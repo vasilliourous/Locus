@@ -940,12 +940,21 @@ jobs:
           # Ask the API what it actually says, rather than trusting the action's
           # inputs — the whole point is that the earlier step's intent is not the
           # current state.
-          is_pre=$(gh release view build-preview --json isPrerelease --jq '.isPrerelease')
+          #
+          # `--repo` is REQUIRED here, not decoration. This job has no
+          # `actions/checkout`, so there is no `.git` for gh to infer the
+          # repository from, and every call without it dies with
+          # "fatal: not a git repository (or any of the parent directories): .git".
+          # That is how the preview job failed the first time it ever reached this
+          # step: it never had, because the signing failure upstream aborted the
+          # run before this job. The missing `--repo` is a latent defect that
+          # predates the repository migration, not one the migration introduced.
+          is_pre=$(gh release view build-preview --repo "$GITHUB_REPOSITORY" --json isPrerelease --jq '.isPrerelease')
           echo "build-preview isPrerelease = $is_pre"
           if [ "$is_pre" != "true" ]; then
             echo "::warning::build-preview was not a prerelease — re-asserting."
-            gh release edit build-preview --prerelease
-            is_pre=$(gh release view build-preview --json isPrerelease --jq '.isPrerelease')
+            gh release edit build-preview --repo "$GITHUB_REPOSITORY" --prerelease
+            is_pre=$(gh release view build-preview --repo "$GITHUB_REPOSITORY" --json isPrerelease --jq '.isPrerelease')
           fi
           if [ "$is_pre" != "true" ]; then
             echo "::error::build-preview is still not a prerelease after re-asserting; it would be offered as the latest release."
@@ -1011,7 +1020,7 @@ jobs:
 
           if [ "${{ github.ref_type }}" = "tag" ]; then
             tag="${{ github.ref_name }}"
-            if gh release view "$tag" --json tagName,isPrerelease,createdAt \
+            if gh release view "$tag" --repo "$GITHUB_REPOSITORY" --json tagName,isPrerelease,createdAt \
                  --jq '"| Release | `\(.tagName)` |\n|---|---|\n| Created | \(.createdAt) |\n| Prerelease | \(.isPrerelease) |"' \
                  >> "$GITHUB_STEP_SUMMARY" 2>/dev/null; then
               echo "Release $tag exists." >> "$GITHUB_STEP_SUMMARY"
@@ -1019,7 +1028,7 @@ jobs:
               echo "**No release \`$tag\` exists.** A tag run that produced no release is a release that did not happen — check whether this job was cancelled by a concurrent run." >> "$GITHUB_STEP_SUMMARY"
             fi
           else
-            if gh release view build-preview --json tagName,isPrerelease,publishedAt \
+            if gh release view build-preview --repo "$GITHUB_REPOSITORY" --json tagName,isPrerelease,publishedAt \
                  --jq '"**Rolling preview:** `\(.tagName)` — published \(.publishedAt), prerelease=\(.isPrerelease)"' \
                  >> "$GITHUB_STEP_SUMMARY" 2>/dev/null; then
               echo "" >> "$GITHUB_STEP_SUMMARY"
