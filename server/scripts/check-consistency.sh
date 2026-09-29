@@ -1071,6 +1071,127 @@ else
     fi
 fi
 
+# 12. The update install path must not reintroduce the buffering downloader.
+#
+# WHY THIS EXISTS
+#
+# The client's updater crashed on "Install Now": the progress spinner stayed at
+# 0% and the app died with nothing in the log. The cause was that the install
+# path used the Tauri plugin's `download_and_install`, which reads the ENTIRE
+# artifact into a `Vec<u8>` in memory before verifying it — enough to abort the
+# allocation on a school laptop, killing the process.
+#
+# The streaming, disk-hashing downloader that avoids this (`locus/update/apply.rs`)
+# already existed and was DEAD CODE. The two modules were written from
+# incompatible plans and only the unsafe one got wired up. Nothing noticed,
+# because nothing checked.
+#
+# This guard is what notices. It fails the build if the live install path calls
+# the plugin's buffering downloader again, or if the streaming downloader loses
+# its only production caller.
+echo
+echo "12. Update install path uses the streaming downloader"
+
+INSTALL_RS="$REPO/client/src-tauri/src/locus/update/install.rs"
+APPLY_RS="$REPO/client/src-tauri/src/locus/update/apply.rs"
+CMD_RS="$REPO/client/src-tauri/src/cmd/locus.rs"
+
+if [ ! -f "$INSTALL_RS" ] || [ ! -f "$APPLY_RS" ] || [ ! -f "$CMD_RS" ]; then
+    bad "the update path files are missing — this guard cannot run"
+else
+    # (a) The buffering call must not be present in the install module at all.
+    #     Matched on the call, not the name, so a doc comment explaining why it
+    #     is avoided does not trip it.
+    if grep -qE '\.download_and_install[[:space:]]*\(' "$INSTALL_RS" "$CMD_RS"; then
+        bad "the install path calls the plugin's download_and_install, which buffers the whole artifact in memory"
+        bad "  use PendingInstall::download_to_file + ReadyInstall::install instead (see client/src-tauri/src/locus/update/install.rs)"
+    else
+        ok "no call to the memory-buffering download_and_install in the install path"
+    fi
+
+    # (b) The streaming downloader must have a production caller. `pub mod apply`
+    #     plus a re-export is not a caller — that is exactly the dead-code state
+    #     that caused this bug.
+    if grep -qE 'apply::download[[:space:]]*\(' "$INSTALL_RS"; then
+        ok "the streaming downloader apply::download is called by the install path"
+    else
+        bad "apply::download is not called by the install path — the streaming downloader is dead code again"
+        bad "  this is the state that produced the 0%-then-crash updater bug"
+    fi
+
+    # (c) The install command must log BEFORE it can block. The original bug was
+    #     undiagnosable precisely because the path was silent until it failed.
+    if grep -q 'update install requested' "$CMD_RS"; then
+        ok "the install command logs at the start of the attempt"
+    else
+        bad "locus_install_update has no start-of-attempt log line — a crash mid-download would again leave nothing behind"
+    fi
+
+    # (d) The hub's checksum must be read and enforced. Installing without a
+    #     hash is installing unverified bytes.
+    if grep -qE 'sha256_from_manifest|\.sha256\(\)' "$INSTALL_RS" \
+       && grep -q 'LOCUS_UPDATE_NO_CHECKSUM' "$CMD_RS"; then
+        ok "the install path reads the hub checksum and refuses when it is absent"
+    else
+        bad "the install path does not enforce the hub's sha256 — an unverified install would be possible"
+    fi
+fi
+
+# ─────────────────────────────────────────────────────────────
+# 13. No Windows path is interpolated raw into JSON that a build parses.
+#
+# WHY THIS EXISTS
+#
+# The Windows build died in the `tauri` build script with:
+#
+#     called `Result::unwrap()` on an `Err` value: invalid escape at line 1 column 54
+#
+# The cause was `TAURI_CONFIG` in `.github/workflows/client.yml`:
+#
+#     {"...","frontendDist":"${{ github.workspace }}/client/dist"}
+#
+# `TAURI_CONFIG` is JSON, parsed by `serde_json::from_str` in tauri-utils. On
+# Windows `github.workspace` is `D:\a\Locus\Locus`, so the raw interpolation
+# produced `"D:\a\Locus\..."` — where `\a` is an INVALID JSON ESCAPE (`\a` sits
+# at exactly column 54 for this path). Linux and macOS have forward slashes and
+# stayed green, so the failure existed only on the one runner the author could
+# not see.
+#
+# This is the same shape as §5's ':' path bug: a Windows-only break that looks
+# green on every other runner. The guard is a grep for the pattern, because the
+# value interpolated is a runner path that does not exist in this checkout.
+# ─────────────────────────────────────────────────────────────
+echo
+echo "13. No raw Windows-path interpolation into build JSON"
+
+WORKFLOW="$REPO/.github/workflows/client.yml"
+if [ ! -f "$WORKFLOW" ]; then
+    warn "no .github/workflows/client.yml — this guard cannot run"
+else
+    # A JSON-looking line (has a "key":"value" shape) that interpolates
+    # github.workspace directly. That is always wrong: the result carries
+    # backslashes on Windows, which are not valid JSON escapes.
+    json_path_hits=$(grep -nE '\$?\{\{?[[:space:]]*github\.workspace' "$WORKFLOW" \
+        | grep -E '"' \
+        || true)
+
+    if [ -z "$json_path_hits" ]; then
+        ok "no JSON line interpolates github.workspace directly"
+    else
+        bad "github.workspace is interpolated into a JSON-looking line — on Windows this is an invalid JSON escape"
+        bad "  normalize to forward slashes and encode with a real JSON encoder (see the build job's TAURI_CONFIG)"
+        printf '%s\n' "$json_path_hits" | head -5 | sed 's/^/         /'
+    fi
+
+    # The positive half: TAURI_CONFIG must still be exported somewhere, or the
+    # build silently reverts to the interactive `beforeBuildCommand` rebuild.
+    if grep -q 'TAURI_CONFIG' "$WORKFLOW"; then
+        ok "TAURI_CONFIG is still constructed by the workflow"
+    else
+        warn "TAURI_CONFIG no longer appears in the workflow — if the frontend rebuild was reintroduced deliberately, ignore this"
+    fi
+fi
+
 echo
 echo "════════════════════════════════════════════════════════════"
 if [ "$FAIL" -eq 0 ]; then

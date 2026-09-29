@@ -413,8 +413,28 @@ jobs:
       # the path is missing (\"The `frontendDist` configuration is set to
       # \"../dist\" but this path doesn't exist\"), and a relative path is
       # resolved against the config file's directory on some code paths and the
-      # CWD on others. The absolute `${{ github.workspace }}` form is correct on
-      # every runner, including Windows where it yields `D:\\a\\...`.
+      # CWD on others.
+      #
+      # ── THE PATH IS NORMALIZED TO FORWARD SLASHES, AND THAT IS NOT COSMETIC ──
+      #
+      # `TAURI_CONFIG` is JSON, and Tauri parses it with `serde_json::from_str`
+      # (`tauri-utils` `acl/build.rs`). On Windows `github.workspace` is
+      # `D:\a\Locus\Locus`, and interpolated raw into JSON that becomes
+      # `"D:\a\Locus\..."` — where `\a` and `\L` are **invalid JSON escapes**.
+      # The parse fails and the `tauri` build script panics with:
+      #
+      #   called `Result::unwrap()` on an `Err` value: invalid escape at line 1 column 54
+      #
+      # (`\a` sits at exactly column 54 for this workspace path.) That is a
+      # Windows-only failure, which is why Linux and macOS stayed green while the
+      # Windows leg died in the build script before compiling a line.
+      #
+      # An earlier revision of this file claimed the raw `${{ github.workspace }}`
+      # form "is correct on every runner, including Windows where it yields
+      # `D:\\a\\...`". It does not: a YAML block scalar does no JSON escaping, so
+      # what reached `serde_json` was `D:\a\Locus\Locus`. Windows accepts forward
+      # slashes in every path context involved here, and they are valid JSON
+      # unescaped, so the path is normalized in the shell below.
       #
       # The download MUST precede the build, because that macro runs during
       # compilation.
@@ -555,10 +575,40 @@ jobs:
           #
           # `frontendDist` is absolute because `tauri::generate_context!()`
           # resolves it at compile time and panics on a missing path.
-          TAURI_CONFIG: >-
-            {"build":{"beforeBuildCommand":"","frontendDist":"${{ github.workspace }}/client/dist"}}
+          #
+          # `TAURI_CONFIG` is NOT set here. It is built in the `run` block below,
+          # because the absolute path must be normalized to forward slashes first
+          # — on Windows a raw `${{ github.workspace }}` carries backslashes that
+          # are invalid JSON escapes and make the `tauri` build script panic
+          # ("invalid escape at line 1 column 54"). See the note above.
+          #
+          # `GITHUB_WORKSPACE` (the runner's own env var) is used rather than an
+          # `${{ }}` interpolation so the value is normalized by the shell at run
+          # time, in the same place it is consumed. It may legitimately contain
+          # spaces (a Windows runner path like `C:\Users\runner admin\...`), which
+          # is exactly why the JSON is assembled by a real encoder rather than by
+          # string interpolation — the encoder escapes spaces and quotes for us.
+          #
+          # `node` is used, not `jq`: node is guaranteed present because the whole
+          # build runs through pnpm, whereas `jq` is an extra runner dependency to
+          # rely on for six characters of JSON.
+          GITHUB_WORKSPACE: ${{ github.workspace }}
         run: |
           set -euo pipefail
+
+          # Forward slashes: valid JSON unescaped, and accepted by tauri on
+          # Windows. Runs of `/` are collapsed so a path with a trailing
+          # separator does not produce `//client/dist`.
+          DIST="${GITHUB_WORKSPACE//\\//}/client/dist"
+          DIST="$(printf '%s' "$DIST" | tr -s '/')"
+
+          # A real JSON encoder, so a space or quote in the path cannot produce
+          # invalid JSON the way raw interpolation did.
+          export TAURI_CONFIG="$(node -e 'process.stdout.write(JSON.stringify({
+            build: { beforeBuildCommand: "", frontendDist: process.argv[1] }
+          }))' "$DIST")"
+          echo "TAURI_CONFIG=$TAURI_CONFIG"
+
           if [ "${{ github.ref_type }}" = "tag" ]; then
             echo "Tag build — using the release profile."
             pnpm exec tauri build --target ${{ matrix.triple }}
