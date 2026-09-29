@@ -101,13 +101,36 @@ concurrency:
   cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
 
 jobs:
-  # ── Gate: fast checks that must pass before any expensive build ──
+  # ── Gate: fast checks, now PARALLEL with `build` ──
   #
-  # Deliberately separate from the release jobs so a lint failure costs seconds
-  # rather than a full cross-platform build.
+  # WHAT CHANGED, AND WHY IT IS SAFE
+  #
+  # This job used to run BEFORE the build matrix and hold it up: `build` had
+  # `needs: verify`, so four expensive runners sat idle for the gate's whole
+  # duration. That dependency is now gone. `release` and `preview` require BOTH
+  # results (`needs: [verify, build]`), so a red gate still blocks publishing
+  # exactly as before — it just no longer delays the builds.
+  #
+  # The Rust tests and lints have MOVED OUT of this job into the `linux` build
+  # job. They were compiling the whole workspace with `--all-features` on a fifth
+  # runner and producing a cache entry the builds could not use, so the entire
+  # dependency tree was compiled twice per run. In `build (linux)` they reuse the
+  # target directory that job already populated.
+  #
+  # The rationale that put them in a separate job — "a failing test must cost
+  # seconds, not four cross-platform release builds" — is preserved differently:
+  # this job is parallel, so a test failure still turns the run red and blocks
+  # the publish without having delayed the builds by a second.
   verify:
     name: Verify
-    runs-on: ubuntu-latest
+    # Pinned rather than `ubuntu-latest`: a moving tag re-points itself when
+    # GitHub retires an image, and a runner image that changes under a green
+    # workflow is a world claim nobody re-checks. Same reasoning as the matrix
+    # labels below.
+    runs-on: ubuntu-24.04
+    # A lint failure must cost seconds, not 45 minutes. The gate no longer
+    # compiles any Rust, so this is generous.
+    timeout-minutes: 15
     defaults:
       run:
         working-directory: client
@@ -175,120 +198,73 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      # ── The frontend is built ONCE, here, and shared as an artifact ──
+      #
+      # WHAT CHANGED
+      #
+      # `tauri.conf.json` sets `beforeBuildCommand: pnpm run web:build`, so every
+      # one of the four build runners used to rebuild a byte-identical bundle.
+      # The type-check (`tsc --noEmit`, part of this script) also belongs in the
+      # gate rather than on four runners.
+      #
+      # This job uploads `dist/` and each build job downloads it and skips the
+      # rebuild. `tauri build` is given an empty `beforeBuildCommand` via
+      # `TAURI_CONFIG` — see the build job for why that is an override rather
+      # than an edit to `tauri.conf.json`.
       - name: Type-check and build the frontend
         run: pnpm run web:build
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: frontend-dist
+          path: client/dist
+          if-no-files-found: error
 
       - name: Lint
         run: pnpm run lint
 
-      # ── Rust tests and lints ──
+      # ── Rust tests and lints have MOVED to the `linux` build job ──
       #
-      # These were NOT run by CI until 2026-09-29, which is why the updater's
+      # They were NOT run by CI until 2026-09-29, which is why the updater's
       # signature/pubkey encoding mismatch reached a real install: 530 Rust tests
       # existed and passed locally, but nothing in this workflow invoked them, so
       # a tag could build, sign and publish with a broken suite.
       #
-      # The gate belongs here, in `verify`, not in the build matrix — a failing
-      # test must cost seconds, not four cross-platform release builds.
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          # Must match client/rust-toolchain.toml; `edition = "2024"` needs >= 1.85.
-          toolchain: "1.98.1"
-          components: clippy, rustfmt
-
-      - uses: Swatinem/rust-cache@v2
-        with:
-          # The Cargo workspace root is client/, not client/src-tauri/.
-          workspaces: client
-
-      # Linux system libraries for the Tauri build script. Without these the
-      # test build fails in build.rs with a glib-sys error that reads like a
-      # code fault rather than a missing dependency.
-      - name: Install Linux dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev \
-            patchelf libgtk-3-dev libsoup-3.0-dev \
-            libjavascriptcoregtk-4.1-dev
-
-      # `src-tauri/tauri.conf.json` declares `externalBin` (the mihomo sidecars)
-      # and `resources` (geo data). `tauri::generate_context!()` resolves BOTH at
-      # COMPILE time, so a `cargo test` on a tree without them fails before a
-      # single test runs — the same class of failure as the missing `dist/`
-      # below. The build job fetches them; this job must too, or the gate is red
-      # for a reason that has nothing to do with the code under test.
+      # They are still run, with the same `--all-targets` and the same
+      # `-D warnings`, and they still gate the release. They now run in
+      # `build (linux)` instead of here, because that job has already compiled the
+      # dependency tree and this one had to compile all 916 packages from scratch
+      # — paying for the whole workspace twice on every run.
       #
-      # A triple is required: the script bails rather than guessing, because
-      # guessing is how a Windows client is handed a Linux binary.
-      - name: Fetch sidecars and geo data
-        run: node scripts/prebuild.mjs x86_64-unknown-linux-gnu
-
-      # The frontend bundle must exist before any `cargo` command here.
+      # Nothing in `verify` compiles Rust any more, so this job needs no Rust
+      # toolchain, no Rust cache, and no Linux system libraries. The sidecar and
+      # `dist/` fetches moved with the tests, because `tauri::generate_context!()`
+      # resolves both at COMPILE time and nothing here compiles.
       #
-      # `tauri::generate_context!()` also resolves `frontendDist`
-      # (`../dist` from src-tauri = `client/dist`). If that path is missing the
-      # macro panics at COMPILE time:
-      #
-      #   The `frontendDist` configuration is set to "../dist" but this path
-      #   doesn't exist
-      #
-      # The `web:build` step above already produces it, and this step makes the
-      # dependency explicit rather than incidental — the ordering was load-bearing
-      # and undocumented, which is exactly how a "tests pass locally, fail in CI"
-      # report is born. Rebuilt here so this job does not depend on a step's side
-      # effect three steps earlier.
-      - name: Ensure the frontend bundle exists
-        run: |
-          set -euo pipefail
-          if [ ! -f dist/index.html ]; then
-            echo "dist/index.html missing — building the frontend"
-            pnpm run web:build
-          fi
-          test -f dist/index.html
-          echo "frontend bundle present: $(du -sh dist | cut -f1)"
+      # The gate still fails the run and still blocks `release`/`preview`, which
+      # now require this job's result as well as the builds'.
 
-      # `--nocapture`-free and un-filtered on purpose: a `| tail` here would let a
-      # failing suite report success (the pipe's exit status wins), which is the
-      # same class of mistake as a green CI with no tests in it.
-      #
-      # Output is also teed into the job summary so a failure is diagnosable from
-      # the run page alone. Job logs need authentication on this repository, and a
-      # red step whose cause cannot be read is only marginally better than no gate.
-      - name: Rust tests
-        run: |
-          set -o pipefail
-          cargo test --all-targets 2>&1 | tee /tmp/cargo-test.log
-
-      # Runs even when the step above failed — that is the entire point. A
-      # failure whose cause is unreadable is only marginally better than no gate,
-      # and job logs require authentication on this repository.
-      - name: Rust test output (always)
-        if: always()
-        run: |
-          {
-            echo '## Rust tests output'
-            echo '```'
-            tail -80 /tmp/cargo-test.log 2>/dev/null || echo "(no log captured)"
-            echo '```'
-          } >> "$GITHUB_STEP_SUMMARY"
-
-      # `-D warnings` so a new lint fails the gate. `--features clippy` matches
-      # the `clippy-only` alias in client/.cargo/config.toml, which is how this
-      # was verified locally.
-      - name: Rust lints
-        run: cargo clippy --all-targets --features clippy -- -D warnings
 
   # ── Build, sign and upload the four updater artifacts ──
   build:
     name: Build (${{ matrix.label }})
-    needs: verify
+    # ── `needs: verify` IS DELIBERATELY ABSENT ──
+    #
+    # This job used to declare `needs: verify`, which meant four expensive
+    # runners sat IDLE for the whole duration of the gate before starting any
+    # work. That was the single largest source of lost wall-clock in the run.
+    #
+    # The dependency is not removed, it is RELOCATED: `release` and `preview`
+    # below now require `[verify, build]`, so a red gate still blocks the
+    # publish. The only thing that changes is that it no longer delays the
+    # builds — they run concurrently with it and the run finishes when the
+    # slower of the two finishes, instead of when the sum does.
     runs-on: ${{ matrix.os }}
-    # A cold Rust release build plus pnpm install is ~15 min per platform; macOS
-    # Intel cross-compiling adds a few more. 45 minutes is generous for all of
-    # them and short enough that a genuinely hung job FAILS rather than sitting
-    # for the default 360 while a release waits on it.
-    timeout-minutes: 45
+    # Raised from 45 because this job now ALSO runs the Rust tests and lints on
+    # Linux (see "Rust tests"), which used to be a separate job's work. The
+    # ceiling stays short enough that a genuinely hung job FAILS rather than
+    # sitting for the default 360 while a release waits on it.
+    timeout-minutes: 50
     defaults:
       run:
         working-directory: client
@@ -370,18 +346,45 @@ jobs:
           # on the ARM runner. On other platforms this names the host
           # target, so it is harmless there.
           targets: ${{ matrix.triple }}
+          # `clippy` only where the Rust gate runs, which is Linux alone — this
+          # job now carries the tests and lints that `verify` used to run.
+          # Adding it everywhere would make three runners download a component
+          # they never invoke.
+          components: ${{ matrix.label == 'linux' && 'clippy' || '' }}
 
       - uses: Swatinem/rust-cache@v2
         with:
           # The Cargo workspace root is client/, not client/src-tauri/ — the
           # cache would key on the wrong directory otherwise.
           workspaces: client
+          # Per-platform cache keys. The Intel macOS slice is a CROSS-compile
+          # (x86_64 target on an arm64 runner) and the cache keys on the target
+          # triple, so `macos-intel` and `macos-arm` can never share an entry —
+          # each is an independent compile of all 916 packages. Naming the key
+          # per label at least keeps them from evicting each other.
+          key: ${{ matrix.label }}
+          cache-on-failure: true
+          # On a push to `main` all four runners would race to write the cache;
+          # the first writer wins and the rest waste minutes uploading. Saving
+          # only on `main` keeps exactly one writer per key. Feature branches
+          # still RESTORE, they just do not save.
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       # Tauri's Linux build needs these; without them the build fails in build.rs
       # with a glib-sys error that reads like a code fault.
+      #
+      # The Ubuntu images ship these PREINSTALLED, so in practice this is a
+      # no-op — but `apt-get update` alone costs 10-20 s per run even when the
+      # install has nothing to do. The guard makes the common case free while
+      # keeping the step correct on an image that changes under us.
       - name: Install Linux dependencies
         if: matrix.label == 'linux'
         run: |
+          set -euo pipefail
+          if pkg-config --exists webkit2gtk-4.1 gtk+-3.0 libsoup-3.0 javascriptcoregtk-4.1; then
+            echo "Tauri's Linux dependencies are already present."
+            exit 0
+          fi
           sudo apt-get update
           sudo apt-get install -y \
             libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev \
@@ -391,12 +394,129 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      # ── The frontend bundle is DOWNLOADED, never rebuilt here ──
+      #
+      # `tauri.conf.json` sets `beforeBuildCommand: pnpm run web:build`, so every
+      # one of the four build runners used to run a byte-identical Vite build
+      # (plus `tsc --noEmit`). The bundle is now built once in `verify` and
+      # fetched here.
+      #
+      # WHY `TAURI_CONFIG` RATHER THAN EDITING `tauri.conf.json`
+      #
+      # `tauri` merges the JSON in `TAURI_CONFIG` over the config file. Setting
+      # `beforeBuildCommand` to empty disables the rebuild WITHOUT touching the
+      # committed config, so local `pnpm build` and every other consumer of that
+      # file keep working exactly as they do today.
+      #
+      # `frontendDist` is ABSOLUTE here, and that is load-bearing. The macro
+      # `tauri::generate_context!()` resolves it at COMPILE time and panics if
+      # the path is missing (\"The `frontendDist` configuration is set to
+      # \"../dist\" but this path doesn't exist\"), and a relative path is
+      # resolved against the config file's directory on some code paths and the
+      # CWD on others. The absolute `${{ github.workspace }}` form is correct on
+      # every runner, including Windows where it yields `D:\\a\\...`.
+      #
+      # The download MUST precede the build, because that macro runs during
+      # compilation.
+      - name: Download the frontend bundle
+        uses: actions/download-artifact@v4
+        with:
+          name: frontend-dist
+          path: client/dist
+
+      # ── Sidecars and geo data, CACHED ──
+      #
+      # `prebuild.mjs` is a downloader, not a build step: mihomo core, the
+      # service bundle, mmdb, ASN mmdb, geosite and geoip. Four runners × five
+      # fetches = twenty network round trips per run, and a rate-limited day
+      # turns that into minutes of retry backoff that surfaces as an unexplained
+      # slow build.
+      #
+      # The key covers the fetch logic and the version pin, so a pinned version
+      # bump or an edit to the script correctly invalidates it, while an ordinary
+      # code change does not.
+      #
+      # `restore-keys` is intentionally ABSENT. A fallback that restores a
+      # NEARLY-matching cache would hand the build a stale mihomo binary and turn
+      # a fast path into a silent-wrong-binary path — the one failure mode here
+      # that is worse than being slow.
+      #
+      # The step runs unconditionally, because the script is what validates the
+      # cache: it hashes what it finds and re-fetches anything missing or
+      # changed. On a hit this is a few hundred milliseconds.
+      - name: Cache sidecars and geo data
+        id: sidecar-cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            client/src-tauri/sidecar
+            client/src-tauri/resources
+          key: sidecar-${{ matrix.triple }}-${{ hashFiles('client/scripts/prebuild.mjs', 'client/scripts/service-release.mjs', 'client/package.json') }}
+
       # Downloads the mihomo sidecars and geo data into the gitignored
       # src-tauri/sidecar and src-tauri/resources. The Rust build fails without
       # them, and it needs an explicit target triple in CI (the script bails
       # otherwise rather than guessing).
+      #
+      # A transient network failure here is already covered by the script's own
+      # per-task `retry: 5`, so this does not need the wrapper below. What that
+      # retry does NOT cover is cargo's registry access: see "Fetch the crate
+      # registry".
       - name: Fetch sidecars and geo data
         run: node scripts/prebuild.mjs "${{ matrix.triple }}"
+
+      # ── Fetch the crate registry, WITH RETRIES ──
+      #
+      # WHY THIS STEP EXISTS
+      #
+      # The macOS ARM build failed on `v3.2.8` (run 36574425541) with:
+      #
+      #   failed to load source for dependency `aes-gcm`
+      #     → unable to update registry `crates-io`
+      #     → download of config.json failed
+      #     → [6] Couldn't resolve host name (index.crates.io)
+      #
+      # That is a DNS failure reaching crates.io, and it is not a build error.
+      # Every job that compiles pays for it: `cargo test`, `cargo clippy` and
+      # `tauri build` all trigger dependency resolution, and a flake in the first
+      # one to run takes the whole 20-minute job down with it.
+      #
+      # `prebuild.mjs` already retries its own downloads five times, which is why
+      # "Fetch sidecars and geo data" SUCCEEDED in that same failed run. Nothing
+      # retried cargo. This step is that missing retry.
+      #
+      # `cargo fetch` is the right command because it does the registry and
+      # index work in isolation, with no compilation: it either resolves the
+      # graph or fails fast. Once it succeeds the registry is in
+      # `~/.cargo/registry` and the later cargo invocations do not need the
+      # network at all.
+      #
+      # `--locked` matches the `--frozen-lockfile` discipline on the JS side: a
+      # Cargo.lock that has drifted from Cargo.toml must fail here rather than
+      # be silently regenerated in CI.
+      #
+      # The backoff is deliberately generous (5/10/20/40s, ~75s worst case). The
+      # failure it is defending against is runner-level DNS, which resolves on
+      # its own within seconds; anything still failing after that is a real
+      # outage and SHOULD fail the job rather than hang.
+      - name: Fetch the crate registry
+        shell: bash
+        run: |
+          set -euo pipefail
+          delay=5
+          for attempt in 1 2 3 4; do
+            if cargo fetch --locked; then
+              echo "registry fetch succeeded on attempt $attempt"
+              exit 0
+            fi
+            if [ "$attempt" -eq 4 ]; then
+              echo "::error::cargo fetch failed 4 times — this is a registry outage or a genuine dependency problem, not a transient DNS flake"
+              exit 1
+            fi
+            echo "::warning::cargo fetch attempt $attempt failed; retrying in ${delay}s"
+            sleep "$delay"
+            delay=$((delay * 2))
+          done
 
       # `tauri build` has its OWN --target flag. Using `pnpm run build --
       # --target X` sends it to Cargo instead (the extra `--` makes everything
@@ -406,20 +526,149 @@ jobs:
       #   "failed to bundle project: can't open main binary .../target/release/locus"
       # Passing it through `pnpm exec` gives the flag to Tauri, which is what
       # actually needs it.
+      #
+      # `--offline` is NOT set: the fetch above populated the registry, but
+      # tauri may still legitimately fetch a git dependency, and forbidding that
+      # would turn a working build red. The retry step is the mitigation.
+      #
+      # ── WHICH PROFILE, AND WHY IT DEPENDS ON THE EVENT ──
+      #
+      # [profile.release] sets `codegen-units = 1`, which is a single backend
+      # thread for the whole final crate — the one setting that throws away every
+      # core at the most expensive moment. It was being paid on every push to
+      # `main`, including the pre-releases that exist only so a fix can be
+      # installed and tested.
+      #
+      # A `v*` TAG keeps the tuned `release` profile, because that binary is what
+      # the fleet downloads and installs itself with. A BRANCH build uses
+      # `fast-release`, which already exists in `client/Cargo.toml` with
+      # `codegen-units = 64`, `lto = false`, `opt-level = 0`. A preview is for
+      # testing whether the fix WORKS, not for measuring its final speed.
+      #
+      # This is an explicit speed-versus-optimisation tradeoff, not a silent
+      # downgrade: tagged releases remain fully optimised.
       - name: Build
-        run: pnpm exec tauri build --target ${{ matrix.triple }}
+        shell: bash
+        env:
+          # Empty `beforeBuildCommand`: the bundle was built once in `verify` and
+          # downloaded above. See "Download the frontend bundle".
+          #
+          # `frontendDist` is absolute because `tauri::generate_context!()`
+          # resolves it at compile time and panics on a missing path.
+          TAURI_CONFIG: >-
+            {"build":{"beforeBuildCommand":"","frontendDist":"${{ github.workspace }}/client/dist"}}
+        run: |
+          set -euo pipefail
+          if [ "${{ github.ref_type }}" = "tag" ]; then
+            echo "Tag build — using the release profile."
+            pnpm exec tauri build --target ${{ matrix.triple }}
+          else
+            echo "Branch build — using fast-release (preview installers only)."
+            pnpm exec tauri build --target ${{ matrix.triple }} -- --profile fast-release
+          fi
+
+      # ── The Rust gate, relocated here from `verify` ──
+      #
+      # These commands used to run on a fifth runner, compiling the whole
+      # workspace with `--all-features` and producing a cache entry the builds
+      # could not use. Running them HERE reuses the target directory `tauri
+      # build` just populated, so the compile is largely already done.
+      #
+      # Linux only, so the gate costs one runner instead of four — the code under
+      # test is the same on every platform. They run AFTER `tauri build` so a
+      # broken test never delays the artifact a preview depends on.
+      #
+      # `fail-fast: false` at the strategy level means the other platforms still
+      # deliver their artifacts, so a red gate still leaves a diagnosable run.
+      #
+      # ── THE RETRY WRAPPER IS FOR THE NETWORK, NOT FOR FAILING TESTS ──
+      #
+      # `cargo test` on a tree whose registry is already populated (guaranteed by
+      # "Fetch the crate registry" above) does not need the network, so a retry
+      # cannot mask a real test failure: a test that fails fails on all three
+      # attempts and the exit status is preserved.
+      #
+      # What it catches is the transient version of this, seen on `v3.2.8`
+      # (run 36574425541):
+      #
+      #   failed to load source for dependency `aes-gcm`
+      #     → unable to update registry `crates-io`
+      #     → Couldn't resolve host name (index.crates.io)
+      #
+      # The grep guard keeps it honest: a NON-network failure is not retried at
+      # all, so a real regression reports on the first pass rather than after
+      # minutes of backoff.
+      - name: Rust tests
+        if: matrix.label == 'linux'
+        shell: bash
+        run: |
+          set -o pipefail
+          delay=5
+          for attempt in 1 2 3; do
+            if cargo test --all-targets 2>&1 | tee /tmp/cargo-test.log; then
+              exit 0
+            fi
+            if ! grep -qE "Couldn't resolve host name|failed to download|unable to update registry|failed to load source for dependency|network failure|Connection reset by peer" /tmp/cargo-test.log; then
+              echo "::error::tests failed for a reason unrelated to the network — not retrying"
+              exit 1
+            fi
+            if [ "$attempt" -eq 3 ]; then
+              echo "::error::cargo test hit a network failure on all 3 attempts"
+              exit 1
+            fi
+            echo "::warning::cargo test attempt $attempt failed on a network error; retrying in ${delay}s"
+            sleep "$delay"
+            delay=$((delay * 2))
+          done
+
+      # Runs even when the step above failed — that is the entire point. Job logs
+      # need authentication on this repository, so a red step whose cause cannot
+      # be read is only marginally better than no gate.
+      - name: Rust test output (always)
+        if: always() && matrix.label == 'linux'
+        shell: bash
+        run: |
+          {
+            echo '## Rust tests output'
+            echo '```'
+            tail -80 /tmp/cargo-test.log 2>/dev/null || echo "(no log captured)"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # `-D warnings` so a new lint fails the gate. `--features clippy` matches
+      # the `clippy-only` alias in client/.cargo/config.toml, which is how this
+      # was verified locally.
+      - name: Rust lints
+        if: matrix.label == 'linux'
+        run: cargo clippy --all-targets --features clippy -- -D warnings
 
       # ── Stage the raw executable under the name the hub expects ──
       #
       # tauri build produces the *installed* form (NSIS / .app). The updater is
       # handed the bare executable, so copy it out of the compiler's output.
+      #
+      # The output directory is profile-qualified: `target/<triple>/release/` for
+      # a release profile, `target/<triple>/fast-release/` for a branch build.
+      # Both are searched so this step does not have to know which branch of the
+      # profile condition above ran.
       - name: Stage the raw updater artifact (unix)
         if: matrix.label != 'windows'
         shell: bash
         run: |
           set -euo pipefail
-          src="target/${{ matrix.triple }}/release/locus"
-          [ -f "$src" ] || { echo "::error::expected binary not found: $src"; ls -R target/*/release 2>/dev/null | head -50; exit 1; }
+          src=""
+          for candidate in \
+            "target/${{ matrix.triple }}/release/locus" \
+            "target/${{ matrix.triple }}/fast-release/locus"
+          do
+            [ -f "$candidate" ] && { src="$candidate"; break; }
+          done
+          [ -n "$src" ] || {
+            echo "::error::expected binary not found for ${{ matrix.triple }}"
+            ls -R target/*/release target/*/fast-release 2>/dev/null | head -50
+            exit 1
+          }
+          echo "staging $src"
           mkdir -p artifacts
           cp "$src" "artifacts/${{ matrix.artifact }}"
           chmod +x "artifacts/${{ matrix.artifact }}"
@@ -429,8 +678,19 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          src="target/${{ matrix.triple }}/release/locus.exe"
-          [ -f "$src" ] || { echo "::error::expected binary not found: $src"; ls -R target/*/release 2>/dev/null | head -50; exit 1; }
+          src=""
+          for candidate in \
+            "target/${{ matrix.triple }}/release/locus.exe" \
+            "target/${{ matrix.triple }}/fast-release/locus.exe"
+          do
+            [ -f "$candidate" ] && { src="$candidate"; break; }
+          done
+          [ -n "$src" ] || {
+            echo "::error::expected binary not found for ${{ matrix.triple }}"
+            ls -R target/*/release target/*/fast-release 2>/dev/null | head -50
+            exit 1
+          }
+          echo "staging $src"
           mkdir -p artifacts
           cp "$src" "artifacts/${{ matrix.artifact }}"
 
@@ -600,7 +860,6 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          bundle="target/${{ matrix.triple }}/release/bundle"
           mkdir -p installer
           found=0
 
@@ -608,23 +867,30 @@ jobs:
           # than one hardcoded path because the extensions differ per platform and
           # a silent "nothing matched" is the failure mode that would recreate
           # the original bug without anyone noticing.
-          for f in \
-            "$bundle"/nsis/*.exe \
-            "$bundle"/dmg/*.dmg \
-            "$bundle"/deb/*.deb \
-            "$bundle"/rpm/*.rpm
-          do
-            [ -f "$f" ] || continue
-            cp "$f" "installer/$(basename "$f")"
-            echo "staged installer: $(basename "$f")"
-            found=$((found + 1))
+          #
+          # Both profiles are searched, for the same reason as the updater staging
+          # steps: a branch build puts its bundle under `fast-release/`, a tag
+          # build under `release/`, and this step should not have to know which.
+          for profile in release fast-release; do
+            bundle="target/${{ matrix.triple }}/$profile/bundle"
+            for f in \
+              "$bundle"/nsis/*.exe \
+              "$bundle"/dmg/*.dmg \
+              "$bundle"/deb/*.deb \
+              "$bundle"/rpm/*.rpm
+            do
+              [ -f "$f" ] || continue
+              cp "$f" "installer/$(basename "$f")"
+              echo "staged installer: $(basename "$f")"
+              found=$((found + 1))
+            done
           done
 
           if [ "$found" -eq 0 ]; then
-            echo "::error::no installer bundle found for ${{ matrix.label }} under $bundle"
+            echo "::error::no installer bundle found for ${{ matrix.label }} under target/${{ matrix.triple }}/{release,fast-release}/bundle"
             # List what IS there, so a bundle-layout change is diagnosable from
             # the log instead of requiring a guess.
-            find target -path '*/release/bundle*' -type f 2>/dev/null | head -40
+            find target -path '*/bundle*' -type f 2>/dev/null | head -40
             exit 1
           fi
 
@@ -637,7 +903,9 @@ jobs:
   # ── Assemble the release ──
   release:
     name: Release
-    needs: build
+    # BOTH results are required: the gate still blocks a publish, it just no
+    # longer delays the builds. See the note on `build`.
+    needs: [verify, build]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     steps:
@@ -841,7 +1109,9 @@ jobs:
   #     came from and cannot be mistaken for a version.
   preview:
     name: Preview installers
-    needs: build
+    # Same relocation as `release`: the gate is still required, it just runs
+    # alongside the builds rather than in front of them.
+    needs: [verify, build]
     # Branch builds only. Tags are handled by `release`, and running both would
     # publish the same installers twice under two names.
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
