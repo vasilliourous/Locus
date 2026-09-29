@@ -1,0 +1,20 @@
+[Unit]
+Description=PocketBase — Locus Admin Backend
+After=network.target
+
+[Service]
+Type=simple
+User=pocketbase
+Group=pocketbase
+EnvironmentFile=/etc/environment
+ExecStart=/opt/pocketbase/pocketbase serve --http=127.0.0.1:8090 --dir=/opt/pocketbase/pb_data --hooksDir=/opt/pocketbase/pb_hooks
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+# Security hardening (minimal — PB 0.22+ has issues with ProtectHome/ProtectSystem on some kernels)
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target

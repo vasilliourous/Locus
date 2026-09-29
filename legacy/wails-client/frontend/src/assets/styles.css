@@ -1,0 +1,104 @@
+/* ── Locus Dark-Green Theme ──
+   Based on the UI-AESTHETICS.md spec (re-themed from purple → green).
+   Tokens:
+     Background    #06130C   (green-tinted black)
+     Surface       #0C1711
+     SurfaceHover  #13241A
+     Border        #1F3629
+     TextPrimary   #EAF2EC
+     TextSecondary #8CA596
+     Accent        #2EA86A   (Locus green)
+     AccentHover   #46C186
+     Success       #22C55E
+     Error         #EF4444
+     Warning       #F59E0B
+     TierStrike    #EAB308   (gold)
+     TierStealth   #46C186
+*/
+
+:root {
+  --bg: #06130C;
+  --surface: #0C1711;
+  --surface-hover: #13241A;
+  --border: #1F3629;
+  --text: #EAF2EC;
+  --text-secondary: #8CA596;
+  --accent: #2EA86A;
+  --accent-hover: #46C186;
+  --success: #22C55E;
+  --error: #EF4444;
+  --warning: #F59E0B;
+  --strike: #EAB308;
+  --stealth: #46C186;
+}
+
+/* ── Typography ── */
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* ── Accessibility: visible focus for keyboard users ── */
+:focus-visible {
+  outline: 2px solid #2EA86A;
+  outline-offset: 2px;
+}
+
+button:focus-visible,
+input:focus-visible {
+  outline: 2px solid #46C186;
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}
+
+code, pre, .mono {
+  font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', 'JetBrains Mono', monospace;
+}
+
+/* ── Scrollbar ── */
+
+::-webkit-scrollbar {
+  width: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #1F3629;
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #2B4636;
+}
+
+/* ── Animations ── */
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+@keyframes slideUp {
+  from { opacity: 0; transform: translateY(10px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.fade-in {
+  animation: fadeIn 0.3s ease;
+}
+
+.slide-up {
+  animation: slideUp 0.3s ease;
+}

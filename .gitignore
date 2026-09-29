@@ -1,0 +1,102 @@
+# Locus Root .gitignore
+#
+# NOTE: gitignore has no inline comments. A `#` only starts a comment at the
+# BEGINNING of a line — anywhere else it is part of the pattern. Two secret
+# files were "ignored" here with trailing comments and were therefore NOT
+# ignored at all, and ended up committed with a live tier password in them
+# (removed in FIXES.md 34). Never put a comment on the same line as a pattern.
+
+# Generated code files
+*-codes.txt
+*-cards.pdf
+
+# Build artifacts
+dist/
+build/bin/
+frontend/dist/
+node_modules/
+*.exe
+*.zip
+*.tar.gz
+
+# Rust/Tauri client build output. `client/` has its own .gitignore covering
+# these; repeated here so a root-level `git add -A` cannot pick them up.
+client/target/
+client/src-tauri/sidecar/
+client/src-tauri/resources/
+client/src-tauri/gen/schemas/
+
+# Python
+__pycache__/
+*.pyc
+
+# OS junk
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+
+# Windows "downloaded from the Internet" markers (Zone.Identifier, ZoneId=3).
+#
+# On NTFS these are invisible alternate data streams on the file they belong
+# to. Copy the file to a filesystem that has no streams — or with a tool that
+# materialises them — and they become real files named `photo.png:Zone.Identifier`.
+# A colon is illegal in a Windows path component, so once one is committed Git
+# for Windows refuses to check out ANY commit containing it:
+#
+#   error: invalid path '.../128x128.png:Zone.Identifier'
+#
+# That is exactly how the Windows CI job broke (FIXES.md, 2026-09-27). The
+# pattern is anchored to the suffix so it cannot accidentally ignore a real
+# file whose name merely contains a colon.
+*:Zone.Identifier
+
+# Diagnostic scratch (probe logs, one-off scripts)
+diag/
+whale.txt
+
+# Local Go toolchain bootstrapped for builds on a host with no system Go.
+# Never part of the repository; see docs for the bootstrap procedure.
+.gotool/
+
+# IDE
+.idea/
+.vscode/
+*.iml
+
+# Scratch npm packages. These were pulled into the repo root while building a
+# one-off tool and got committed by `git add -A` — the same way node_modules
+# would. Anything installed outside client/ or server/console/ is here by
+# accident.
+/tweetnacl/
+/tweetnacl-util/
+
+# Deploy key for pushing to the VPS from this machine. Not a signing key and
+# not a secret anyone else needs — but it is still a credential, and one that
+# would grant root shell on the hub if it leaked.
+.deploy/
+
+# Locus update signing keys. The private key signs every shipped client update;
+# a leak lets anyone publish a build every installed client will accept, and a
+# loss means no installed client can ever be updated again. Never commit either
+# file — the public key belongs in tauri.conf.json, the private key in CI
+# secrets and offline custody.
+.locus-keys/
+
+# Secrets (encrypted is fine; plaintext never)
+.secrets.env
+age-key.txt
+
+# Clash Verge client profiles. These embed the tier's shadowsocks password in
+# cleartext, so they must never be committed.
+clash-verge-stealth.yaml
+clash-verge-stealth-notun.yaml
+clash-verge-*.yaml
+
+# Obsidian vault config (personal notes tooling, not part of the project).
+# Was partially tracked — only workspace.json was ignored — which is why the
+# whole directory is ignored now. Files stay on disk; none are tracked.
+.obsidian/
+
+# Local agent-runner config (whale). Never part of the project.
+.whale/

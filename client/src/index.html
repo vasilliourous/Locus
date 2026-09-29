@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link
+      rel="shortcut icon"
+      href="./assets/image/logo.ico"
+      type="image/x-icon"
+    />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Locus</title>
+    <style>
+      /* Locus palette, duplicated here on purpose.
+         This document is parsed before any bundle runs, so it cannot import the
+         theme module — and it is what paints the very first frame. Leaving
+         Verge's grey here would show a flash of another product's colours before
+         the app sits on its own background. Keep these in step with
+         `src/pages/_theme.tsx` (LOCUS_COLORS / LOCUS_LIGHT); `theme-colors.test.ts`
+         fails if they drift. */
+      :root {
+        --bg-color: #f4f8f5;
+        --text-color: #0b1f14;
+        color-scheme: light;
+      }
+
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --bg-color: #06130c;
+          --text-color: #eaf2ec;
+          color-scheme: dark;
+        }
+      }
+
+      html,
+      body {
+        width: 100%;
+        height: 100%;
+        margin: 0;
+        color: var(--text-color);
+      }
+
+      #root {
+        width: 100%;
+        height: 100%;
+      }
+
+      #initial-loading-overlay {
+        position: fixed;
+        inset: 0;
+        background: var(--bg-color);
+        z-index: 9999;
+        transition: opacity 0.2s ease-out;
+        /* The overlay covers the whole window and is normally removed by
+           `hideInitialOverlay()` once the app has painted. That removal is
+           JavaScript, so a bundle that fails to execute would leave this opaque
+           layer over a working app forever — which is indistinguishable from a
+           blank window, and is exactly how the activation-screen bug presented.
+
+           This animation is the CSS-only backstop: it hides the overlay after a
+           few seconds whether or not any script ever runs. The JS path still
+           removes it earlier on a healthy start, so the animation is only ever
+           the safety net, never the normal route. Do not remove it as redundant:
+           it is the difference between "slow" and "blank" when the bundle
+           breaks. */
+        animation: initial-overlay-backstop 0.2s ease-out 5s forwards;
+      }
+
+      @keyframes initial-overlay-backstop {
+        to {
+          opacity: 0;
+          pointer-events: none;
+          visibility: hidden;
+        }
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        #initial-loading-overlay {
+          animation-duration: 0.01s;
+        }
+      }
+
+      #initial-loading-overlay[data-hidden='true'] {
+        opacity: 0;
+        pointer-events: none;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="initial-loading-overlay"></div>
+    <div id="root"></div>
+    <script type="module" src="./main.tsx"></script>
+  </body>
+</html>

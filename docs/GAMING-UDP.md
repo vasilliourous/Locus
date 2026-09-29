@@ -1,0 +1,274 @@
+# Gaming UDP — Implementation Plan (Consolidated 2026-08-14)
+
+```
+audience:    builder
+status:      live
+authoritative-for: the UoT (UDP-over-TCP) transport for the Strike gaming tier, server side
+verified-against: docs/STATE.md
+```
+
+> **Engine note — read before trusting any "sing-box client" claim below.** The
+> **server** half of this document is current. The **client** was the Go + Wails +
+> sing-box build when this was written; that client is **retired**. `client/` is a
+> Tauri fork of Clash Verge Rev and tunnels through **mihomo**. Every phrase below
+> describing "the engine already on every client" or a "sing-box client" is
+> **historical**. The Strike UoT seam is cross-engine (sing-box inbound ↔ mihomo
+> outbound); see §2's correction.
+>
+> **Status: LIVE on the current host — enabled 2026-09-19**
+>
+> `sing-box-uot` is active and listening on **TCP+UDP 8446**, and the strike tier
+> advertises `udp_relay=true` + `uot_port=8446`. Verified end-to-end on the live
+> host: a sing-box client with `udp_over_tcp: true` → 127.0.0.1:8446 → sing-box
+> server → UDP to 8.8.8.8:53 → DNS reply returned. The server log confirms the
+> mechanism explicitly:
+>
+> ```
+> inbound/shadowsocks[strike-uot]: inbound connection to sp.v2.udp-over-tcp.arpa:0
+> inbound/shadowsocks[strike-uot]: inbound UoT connection to 8.8.8.8:53
+> outbound/direct: outbound packet connection
+> ```
+>
+> The same test also confirmed **raw** UDP (via the ordinary 8445 shadowsocks
+> port) relays correctly on this host.
+>
+> **Still outstanding: a real game session on a school network.** The transport
+> is proven; the acceptance gate in §P1 (5-minute SCP:SL or similar, on N4L,
+> versus the raw-UDP baseline) has still never been run. Until it is, treat
+> Strike's gaming claim as unvalidated in the field.
+>
+> **Historically:** the code landed and the UoT transport was first validated
+> 2026-08-14 on the then-live VPS (since retired and offline; its address is not
+> recorded here — see [`operate/CLAIMS.md`](operate/CLAIMS.md) §6). The current
+> hub was deployed while UoT was still opt-in, which is why this needed enabling
+> by hand.
+>
+> **Default now:** `02-shadowsocks.sh` and `setup.sh` build the UoT endpoint
+> unless `ENABLE_UOT=0` is set, `08-firewall.sh` opens 8446 TCP+UDP, and
+> `seed-pb.py` advertises `uot_port` on the strike tier. So a fresh deployment
+> gets working game-UDP handling with no extra flags. Opting out is the
+> exception and needs `ENABLE_UOT=0` **plus** a re-seed, or clients are told to
+> use a port nothing is listening on.
+>
+> **Testing note (learned the hard way):** do not test the UDP path by sending a
+> bare DNS datagram at a `mixed` inbound. The client engine (sing-box at the time;
+> mihomo now) sniffs and hijacks DNS, and UDP through the tunnel is reached via
+> **SOCKS5 UDP
+> ASSOCIATE**, not by throwing an unauthenticated packet at the port. Two
+> apparently-failing tests here were bad tests, not a broken server — the raw
+> UDP and UoT paths both worked once exercised the way the tunnel actually
+> carries UDP.
+
+> This document consolidates the analysis from the packet-level debugging narrative (diag/ toolkit, FIXES.md, CONTEXT.md) into an ordered change plan
+> to make the Strike tier's gaming promise actually function on N4L school
+> networks. Read `CONTEXT.md` and `reference/FIXES.md` for the full debugging history.
+>
+> **P1 throughput baselines (2026-08-14, via the Stealth TCP path — clash
+> config `clash-verge-stealth.yaml`):** school network 25.3 down / 113.6 up
+> @ 51ms (single-flow: 2.47 down — school shapes downloads PER-FLOW ~2.5
+> Mbps, aggregate scales with parallel connections); mobile (Optus) 81.7
+> down / 9.5 up @ 121-150ms (mobile caps uploads); tunnel capacity from a
+> non-school link ~45-80 Mbps. Conclusion: the tunnel/VPS is not the
+> bottleneck — last-mile network shaping is. Per-flow download shaping is
+> worked around with multi-connection downloaders; a per-IP total cap would
+> need a second egress IP.
+> This document consolidates the analysis from the packet-level debugging
+> narrative (diag/ toolkit, FIXES.md, CONTEXT.md) into an ordered change plan
+> to make the Strike tier's gaming promise actually function on N4L school
+> networks. Read `CONTEXT.md` and `reference/FIXES.md` for the full debugging history.
+
+---
+
+## 1. Goal
+
+Make **UDP gaming (SCP:Secret Laboratory etc.) work through the Locus tunnel**
+on networks where UDP is hostile. The school network's UDP policy is
+stateful/DPI-based, observed as: tiny flows pass (48B NTP round-trips),
+QUIC is explicitly killed, game-sized flows get dropped or silence.
+
+## 2. Why it fails today (root cause)
+
+The client currently sends game UDP **raw** — standard SS UDP relay
+(`process.go` ~line 718: `udp_over_tcp` deliberately NOT configured; Strike
+server runs `tcp_and_udp`). Raw UDP from the school network is exactly what
+the hostile policy drops.
+
+UDP-over-TCP (UoT) was tried and removed because the **server** rejected it:
+`shadowsocks-rust` does not implement SagerNet's proprietary UoT protocol
+(magic domains `sp.udp-over-tcp.arpa` / `sp.v2.udp-over-tcp.arpa`) and RSTs
+every UoT connection after ~300ms (confirmed in `seed-live.py` notes,
+2026-08-01).
+
+**Conclusion:** UoT was never the wrong protocol — it was the wrong server.
+The fix is to carry UDP inside the TCP tunnel with a server that implements
+UoT. sing-box was that server, and was chosen then partly because it was **"the
+engine already on every client"** — the retired Wails client. The server choice
+stands unchanged; only that justification is stale, because the shipping client
+is now mihomo and the framing match is cross-engine rather than same-engine.
+
+## 3. The change stack (ordered)
+
+### P0 — Transport fix: UDP-over-TCP on a server that implements it (the core change)
+
+✅ **Code landed and transport validated — 2026-08-14** (on the then-live VPS,
+since retired — address deliberately not recorded; [`operate/CLAIMS.md`](operate/CLAIMS.md) §6).
+What landed and still exists in the repo:
+
+| Piece | Where | Detail |
+|-------|-------|--------|
+| Server UoT endpoint | `server/modules/02-shadowsocks.sh` | Default-on section (`ENABLE_UOT=0` to skip): installs sing-box server (v1.12.1), shadowsocks inbound on `UOT_PORT` (default 8446) with Strike creds, systemd unit `sing-box-uot.service`. **Config corrections from live deploy:** sing-box REJECTS `"network": "tcp_and_udp"` and rejects `"udp_over_tcp"` on the INBOUND — both omitted (default = tcp+udp; UoT magic-domain connections handled automatically by the inbound). Verified listening on TCP+UDP 8446 |
+| Idempotent installer | `server/scripts/enable-uot.sh` | Installs/starts the UoT endpoint on an **already-deployed** box without re-running full setup; touches none of the 8443/44/45 services, Caddy, PocketBase, tc or backups |
+| Advertising | `server/scripts/seed-live.py`, `seed-pb.py` | With `ENABLE_UOT=1`, strike's tier_configs config gains `"uot_port"` + `udp_relay=true` |
+| Client UoT outbound | `legacy/wails-client/internal/manager/process.go` | When `UDPRelay && ServerPortUOT > 0`: adds a `proxy-uot` shadowsocks outbound (`udp_over_tcp: true`, port = uot_port) + a `network: udp` route rule pinning UDP to it. TCP stays on the standard port/outbound — the working path never changes |
+| Plumbing | `heartbeat.go`, `activation.go`, `storage.go`, `app.go` | `server_port_uot` parsed from server config in all three paths (activation, heartbeat refresh, persisted state) and applied to the manager Config |
+| Verified live (2026-08-14) | activation + heartbeat | `POST /api/activate` → 200 with `server_config.uot_port:8446, udp_relay:true`; `POST /api/heartbeat` → 200 with the same config refresh |
+
+**Superseded (was true 2026-08-14 → 2026-09-19):** this section used to say none
+of the above was *running* on the live hub, so Strike clients got no
+`uot_port` and sent raw UDP. **That is no longer the case.** UoT was enabled on
+the hub by hand on **2026-09-19** and is live — see the status banner at the
+top of this file, which is the current statement. The paragraph is kept only
+because it explains why `enable-uot.sh` exists (to switch UoT on an
+already-deployed box without a full re-run) and why enabling it was once a
+manual step rather than the default. `02-shadowsocks.sh` and `seed-pb.py` now
+default it **on** (`ENABLE_UOT` defaults to `1`).
+
+**Deploy commands (repeatable):**
+1. DNS for the domain must resolve to the VPS FIRST (00-env hard-fails)
+2. `scp -r server age-key.txt root@VPS:/root/server/`
+3. `ENABLE_UOT=1 DOMAIN=… /root/server/setup.sh` (idempotent) — or, on an
+   already-deployed box, just `UOT_PORT=8446 bash server/scripts/enable-uot.sh`
+4. `ENABLE_UOT=1 DOMAIN=… python3 /root/server/scripts/seed-pb.py` (re-seed after any setup re-run)
+5. Existing Strike clients pick up `uot_port` on their next heartbeat (no re-activation needed)
+6. Disable: `systemctl disable --now sing-box-uot` + drop `uot_port` from the tier config
+
+The original design rationale (additive shape, why it works, rollback) follows:
+
+| End | Change |
+|-----|--------|
+| VPS | `server/modules/02-shadowsocks.sh`: add an optional module section that installs sing-box server (version aligned with client 1.12.1) and writes a Strike-only shadowsocks **inbound** (`network: tcp_and_udp`, `"udp_over_tcp": true`) on a NEW port (e.g. 8446); keep existing ssserver units untouched; keep password file, BBR + tc (04-tc.sh untouched) |
+| Client | `legacy/wails-client/internal/manager/process.go` (~line 718): set `"udp_over_tcp": true` on the shadowsocks outbound when the tier advertises UDP (Strike) and a UoT-capable server port is configured |
+| Deployment | One new TCP port (e.g. 8446); school firewall sees plain Shadowsocks TCP wire format, identical to existing tiers. Server may also listen UDP 8446 for raw fallback |
+
+**Why this works:** the school firewall only ever sees TCP (identical wire
+format to the working traffic). UDP is encapsulated inside it, so the hostile
+UDP policy is bypassed entirely. MTU/fragmentation issues (the sizeladder
+threshold) also disappear — TCP segments.
+
+**Rollback:** disable the new systemd unit; delete the new port from the
+firewall module. Nothing else changes.
+
+### P1 — Validation experiments (deferred until testing is possible)
+
+These close the remaining diagnostic gap and MUST run before/with the P0
+deploy:
+
+1. **VPS-direct real-client test** — from the VPS (bypassing the school
+   network entirely), replay a **byte-exact Wireshark-captured LiteNetLib
+   ConnectRequest** (magic `SCPSL14` + protocol id + session key + connect
+   data) against the 24 SCP:SL servers, or run an actual SCP:SL client.
+   - Reply → school leg is the problem → P0 confirmed correct.
+   - Silence → server list stale / whitelist-only / anti-DDoS blocks the VPS
+     IP → pick different servers instead of changing transport.
+2. **Packet-rate ladder** — current ladders test size only; add a rate test
+   (1–100 pps through the tunnel) — a stateful policy often drops by flow
+   rate, not size.
+3. **Server aliveness** — cross-check the 24 IPs against the SCP:SL server
+   registry; dead servers are indistinguishable from dropped packets
+   client-side.
+4. **Post-deploy end-to-end** — actual SCP:SL session through the UoT path;
+   confirm UDP byte counters move both ways in `diag/watch.sh` (game ports
+   7777/27018 flows currently show sent-bytes-with-no-return).
+
+### P2 — Raw-UDP mitigations (only if P0 deployment is delayed)
+
+If UoT cannot be deployed yet, reduce raw-UDP fragility:
+
+- TUN **MTU 1500 → 1280** in the client config (fragmented UDP is a classic
+  DPI drop; SS AEAD-UDP adds ~32B/packet so anything near 1472 already
+  fragments)
+- Keep `strict_route: false` and the DNS chain exactly as-is (the 7-layer
+  #4–#11 fix stack — do NOT regress)
+- Optional ~15s UDP keepalive if school NAT expires UDP mappings
+
+These are stopgaps, not the fix.
+
+### P3 — Product hardening (after P0 works)
+
+1. **`UDPRelay` heartbeat flag** (`heartbeat.go`/`heartbeat.pb.js`, currently
+   informational-only per `process.go:182`) → drive UoT enablement per tier
+   server-side.
+2. **Game-mode route rule** — pin known game-server IPs to the UoT-capable
+   outbound; everything else stays plain TCP. Optionally serve a game-server
+   list via heartbeat `server_config`.
+3. **Tier accuracy** — update tier tables/docs: Strike = "TCP+UDP
+   (UDP-over-TCP through sing-box server)".
+4. **Silent-client enforcement** (orthogonal): server-side suspend still
+   depends on client heartbeat — document the limitation; consider server-side
+   config kill for suspended codes. Separate issue.
+
+## 4. File-change map (checklist for implementation)
+
+| File | Change |
+|------|--------|
+| `server/modules/02-shadowsocks.sh` | Install sing-box server; per-tier inbound configs; UoT on Strike; rollback path |
+| `server/setup.sh` | Module chain unchanged; summary line "Strike: TCP+UDP (UoT)" |
+| `server/scripts/smoke-test.sh` | Verify Strike serves tcp+udp; UoT handshake check |
+| `server/scripts/seed-live.py` | Notes/config for sing-box server |
+| `server/templates/` | Optional sing-box server config template |
+| `legacy/wails-client/internal/manager/process.go` | `udp_over_tcp: true` on outbound (Strike); MTU change (P2) |
+| `legacy/wails-client/internal/heartbeat/heartbeat.go` + `server/pb_hooks/heartbeat.pb.js` | UDPRelay semantics (P3) |
+| `docs/operate/DEPLOY.md`, `OPS.md`, `ARCHITECTURE.md`, `CONTEXT.md`, tier tables | Reflect sing-box server + UoT |
+| `docs/reference/FIXES.md` | Dated entry when implemented |
+
+## 5. Risks / decision points
+
+### 5a. Server choice — tradeoffs (OPEN DECISION, not settled)
+
+sing-box server is the leading candidate but is NOT the only one. The deciding
+factor is interoperability with the client's UoT framing and server-side
+operating properties. Options:
+
+| Option | Pros | Cons |
+|--------|------|------|
+| **sing-box server** (additive instance) | Framing match with the shipped mihomo client — now a **cross-engine** match (sing-box inbound ↔ mihomo outbound), verified live; one binary family to learn; verified version 1.12.1 | UoT is a **proprietary SagerNet protocol** (magic domains `sp.udp-over-tcp.arpa`); bigger attack surface than ssserver (full proxy platform, not a minimal relay); client↔server version coupling (engine upgrades must track); server mode is less battle-tested than shadowsocks-rust; heavier RAM/CPU on a 2GB VPS; **non-UoT clients (Hiddify, Clash) lose UDP entirely** |
+| **Xray (v2ray-core) SS inbound + `uot`** | Server-grade maturity; implements SagerNet UoT framing; keeps a dedicated server tool | Interop with sing-box/mihomo client UoT is **reported but unverified** — needs a 5-min test; larger binary/feature set than needed; still depends on the proprietary UoT framing |
+| **shadowsocks-rust + udp2raw** | Keeps the standard, working server untouched; raw UDP wrapped in fake-TCP; battle-tested for gaming | Second tunnel layer + extra process per tier; fake-TCP may be classified by DPI (unknown); single-maintainer dependency; latency overhead |
+| **Raw UDP + P2 stopgaps only** | Zero change, zero risk; UDP works wherever the network allows it | Gaming UDP stays broken on N4L — the Strike promise is unfulfilled; this is the honest fallback if all transport options fail validation |
+
+**The key open question (needs a 5-minute test, can't run now):** does
+sing-box client UoT interoperate with Xray's SS `uot`? If yes, Xray is a
+serious alternative to sing-box server. If no, sing-box server is the only
+native option.
+
+### 5b. Other risks / decision points
+
+- **Proprietary protocol lock-in:** UoT is SagerNet-specific. Choosing it
+  (with any server) ties the UDP path to a closed framing — if it changes or
+  breaks, both ends must track it. This is the same class of dependency risk
+  that engine churn already caused twice (1.10→1.12).
+- **Third-party client loss:** with UoT on the server, Hiddify/Clash testing
+  flows lose UDP. Acceptable for the shipped product (the shipped client speaks
+  UoT) but kills a useful test path. (The `hiddify.pb.js` ss:// link generator
+  this originally referenced was deleted — it never worked, `goja` has no `btoa`.)
+- **UoT latency:** TCP head-of-line blocking can add latency for UDP games
+  under packet loss. Acceptable for school WiFi; product targets N4L schools,
+  so **default Strike UDP = UoT always**; a per-network toggle is a possible
+  future setting.
+- **Migration:** the additive shape needs no migration of the working path;
+  a full swap would. The module is idempotent by design (FIXES.md R-series).
+
+## 6. Sequence when testing resumes
+
+1. P1.3 aliveness + P1.1 VPS-direct test (closes the school-leg vs server-leg
+   gap — validates the whole premise)
+2. P0 on a **test port** (e.g. 8446, additive instance) + client UoT on a test build
+3. P1.4 end-to-end with an actual SCP:SL session
+4. Promote to the production Strike port, update smoke test + docs
+5. P3 hardening items
+
+---
+
+*Consolidated 2026-08-14 from the debugging narrative (diag/ toolkit,
+FIXES.md, CONTEXT.md, seed-live.py notes, process.go config). No code changes
+made as part of this plan.*

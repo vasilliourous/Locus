@@ -1,0 +1,214 @@
+{
+  "page": {
+    "tooltips": {
+      "lightweightMode": "軽量モード",
+      "manual": "マニュアル",
+      "settings": "ホーム設定"
+    },
+    "cards": {
+      "trafficStats": "トラフィック統計",
+      "networkSettings": "ネットワーク設定",
+      "proxyMode": "プロキシモード"
+    },
+    "settings": {
+      "cards": {
+        "profile": "プロファイルカード",
+        "currentProxy": "現在のプロキシカード",
+        "network": "ネットワーク設定カード",
+        "proxyMode": "プロキシモードカード",
+        "traffic": "トラフィック統計カード",
+        "tests": "ウェブサイトテストカード",
+        "ip": "IP情報カード",
+        "clashInfo": "Clash情報カード",
+        "systemInfo": "システム情報カード"
+      },
+      "title": "ホーム設定"
+    },
+    "title": "ホーム"
+  },
+  "components": {
+    "proxyTun": {
+      "status": {
+        "systemProxyEnabled": "システムプロキシが有効になっています。アプリケーションはプロキシを通じてネットワークにアクセスします。",
+        "systemProxyDisabled": "システムプロキシが無効になっています。ほとんどのユーザーはこのオプションをオンにすることをお勧めします。",
+        "tunModeServiceRequired": "TUNモードはサービスモードが必要です。まずサービスをインストールしてください。",
+        "tunModeEnabled": "TUNモードが有効になっています。アプリケーションは仮想ネットワークカードを通じてネットワークにアクセスします。",
+        "tunModeDisabled": "TUNモードが無効になっています。特殊なアプリケーションに適しています。"
+      },
+      "tooltips": {
+        "systemProxy": "オペレーティングシステムのプロキシ設定を変更します。有効にできない場合は、手動でオペレーティングシステムのプロキシ設定を変更してください。",
+        "tunMode": "TUNモードは全てのアプリケーションのトラフィックを制御できます。システムプロキシ設定に従わない特殊なアプリケーションに適しています。"
+      }
+    },
+    "clashInfo": {
+      "title": "Clash情報",
+      "fields": {
+        "coreVersion": "コアバージョン",
+        "systemProxyAddress": "システムプロキシアドレス",
+        "mixedPort": "Mixed Port",
+        "uptime": "稼働時間",
+        "rulesCount": "ルール数"
+      }
+    },
+    "systemInfo": {
+      "title": "システム情報",
+      "fields": {
+        "osInfo": "オペレーティングシステム情報",
+        "autoLaunch": "起動時に自動起動",
+        "runningMode": "実行モード",
+        "lastCheckUpdate": "最後の更新チェック",
+        "vergeVersion": "バージョン"
+      },
+      "actions": {
+        "settings": "設定"
+      },
+      "badges": {
+        "notRunning": "コア停止中",
+        "adminMode": "管理者モード",
+        "serviceMode": "サービスモード",
+        "adminServiceMode": "Admin + Service Mode"
+      }
+    },
+    "ipInfo": {
+      "title": "IP情報",
+      "labels": {
+        "ip": "IP",
+        "asn": "自治システム番号",
+        "isp": "インターネットサービスプロバイダー",
+        "org": "組織",
+        "location": "位置",
+        "timezone": "タイムゾーン",
+        "autoRefresh": "自動更新",
+        "unknown": "不明"
+      },
+      "errors": {
+        "load": "IP情報の取得に失敗しました",
+        "loadWithDetails": "IP情報の取得に失敗しました: {{message}}",
+        "noServices": "利用可能なIP検出サービスがありません"
+      }
+    },
+    "currentProxy": {
+      "title": "現在のノード",
+      "actions": {
+        "refreshDelay": "遅延テスト"
+      },
+      "labels": {
+        "globalMode": "グローバルモード",
+        "directMode": "直接接続モード",
+        "group": "プロキシグループ",
+        "proxy": "ノード",
+        "noActiveNode": "アクティブなプロキシノードがありません。"
+      },
+      "status": {
+        "testing": "テスト中",
+        "untested": "未テスト",
+        "error": "エラー",
+        "timeout": "タイムアウト",
+        "latencyHigh": "遅延が高い",
+        "latencyMedium": "遅延が中程度",
+        "latencyGood": "遅延が良好",
+        "latencyExcellent": "遅延が非常に良好",
+        "uninitialized": "未初期化",
+        "noProxyNode": "プロキシノードがありません"
+      }
+    },
+    "tests": {
+      "title": "ウェブサイトテスト"
+    },
+    "traffic": {
+      "metrics": {
+        "uploadSpeed": "アップロード速度",
+        "downloadSpeed": "ダウンロード速度",
+        "activeConnections": "アクティブな接続",
+        "memoryUsage": "コアメモリ使用量"
+      },
+      "legends": {
+        "upload": "アップロード",
+        "download": "ダウンロード"
+      },
+      "patterns": {
+        "minutes": "{{time}} Minutes"
+      },
+      "unknownTime": "不明な時刻",
+      "chartStyles": {
+        "smooth": "スムーズ",
+        "linear": "リニア"
+      },
+      "diagnostics": "データ点: {{points}} | 圧縮後: {{compressed}} | FPS: {{fps}}"
+    },
+    "clashMode": {
+      "errors": {
+        "communication": "コアの通信エラーです。パソコンを再起動してから再試行してください"
+      },
+      "labels": {
+        "rule": "ルールモード",
+        "global": "グローバルモード",
+        "direct": "直接接続モード"
+      },
+      "descriptions": {
+        "rule": "Automatically choose proxies according to the rule set.",
+        "global": "Forward all network requests through the selected proxy.",
+        "direct": "Bypass the proxy and connect to the internet directly."
+      }
+    },
+    "connection": {
+      "connect": "接続",
+      "disconnect": "切断",
+      "connecting": "接続中…",
+      "disconnecting": "切断中…",
+      "checking": "確認中…",
+      "notConnected": "未接続",
+      "connected": "接続済み",
+      "sessionUpload": "このセッションの送信",
+      "sessionDownload": "このセッションの受信",
+      "activeConnections": "アクティブ接続",
+      "metricPending": "まだデータがありません",
+      "speed": "速度",
+      "needsActivation": "このデバイスにはアクティベーションコードが必要です。",
+      "requiresSetup": "Locus はまだ VPN を有効にできません。管理者権限が必要で、Locus サービスがインストールされていません。インストーラーで Locus をインストールすると自動的に設定されます。",
+      "subscriptionLapsed": "Your Locus subscription has expired, so the VPN will not connect. Contact the person who sold you the code to renew it.",
+      "subscriptionExpiresToday": "Your Locus subscription expires today. Contact the person who sold you the code to renew it.",
+      "subscriptionExpiresIn": "Your Locus subscription expires in {{count}} days. Contact the person who sold you the code to renew it.",
+      "account": {
+        "title": "Account",
+        "subscription": "Subscription",
+        "plan": "Plan",
+        "expires": "Expires",
+        "expired": "Expired",
+        "today": "Today",
+        "daysLeft": "{{count}} days",
+        "oneDayLeft": "1 day",
+        "expiresSoon": "Your subscription expires soon. Contact the person who sold you the code to renew.",
+        "noExpiryYet": "Your subscription end date is not available yet. It will appear after this device next contacts Locus.",
+        "activateForExpiry": "Activate this device to see your subscription.",
+        "thisDevice": "This device",
+        "deviceId": "Device ID",
+        "platform": "Platform",
+        "appVersion": "App version",
+        "deviceIdHint": "Quote the device ID if you need support — it identifies this install without revealing anything about you.",
+        "preferences": "Preferences",
+        "language": "Language",
+        "appearance": "Appearance",
+        "themeSystem": "System",
+        "themeLight": "Light",
+        "themeDark": "Dark",
+        "autoUpdate": "Check for updates automatically",
+        "on": "On",
+        "off": "Off",
+        "refresh": "Refresh",
+        "notActivated": "This device is not activated. Enter the code from your card to connect.",
+        "checkStatus": "Check status now",
+        "lastChecked": "Last confirmed {{time}}",
+        "confirmedJustNow": "just now",
+        "confirmedMinutesAgo": "{{count}} min ago",
+        "confirmedHoursAgo": "{{count}} h ago",
+        "confirmedDaysAgo": "{{count}} d ago",
+        "neverConfirmed": "Not confirmed with the server yet",
+        "checkingStatus": "Checking…",
+        "notActivatedToCheck": "Activate a code first — there is nothing to confirm yet."
+      },
+      "cancel": "Cancel",
+      "takingLonger": "Still connecting. This can take a few seconds on a school network — you can cancel and try again."
+    }
+  }
+}

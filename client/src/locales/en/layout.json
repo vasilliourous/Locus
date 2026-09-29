@@ -1,0 +1,68 @@
+{
+  "components": {
+    "navigation": {
+      "tabs": {
+        "home": "Home",
+        "proxies": "Proxies",
+        "profiles": "Profiles",
+        "connections": "Connections",
+        "rules": "Rules",
+        "logs": "Logs",
+        "unlock": "Test",
+        "settings": "Settings"
+      },
+      "menu": {
+        "reorderMode": "Menu reorder mode",
+        "restoreDefaultOrder": "Restore default order",
+        "unlock": "Unlock menu order",
+        "lock": "Lock menu order",
+        "collapseNavBar": "Collapse navigation bar",
+        "expandNavBar": "Expand navigation bar"
+      }
+    },
+    "serviceMigration": {
+      "locationRefusedMessage": "The service cannot start the core because its installation path or directory permissions failed a security check. Reinstall the service to restore its files and permissions, then try again. Windows may ask for administrator approval.",
+      "title": "Service update required",
+      "message": "The Locus service version does not match the version required by this app. Choose Reinstall Service to uninstall the existing service and install the required version.",
+      "checkingMessage": "Checking the system service status and current running mode. Please wait…",
+      "unavailableMessage": "The Locus service is required and is not available. Install or repair it, then try again. Locus cannot turn the VPN on without it.",
+      "reinstall": "Reinstall service",
+      "repair": "Repair service",
+      "success": "The Locus service was updated successfully",
+      "errors": {
+        "actionFailed": "The service operation failed",
+        "stateRefreshFailed": "Failed to refresh the service state",
+        "restartFailed": "Failed to restart the core",
+        "revalidationFailed": "Failed to refresh the running state"
+      }
+    },
+    "sysproxyPrivilege": {
+      "title": "Could not set the system proxy",
+      "message": "macOS refused the change for lack of privileges. Installing the Locus service lets it make proxy changes as an administrator, and this prompt will not come back.",
+      "serviceReadyMessage": "The Locus service is ready, but the core is still running as a sidecar, which is why setting the system proxy was refused. Switching to service mode fixes it — no reinstall needed.",
+      "alternative": "Alternatively, turn off “require an administrator password to access system-wide settings” in System Settings → Privacy & Security → Advanced.",
+      "later": "Later",
+      "installing": "Installing the system service. This may ask for an administrator password.",
+      "restarting": "Service installed. Restarting the core through it…",
+      "applying": "Applying your system proxy change…",
+      "tunTitle": "TUN mode needs the system service",
+      "tunMessage": "TUN mode needs the Locus service to take over network traffic. Once it is installed, TUN mode will be turned on for you."
+    },
+    "subscription": {
+      "expired": "Subscription expired",
+      "expiredHint": "Your Locus subscription has ended. Contact the person who sold you the code to renew it, then activate again.",
+      "hint": "When your Locus subscription ends.",
+      "expiresToday": "Expires today",
+      "oneDayLeft": "Expires in 1 day",
+      "daysLeft": "Expires in {{count}} days",
+      "unconfirmed": "Subscription status unavailable",
+      "unconfirmedHint": "Locus has not confirmed your subscription with the server yet. Connect once on a working network and this will update."
+    }
+  },
+  "feedback": {
+    "errors": {
+      "restartCoreStopFailed": "The core could not be stopped safely, so the restart was cancelled",
+      "quitCoreStopFailed": "The core could not be stopped safely, so quitting was cancelled"
+    }
+  }
+}

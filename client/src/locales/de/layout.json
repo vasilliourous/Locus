@@ -1,0 +1,68 @@
+{
+  "components": {
+    "navigation": {
+      "tabs": {
+        "home": "Startseite",
+        "proxies": "Proxy",
+        "profiles": "Abonnement",
+        "connections": "Verbindungen",
+        "rules": "Regeln",
+        "logs": "Protokolle",
+        "unlock": "Testen",
+        "settings": "Einstellungen"
+      },
+      "menu": {
+        "reorderMode": "Menu reorder mode",
+        "restoreDefaultOrder": "Restore default order",
+        "unlock": "Unlock menu order",
+        "lock": "Lock menu order",
+        "collapseNavBar": "Collapse navigation bar",
+        "expandNavBar": "Expand navigation bar"
+      }
+    },
+    "serviceMigration": {
+      "locationRefusedMessage": "Der Dienst kann den Kern nicht starten, da sein Installationspfad oder die Verzeichnisberechtigungen die Sicherheitsprüfung nicht bestanden haben. Installieren Sie den Dienst erneut, um Dateien und Berechtigungen wiederherzustellen, und versuchen Sie es erneut. Windows kann eine Administratorbestätigung anfordern.",
+      "title": "Service update required",
+      "message": "The Locus service version does not match the version required by this app. Choose Reinstall Service to uninstall the existing service and install the required version.",
+      "checkingMessage": "Checking the system service status and current running mode. Please wait…",
+      "unavailableMessage": "The Locus service is required and is not available. Install or repair it, then try again. Locus cannot turn the VPN on without it.",
+      "reinstall": "Reinstall service",
+      "repair": "Repair service",
+      "success": "The Locus service was updated successfully",
+      "errors": {
+        "actionFailed": "Der Dienstvorgang ist fehlgeschlagen",
+        "stateRefreshFailed": "Dienststatus konnte nicht aktualisiert werden",
+        "restartFailed": "Kern konnte nicht neu gestartet werden",
+        "revalidationFailed": "Laufstatus konnte nicht aktualisiert werden"
+      }
+    },
+    "sysproxyPrivilege": {
+      "title": "Systemproxy konnte nicht gesetzt werden",
+      "message": "macOS hat die Änderung mangels Berechtigungen abgelehnt. Nach Installation des Locus-Dienstes nimmt dieser die Proxy-Änderungen als Administrator vor, und dieser Hinweis erscheint nicht mehr.",
+      "serviceReadyMessage": "Der Locus-Dienst ist bereit, der Kern läuft aber noch als Sidecar — deshalb wurde das Setzen des Systemproxys abgelehnt. Ein Wechsel in den Dienstmodus behebt das, eine Neuinstallation ist nicht nötig.",
+      "alternative": "Alternativ: Deaktivieren Sie in den Systemeinstellungen → Datenschutz & Sicherheit → Erweitert die Option, die für systemweite Einstellungen ein Administratorkennwort verlangt.",
+      "later": "Später",
+      "installing": "Der Systemdienst wird installiert. Möglicherweise wird ein Administratorkennwort verlangt.",
+      "restarting": "Dienst installiert. Der Kern wird darüber neu gestartet…",
+      "applying": "Ihre Systemproxy-Änderung wird angewendet…",
+      "tunTitle": "Der TUN-Modus benötigt den Systemdienst",
+      "tunMessage": "Der TUN-Modus benötigt den Locus-Systemdienst, um den Netzwerkverkehr zu übernehmen. Nach der Installation wird der TUN-Modus für Sie eingeschaltet."
+    },
+    "subscription": {
+      "expired": "Subscription expired",
+      "expiredHint": "Your Locus subscription has ended. Contact the person who sold you the code to renew it, then activate again.",
+      "hint": "When your Locus subscription ends.",
+      "expiresToday": "Expires today",
+      "oneDayLeft": "Expires in 1 day",
+      "daysLeft": "Expires in {{count}} days",
+      "unconfirmed": "Subscription status unavailable",
+      "unconfirmedHint": "Locus has not confirmed your subscription with the server yet. Connect once on a working network and this will update."
+    }
+  },
+  "feedback": {
+    "errors": {
+      "restartCoreStopFailed": "Der Kern konnte nicht sicher gestoppt werden, daher wurde der Neustart abgebrochen",
+      "quitCoreStopFailed": "Der Kern konnte nicht sicher gestoppt werden, daher wurde das Beenden abgebrochen"
+    }
+  }
+}

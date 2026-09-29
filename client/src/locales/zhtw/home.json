@@ -1,0 +1,214 @@
+{
+  "page": {
+    "tooltips": {
+      "lightweightMode": "輕量模式",
+      "manual": "使用手冊",
+      "settings": "首頁設定"
+    },
+    "cards": {
+      "trafficStats": "流量統計",
+      "networkSettings": "網路設定",
+      "proxyMode": "代理模式"
+    },
+    "settings": {
+      "cards": {
+        "profile": "訂閱卡",
+        "currentProxy": "目前代理卡",
+        "network": "網路設定卡",
+        "proxyMode": "代理模式卡",
+        "traffic": "流量統計卡",
+        "tests": "網站測試卡",
+        "ip": "IP資訊卡",
+        "clashInfo": "Clash 資訊卡",
+        "systemInfo": "系統資訊卡"
+      },
+      "title": "首頁設定"
+    },
+    "title": "首頁"
+  },
+  "components": {
+    "proxyTun": {
+      "status": {
+        "systemProxyEnabled": "系統代理已啟用，您的應用程式將透過代理存取網路",
+        "systemProxyDisabled": "系統代理已關閉，建議大多數使用者開啟此選項",
+        "tunModeServiceRequired": "虛擬網路介面卡模式需要服務模式，請先安裝服務",
+        "tunModeEnabled": "虛擬網路介面卡模式已啟用，應用程式將透過虛擬網路介面卡存取網路",
+        "tunModeDisabled": "虛擬網路介面卡模式已關閉，適用於特殊應用程式"
+      },
+      "tooltips": {
+        "systemProxy": "修改作業系統的代理設定，如果開啟失敗，可手動修改作業系統的代理設定",
+        "tunMode": "虛擬網路介面卡模式可以接管所有應用程式流量，適用於不遵循系統代理設定的特殊應用程式"
+      }
+    },
+    "clashInfo": {
+      "title": "Clash 資訊",
+      "fields": {
+        "coreVersion": "內核版本",
+        "systemProxyAddress": "系統代理位址",
+        "mixedPort": "Mixed Port",
+        "uptime": "執行時間",
+        "rulesCount": "規則數量"
+      }
+    },
+    "systemInfo": {
+      "title": "系統資訊",
+      "fields": {
+        "osInfo": "作業系統資訊",
+        "autoLaunch": "開機自啟",
+        "runningMode": "執行模式",
+        "lastCheckUpdate": "最後檢查更新",
+        "vergeVersion": "版本"
+      },
+      "actions": {
+        "settings": "設定"
+      },
+      "badges": {
+        "notRunning": "核心未執行",
+        "adminMode": "管理員模式",
+        "serviceMode": "服務模式",
+        "adminServiceMode": "系統管理員 + 服務模式"
+      }
+    },
+    "ipInfo": {
+      "title": "IP資訊",
+      "labels": {
+        "ip": "IP",
+        "asn": "自治系統",
+        "isp": "網際網路服務供應商",
+        "org": "組織",
+        "location": "位置",
+        "timezone": "時區",
+        "autoRefresh": "自動重整",
+        "unknown": "未知"
+      },
+      "errors": {
+        "load": "取得 IP 資訊失敗",
+        "loadWithDetails": "取得 IP 資訊失敗：{{message}}",
+        "noServices": "目前沒有可用的 IP 偵測服務"
+      }
+    },
+    "currentProxy": {
+      "title": "目前節點",
+      "actions": {
+        "refreshDelay": "延遲測試"
+      },
+      "labels": {
+        "globalMode": "全域模式",
+        "directMode": "直連模式",
+        "group": "代理組",
+        "proxy": "節點",
+        "noActiveNode": "暫無作用中的代理節點"
+      },
+      "status": {
+        "testing": "測試中",
+        "untested": "未測試",
+        "error": "錯誤",
+        "timeout": "逾時",
+        "latencyHigh": "延遲較高",
+        "latencyMedium": "延遲中等",
+        "latencyGood": "延遲良好",
+        "latencyExcellent": "延遲極佳",
+        "uninitialized": "未初始化",
+        "noProxyNode": "無代理節點"
+      }
+    },
+    "tests": {
+      "title": "網站測試"
+    },
+    "traffic": {
+      "metrics": {
+        "uploadSpeed": "上傳速度",
+        "downloadSpeed": "下載速度",
+        "activeConnections": "作用中連線",
+        "memoryUsage": "內核佔用"
+      },
+      "legends": {
+        "upload": "上傳",
+        "download": "下載"
+      },
+      "patterns": {
+        "minutes": "{{time}} 分"
+      },
+      "unknownTime": "未知時間",
+      "chartStyles": {
+        "smooth": "平滑",
+        "linear": "線性"
+      },
+      "diagnostics": "資料點：{{points}} | 壓縮後：{{compressed}} | 影格率：{{fps}}"
+    },
+    "clashMode": {
+      "errors": {
+        "communication": "內核通信錯誤，請重新啟動電腦再試"
+      },
+      "labels": {
+        "rule": "規則",
+        "global": "全域",
+        "direct": "直連"
+      },
+      "descriptions": {
+        "rule": "依照規則自動選擇代理。",
+        "global": "將所有網路請求轉送至所選代理。",
+        "direct": "略過代理，直接連線至網際網路。"
+      }
+    },
+    "connection": {
+      "connect": "連接",
+      "disconnect": "斷開",
+      "connecting": "正在連接…",
+      "disconnecting": "正在斷開…",
+      "checking": "檢查中…",
+      "notConnected": "未連接",
+      "connected": "已連接",
+      "sessionUpload": "本次會話上傳",
+      "sessionDownload": "本次會話下載",
+      "activeConnections": "活動連接數",
+      "metricPending": "尚無資料",
+      "speed": "速度",
+      "needsActivation": "此裝置需要啟用碼才能連接。",
+      "requiresSetup": "Locus 暫時無法開啟 VPN：它需要管理員權限，且尚未安裝 Locus 服務。使用安裝程式安裝 Locus 會自動完成設定。",
+      "subscriptionLapsed": "Your Locus subscription has expired, so the VPN will not connect. Contact the person who sold you the code to renew it.",
+      "subscriptionExpiresToday": "Your Locus subscription expires today. Contact the person who sold you the code to renew it.",
+      "subscriptionExpiresIn": "Your Locus subscription expires in {{count}} days. Contact the person who sold you the code to renew it.",
+      "account": {
+        "title": "Account",
+        "subscription": "Subscription",
+        "plan": "Plan",
+        "expires": "Expires",
+        "expired": "Expired",
+        "today": "Today",
+        "daysLeft": "{{count}} days",
+        "oneDayLeft": "1 day",
+        "expiresSoon": "Your subscription expires soon. Contact the person who sold you the code to renew.",
+        "noExpiryYet": "Your subscription end date is not available yet. It will appear after this device next contacts Locus.",
+        "activateForExpiry": "Activate this device to see your subscription.",
+        "thisDevice": "This device",
+        "deviceId": "Device ID",
+        "platform": "Platform",
+        "appVersion": "App version",
+        "deviceIdHint": "Quote the device ID if you need support — it identifies this install without revealing anything about you.",
+        "preferences": "Preferences",
+        "language": "Language",
+        "appearance": "Appearance",
+        "themeSystem": "System",
+        "themeLight": "Light",
+        "themeDark": "Dark",
+        "autoUpdate": "Check for updates automatically",
+        "on": "On",
+        "off": "Off",
+        "refresh": "Refresh",
+        "notActivated": "This device is not activated. Enter the code from your card to connect.",
+        "checkStatus": "Check status now",
+        "lastChecked": "Last confirmed {{time}}",
+        "confirmedJustNow": "just now",
+        "confirmedMinutesAgo": "{{count}} min ago",
+        "confirmedHoursAgo": "{{count}} h ago",
+        "confirmedDaysAgo": "{{count}} d ago",
+        "neverConfirmed": "Not confirmed with the server yet",
+        "checkingStatus": "Checking…",
+        "notActivatedToCheck": "Activate a code first — there is nothing to confirm yet."
+      },
+      "cancel": "Cancel",
+      "takingLonger": "Still connecting. This can take a few seconds on a school network — you can cancel and try again."
+    }
+  }
+}

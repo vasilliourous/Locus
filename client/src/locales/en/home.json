@@ -1,0 +1,214 @@
+{
+  "page": {
+    "tooltips": {
+      "lightweightMode": "Lightweight Mode",
+      "manual": "Manual",
+      "settings": "Home Settings"
+    },
+    "cards": {
+      "trafficStats": "Traffic Stats",
+      "networkSettings": "Network Settings",
+      "proxyMode": "Proxy Mode"
+    },
+    "settings": {
+      "cards": {
+        "profile": "Profile Card",
+        "currentProxy": "Current Proxy Card",
+        "network": "Network Settings Card",
+        "proxyMode": "Proxy Mode Card",
+        "traffic": "Traffic Stats Card",
+        "tests": "Website Tests Card",
+        "ip": "IP Information Card",
+        "clashInfo": "Clash Info Cards",
+        "systemInfo": "System Info Cards"
+      },
+      "title": "Home Settings"
+    },
+    "title": "Home"
+  },
+  "components": {
+    "proxyTun": {
+      "status": {
+        "systemProxyEnabled": "System Proxy Enabled",
+        "systemProxyDisabled": "System Proxy Disabled",
+        "tunModeServiceRequired": "TUN Mode Service Required",
+        "tunModeEnabled": "TUN Mode Enabled",
+        "tunModeDisabled": "TUN Mode Disabled"
+      },
+      "tooltips": {
+        "systemProxy": "System Proxy Info",
+        "tunMode": "TUN Mode Intercept Info"
+      }
+    },
+    "clashInfo": {
+      "title": "Clash Info",
+      "fields": {
+        "coreVersion": "Core Version",
+        "systemProxyAddress": "System Proxy Address",
+        "mixedPort": "Mixed Port",
+        "uptime": "Uptime",
+        "rulesCount": "Rules Count"
+      }
+    },
+    "systemInfo": {
+      "title": "System Info",
+      "fields": {
+        "osInfo": "OS Info",
+        "autoLaunch": "Auto Launch",
+        "runningMode": "Running Mode",
+        "lastCheckUpdate": "Last Check Update",
+        "vergeVersion": "Version"
+      },
+      "actions": {
+        "settings": "Settings"
+      },
+      "badges": {
+        "notRunning": "Core Not Running",
+        "adminMode": "Administrator Mode",
+        "serviceMode": "Service Mode",
+        "adminServiceMode": "Admin + Service Mode"
+      }
+    },
+    "ipInfo": {
+      "title": "IP Information",
+      "labels": {
+        "ip": "IP",
+        "asn": "ASN",
+        "isp": "ISP",
+        "org": "ORG",
+        "location": "Location",
+        "timezone": "Timezone",
+        "autoRefresh": "Auto refresh",
+        "unknown": "Unknown"
+      },
+      "errors": {
+        "load": "Failed to get IP info",
+        "loadWithDetails": "Failed to get IP info: {{message}}",
+        "noServices": "No IP detection services are available"
+      }
+    },
+    "currentProxy": {
+      "title": "Current Node",
+      "actions": {
+        "refreshDelay": "Delay check"
+      },
+      "labels": {
+        "globalMode": "Global Mode",
+        "directMode": "Direct Mode",
+        "group": "Group",
+        "proxy": "Proxy",
+        "noActiveNode": "No active proxy node"
+      },
+      "status": {
+        "testing": "Testing",
+        "untested": "Not tested",
+        "error": "Error",
+        "timeout": "Timeout",
+        "latencyHigh": "High latency",
+        "latencyMedium": "Moderate latency",
+        "latencyGood": "Good latency",
+        "latencyExcellent": "Excellent latency",
+        "uninitialized": "Not initialized",
+        "noProxyNode": "No proxy node"
+      }
+    },
+    "tests": {
+      "title": "Website Tests"
+    },
+    "traffic": {
+      "metrics": {
+        "uploadSpeed": "Upload Speed",
+        "downloadSpeed": "Download Speed",
+        "activeConnections": "Active Connections",
+        "memoryUsage": "Core Usage"
+      },
+      "legends": {
+        "upload": "Upload",
+        "download": "Download"
+      },
+      "patterns": {
+        "minutes": "{{time}} Minutes"
+      },
+      "unknownTime": "Unknown time",
+      "chartStyles": {
+        "smooth": "Smooth",
+        "linear": "Linear"
+      },
+      "diagnostics": "Points: {{points}} | Compressed: {{compressed}} | FPS: {{fps}}"
+    },
+    "clashMode": {
+      "errors": {
+        "communication": "Core communication error, please restart your computer and try again"
+      },
+      "labels": {
+        "rule": "Rule",
+        "global": "Global",
+        "direct": "Direct"
+      },
+      "descriptions": {
+        "rule": "Automatically choose proxies according to the rule set.",
+        "global": "Forward all network requests through the selected proxy.",
+        "direct": "Bypass the proxy and connect to the internet directly."
+      }
+    },
+    "connection": {
+      "connect": "Connect",
+      "disconnect": "Disconnect",
+      "connecting": "Connecting…",
+      "disconnecting": "Disconnecting…",
+      "checking": "Checking…",
+      "notConnected": "Not connected",
+      "connected": "Connected",
+      "sessionUpload": "Uploaded this session",
+      "sessionDownload": "Downloaded this session",
+      "activeConnections": "Active connections",
+      "metricPending": "Not reported yet",
+      "speed": "Speed",
+      "needsActivation": "This device needs an activation code before it can connect.",
+      "requiresSetup": "Locus cannot turn the VPN on yet: it needs administrator rights, and the Locus service is not installed. Installing Locus with the installer sets this up automatically.",
+      "subscriptionLapsed": "Your Locus subscription has expired, so the VPN will not connect. Contact the person who sold you the code to renew it.",
+      "subscriptionExpiresToday": "Your Locus subscription expires today. Contact the person who sold you the code to renew it.",
+      "subscriptionExpiresIn": "Your Locus subscription expires in {{count}} days. Contact the person who sold you the code to renew it.",
+      "account": {
+        "title": "Account",
+        "subscription": "Subscription",
+        "plan": "Plan",
+        "expires": "Expires",
+        "expired": "Expired",
+        "today": "Today",
+        "daysLeft": "{{count}} days",
+        "oneDayLeft": "1 day",
+        "expiresSoon": "Your subscription expires soon. Contact the person who sold you the code to renew.",
+        "noExpiryYet": "Your subscription end date is not available yet. It will appear after this device next contacts Locus.",
+        "activateForExpiry": "Activate this device to see your subscription.",
+        "thisDevice": "This device",
+        "deviceId": "Device ID",
+        "platform": "Platform",
+        "appVersion": "App version",
+        "deviceIdHint": "Quote the device ID if you need support — it identifies this install without revealing anything about you.",
+        "preferences": "Preferences",
+        "language": "Language",
+        "appearance": "Appearance",
+        "themeSystem": "System",
+        "themeLight": "Light",
+        "themeDark": "Dark",
+        "autoUpdate": "Check for updates automatically",
+        "on": "On",
+        "off": "Off",
+        "refresh": "Refresh",
+        "notActivated": "This device is not activated. Enter the code from your card to connect.",
+        "checkStatus": "Check status now",
+        "lastChecked": "Last confirmed {{time}}",
+        "confirmedJustNow": "just now",
+        "confirmedMinutesAgo": "{{count}} min ago",
+        "confirmedHoursAgo": "{{count}} h ago",
+        "confirmedDaysAgo": "{{count}} d ago",
+        "neverConfirmed": "Not confirmed with the server yet",
+        "checkingStatus": "Checking…",
+        "notActivatedToCheck": "Activate a code first — there is nothing to confirm yet."
+      },
+      "cancel": "Cancel",
+      "takingLonger": "Still connecting. This can take a few seconds on a school network — you can cancel and try again."
+    }
+  }
+}

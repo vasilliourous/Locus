@@ -1,0 +1,167 @@
+import { Alert, LinearProgress, Typography } from '@mui/material'
+import { useState, useSyncExternalStore } from 'react'
+import { useTranslation } from 'react-i18next'
+
+import { BaseDialog } from '@/components/base'
+import { useDialogFailure } from '@/pages/_layout/hooks'
+import {
+  getRuntimeState,
+  installService,
+  patchVergeConfig,
+  reinstallService,
+  restartCore,
+  type FailedOperation,
+  type PendingFailure,
+} from '@/services/cmds'
+import { showNotice } from '@/services/notice-service'
+import {
+  clearServiceRequest,
+  getServiceRequest,
+  subscribeServiceRequest,
+  type ServiceRequest,
+  type ServiceRequestReason,
+} from '@/services/service-request'
+
+type Remedy = 'installAndRestart' | 'reinstallAndRestart' | 'restartOnly'
+
+const remedyFor = (reason: ServiceRequestReason): Remedy =>
+  reason === 'serviceLocationRefused'
+    ? 'reinstallAndRestart'
+    : 'installAndRestart'
+
+const EXPLANATION = {
+  sysproxyRefused: 'layout.components.sysproxyPrivilege.message',
+  tunNeedsService: 'layout.components.sysproxyPrivilege.tunMessage',
+  serviceLocationRefused:
+    'layout.components.serviceMigration.locationRefusedMessage',
+} as const
+
+const TITLE = {
+  sysproxyRefused: 'layout.components.sysproxyPrivilege.title',
+  tunNeedsService: 'layout.components.sysproxyPrivilege.tunTitle',
+  serviceLocationRefused: 'layout.components.serviceMigration.repair',
+} as const
+
+const stateToRestore = (
+  operation: FailedOperation,
+): Partial<IVergeConfig> | undefined => {
+  switch (operation) {
+    case 'systemProxyEnable':
+      return { enable_system_proxy: true }
+    case 'systemProxyDisable':
+      return { enable_system_proxy: false }
+    case 'systemProxyRestore':
+    case 'systemProxyGuard':
+      return undefined
+  }
+}
+
+/**
+ * Every privileged-proxy failure the dialog handles is now the same shape: this
+ * process could not write the system proxy and the service can. The distinction
+ * the old code drew — a sidecar writing while a service was ready — describes a
+ * second run mode that no longer exists, so there is one reason left to send.
+ */
+const asServiceRequest = (failure: PendingFailure): ServiceRequest => ({
+  reason: 'sysproxyRefused',
+  restore: stateToRestore(failure.operation),
+})
+
+type Step = 'idle' | 'installing' | 'restarting' | 'applying'
+
+const STEP_MESSAGE = {
+  installing: 'layout.components.sysproxyPrivilege.installing',
+  restarting: 'layout.components.sysproxyPrivilege.restarting',
+  applying: 'layout.components.sysproxyPrivilege.applying',
+} as const
+
+export const SysproxyPrivilegeDialog = () => {
+  const { t } = useTranslation()
+  const { failure, dismiss } = useDialogFailure()
+  const asked = useSyncExternalStore(subscribeServiceRequest, getServiceRequest)
+  const [step, setStep] = useState<Step>('idle')
+  const loading = step !== 'idle'
+
+  // Prefer the request the user just made over a pending failure.
+  const request = asked ?? (failure ? asServiceRequest(failure) : null)
+
+  const reason = request?.reason ?? 'sysproxyRefused'
+  const remedy = remedyFor(reason)
+  const restoring = request?.restore
+
+  const close = () => {
+    clearServiceRequest()
+    dismiss()
+  }
+
+  const handleFix = async () => {
+    try {
+      if (remedy === 'reinstallAndRestart') {
+        setStep('installing')
+        await reinstallService()
+      } else if (remedy === 'installAndRestart') {
+        setStep('installing')
+        await installService()
+      }
+      setStep('restarting')
+      await restartCore()
+
+      const runState = await getRuntimeState()
+      // Only a Service-mode core counts as fixed. There is no elevated
+      // non-service mode to accept as a fallback any more.
+      if (runState.mode === 'Service') {
+        if (restoring !== undefined) {
+          setStep('applying')
+          await patchVergeConfig(restoring)
+        }
+        showNotice.success(
+          remedy === 'reinstallAndRestart'
+            ? 'layout.components.serviceMigration.success'
+            : restoring === undefined
+              ? 'settings.sections.proxyControl.messages.installedCheckProxy'
+              : 'settings.sections.proxyControl.messages.installedProxyRestored',
+        )
+        close()
+      } else {
+        showNotice.error(
+          'settings.sections.proxyControl.messages.installedCoreNotOnService',
+        )
+      }
+    } catch (error) {
+      showNotice.error(error)
+    } finally {
+      setStep('idle')
+    }
+  }
+
+  return (
+    <BaseDialog
+      open={Boolean(request)}
+      title={t(TITLE[reason])}
+      okBtn={t(
+        remedy === 'reinstallAndRestart'
+          ? 'layout.components.serviceMigration.reinstall'
+          : remedy === 'installAndRestart'
+            ? 'settings.sections.proxyControl.actions.installService'
+            : 'settings.sections.proxyControl.actions.switchToServiceMode',
+      )}
+      cancelBtn={t('layout.components.sysproxyPrivilege.later')}
+      // Keep the primary spinner visible; only cancellation is unavailable.
+      disableCancel={loading}
+      loading={loading}
+      onOk={() => void handleFix()}
+      onCancel={close}
+      onClose={close}
+    >
+      <Alert severity={loading ? 'info' : 'warning'} sx={{ mb: 1.5 }}>
+        {t(step !== 'idle' ? STEP_MESSAGE[step] : EXPLANATION[reason])}
+      </Alert>
+      {loading && <LinearProgress />}
+      {!loading && reason === 'sysproxyRefused' && (
+        <Typography variant="body2" color="text.secondary">
+          {t('layout.components.sysproxyPrivilege.alternative')}
+        </Typography>
+      )}
+    </BaseDialog>
+  )
+}

@@ -1,0 +1,182 @@
+import { Paper, ThemeProvider } from '@mui/material'
+import dayjs from 'dayjs'
+import relativeTime from 'dayjs/plugin/relativeTime'
+import { useCallback, useEffect, useMemo, useRef } from 'react'
+import { Outlet } from 'react-router'
+
+import { BaseErrorBoundary } from '@/components/base'
+import { LayoutSidebar } from '@/components/layout/layout-sidebar'
+import { NoticeManager } from '@/components/layout/notice-manager'
+import { ServiceMigrationDialog } from '@/components/layout/service-migration-dialog'
+import { SysproxyPrivilegeDialog } from '@/components/layout/sysproxy-privilege-dialog'
+import { UpdatePrompt } from '@/components/layout/update-prompt'
+import {
+  WindowControls,
+  WindowResizeHandles,
+} from '@/components/layout/window-controller'
+import { useI18n } from '@/hooks/use-i18n'
+import { useVerge } from '@/hooks/use-verge'
+import { useWindowDecorations } from '@/hooks/use-window'
+import { LOCUS_COLORS, LOCUS_LIGHT } from '@/pages/_theme'
+import { useThemeMode } from '@/services/states'
+import getSystem from '@/utils/get-system'
+
+import {
+  useCustomTheme,
+  useLayoutEvents,
+  usePendingFailures,
+} from './_layout/hooks'
+import { handleNoticeMessage } from './_layout/utils'
+
+import 'dayjs/locale/ru'
+import 'dayjs/locale/zh-cn'
+
+dayjs.extend(relativeTime)
+
+const OS = getSystem()
+
+const Layout = () => {
+  const mode = useThemeMode()
+  const isDark = mode !== 'light'
+  const { theme } = useCustomTheme()
+  const { verge } = useVerge()
+  const { language } = verge ?? {}
+  const navCollapsed = verge?.collapse_navbar ?? false
+  const { switchLanguage } = useI18n()
+  const themeReady = useMemo(() => Boolean(theme), [theme])
+  const windowControlsRef = useRef<any>(null)
+  const { decorated } = useWindowDecorations()
+
+  const customTitlebar = useMemo(
+    () =>
+      decorated === false ? (
+        <div className="the_titlebar">
+          <div
+            className="the_titlebar-drag-region"
+            data-tauri-drag-region="true"
+          />
+          <WindowControls ref={windowControlsRef} />
+        </div>
+      ) : null,
+    [decorated],
+  )
+
+  const handleNotice = useCallback((payload: [string, string]) => {
+    const [status, msg] = payload
+    try {
+      handleNoticeMessage(status, msg)
+    } catch (error) {
+      console.error('[通知处理] 失败:', error)
+    }
+  }, [])
+
+  useLayoutEvents(handleNotice)
+  usePendingFailures()
+
+  useEffect(() => {
+    if (language) {
+      dayjs.locale(language === 'zh' ? 'zh-cn' : language)
+      switchLanguage(language)
+    }
+  }, [language, switchLanguage])
+
+  if (!themeReady) {
+    // The brief window before the custom theme resolves. Must be the same
+    // background as the native window and the document, or this placeholder
+    // itself becomes a flash of a different colour between the two.
+    return (
+      <div
+        style={{
+          width: '100vw',
+          height: '100vh',
+          background:
+            mode === 'light' ? LOCUS_LIGHT.background : LOCUS_COLORS.background,
+          transition: 'background 0.2s',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+        }}
+      ></div>
+    )
+  }
+
+  return (
+    <ThemeProvider theme={theme}>
+      {/* 左侧底部窗口控制按钮 */}
+      <NoticeManager position={verge?.notice_position} />
+      <ServiceMigrationDialog />
+      <SysproxyPrivilegeDialog />
+      <div
+        style={{
+          animation: 'fadeIn 0.5s',
+          WebkitAnimation: 'fadeIn 0.5s',
+        }}
+      />
+      <style>
+        {`
+            @keyframes fadeIn {
+              from { opacity: 0; }
+              to { opacity: 1; }
+            }
+          `}
+      </style>
+      <Paper
+        square
+        elevation={0}
+        className={`${OS} layout${navCollapsed ? ' layout--nav-collapsed' : ''}`}
+        style={{
+          borderTopLeftRadius: '0px',
+          borderTopRightRadius: '0px',
+        }}
+        onContextMenu={(e) => {
+          if (
+            OS === 'windows' &&
+            !['input', 'textarea'].includes(
+              e.currentTarget.tagName.toLowerCase(),
+            ) &&
+            !e.currentTarget.isContentEditable
+          ) {
+            e.preventDefault()
+          }
+        }}
+        sx={[
+          ({ palette }) => ({ bgcolor: palette.background.paper }),
+          OS === 'linux'
+            ? {
+                borderRadius: '8px',
+                width: '100vw',
+                height: '100vh',
+              }
+            : {},
+        ]}
+      >
+        {decorated === false && <WindowResizeHandles />}
+
+        {/* Custom titlebar - rendered only when decorated is false, memoized for performance */}
+        {customTitlebar}
+
+        <div className="layout-content">
+          <LayoutSidebar isDark={isDark} isCollapsed={navCollapsed} />
+
+          <div className="layout-content__right">
+            <div className="the-bar"></div>
+            <div className="the-content">
+              <BaseErrorBoundary>
+                <Outlet />
+              </BaseErrorBoundary>
+            </div>
+          </div>
+        </div>
+      </Paper>
+
+      {/* The update prompt, mounted once for the whole app.
+          It lives at the layout root rather than on a page because an offer can
+          arrive on any screen — it comes from a background heartbeat — and a
+          prompt that only appeared on the Account page would be missed by every
+          student who never opens it. */}
+      <UpdatePrompt />
+    </ThemeProvider>
+  )
+}
+
+export default Layout

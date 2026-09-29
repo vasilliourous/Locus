@@ -1,0 +1,214 @@
+{
+  "page": {
+    "tooltips": {
+      "lightweightMode": "Hafif Mod",
+      "manual": "Kılavuz",
+      "settings": "Ana Sayfa Ayarları"
+    },
+    "cards": {
+      "trafficStats": "Trafik İstatistikleri",
+      "networkSettings": "Ağ Ayarları",
+      "proxyMode": "Vekil Modu"
+    },
+    "settings": {
+      "cards": {
+        "profile": "Profil Kartı",
+        "currentProxy": "Geçerli Vekil Kartı",
+        "network": "Ağ Ayarları Kartı",
+        "proxyMode": "Vekil Modu Kartı",
+        "traffic": "Trafik İstatistikleri Kartı",
+        "tests": "Web Sitesi Testleri Kartı",
+        "ip": "IP Bilgi Kartı",
+        "clashInfo": "Clash Bilgi Kartları",
+        "systemInfo": "Sistem Bilgi Kartları"
+      },
+      "title": "Ana Sayfa Ayarları"
+    },
+    "title": "Ana Sayfa"
+  },
+  "components": {
+    "proxyTun": {
+      "status": {
+        "systemProxyEnabled": "Sistem vekil'i etkinleştirildi, uygulamalarınız vekil üzerinden ağa erişecek",
+        "systemProxyDisabled": "Sistem vekil'i devre dışı, çoğu kullanıcı için bu seçeneği açmanız önerilir",
+        "tunModeServiceRequired": "TUN modu hizmet modu gerektirir, lütfen önce hizmeti kurun",
+        "tunModeEnabled": "TUN modu etkinleştirildi, uygulamalar sanal ağ kartı üzerinden ağa erişecek",
+        "tunModeDisabled": "TUN modu devre dışı, özel uygulamalar için uygundur"
+      },
+      "tooltips": {
+        "systemProxy": "İşletim sisteminin vekil ayarlarını değiştirmek için etkinleştirin. Etkinleştirme başarısız olursa, işletim sisteminin proxy ayarlarını manuel olarak değiştirin",
+        "tunMode": "TUN modu tüm uygulama trafiğini ele alabilir, sistem vekil ayarlarını takip etmeyen özel uygulamalar için uygundur"
+      }
+    },
+    "clashInfo": {
+      "title": "Clash Bilgisi",
+      "fields": {
+        "coreVersion": "Çekirdek Sürümü",
+        "systemProxyAddress": "Sistem Vekil Adresi",
+        "mixedPort": "Karma Port",
+        "uptime": "Çalışma Süresi",
+        "rulesCount": "Kural Sayısı"
+      }
+    },
+    "systemInfo": {
+      "title": "Sistem Bilgisi",
+      "fields": {
+        "osInfo": "İşletim Sistemi Bilgisi",
+        "autoLaunch": "Otomatik Başlatma",
+        "runningMode": "Çalışma Modu",
+        "lastCheckUpdate": "Son Güncelleme Kontrolü",
+        "vergeVersion": "Sürüm"
+      },
+      "actions": {
+        "settings": "Ayarlar"
+      },
+      "badges": {
+        "notRunning": "Çekirdek çalışmıyor",
+        "adminMode": "Yönetici Modu",
+        "serviceMode": "Hizmet Modu",
+        "adminServiceMode": "Yönetici + Hizmet Modu"
+      }
+    },
+    "ipInfo": {
+      "title": "IP Bilgisi",
+      "labels": {
+        "ip": "IP",
+        "asn": "ASN",
+        "isp": "ISP",
+        "org": "Kuruluş",
+        "location": "Konum",
+        "timezone": "Saat Dilimi",
+        "autoRefresh": "Otomatik yenile",
+        "unknown": "Bilinmiyor"
+      },
+      "errors": {
+        "load": "IP bilgisi alınamadı",
+        "loadWithDetails": "IP bilgisi alınamadı: {{message}}",
+        "noServices": "Kullanılabilir IP algılama hizmeti yok"
+      }
+    },
+    "currentProxy": {
+      "title": "Geçerli Düğüm",
+      "actions": {
+        "refreshDelay": "Gecikme kontrolü"
+      },
+      "labels": {
+        "globalMode": "Küresel Mod",
+        "directMode": "Doğrudan Mod",
+        "group": "Grup",
+        "proxy": "Vekil",
+        "noActiveNode": "Aktif vekil düğümü yok"
+      },
+      "status": {
+        "testing": "Test ediliyor",
+        "untested": "Test edilmedi",
+        "error": "Hata",
+        "timeout": "Zaman aşımı",
+        "latencyHigh": "Yüksek gecikme",
+        "latencyMedium": "Orta gecikme",
+        "latencyGood": "İyi gecikme",
+        "latencyExcellent": "Mükemmel gecikme",
+        "uninitialized": "Başlatılmadı",
+        "noProxyNode": "Proxy düğümü yok"
+      }
+    },
+    "tests": {
+      "title": "Web Sitesi Testleri"
+    },
+    "traffic": {
+      "metrics": {
+        "uploadSpeed": "Yükleme Hızı",
+        "downloadSpeed": "İndirme Hızı",
+        "activeConnections": "Aktif Bağlantılar",
+        "memoryUsage": "Çekirdek Kullanımı"
+      },
+      "legends": {
+        "upload": "Yükleme",
+        "download": "İndirme"
+      },
+      "patterns": {
+        "minutes": "{{time}} Dakika"
+      },
+      "unknownTime": "Bilinmeyen zaman",
+      "chartStyles": {
+        "smooth": "Yumuşak",
+        "linear": "Doğrusal"
+      },
+      "diagnostics": "Nokta: {{points}} | Sıkıştırılmış: {{compressed}} | FPS: {{fps}}"
+    },
+    "clashMode": {
+      "errors": {
+        "communication": "Çekirdek iletişim hatası, lütfen bilgisayarınızı yeniden başlatıp tekrar deneyin"
+      },
+      "labels": {
+        "rule": "Kural Modu",
+        "global": "Küresel Mod",
+        "direct": "Doğrudan Mod"
+      },
+      "descriptions": {
+        "rule": "Vekilleri kural kümesine göre otomatik olarak seçer.",
+        "global": "Tüm ağ isteklerini seçili vekil üzerinden iletir.",
+        "direct": "Vekili atlar ve internete doğrudan bağlanır."
+      }
+    },
+    "connection": {
+      "connect": "Bağlan",
+      "disconnect": "Bağlantıyı Kes",
+      "connecting": "Bağlanıyor…",
+      "disconnecting": "Bağlantı kesiliyor…",
+      "checking": "Kontrol ediliyor…",
+      "notConnected": "Bağlı değil",
+      "connected": "Bağlı",
+      "sessionUpload": "Bu oturumda yüklenen",
+      "sessionDownload": "Bu oturumda indirilen",
+      "activeConnections": "Etkin bağlantılar",
+      "metricPending": "Henüz veri yok",
+      "speed": "Hız",
+      "needsActivation": "Bu cihaz için etkinleştirme kodu gerekli.",
+      "requiresSetup": "Locus henüz VPN'i açamıyor: yönetici hakları gerekiyor ve Locus hizmeti yüklü değil. Locus'u kurulum programıyla kurmak bunu otomatik olarak ayarlar.",
+      "subscriptionLapsed": "Your Locus subscription has expired, so the VPN will not connect. Contact the person who sold you the code to renew it.",
+      "subscriptionExpiresToday": "Your Locus subscription expires today. Contact the person who sold you the code to renew it.",
+      "subscriptionExpiresIn": "Your Locus subscription expires in {{count}} days. Contact the person who sold you the code to renew it.",
+      "account": {
+        "title": "Account",
+        "subscription": "Subscription",
+        "plan": "Plan",
+        "expires": "Expires",
+        "expired": "Expired",
+        "today": "Today",
+        "daysLeft": "{{count}} days",
+        "oneDayLeft": "1 day",
+        "expiresSoon": "Your subscription expires soon. Contact the person who sold you the code to renew.",
+        "noExpiryYet": "Your subscription end date is not available yet. It will appear after this device next contacts Locus.",
+        "activateForExpiry": "Activate this device to see your subscription.",
+        "thisDevice": "This device",
+        "deviceId": "Device ID",
+        "platform": "Platform",
+        "appVersion": "App version",
+        "deviceIdHint": "Quote the device ID if you need support — it identifies this install without revealing anything about you.",
+        "preferences": "Preferences",
+        "language": "Language",
+        "appearance": "Appearance",
+        "themeSystem": "System",
+        "themeLight": "Light",
+        "themeDark": "Dark",
+        "autoUpdate": "Check for updates automatically",
+        "on": "On",
+        "off": "Off",
+        "refresh": "Refresh",
+        "notActivated": "This device is not activated. Enter the code from your card to connect.",
+        "checkStatus": "Check status now",
+        "lastChecked": "Last confirmed {{time}}",
+        "confirmedJustNow": "just now",
+        "confirmedMinutesAgo": "{{count}} min ago",
+        "confirmedHoursAgo": "{{count}} h ago",
+        "confirmedDaysAgo": "{{count}} d ago",
+        "neverConfirmed": "Not confirmed with the server yet",
+        "checkingStatus": "Checking…",
+        "notActivatedToCheck": "Activate a code first — there is nothing to confirm yet."
+      },
+      "cancel": "Cancel",
+      "takingLonger": "Still connecting. This can take a few seconds on a school network — you can cancel and try again."
+    }
+  }
+}

@@ -1,0 +1,107 @@
+# docs/state.toml — the single machine-readable home for derived facts.
+#
+# WHY THIS IS A DATA FILE AND NOT PROSE
+#
+# Every value below is derivable from this checkout by running something. That
+# makes it a CLASS B claim (see docs/operate/CLAIMS.md §2), and Class B claims do
+# not belong in a sentence: a sentence cannot be recomputed, so it drifts in
+# silence. This file CAN be recomputed, so `server/scripts/check-consistency.sh`
+# §9 does exactly that and fails the build when a value here stops agreeing with
+# the tree.
+#
+# There are no bare `source`/`provenance` keys in this file, for a reason that
+# bit us immediately: TOML does not allow a key to appear twice in one table, so
+# one shared `source` line silently overwrote the previous fact's. The metadata
+# is therefore carried in per-fact subtables, keyed by the fact's own name.
+#
+# RULES
+#
+#   * Every fact is a subtable with its own `value` and `source`.
+#   * `provenance` is one of:
+#       "derived"    — recomputable from the tree; §9 enforces value == reality.
+#       "asserted"   — true by decision, not derivable (a naming choice, a
+#                      policy). §9 only reports it.
+#       "unverified" — a world claim we could not check. These are NEVER facts
+#                      about the code; see CLAIMS.md §5.
+#
+# DO NOT ADD A VOLATILE VALUE HERE AND CALL IT DERIVED.
+# An IP address is not derivable — the box moves. It is a world claim, and its
+# home is docs/operate/CLAIMS.md §5. That confusion is the whole reason this
+# file exists; see CLAIMS.md §1.
+#
+# Added 2026-09-29.
+
+[client.version]
+value      = "3.2.7"
+source     = "client/package.json, client/src-tauri/Cargo.toml, client/src-tauri/tauri.conf.json"
+provenance = "derived"
+
+[client.first_shipped]
+value      = "3.0.0"
+source     = "docs/reference/FIXES.md (release history)"
+provenance = "asserted"
+
+[client.fork_base]
+value      = "Clash Verge Rev v2.5.5 (22e3f1ac)"
+source     = "client/docs/UPSTREAM-CHANGES.md"
+provenance = "asserted"
+
+[client.engine]
+value      = "mihomo (bundled as verge-mihomo)"
+source     = "client/docs/UPSTREAM-CHANGES.md"
+provenance = "asserted"
+
+[hub.domain]
+# THE ONLY STABLE IDENTIFIER FOR THE DEPLOYED SYSTEM IS THE DOMAIN.
+# There is deliberately no host/IP fact anywhere in this file. An address that
+# changes on every redeploy is not a derived fact; it is a world claim, and it
+# belongs in CLAIMS.md §5 where it can be dated and re-verified. It was recorded
+# in STATE.md for months, went stale three times, and finished by naming an
+# address that no longer existed — while being labelled "authoritative".
+value      = "networkingguides.duckdns.org"
+source     = "server/setup.sh (DOMAIN, required env)"
+provenance = "derived"
+
+[hub.api_base]
+value      = "https://networkingguides.duckdns.org"
+source     = "server/scripts/publish-release.sh (PB_API default)"
+provenance = "derived"
+
+[hub.console_path]
+value      = "/admin/"
+source     = "server/setup.sh (log line: 'Admin console: https://${DOMAIN}/admin/')"
+provenance = "derived"
+
+[hub.pocketbase_ui]
+value      = "/_/"
+source     = "server/setup.sh (log line: 'PocketBase UI: https://${DOMAIN}/_/')"
+provenance = "derived"
+
+[hub.deploy_staging]
+value      = "/root/server/"
+source     = "server/setup.sh; server/scripts/hooks-sync.sh"
+provenance = "asserted"
+
+[hub.deployed_os]
+# A property of the box that is there now, not of this tree. Recorded so a
+# reader knows what was being aimed at; verify before trusting.
+value      = "Ubuntu 22.04.5, 1 vCPU / 454 MB RAM + 1 GB swap"
+source     = "operator observation"
+provenance = "unverified"
+
+[platforms.keys]
+# The four update platforms. The keys say macos_*, the artifact filenames say
+# darwin-* — that asymmetry is frozen; see client/src-tauri/src/locus/contract.rs.
+# Enforced by check-consistency.sh §1.
+value      = ["linux", "windows", "macos_intel", "macos_arm"]
+source     = "client/src-tauri/src/locus/contract.rs; server/pb_hooks/*.pb.js"
+provenance = "derived"
+
+[world]
+# A pointer into CLAIMS.md §5, not a fact. Listed here so a reader of this file
+# is sent to the right place rather than tempted to put a world claim in this
+# table. It has no `value` on purpose: its value is a date and a method, and
+# writing an unverified value here would recreate exactly the bug this file was
+# built to remove.
+register   = "docs/operate/CLAIMS.md"
+provenance = "unverified"

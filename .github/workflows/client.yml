@@ -1,0 +1,1004 @@
+# Locus client — build, sign, release.
+#
+# WHY THIS MUST LIVE AT THE REPO ROOT
+# GitHub only runs workflows from `.github/workflows/` at the repository root. A
+# workflow placed in `client/.github/workflows/` would never trigger at all —
+# this is noted because the fork's planned CI was once described as living there.
+#
+# WHAT IT PRODUCES, AND WHY EXACTLY THIS
+# The hub's publish path (`server/scripts/fetch-release.py`) resolves assets BY
+# NAME from the GitHub Release, and requires all of them:
+#
+#   locus-linux-amd64          + .sig
+#   locus-windows-amd64.exe    + .sig
+#   locus-darwin-amd64         + .sig
+#   locus-darwin-arm64         + .sig
+#   manifest.json
+#
+# The filenames are a frozen contract spanning three systems (CI, the hub's
+# fetcher, and the client's updater). `macos_*` platform keys pair with
+# `darwin-*` filenames deliberately — see client/src-tauri/src/locus/contract.rs.
+# Renaming either side breaks publishing for that platform.
+#
+# WHY `.sig` FILES ARE MANDATORY
+# The Tauri updater verifies a minisign signature over every download and has no
+# bypass. A release without signatures is installable by nobody, while looking
+# perfectly healthy from the hub's side. Signing here, and refusing to continue
+# without the key, means that failure surfaces in CI rather than as "updates
+# silently never arrive" weeks later.
+#
+# WHY THE BINARIES ARE STAGED BY HAND
+# `createUpdaterArtifacts` is false, so `tauri build` does NOT emit the raw
+# per-platform executables the updater consumes. It produces the *installed*
+# forms (NSIS, .app). The updater replaces an installed application, so it is
+# handed the bare executable. Staging copies it out of the compiled output under
+# the name the hub expects.
+
+name: Client
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+    # WHY docs/ AND scripts/ ARE IN THIS LIST
+    #
+    # They were not, and the omission was a silent-failure class. The `preview`
+    # job below publishes installers for every push to `main` so a fix can be
+    # installed and tested without cutting a release. With the filter set to
+    # `client/**` and `server/**` only, a push that touched the root `scripts/`
+    # (the code generator, the PDF printer) or a document did nothing at all —
+    # no run, no preview, no failure. Nothing reported the omission: a workflow
+    # that does not trigger emits exactly the same silence as one that succeeds.
+    #
+    # The trap this closes is a person or an agent believing "push to main
+    # publishes a preview" while the change they pushed is in a path that
+    # cannot start a run. If a path is added to the repo and it should refresh
+    # the preview, add it here; if it should NOT, that is a deliberate decision
+    # worth a comment rather than an omission.
+    paths:
+      - 'client/**'
+      - 'server/**'
+      - 'scripts/**'
+      - '.github/workflows/client.yml'
+  pull_request:
+    paths:
+      - 'client/**'
+      - 'server/**'
+      - 'scripts/**'
+      - '.github/workflows/client.yml'
+  workflow_dispatch:
+
+# GITHUB_TOKEN needs write access only to create the Release on a tag.
+permissions:
+  contents: write
+
+# A tag build and a branch build must not race to publish.
+#
+# ── THE GROUP INCLUDES THE REF *KIND*, AND THAT IS LOAD-BEARING ──
+#
+# `github.ref` is `refs/heads/main` for a branch and `refs/tags/v3.2.7` for a
+# tag, so the group string was ALREADY different between the two — but it was
+# different by accident of syntax, and the comment that used to sit here only
+# reasoned about *running* builds. The gap is in the QUEUED state:
+#
+#   * `cancel-in-progress` below exempts a tag only `if startsWith(... 'refs/tags/')`.
+#     So a QUEUED tag run is NOT exempt: it is cancellable like anything else.
+#   * And a queued run holds the group. If a tag build is waiting for a runner
+#     while a push to `main` arrives in the same group, the branch run can cancel
+#     the waiting release before it ever starts.
+#
+# A release that is cancelled before it starts leaves NO trace on the Releases
+# page and no failing check on the commit — the exact silent-loss shape this
+# file's own history warns about ("a run queued at 09:51 was still blocking a
+# 23:58 dispatch"). `github.ref_type` makes the two kinds of run structurally
+# independent rather than one-git-ref-string apart, so a release can never be
+# cancelled by a preview and a preview can never hold a release.
+#
+# Tag builds are additionally excluded from cancellation so a release already in
+# flight is never lost to an unrelated push to main.
+concurrency:
+  group: client-${{ github.ref_type }}-${{ github.ref }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
+
+jobs:
+  # ── Gate: fast checks that must pass before any expensive build ──
+  #
+  # Deliberately separate from the release jobs so a lint failure costs seconds
+  # rather than a full cross-platform build.
+  verify:
+    name: Verify
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: client
+    steps:
+      - uses: actions/checkout@v4
+
+      # Cross-language consistency. Runs from the REPO ROOT (not client/), so it
+      # overrides the job's working-directory. This is the guard for the bug
+      # class that has cost this project the most: a value that must agree
+      # across Rust / goja JS / Python / shell with nothing enforcing agreement
+      # — `uot_port`, `download_<platform>`, the `unbound_at` columns, the
+      # duplicated cipher. It also fails on a tracked path containing ':',
+      # which breaks the WINDOWS checkout entirely while looking green here.
+      - name: Cross-language consistency check
+        working-directory: .
+        run: server/scripts/check-consistency.sh
+
+      - uses: pnpm/action-setup@v4
+        with:
+          # package.json is in client/, and defaults.run.working-directory does
+          # NOT apply to `uses:` steps — only to `run:`. Without this the action
+          # cannot find the pinned version and fails.
+          package_json_file: client/package.json
+          run_install: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: client/pnpm-lock.yaml
+
+      # --frozen-lockfile so a package.json edit that skipped the lockfile fails
+      # here. That exact drift shipped once (a removed dependency left the
+      # lockfile stale), and it would have broken every clean install.
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Type-check and build the frontend
+        run: pnpm run web:build
+
+      - name: Lint
+        run: pnpm run lint
+
+      # ── Rust tests and lints ──
+      #
+      # These were NOT run by CI until 2026-09-29, which is why the updater's
+      # signature/pubkey encoding mismatch reached a real install: 530 Rust tests
+      # existed and passed locally, but nothing in this workflow invoked them, so
+      # a tag could build, sign and publish with a broken suite.
+      #
+      # The gate belongs here, in `verify`, not in the build matrix — a failing
+      # test must cost seconds, not four cross-platform release builds.
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          # Must match client/rust-toolchain.toml; `edition = "2024"` needs >= 1.85.
+          toolchain: "1.98.1"
+          components: clippy, rustfmt
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          # The Cargo workspace root is client/, not client/src-tauri/.
+          workspaces: client
+
+      # Linux system libraries for the Tauri build script. Without these the
+      # test build fails in build.rs with a glib-sys error that reads like a
+      # code fault rather than a missing dependency.
+      - name: Install Linux dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev \
+            patchelf libgtk-3-dev libsoup-3.0-dev \
+            libjavascriptcoregtk-4.1-dev
+
+      # `src-tauri/tauri.conf.json` declares `externalBin` (the mihomo sidecars)
+      # and `resources` (geo data). `tauri::generate_context!()` resolves BOTH at
+      # COMPILE time, so a `cargo test` on a tree without them fails before a
+      # single test runs — the same class of failure as the missing `dist/`
+      # below. The build job fetches them; this job must too, or the gate is red
+      # for a reason that has nothing to do with the code under test.
+      #
+      # A triple is required: the script bails rather than guessing, because
+      # guessing is how a Windows client is handed a Linux binary.
+      - name: Fetch sidecars and geo data
+        run: node scripts/prebuild.mjs x86_64-unknown-linux-gnu
+
+      # The frontend bundle must exist before any `cargo` command here.
+      #
+      # `tauri::generate_context!()` also resolves `frontendDist`
+      # (`../dist` from src-tauri = `client/dist`). If that path is missing the
+      # macro panics at COMPILE time:
+      #
+      #   The `frontendDist` configuration is set to "../dist" but this path
+      #   doesn't exist
+      #
+      # The `web:build` step above already produces it, and this step makes the
+      # dependency explicit rather than incidental — the ordering was load-bearing
+      # and undocumented, which is exactly how a "tests pass locally, fail in CI"
+      # report is born. Rebuilt here so this job does not depend on a step's side
+      # effect three steps earlier.
+      - name: Ensure the frontend bundle exists
+        run: |
+          set -euo pipefail
+          if [ ! -f dist/index.html ]; then
+            echo "dist/index.html missing — building the frontend"
+            pnpm run web:build
+          fi
+          test -f dist/index.html
+          echo "frontend bundle present: $(du -sh dist | cut -f1)"
+
+      # `--nocapture`-free and un-filtered on purpose: a `| tail` here would let a
+      # failing suite report success (the pipe's exit status wins), which is the
+      # same class of mistake as a green CI with no tests in it.
+      #
+      # Output is also teed into the job summary so a failure is diagnosable from
+      # the run page alone. Job logs need authentication on this repository, and a
+      # red step whose cause cannot be read is only marginally better than no gate.
+      - name: Rust tests
+        run: |
+          set -o pipefail
+          cargo test --all-targets 2>&1 | tee /tmp/cargo-test.log
+
+      # Runs even when the step above failed — that is the entire point. A
+      # failure whose cause is unreadable is only marginally better than no gate,
+      # and job logs require authentication on this repository.
+      - name: Rust test output (always)
+        if: always()
+        run: |
+          {
+            echo '## Rust tests output'
+            echo '```'
+            tail -80 /tmp/cargo-test.log 2>/dev/null || echo "(no log captured)"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # `-D warnings` so a new lint fails the gate. `--features clippy` matches
+      # the `clippy-only` alias in client/.cargo/config.toml, which is how this
+      # was verified locally.
+      - name: Rust lints
+        run: cargo clippy --all-targets --features clippy -- -D warnings
+
+  # ── Build, sign and upload the four updater artifacts ──
+  build:
+    name: Build (${{ matrix.label }})
+    needs: verify
+    runs-on: ${{ matrix.os }}
+    # A cold Rust release build plus pnpm install is ~15 min per platform; macOS
+    # Intel cross-compiling adds a few more. 45 minutes is generous for all of
+    # them and short enough that a genuinely hung job FAILS rather than sitting
+    # for the default 360 while a release waits on it.
+    timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: client
+    strategy:
+      # One platform failing must not hide the others: a release missing a
+      # platform cannot be published at all, so seeing every failure at once is
+      # worth more than stopping early.
+      fail-fast: false
+      # ── THE RUNNER LABELS ARE PINNED, AND THAT IS A DELIBERATE COST ──
+      #
+      # `ubuntu-latest` / `windows-latest` / `macos-14` are MOVING TAGS. GitHub
+      # re-points them when it retires an image, and a runner image that changes
+      # under a green workflow is a world claim nobody re-checks: the workflow
+      # says it builds on macOS 14, and one day it does not, with no commit and
+      # no failing check to mark the change.
+      #
+      # This project has already paid for that exact failure once. The Intel
+      # macOS slice used to target `macos-13`; every run sat at "Waiting for a
+      # runner to pick up this job" while the other three platforms finished,
+      # because GitHub retired the Intel images. That is recorded in the comment
+      # below, and it was found by a human noticing, not by anything automated.
+      #
+      # Pinning means a retirement becomes a LOUD failure ("no runner with this
+      # label") instead of a silent downgrade, at the cost of a manual bump when
+      # we choose to move. The bump is a commit; the silent change is not.
+      #
+      # WHEN PINNING: update the label here AND the note in docs/operate/CI-CD.md.
+      # The images below are the current GA entries for each platform.
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            label: linux
+            triple: x86_64-unknown-linux-gnu
+            artifact: locus-linux-amd64
+          - os: windows-2022
+            label: windows
+            triple: x86_64-pc-windows-msvc
+            artifact: locus-windows-amd64.exe
+          # BOTH macOS architectures build on the same ARM image.
+          #
+          # `macos-13` was used for the Intel slice and never once started: every
+          # run sat at "Waiting for a runner to pick up this job" while the other
+          # three platforms finished, because GitHub is retiring the Intel macOS
+          # images. Both slices now build on the ARM image, with x86_64 added as
+          # a cross-compile target — the supported way to produce an Intel binary
+          # without an Intel machine.
+          #
+          # `macos-14` is pinned to its major version on purpose (see above): the
+          # ARM images are the ones GitHub is actively rolling forward, so this
+          # is the label most likely to change meaning under us.
+          - os: macos-14
+            label: macos-intel
+            triple: x86_64-apple-darwin
+            artifact: locus-darwin-amd64
+          - os: macos-14
+            label: macos-arm
+            triple: aarch64-apple-darwin
+            artifact: locus-darwin-arm64
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          # See the note in `verify`: action steps ignore working-directory.
+          package_json_file: client/package.json
+          run_install: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: client/pnpm-lock.yaml
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          # Matches client/rust-toolchain.toml. `edition = "2024"` needs >= 1.85.
+          toolchain: "1.98.1"
+          # Required for the Intel macOS slice, which now cross-compiles
+          # on the ARM runner. On other platforms this names the host
+          # target, so it is harmless there.
+          targets: ${{ matrix.triple }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          # The Cargo workspace root is client/, not client/src-tauri/ — the
+          # cache would key on the wrong directory otherwise.
+          workspaces: client
+
+      # Tauri's Linux build needs these; without them the build fails in build.rs
+      # with a glib-sys error that reads like a code fault.
+      - name: Install Linux dependencies
+        if: matrix.label == 'linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev \
+            patchelf libgtk-3-dev libsoup-3.0-dev \
+            libjavascriptcoregtk-4.1-dev
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # Downloads the mihomo sidecars and geo data into the gitignored
+      # src-tauri/sidecar and src-tauri/resources. The Rust build fails without
+      # them, and it needs an explicit target triple in CI (the script bails
+      # otherwise rather than guessing).
+      - name: Fetch sidecars and geo data
+        run: node scripts/prebuild.mjs "${{ matrix.triple }}"
+
+      # `tauri build` has its OWN --target flag. Using `pnpm run build --
+      # --target X` sends it to Cargo instead (the extra `--` makes everything
+      # after it a cargo argument), so Tauri compiles WITHOUT the triple while
+      # its bundler then looks for a triple-qualified path — producing
+      #   "Built application at: target/release/locus"
+      #   "failed to bundle project: can't open main binary .../target/release/locus"
+      # Passing it through `pnpm exec` gives the flag to Tauri, which is what
+      # actually needs it.
+      - name: Build
+        run: pnpm exec tauri build --target ${{ matrix.triple }}
+
+      # ── Stage the raw executable under the name the hub expects ──
+      #
+      # tauri build produces the *installed* form (NSIS / .app). The updater is
+      # handed the bare executable, so copy it out of the compiler's output.
+      - name: Stage the raw updater artifact (unix)
+        if: matrix.label != 'windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          src="target/${{ matrix.triple }}/release/locus"
+          [ -f "$src" ] || { echo "::error::expected binary not found: $src"; ls -R target/*/release 2>/dev/null | head -50; exit 1; }
+          mkdir -p artifacts
+          cp "$src" "artifacts/${{ matrix.artifact }}"
+          chmod +x "artifacts/${{ matrix.artifact }}"
+
+      - name: Stage the raw updater artifact (windows)
+        if: matrix.label == 'windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          src="target/${{ matrix.triple }}/release/locus.exe"
+          [ -f "$src" ] || { echo "::error::expected binary not found: $src"; ls -R target/*/release 2>/dev/null | head -50; exit 1; }
+          mkdir -p artifacts
+          cp "$src" "artifacts/${{ matrix.artifact }}"
+
+      # ── Sign ──
+      #
+      # A release without signatures is uninstallable by every client. Failing
+      # here, loudly, is the whole point: the alternative is discovering it as
+      # "updates never arrive" with no error anywhere.
+      # Pinned to 0.12 from the official releases on EVERY platform.
+      #
+      # This used to be brew on macOS and chocolatey on Windows. Chocolatey
+      # ships minisign 0.8, which cannot read the key format 0.11+ writes and
+      # fails with "Unsupported key derivation function" — after successfully
+      # installing and printing a version, so the error reads like a key
+      # problem rather than a tool-version problem. Pinning the same version
+      # everywhere removes that class of variance entirely.
+      - name: Install minisign
+        shell: bash
+        run: |
+          set -euo pipefail
+          DEST="$RUNNER_TEMP/minisign"
+          mkdir -p "$DEST"
+
+          if [ "${{ runner.os }}" = "Linux" ]; then
+            curl -sSL -o "$RUNNER_TEMP/m.tar.gz" \
+              https://github.com/jedisct1/minisign/releases/download/0.12/minisign-0.12-linux.tar.gz
+            tar -xzf "$RUNNER_TEMP/m.tar.gz" -C "$RUNNER_TEMP"
+            install -m 755 "$RUNNER_TEMP/minisign-linux/x86_64/minisign" "$DEST/minisign"
+          elif [ "${{ runner.os }}" = "macOS" ]; then
+            curl -sSL -o "$RUNNER_TEMP/m.zip" \
+              https://github.com/jedisct1/minisign/releases/download/0.12/minisign-0.12-macos.zip
+            unzip -o -q "$RUNNER_TEMP/m.zip" -d "$RUNNER_TEMP/mac"
+            install -m 755 "$RUNNER_TEMP/mac/minisign" "$DEST/minisign"
+          else
+            curl -sSL -o "$RUNNER_TEMP/m.zip" \
+              https://github.com/jedisct1/minisign/releases/download/0.12/minisign-0.12-win64.zip
+            unzip -o -q "$RUNNER_TEMP/m.zip" -d "$RUNNER_TEMP/win"
+            # The Windows zip contains BOTH architectures:
+            #
+            #     minisign-win64/aarch64/minisign.exe
+            #     minisign-win64/x86_64/minisign.exe
+            #
+            # Picking with `find | head -1` selects `aarch64` (alphabetically
+            # first), and an ARM64 binary on an x64 runner fails with
+            #
+            #     This version of ...minisign.exe is not compatible with the
+            #     version of Windows you're running
+            #
+            # which reads like a Windows-version problem rather than the wrong
+            # architecture being unpacked. The architecture is now chosen
+            # explicitly from the runner's own PROCESSOR_ARCHITECTURE.
+            case "${PROCESSOR_ARCHITECTURE:-AMD64}" in
+              ARM64|arm64) ms_arch="aarch64" ;;
+              *)           ms_arch="x86_64" ;;
+            esac
+            found="$RUNNER_TEMP/win/minisign-win64/$ms_arch/minisign.exe"
+            [ -f "$found" ] || {
+              echo "::error::no $ms_arch minisign.exe in the release zip"
+              find "$RUNNER_TEMP/win" -type f
+              exit 1
+            }
+            echo "using the $ms_arch minisign build for ${{ runner.arch }}"
+            install -m 755 "$found" "$DEST/minisign.exe"
+          fi
+
+          echo "$DEST" >> "$GITHUB_PATH"
+
+          # Print the version so a wrong/old binary is visible in the log rather
+          # than surfacing later as a confusing key error.
+          #
+          # On Windows this runs through cmd, NOT bash, for two reasons:
+          #
+          #   1. Git Bash refuses to exec a native .exe addressed by a bash-style
+          #      path — "cannot execute binary file: Exec format error" — on a
+          #      perfectly good Windows binary.
+          #   2. Backslashes cannot be written literally in this script. Bash
+          #      consumes them, so `"$DEST\minisign.exe"` reached cmd as
+          #      `D:\a\_temp/minisignminisign.exe` and produced
+          #      "is not recognized as an internal or external command".
+          #
+          # cygpath converts to a real Windows path, so nothing has to be escaped.
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            "$DEST/minisign.exe" -v
+          else
+            "$DEST/minisign" -v
+          fi
+
+      - name: Sign the artifact
+        shell: bash
+        env:
+          # The private half of the key whose public half is compiled into the
+          # app (tauri.conf.json -> plugins.updater.pubkey). See
+          # client/docs/SIGNING.md for custody and rotation.
+          LOCUS_UPDATE_KEY: ${{ secrets.LOCUS_UPDATE_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -z "${LOCUS_UPDATE_KEY:-}" ]; then
+            echo "::error::LOCUS_UPDATE_KEY is not set. A release without signatures cannot be installed by any client — see client/docs/SIGNING.md."
+            exit 1
+          fi
+          printf '%s' "$LOCUS_UPDATE_KEY" > "$RUNNER_TEMP/locus.key"
+          chmod 600 "$RUNNER_TEMP/locus.key"
+
+          # Run minisign through Git Bash directly, and give it WINDOWS paths
+          # for its file arguments.
+          #
+          # Two failures shaped this:
+          #
+          #   1. Executing a native .exe by a path built with `cygpath -w` fails
+          #      with "Exec format error" — bash execs it but the D:\ prefix
+          #      confuses the exec layer. Its own POSIX path ($RUNNER_TEMP/...)
+          #      works, so that is what runs it.
+          #   2. minisign itself is a Windows program and expects Windows paths
+          #      for -s/-m/-x, so THOSE are converted with cygpath. The split is:
+          #      exec with a bash path, pass arguments as Windows paths.
+          #
+          # No cmd.exe is involved anywhere, which removes the whole class of
+          # quoting-and-backslash problems this step kept hitting.
+          MS="$RUNNER_TEMP/minisign/minisign.exe"
+          KEY="$RUNNER_TEMP/locus.key"
+          ART="artifacts/${{ matrix.artifact }}"
+          SIG="artifacts/${{ matrix.artifact }}.sig"
+
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            "$MS" -S -s "$(cygpath -w "$KEY")" \
+              -m "$(cygpath -w "$ART")" \
+              -x "$(cygpath -w "$SIG")" \
+              -t "Locus_${{ matrix.label }}"
+          else
+            "$RUNNER_TEMP/minisign/minisign" -S -s "$KEY" -m "$ART" -x "$SIG" \
+              -t "Locus ${{ matrix.label }}"
+          fi
+
+          rm -f "$RUNNER_TEMP/locus.key"
+          echo "Signed ${{ matrix.artifact }}:"
+          cat "artifacts/${{ matrix.artifact }}.sig"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: update-${{ matrix.label }}
+          # The binary AND its signature, always together. They are published as
+          # a pair and a release with one and not the other is refused.
+          path: |
+            client/artifacts/${{ matrix.artifact }}
+            client/artifacts/${{ matrix.artifact }}.sig
+          if-no-files-found: error
+
+      # ── Stage the human-facing installer ──
+      #
+      # `tauri build` already produced a real bundle above (NSIS on Windows, .app
+      # + .dmg on macOS, .deb/.rpm on Linux); we were simply throwing it away and
+      # publishing only the bare executable.
+      #
+      # That mattered more than it looked. On Windows the NSIS script contains the
+      # `StartVergeService` / `RemoveVergeService` macros that REGISTER THE SYSTEM
+      # SERVICE, and the service is what makes TUN reachable (`tun_capable` is
+      # `is_admin || service_usable()`). Shipping only the raw .exe meant no
+      # installer ever ran, so the service was never registered, so a Windows
+      # student could never connect through TUN at all.
+      #
+      # The two artifact kinds are kept strictly apart: the updater binaries keep
+      # their exact names (fetch-release.py resolves them from an allowlist, and
+      # handing it an installer would be a silent mis-update), while the
+      # installers get distinct `installer-` names and are published for humans
+      # to download and run.
+      - name: Stage the platform installer
+        shell: bash
+        run: |
+          set -euo pipefail
+          bundle="target/${{ matrix.triple }}/release/bundle"
+          mkdir -p installer
+          found=0
+
+          # Collect whatever this platform actually produced. Using a glob rather
+          # than one hardcoded path because the extensions differ per platform and
+          # a silent "nothing matched" is the failure mode that would recreate
+          # the original bug without anyone noticing.
+          for f in \
+            "$bundle"/nsis/*.exe \
+            "$bundle"/dmg/*.dmg \
+            "$bundle"/deb/*.deb \
+            "$bundle"/rpm/*.rpm
+          do
+            [ -f "$f" ] || continue
+            cp "$f" "installer/$(basename "$f")"
+            echo "staged installer: $(basename "$f")"
+            found=$((found + 1))
+          done
+
+          if [ "$found" -eq 0 ]; then
+            echo "::error::no installer bundle found for ${{ matrix.label }} under $bundle"
+            # List what IS there, so a bundle-layout change is diagnosable from
+            # the log instead of requiring a guess.
+            find target -path '*/release/bundle*' -type f 2>/dev/null | head -40
+            exit 1
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: installer-${{ matrix.label }}
+          path: client/installer/*
+          if-no-files-found: error
+
+  # ── Assemble the release ──
+  release:
+    name: Release
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: update-*
+          # download-artifact does NOT flatten by default, and the release job
+          # previously assumed it did — producing a release whose assets were in
+          # per-platform subdirectories. merge-multiple puts them all in one dir.
+          merge-multiple: true
+          path: release
+
+      # The human-facing installers land in their own directory first, then are
+      # copied in under an `installer-` prefix.
+      #
+      # Two stages rather than downloading straight into `release/` because the
+      # installers carry their upstream filenames (e.g. `Locus_3.0.3_x64-setup.exe`)
+      # and a rename step is the only place we can be certain none of them can
+      # collide with an updater payload name. Collision is the one failure that
+      # would matter: fetch-release.py would find an installer where it expected
+      # a raw binary and publish it as the update.
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: installer-*
+          merge-multiple: true
+          path: installers-raw
+
+      - name: Prefix and stage the installers
+        run: |
+          set -euo pipefail
+          mkdir -p release
+          count=0
+          for f in installers-raw/*; do
+            [ -f "$f" ] || continue
+            base="$(basename "$f")"
+            # Defensive: refuse anything that looks like an updater payload, so a
+            # future naming change upstream cannot quietly publish an installer
+            # under a name fetch-release.py resolves.
+            case "$base" in
+              locus-*|manifest.json)
+                echo "::error::installer artifact collides with an updater name: $base"
+                exit 1
+                ;;
+            esac
+            cp "$f" "release/installer-$base"
+            echo "staged: installer-$base"
+            count=$((count + 1))
+          done
+          if [ "$count" -eq 0 ]; then
+            echo "::error::no installer artifacts were produced by the build jobs"
+            exit 1
+          fi
+          echo "Staged $count installer asset(s)."
+
+      - name: List what will be published
+        run: ls -la release/
+
+      # ── The manifest the hub cross-checks against ──
+      #
+      # fetch-release.py and publish-release.sh both compare their hashes with
+      # this file, so a mismatch aborts a publish rather than serving bytes that
+      # do not match what CI built.
+      - name: Build manifest.json
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import hashlib, json, os
+
+          # Platform key -> filename. The keys say macos_*, the files say darwin-*:
+          # that asymmetry is frozen and must not be "tidied".
+          platforms = {
+              "linux": "locus-linux-amd64",
+              "windows": "locus-windows-amd64.exe",
+              "macos_intel": "locus-darwin-amd64",
+              "macos_arm": "locus-darwin-arm64",
+          }
+
+          out = {"version": os.environ["VERSION"].lstrip("v"), "platforms": {}}
+          missing = []
+
+          for key, filename in platforms.items():
+              path = os.path.join("release", filename)
+              if not os.path.isfile(path):
+                  missing.append(filename)
+                  continue
+              digest = hashlib.sha256(open(path, "rb").read()).hexdigest()
+              # The signature is read back and embedded, so the manifest is a
+              # complete description of what the hub should serve.
+              sig_path = path + ".sig"
+              if not os.path.isfile(sig_path):
+                  missing.append(filename + ".sig")
+                  continue
+              out["platforms"][key] = {
+                  "file": filename,
+                  "sha256": digest,
+                  "signature": open(sig_path).read().strip(),
+              }
+
+          if missing:
+              raise SystemExit(
+                  "refusing to publish a partial release — missing: " + ", ".join(missing)
+              )
+
+          with open(os.path.join("release", "manifest.json"), "w") as f:
+              json.dump(out, f, indent=2)
+          print(json.dumps(out, indent=2))
+          PY
+        env:
+          # Strip the leading `v` from the tag: the manifest's version field is
+          # compared against update_config and against the version the client
+          # reports, and neither carries the prefix. Leaving it produced
+          # "version": "v3.0.0" in the published manifest — harmless today
+          # because nothing reads that field yet, but exactly the kind of latent
+          # mismatch that becomes a bug the first time something does.
+          VERSION: ${{ github.ref_name }}
+
+      - name: Verify every artifact is signed
+        run: |
+          set -euo pipefail
+          missing=0
+          for f in release/locus-*; do
+            case "$f" in
+              *.sig) continue ;;
+            esac
+            if [ ! -f "$f.sig" ]; then
+              echo "::error::no signature for $(basename "$f")"
+              missing=1
+            fi
+          done
+          [ "$missing" -eq 0 ] || exit 1
+          echo "All artifacts are signed."
+
+      - name: Create the release
+        uses: softprops/action-gh-release@v2
+        with:
+          # Two kinds of asset, deliberately named apart.
+          #
+          # `locus-*` are the UPDATER payloads: raw executables the in-app
+          # updater downloads and replaces itself with. fetch-release.py resolves
+          # exactly these names from an allowlist, so they must not be renamed.
+          #
+          # `installer-*` are the HUMAN payloads: the NSIS setup .exe, .dmg,
+          # .deb and .rpm a person downloads and runs to install Locus. They are
+          # the ones that register the system service on Windows (see the
+          # `StartVergeService` macros in packages/windows/installer.nsi), which
+          # is what makes TUN reachable there. They are never fetched by
+          # fetch-release.py, so their names cannot collide with an update.
+          files: |
+            release/locus-linux-amd64
+            release/locus-linux-amd64.sig
+            release/locus-windows-amd64.exe
+            release/locus-windows-amd64.exe.sig
+            release/locus-darwin-amd64
+            release/locus-darwin-amd64.sig
+            release/locus-darwin-arm64
+            release/locus-darwin-arm64.sig
+            release/manifest.json
+            release/installer-*
+          draft: false
+          # Idempotent: re-running on the same tag replaces assets rather than
+          # failing. A half-published release is worse than a re-run.
+          fail_on_unmatched_files: true
+          generate_release_notes: false
+
+  # ── Installers for every build, not just tagged ones ──
+  #
+  # WHY THIS JOB EXISTS
+  #
+  # The `release` job above is tag-gated, so a normal commit to `main` built the
+  # installers and then threw them away as 90-day workflow artifacts. The only
+  # downloadable Locus was therefore a tagged release — and the person testing a
+  # fix had nothing to install, so they ran the raw updater payload instead.
+  #
+  # That does not work, and the error it produces is misleading:
+  #
+  #   failed to run validation core "verge-mihomo" ... The system cannot find the
+  #   file specified. (os error 2)
+  #
+  # `locus-<platform>` is a bare executable staged from the compiler's output. It
+  # has no `verge-mihomo` sidecar beside it, because Tauri resolves sidecars
+  # relative to the running executable and the raw payload ships alone. Worse, on
+  # Windows it never runs the NSIS installer, so the system service is never
+  # registered and TUN is unreachable even when nothing else is wrong.
+  #
+  # So: every build now publishes a PRERELEASE carrying the installers. It is
+  # deliberately a separate job from `release`, with a different asset set,
+  # because the two must not be confused:
+  #
+  #   * NO `manifest.json`, NO `locus-*` updater payloads, NO `.sig` files.
+  #     Those are what `fetch-release.py` resolves, and publishing them from a
+  #     branch would let an unreviewed build be pushed to the whole fleet —
+  #     there is no rollout percentage and no server-driven downgrade, so a bad
+  #     build is only fixable by publishing a HIGHER version. Keeping the asset
+  #     sets disjoint is what makes that impossible by construction rather than
+  #     by remembering.
+  #   * prerelease=true, so GitHub does not offer it as "the latest release" and
+  #     a stray link does not read as a shipped product.
+  #   * Tagged by the commit SHA, so the download always names the exact build it
+  #     came from and cannot be mistaken for a version.
+  preview:
+    name: Preview installers
+    needs: build
+    # Branch builds only. Tags are handled by `release`, and running both would
+    # publish the same installers twice under two names.
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: installer-*
+          merge-multiple: true
+          path: installers-raw
+
+      - name: Prefix and stage the installers
+        run: |
+          set -euo pipefail
+          mkdir -p preview
+          count=0
+          for f in installers-raw/*; do
+            [ -f "$f" ] || continue
+            base="$(basename "$f")"
+            # Same guard as the release job: an installer must never end up under
+            # a name that resolves as an updater payload. Nothing in this job
+            # publishes `locus-*`, so this is defence against a future edit.
+            case "$base" in
+              locus-*|manifest.json)
+                echo "::error::installer artifact collides with an updater name: $base"
+                exit 1
+                ;;
+            esac
+            cp "$f" "preview/installer-$base"
+            echo "staged: installer-$base"
+            count=$((count + 1))
+          done
+          if [ "$count" -eq 0 ]; then
+            echo "::error::no installer artifacts were produced by the build jobs"
+            exit 1
+          fi
+          echo "Staged $count installer asset(s)."
+
+      - name: List what will be published
+        run: ls -la preview/
+
+      - name: Create or refresh the preview release
+        uses: softprops/action-gh-release@v2
+        with:
+          # A fixed tag, moved to the newest build on every run. Using the SHA as
+          # the tag instead would leave one release per commit and grow without
+          # bound; a single rolling tag keeps "where do I download the latest
+          # build?" answerable, and the asset filenames still carry the version.
+          tag_name: build-preview
+          name: "Latest build (not a release)"
+          # Says plainly that this is not a supported release. A student who
+          # lands here by accident should be told to use the tagged release.
+          body: |
+            Automated build of `${{ github.sha }}`, published so a fix can be
+            installed and tested without cutting a release.
+
+            **This is not a release.** It has no update manifest and no
+            signatures, and it cannot be published to clients. Download the
+            installer for your platform and run it.
+
+            Tagged releases are the supported downloads.
+          prerelease: true
+          # Replaced wholesale on each run, so a stale installer from a previous
+          # commit cannot be downloaded alongside the current one.
+          files: |
+            preview/installer-*
+          fail_on_unmatched_files: true
+          generate_release_notes: false
+
+      # ── Re-assert the prerelease flag on every run, not just the first ──
+      #
+      # `softprops/action-gh-release` applies `prerelease: true` when it CREATES
+      # a release. On a later run against a tag that already exists it updates
+      # the assets and the body but does NOT re-assert the flag — so the flag is
+      # carried by whatever the first run set, and nothing after it guarantees
+      # the value.
+      #
+      # `build-preview` is a tag that is MOVED on every push, so it is created
+      # exactly once and then updated forever. That makes this the one release in
+      # the project whose "not a release" status is established once and never
+      # re-checked — the structural twin of the stale-address problem in
+      # docs/operate/CLAIMS.md §1: a value true at creation, relied on later,
+      # with nothing re-establishing it.
+      #
+      # A preview that lost its prerelease flag would be offered by GitHub as
+      # "the latest release" — i.e. a human or an agent would be handed an
+      # unreviewed, unsigned, unpublishable build as though it were the product.
+      # So the flag is asserted here, every run, from the API rather than assumed.
+      - name: Re-assert the preview is a prerelease
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          # Ask the API what it actually says, rather than trusting the action's
+          # inputs — the whole point is that the earlier step's intent is not the
+          # current state.
+          is_pre=$(gh release view build-preview --json isPrerelease --jq '.isPrerelease')
+          echo "build-preview isPrerelease = $is_pre"
+          if [ "$is_pre" != "true" ]; then
+            echo "::warning::build-preview was not a prerelease — re-asserting."
+            gh release edit build-preview --prerelease
+            is_pre=$(gh release view build-preview --json isPrerelease --jq '.isPrerelease')
+          fi
+          if [ "$is_pre" != "true" ]; then
+            echo "::error::build-preview is still not a prerelease after re-asserting; it would be offered as the latest release."
+            exit 1
+          fi
+          echo "build-preview is correctly marked prerelease."
+
+  # ── Say out loud what this run actually did ──
+  #
+  # WHY THIS JOB EXISTS
+  #
+  # Every other job in this file reports on the BUILD. None reports on the RUN.
+  # That gap is where the project's most persistent wrong beliefs come from: a
+  # green tree was read as "CI passed", and "push to main publishes a preview"
+  # was believed while the push was to a path the workflow does not watch. Both
+  # are claims about the world with nothing measuring them — exactly the class
+  # docs/operate/CLAIMS.md describes.
+  #
+  # This job makes the run's own outcome a first-class artifact: what ref, what
+  # commit, which platform jobs succeeded, whether a preview was actually
+  # published, and — for a tag — whether the release exists. It runs `always()`
+  # so it reports on failure too, and it is the thing a person or an agent should
+  # read instead of inferring from a green tick.
+  #
+  # It deliberately does NOT fail the build on a matrix failure: `build` already
+  # does that. Its purpose is to be a readable record, and a job that failed
+  # would be skipped in exactly the case it is most needed.
+  report:
+    name: Report
+    needs: [verify, build]
+    if: always()
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Summarise the run
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -uo pipefail
+          {
+            echo "## This run, stated plainly"
+            echo
+            echo "| | |"
+            echo "|---|---|"
+            echo "| Event | \`${{ github.event_name }}\` |"
+            echo "| Ref | \`${{ github.ref }}\` (\`${{ github.ref_type }}\`) |"
+            echo "| Commit | \`${{ github.sha }}\` |"
+            echo "| Verify | \`${{ needs.verify.result }}\` |"
+            echo "| Build | \`${{ needs.build.result }}\` |"
+            echo "| Run URL | ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }} |"
+            echo
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          # What was actually published, read back from the API rather than
+          # inferred from this run's inputs. A preview or a release that this run
+          # believed it created and did not is precisely the silent failure this
+          # job is here to surface.
+          {
+            echo "### What is published as a result"
+            echo
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          if [ "${{ github.ref_type }}" = "tag" ]; then
+            tag="${{ github.ref_name }}"
+            if gh release view "$tag" --json tagName,isPrerelease,createdAt \
+                 --jq '"| Release | `\(.tagName)` |\n|---|---|\n| Created | \(.createdAt) |\n| Prerelease | \(.isPrerelease) |"' \
+                 >> "$GITHUB_STEP_SUMMARY" 2>/dev/null; then
+              echo "Release $tag exists." >> "$GITHUB_STEP_SUMMARY"
+            else
+              echo "**No release \`$tag\` exists.** A tag run that produced no release is a release that did not happen — check whether this job was cancelled by a concurrent run." >> "$GITHUB_STEP_SUMMARY"
+            fi
+          else
+            if gh release view build-preview --json tagName,isPrerelease,publishedAt \
+                 --jq '"**Rolling preview:** `\(.tagName)` — published \(.publishedAt), prerelease=\(.isPrerelease)"' \
+                 >> "$GITHUB_STEP_SUMMARY" 2>/dev/null; then
+              echo "" >> "$GITHUB_STEP_SUMMARY"
+              echo "> A preview is **not** a release: no manifest, no signatures, not publishable to clients. A client cannot update from it." >> "$GITHUB_STEP_SUMMARY"
+            else
+              echo "**No \`build-preview\` release found.** On a push to \`main\` that means either this was a path-filtered event (check the \`on.push.paths\` list — a change to a path outside it starts no run at all) or the preview job failed." >> "$GITHUB_STEP_SUMMARY"
+            fi
+          fi
+
+          echo
+          echo "Run summary written. Read it rather than inferring from a green tick:"
+          echo "  ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"

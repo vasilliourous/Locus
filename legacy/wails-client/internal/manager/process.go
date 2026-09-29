@@ -1,0 +1,1126 @@
+// Package manager manages the sing-box tunnel process lifecycle.
+//
+// It handles:
+//   - Generating sing-box JSON configuration from server parameters
+//   - Starting and stopping the sing-box process
+//   - Monitoring process health
+//   - Graceful shutdown
+//
+// The manager can operate in two modes:
+//  1. Direct mode: spawns sing-box directly from the app process.
+//     This is the mode used by the Wails app on ALL platforms — app.go calls
+//     SetHelperMode(false) after construction.
+//  2. Helper mode: sends config to the privileged TUN helper via IPC.
+//     Legacy — the locus-helper binary is no longer shipped (removed in the
+//     Wails migration; pre-migration client retained in v4/).
+//     NewManager still defaults to helper mode on Windows, so the app must
+//     explicitly disable it.
+//
+// Hardening: process health monitoring with restart limits, graceful shutdown timeout,
+// config validation, resource cleanup, context propagation.
+package manager
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"log"
+	"net"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"runtime"
+	"strings"
+	"sync"
+	"time"
+)
+
+const (
+	// Default socket path for IPC with TUN helper.
+	defaultSocketPath = "/var/run/locus-helper.sock"
+	// Windows named pipe path for TUN helper IPC.
+	windowsPipePath = `\\.\pipe\LocusHelper`
+
+	// Process health check interval.
+	healthCheckInterval = 10 * time.Second
+
+	// Max consecutive health check failures before force-restart.
+	maxHealthFailures = 3
+
+	// Graceful shutdown timeout: how long we wait for sing-box to exit on its
+	// own before force-killing it. Kept short deliberately — sing-box exits
+	// promptly on SIGTERM/exit in practice, and this value is the worst-case
+	// delay a student sees between tapping Disconnect and the UI responding.
+	// It previously sat at 10s, which made Disconnect feel broken.
+	shutdownTimeout = 2 * time.Second
+
+	// cmdWaitGrace is how long Stop() waits for cmd.Wait() to observe the exit
+	// AFTER the process group has been force-killed. It exists because Wait()
+	// can remain blocked if a detached orphan still holds the inherited
+	// stdout/stderr pipes; we must never block on it indefinitely.
+	cmdWaitGrace = 2 * time.Second
+
+	// Max restart attempts within 5 minutes.
+	maxRestarts   = 3
+	restartWindow = 5 * time.Minute
+)
+
+// Common errors.
+var (
+	ErrProcessNotRunning = fmt.Errorf("sing-box process is not running")
+	ErrProcessCrashed    = fmt.Errorf("sing-box process crashed")
+	ErrHelperNotRunning  = fmt.Errorf("TUN helper is not running")
+	ErrInvalidConfig     = fmt.Errorf("invalid sing-box configuration")
+	ErrMaxRestarts       = fmt.Errorf("maximum restart attempts exceeded")
+	// errEngineAlreadyRunning guards against concurrent double-spawn from the
+	// health loop and the watchdog sharing locus0.
+	errEngineAlreadyRunning = fmt.Errorf("sing-box engine is already running")
+)
+
+// looksLikePermissionError reports whether sing-box's output indicates the
+// engine could not obtain the privileges TUN creation needs. Kept as a small
+// shared helper because both the startup probe and the watchdog path need the
+// same classification, and the wording differs between Windows and Unix.
+func looksLikePermissionError(detail string) bool {
+	d := strings.ToLower(detail)
+	return strings.Contains(d, "operation not permitted") ||
+		strings.Contains(d, "permission denied") ||
+		strings.Contains(d, "access is denied") ||
+		strings.Contains(d, "not permitted") ||
+		strings.Contains(d, "permission") ||
+		strings.Contains(d, "cap_net_admin") ||
+		strings.Contains(d, "needs root") ||
+		strings.Contains(d, "must be root")
+}
+
+// boundedBuffer is a thread-safe writer that keeps only the last max bytes
+// written — used to capture sing-box stderr without unbounded memory growth.
+type boundedBuffer struct {
+	mu  sync.Mutex
+	buf []byte
+	max int
+}
+
+func (b *boundedBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if len(p) >= b.max {
+		b.buf = append([]byte(nil), p[len(p)-b.max:]...)
+		return len(p), nil
+	}
+	if len(b.buf)+len(p) > b.max {
+		b.buf = append(b.buf, p...)
+		b.buf = b.buf[len(b.buf)-b.max:]
+	} else {
+		b.buf = append(b.buf, p...)
+	}
+	return len(p), nil
+}
+
+func (b *boundedBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return string(b.buf)
+}
+
+// managerLogWriter forwards sing-box output to the app's logger.
+//
+// WHY NOT os.Stdout/os.Stderr: the client is a GUI binary with no console. Handing
+// a child process our stdout/stderr makes Windows allocate a fresh console for
+// it (a flashing terminal window), and gives us no diagnostics anyway. Going
+// through log.Printf puts the same lines in the client's own log file, which is
+// where anyone debugging actually looks (%APPDATA%\locus\locus.log).
+//
+// Lines are passed through verbatim (sing-box prefixes its own timestamps and
+// levels), including any trailing newline, so the log stays readable.
+type managerLogWriter struct{}
+
+func (managerLogWriter) Write(p []byte) (int, error) {
+	// log.Printf adds its own timestamp/newline; trim so we do not emit blank
+	// lines for every newline-terminated line the engine writes.
+	msg := strings.TrimRight(string(p), "\r\n")
+	if msg != "" {
+		log.Printf("[sing-box] %s", msg)
+	}
+	return len(p), nil
+}
+
+// HelperClient communicates with the privileged TUN helper service.
+type HelperClient struct {
+	socketPath string
+	timeout    time.Duration
+}
+
+// NewHelperClient creates a client for the TUN helper service.
+func NewHelperClient() *HelperClient {
+	path := defaultSocketPath
+	// On Windows, the helper uses a named pipe instead of a Unix socket.
+	if runtime.GOOS == "windows" {
+		path = windowsPipePath
+	}
+	return &HelperClient{
+		socketPath: path,
+		timeout:    30 * time.Second,
+	}
+}
+
+// helperNetwork returns the network type for IPC based on the platform.
+func helperNetwork() string {
+	if runtime.GOOS == "windows" {
+		return "pipe"
+	}
+	return "unix"
+}
+
+// SendCommand sends an IPC command to the helper and returns the response.
+func (hc *HelperClient) SendCommand(action string, args []string) (bool, string, error) {
+	conn, err := net.DialTimeout(helperNetwork(), hc.socketPath, hc.timeout)
+	if err != nil {
+		return false, "", fmt.Errorf("cannot connect to helper: %w", err)
+	}
+	defer func() { _ = conn.Close() }()
+
+	cmd := map[string]interface{}{
+		"action": action,
+		"args":   args,
+	}
+
+	if err := json.NewEncoder(conn).Encode(cmd); err != nil {
+		return false, "", fmt.Errorf("cannot send command to helper: %w", err)
+	}
+
+	var resp struct {
+		Success bool   `json:"success"`
+		Message string `json:"message"`
+		Error   string `json:"error,omitempty"`
+	}
+
+	if err := json.NewDecoder(conn).Decode(&resp); err != nil {
+		return false, "", fmt.Errorf("cannot decode helper response: %w", err)
+	}
+
+	if !resp.Success {
+		return false, resp.Error, fmt.Errorf("helper command failed: %s", resp.Error)
+	}
+
+	return true, resp.Message, nil
+}
+
+// Manager controls the sing-box tunnel process.
+type Manager struct {
+	mu     sync.Mutex
+	cmd    *exec.Cmd
+	exited chan struct{} // closed by the cmd.Wait goroutine when the process exits
+
+	// procCtx governs the LIFETIME of the sing-box process (exec.CommandContext).
+	// It is deliberately NOT the context passed to Start(): that one carries the
+	// caller's startup deadline and is cancelled as soon as Start() returns. In
+	// Go, cancelling a context created with exec.CommandContext KILLS the child,
+	// so binding sing-box to the caller's ctx meant every fresh connect started
+	// an engine that was killed moments later — the watchdog then restarted it
+	// (via a context.Background() path), which is why connecting appeared to
+	// take forever. procCtx is cancelled only by Stop()/Shutdown().
+	procCtx          context.Context
+	procCancel       context.CancelFunc
+	configPath       string
+	singBoxPath      string
+	helperPath       string
+	helperClient     *HelperClient
+	useHelper        bool
+	healthFailures   int
+	restartCount     int
+	firstRestartTime time.Time
+	stopHealthCheck  chan struct{}
+
+	// tunCfg is the last successful tunnel config, retained so the watchdog
+	// can restart/recover the exact same tunnel (config file is deleted on
+	// Stop, so recovery must regenerate it).
+	tunCfg Config
+
+	// Watchdog state.
+	watchdogStop    chan struct{}
+	watchdogOnProbe ProbeCallback // notified on each probe outcome (nil = no-op)
+	tunnelHealthy   bool
+
+	// probeStage is the latest watchdog recovery stage reported to the UI
+	// (healthy / restart / full-reset / degraded / ...). Guarded by mu.
+	probeStage ProbeStage
+}
+
+// Config holds the parameters needed to start the tunnel.
+type Config struct {
+	Server     string
+	ServerPort int
+	Password   string
+	Method     string
+	TierName   string
+	// UDPRelay is true when the tier supports UDP (Strike). It does NOT by
+	// itself enable UDP-over-TCP: UoT is only used when ServerPortUOT > 0
+	// (server advertises a UoT-capable sing-box endpoint). Otherwise UDP
+	// flows raw (standard ss UDP) — see generateConfig note and
+	// docs/FIXES.md Follow-up 9.
+	UDPRelay bool
+	// ServerPortUOT is the optional UDP-over-TCP endpoint (sing-box server).
+	// When > 0 and UDPRelay is true, UDP is routed to a dedicated UoT
+	// outbound on this port; TCP stays on ServerPort.
+	ServerPortUOT int
+	HubURL        string
+}
+
+// Validate checks that the config is valid.
+func (c *Config) Validate() error {
+	if c.Server == "" {
+		return fmt.Errorf("%w: server address is required", ErrInvalidConfig)
+	}
+	if c.ServerPort <= 0 || c.ServerPort > 65535 {
+		return fmt.Errorf("%w: server port %d is invalid", ErrInvalidConfig, c.ServerPort)
+	}
+	if c.Password == "" {
+		return fmt.Errorf("%w: password is required", ErrInvalidConfig)
+	}
+	if c.Method == "" {
+		return fmt.Errorf("%w: encryption method is required", ErrInvalidConfig)
+	}
+	return nil
+}
+
+// NewManager creates a new tunnel manager.
+func NewManager(singBoxPath, configPath, helperPath string) *Manager {
+	procCtx, procCancel := context.WithCancel(context.Background())
+	m := &Manager{
+		singBoxPath:  singBoxPath,
+		configPath:   configPath,
+		helperPath:   helperPath,
+		helperClient: NewHelperClient(),
+		procCtx:      procCtx,
+		procCancel:   procCancel,
+	}
+	// On Windows, default to helper mode since TUN requires admin privileges.
+	if runtime.GOOS == "windows" {
+		m.useHelper = true
+	}
+	return m
+}
+
+// SetHelperMode enables or disables helper mode.
+func (m *Manager) SetHelperMode(enabled bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.useHelper = enabled
+}
+
+// Start generates the sing-box config and starts the process.
+func (m *Manager) Start(ctx context.Context, cfg Config) error {
+	if err := cfg.Validate(); err != nil {
+		return err
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	// Reconcile our tracking with reality BEFORE deciding anything.
+	//
+	// `m.cmd != nil` is only our belief about the engine; it can be stale in
+	// both directions (a crashed child we still track, or a live child we no
+	// longer do). Treating the stale belief as truth is what produced the
+	// "⚠ tunnel is already running" dead end: after the watchdog had already
+	// disconnected, or after a Stop raced a Start, an orphaned sing-box kept
+	// running while the UI showed Disconnected, and the ONLY way out was to
+	// restart the app because this guard refused to proceed and the cleanup
+	// below it was unreachable.
+	//
+	// So: drop tracking if the tracked process is gone, and if an untracked
+	// engine is running, adopt it into the normal stop path instead of
+	// refusing. Only a LIVE, TRACKED engine means we are genuinely connected.
+	if m.cmd != nil && !m.processAlive() {
+		log.Printf("Start: clearing stale engine tracking (tracked process is gone)")
+		m.cmd = nil
+		m.exited = nil
+	}
+
+	if m.processAlive() && m.cmd != nil {
+		return errEngineAlreadyRunning
+	}
+
+	// Auto-clean before connecting. Previously this hard-failed with "close it
+	// in Task Manager" — a manual dead-end for students. A leftover sing-box
+	// (orphaned after a crash) or a stale locus0 TUN will corrupt routing if we
+	// stack a fresh engine on top, so we clear both first, then start clean.
+	//
+	// This now runs for an UNTRACKED engine too (the case above), so a leftover
+	// from a previous session or a racing disconnect is reclaimed rather than
+	// being a dead end.
+	if foreignSingBoxRunning() {
+		log.Printf("Leftover sing-box detected before connect; killing it and clearing stale TUN")
+		killForeignEngines()
+		_ = removeStaleTUN()
+		// Give the OS a moment to actually reap the killed processes, otherwise
+		// the fresh engine can collide with the dying one over locus0.
+		time.Sleep(500 * time.Millisecond)
+	}
+
+	// Retain the tunnel config so the watchdog can restart/recover it later
+	// (the config file is deleted on Stop).
+	m.tunCfg = cfg
+
+	// Generate the sing-box configuration
+	configJSON, err := generateConfig(cfg)
+	if err != nil {
+		return fmt.Errorf("cannot generate config: %w", err)
+	}
+
+	if m.useHelper {
+		// Try to use the helper — if it's not running, auto-start it
+		if _, _, err := m.helperClient.SendCommand("ping", nil); err != nil {
+			log.Println("TUN helper not running, attempting to start it...")
+			if startErr := m.autoStartHelper(); startErr != nil {
+				log.Printf("Cannot auto-start helper (%v), falling back to direct mode...", startErr)
+				// Fall back to direct mode — disable helper so Stop()
+				// doesn't try IPC that will never work.
+				m.useHelper = false
+				return m.startDirect(ctx, m.procCtx, configJSON)
+			}
+			// Wait a moment for the helper to start listening
+			time.Sleep(2 * time.Second)
+		}
+		return m.startWithHelper(configJSON)
+	}
+	return m.startDirect(ctx, m.procCtx, configJSON)
+}
+
+// Stop terminates the sing-box process gracefully.
+//
+// The wait for the process to exit deliberately happens OUTSIDE m.mu. Holding
+// the lock across shutdownTimeout serialized every other Manager call behind it
+// — including GetStatus, which the UI polls — so a tap on Disconnect froze the
+// whole interface for the duration of the wait. We now take only what we need
+// under the lock, release it, then wait.
+func (m *Manager) Stop() error {
+	m.mu.Lock()
+
+	// Stop the health check loop.
+	if m.stopHealthCheck != nil {
+		close(m.stopHealthCheck)
+		m.stopHealthCheck = nil
+	}
+
+	// Snapshot what we need, then release the lock for the slow part.
+	useHelper := m.useHelper
+	cmd := m.cmd
+	exited := m.exited
+
+	// Clear the tracked process up-front so a concurrent Stop/State call sees a
+	// stopping manager rather than waiting on the same process twice.
+	m.cmd = nil
+	m.exited = nil
+	m.tunnelHealthy = false
+
+	m.mu.Unlock()
+
+	if useHelper {
+		// Only try helper IPC if the helper is actually reachable.
+		if ok, _, _ := m.helperClient.SendCommand("ping", nil); ok {
+			_, _, err := m.helperClient.SendCommand("stop-singbox", nil)
+			// Cancel procCtx so a helper-managed engine also loses its context
+			// parent; harmless if there is no direct child.
+			m.cancelProcCtx()
+			return err
+		}
+		// Helper not reachable — fall through to clean up any direct-mode process
+	}
+
+	if cmd == nil || cmd.Process == nil {
+		m.cancelProcCtx()
+		m.cleanupConfigFile()
+		return nil // Already stopped
+	}
+
+	// Graceful shutdown: wait for the exit goroutine (started in startDirect)
+	// to finish. cmd.Wait must only be called ONCE per process — spawning a
+	// second Wait here would error out immediately and skip the kill.
+	// The wait is bounded and, on expiry, kills the WHOLE process group: an
+	// orphaned grandchild holding the inherited pipes keeps cmd.Wait blocked
+	// even after the direct child dies, which previously made Disconnect hang.
+	if exited == nil {
+		exited = make(chan struct{})
+		go func() { _ = cmd.Wait(); close(exited) }()
+	}
+
+	select {
+	case <-exited:
+		// Process exited cleanly
+	case <-time.After(shutdownTimeout):
+		// Force kill the whole tree, then give Wait a short grace period to
+		// observe the exit. We do NOT block indefinitely on `exited` here: if a
+		// detached orphan somehow still holds a pipe, blocking would reintroduce
+		// the hang this fix exists to remove.
+		if err := killProcessGroup(cmd.Process); err != nil {
+			return fmt.Errorf("cannot kill sing-box: %w", err)
+		}
+		select {
+		case <-exited:
+		case <-time.After(cmdWaitGrace):
+			log.Printf("stop: process group killed but Wait did not return within %v; continuing", cmdWaitGrace)
+		}
+	}
+
+	// Cancel the process-lifetime context and give the NEXT Start a fresh one,
+	// so a subsequent connect is not bound to an already-cancelled parent.
+	m.cancelProcCtx()
+
+	m.cleanupConfigFile()
+	return nil
+}
+
+// cancelProcCtx cancels the current process-lifetime context and installs a
+// fresh one for the next Start. Safe to call when no process is running.
+func (m *Manager) cancelProcCtx() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.procCancel != nil {
+		m.procCancel()
+	}
+	m.procCtx, m.procCancel = context.WithCancel(context.Background())
+}
+
+// procCtxValue returns the current process-lifetime context under the lock.
+// Used by callers that do NOT already hold m.mu (watchdog recovery, health
+// loop); Start reads the field directly because it holds the lock.
+func (m *Manager) procCtxValue() context.Context {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.procCtx == nil {
+		// Defensive: Manager is always built via NewManager, which sets this.
+		ctx, cancel := context.WithCancel(context.Background())
+		m.procCtx, m.procCancel = ctx, cancel
+	}
+	return m.procCtx
+}
+
+// cleanupConfigFile removes the on-disk sing-box config, if any.
+func (m *Manager) cleanupConfigFile() {
+	if m.configPath != "" {
+		_ = os.Remove(m.configPath)
+	}
+}
+
+// processAlive reports whether the current sing-box process is still running.
+// Cross-platform: uses the exited channel (closed when the cmd.Wait goroutine
+// returns) instead of Unix signals — Process.Signal(signal 0) is NOT supported
+// on Windows and always errors, which previously made every liveness check
+// report "dead" and caused Connect() to hang in cmd.Wait().
+func (m *Manager) processAlive() bool {
+	if m.cmd == nil || m.cmd.Process == nil || m.exited == nil {
+		return false
+	}
+	select {
+	case <-m.exited:
+		return false
+	default:
+		return true
+	}
+}
+
+// autoStartHelper attempts to start the locus-helper as an elevated process.
+// On Windows, this uses "runas" to trigger a UAC elevation prompt.
+// On Unix, it tries to start the helper via sudo if available.
+func (m *Manager) autoStartHelper() error {
+	if m.helperPath == "" {
+		// Try to find helper in likely locations
+		log.Println("locus-helper path not set, searching...")
+		execDir, _ := filepath.Abs(filepath.Dir(os.Args[0]))
+		singDir := filepath.Dir(m.singBoxPath)
+		candidates := []string{
+			filepath.Join(execDir, "locus-helper"),
+			filepath.Join(execDir, "locus-helper.exe"),
+			filepath.Join(singDir, "locus-helper"),
+			filepath.Join(singDir, "locus-helper.exe"),
+			"./locus-helper",
+			"./locus-helper.exe",
+		}
+		for _, p := range candidates {
+			if _, err := os.Stat(p); err == nil {
+				m.helperPath = p
+				break
+			}
+		}
+	}
+	if m.helperPath == "" {
+		return fmt.Errorf("locus-helper binary not found alongside sing-box")
+	}
+
+	switch runtime.GOOS {
+	case "windows":
+		// On Windows, use PowerShell Start-Process with RunAs verb to trigger UAC
+		// This shows a UAC elevation prompt and starts the helper as administrator.
+		// The PowerShell window itself is hidden so only the UAC prompt appears.
+		// hiddenCommand applies HideWindow, which is what actually suppresses the
+		// console — passing -WindowStyle Hidden to powershell alone still lets the
+		// OS allocate a console for the powershell process itself.
+		cmd := hiddenCommand("powershell", "-Command",
+			"Start-Process", "-FilePath", m.helperPath,
+			"-Verb", "RunAs", "-WindowStyle", "Hidden")
+		return cmd.Start()
+	case "linux", "darwin":
+		// On Unix, try pkexec (PolKit) or sudo for elevation
+		cmds := [][]string{
+			{"pkexec", m.helperPath},
+			{"sudo", "-n", m.helperPath},
+		}
+		var lastErr error
+		for _, args := range cmds {
+			if _, err := exec.LookPath(args[0]); err != nil {
+				lastErr = err
+				continue
+			}
+			cmd := exec.Command(args[0], args[1:]...)
+			if err := cmd.Start(); err == nil {
+				return nil
+			} else {
+				lastErr = err
+			}
+		}
+		return fmt.Errorf("cannot elevate helper: %w", lastErr)
+	default:
+		return fmt.Errorf("unsupported platform for helper auto-start")
+	}
+}
+
+func (m *Manager) IsRunning() bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if m.useHelper {
+		success, msg, _ := m.helperClient.SendCommand("singbox-status", nil)
+		return success && msg == "running"
+	}
+
+	return m.processAlive()
+}
+
+// startWithHelper sends the config to the TUN helper to launch sing-box.
+func (m *Manager) startWithHelper(configJSON []byte) error {
+	success, msg, err := m.helperClient.SendCommand("start-singbox", []string{string(configJSON)})
+	if err != nil {
+		return fmt.Errorf("helper failed to start sing-box: %w", err)
+	}
+	if !success {
+		return fmt.Errorf("helper refused start: %s", msg)
+	}
+	return nil
+}
+
+// startDirect spawns sing-box directly as a subprocess.
+//
+// startupCtx bounds only the CONNECT handshake (how long we wait for the engine
+// to come up before giving up). procCtx governs the process LIFETIME and must
+// outlive this call — see the procCtx field comment for why binding the child
+// to the caller's context was a bug. Callers pass procCtx explicitly (rather
+// than reading m.procCtx here) because this method is invoked both with m.mu
+// held, from Start, and without it, from the watchdog/health-loop recovery
+// paths; a self-locking accessor would deadlock on sync.Mutex.
+func (m *Manager) startDirect(startupCtx context.Context, procCtx context.Context, configJSON []byte) error {
+	// Guard against concurrent double-spawn (e.g. the health loop and the
+	// watchdog both trying to recover at once): two sing-box instances sharing
+	// locus0 corrupt routing. Prefer the running instance over spawning a second.
+	if m.processAlive() {
+		return errEngineAlreadyRunning
+	}
+
+	// Write config to disk
+	if err := os.WriteFile(m.configPath, configJSON, 0600); err != nil {
+		return fmt.Errorf("cannot write config file: %w", err)
+	}
+
+	// Check sing-box binary exists
+	if _, err := os.Stat(m.singBoxPath); os.IsNotExist(err) {
+		return fmt.Errorf("sing-box binary not found at %s", m.singBoxPath)
+	}
+
+	// Start sing-box. stderr is mirrored to our log AND captured in a bounded
+	// buffer so startup failures can be reported back to the UI with the real
+	// sing-box error (e.g. TUN "Access is denied" on non-elevated Windows).
+	//
+	// The child is bound to procCtx (the process-lifetime context passed in by
+	// the caller), NOT startupCtx. Cancelling a context made with
+	// exec.CommandContext kills the child, and startupCtx's deadline fires when
+	// the caller's Connect() returns — so using it here reliably killed a
+	// freshly-started engine, leaving the watchdog to churn it back up (the
+	// "takes forever to connect" symptom).
+	stderrBuf := &boundedBuffer{max: 8192}
+	cmd := exec.CommandContext(procCtx, m.singBoxPath, "run", "-c", m.configPath, "-D", filepath.Dir(m.configPath))
+
+	// sing-box output goes to OUR LOG, never to os.Stdout/os.Stderr.
+	//
+	// This is a GUI process: it has no console, so attaching the engine's
+	// inherited handles to the process's stdout/stderr is both useless (nobody
+	// reads it) and harmful. On Windows a child given no usable stdout handle
+	// makes the OS allocate a console for it, which is one of the ways a
+	// terminal window flashes on screen. Routing both streams into the log file
+	// keeps the diagnostics (the TUN "Access is denied" banner is read from
+	// stderrBuf) without ever touching a console.
+	logSink := managerLogWriter{}
+	cmd.Stdout = logSink
+	cmd.Stderr = io.MultiWriter(logSink, stderrBuf)
+
+	// Detach — allow parent to manage lifecycle (platform-specific)
+	cmd.SysProcAttr = newProcAttr()
+
+	// Publish the tracked process BEFORE starting it.
+	//
+	// Previously m.cmd/m.exited were set after cmd.Start() returned. In that
+	// window processAlive() reported false while a child was already running,
+	// so a concurrent Stop() (notably the watchdog's auto-disconnect, or a user
+	// tapping Disconnect during connect) found m.cmd == nil, took the "already
+	// stopped" path and returned without killing anything. The engine survived
+	// as an orphan that the UI no longer tracked — which is exactly the
+	// "disconnected, but sing-box.exe is still running and Connect now says
+	// 'tunnel is already running'" report.
+	//
+	// The exit goroutine is started only after Start() succeeds, so we never
+	// wait on a process that was never created. If Start() fails we roll the
+	// tracking fields back.
+	exited := make(chan struct{})
+	m.cmd = cmd
+	m.exited = exited
+
+	if err := cmd.Start(); err != nil {
+		m.cmd = nil
+		m.exited = nil
+		return fmt.Errorf("cannot start sing-box: %w", err)
+	}
+
+	go func() {
+		_ = cmd.Wait()
+		close(exited)
+	}()
+	m.restartCount = 0
+	m.firstRestartTime = time.Time{}
+
+	// Brief startup probe: wait a moment then check if the process is still
+	// alive. This catches cases where sing-box exits immediately due to a
+	// config error or permission denial (e.g. "Access is denied" on Windows).
+	// The liveness check uses the exited channel — Process.Signal(0) does not
+	// work on Windows and would block forever in cmd.Wait() below.
+	// The wait is bounded by BOTH a short fixed delay and the caller's deadline
+	// (startupCtx), so a caller that has already given up is not kept waiting.
+	probeTimer := time.NewTimer(500 * time.Millisecond)
+	defer probeTimer.Stop()
+	select {
+	case <-exited:
+		// Process already exited — the Wait goroutine has released resources
+		m.cmd = nil
+		m.exited = nil
+		detail := strings.TrimSpace(stderrBuf.String())
+		if detail == "" {
+			detail = "no error output"
+		}
+		if strings.Contains(detail, "Access is denied") {
+			return fmt.Errorf("TUN interface creation was denied — run Locus as administrator: %s", detail)
+		}
+		// Unix permission failures surface as "operation not permitted" /
+		// "permission denied" when the engine cannot open /dev/net/tun or
+		// install routes. Translate them, because the raw text ("sing-box exited
+		// immediately: ...") tells a student nothing actionable. This is the
+		// failure mode produced by the known Linux elevation gap.
+		if looksLikePermissionError(detail) {
+			return fmt.Errorf("TUN interface creation was denied — Locus needs root privileges on this system: %s", detail)
+		}
+		return fmt.Errorf("sing-box exited immediately: %s", detail)
+	case <-probeTimer.C:
+		// Still running — startup probe passed
+	case <-startupCtx.Done():
+		// The caller's startup deadline elapsed while we were waiting. The
+		// engine may still be fine (it is bound to procCtx, not startupCtx), so
+		// report a startup timeout rather than killing it — the watchdog owns
+		// recovery from here.
+		return fmt.Errorf("starting the tunnel took too long: %w", startupCtx.Err())
+	}
+
+	// Start health check loop
+	m.stopHealthCheck = make(chan struct{})
+	go m.healthLoop()
+
+	return nil
+}
+
+// healthLoop periodically checks that sing-box is still running.
+func (m *Manager) healthLoop() {
+	ticker := time.NewTicker(healthCheckInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-m.stopHealthCheck:
+			return
+		case <-ticker.C:
+			m.mu.Lock()
+			if m.cmd == nil || m.cmd.Process == nil {
+				m.mu.Unlock()
+				return
+			}
+
+			if !m.processAlive() {
+				// Process died
+				m.healthFailures++
+				if m.healthFailures >= maxHealthFailures {
+					m.mu.Unlock()
+					return
+				}
+
+				// Attempt restart. Route through startDirect so the shared
+				// double-spawn guard applies — otherwise this loop could race
+				// the watchdog's recovery and spawn a second sing-box on the
+				// same TUN (which corrupts routing).
+				if m.canRestart() {
+					m.restartCount++
+					m.mu.Unlock()
+					configJSON, err := os.ReadFile(m.configPath)
+					if err != nil {
+						// Config gone — nothing to restart with; give up the loop.
+						m.mu.Lock()
+						m.healthFailures = maxHealthFailures
+						m.mu.Unlock()
+						return
+					}
+					if startErr := m.startDirect(context.Background(), m.procCtxValue(), configJSON); startErr == nil {
+						m.mu.Lock()
+						m.healthFailures = 0
+						m.mu.Unlock()
+					}
+					// Restart failed or engine already up — will retry next cycle.
+					continue
+				}
+				m.mu.Unlock()
+				return
+			}
+
+			// Health OK — reset failure counter
+			m.healthFailures = 0
+			m.mu.Unlock()
+		}
+	}
+}
+
+// canRestart checks if we haven't exceeded the restart limit in the window.
+func (m *Manager) canRestart() bool {
+	now := time.Now()
+	if m.firstRestartTime.IsZero() {
+		m.firstRestartTime = now
+		return true
+	}
+	if now.Sub(m.firstRestartTime) > restartWindow {
+		m.firstRestartTime = now
+		m.restartCount = 0
+		return true
+	}
+	return m.restartCount < maxRestarts
+}
+
+// State returns a snapshot of the manager state.
+func (m *Manager) State() string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if m.useHelper {
+		_, msg, _ := m.helperClient.SendCommand("singbox-status", nil)
+		return msg
+	}
+
+	if m.cmd == nil || m.cmd.Process == nil {
+		return "stopped"
+	}
+	if !m.processAlive() {
+		return "crashed"
+	}
+	return "running"
+}
+
+// generateConfig creates the sing-box JSON configuration.
+// NOTE: strict_route is DISABLED — on Windows it installs WFP filters that
+// "strictly block all connections not from the TUN", which on some machines
+// (incl. the school laptops this app targets) also blocks sing-box's own
+// outbound + DNS and kills all connectivity. auto_route alone still routes
+// all traffic through the TUN (see FIXES.md).
+//
+// All route rules use the MODERN rule-action format ("action": "route", ...)
+// and the tun inbound NO LONGER sets the legacy "sniff": true field: those
+// legacy 1.10-era fields are deprecated (1.11) and removed (1.13), and make
+// the config fail to start or break routing on newer engines. Validated to
+// `sing-box check` clean on both 1.12.1 and 1.13.x.
+func generateConfig(cfg Config) ([]byte, error) {
+	// Debug is the DEFAULT level while the tunnel data path is under active
+	// investigation (2026-08-01): with it, locus.log shows sing-box's dial
+	// lines (target IP/port, error) which are required to diagnose
+	// "connects but no internet". Override with LOCUS_LOG_LEVEL=warn or
+	// LOCUS_DEBUG=0 for quieter logs in production builds.
+	logLevel := "debug"
+	if lvl := os.Getenv("LOCUS_LOG_LEVEL"); lvl != "" {
+		logLevel = lvl
+	} else if os.Getenv("LOCUS_DEBUG") == "0" {
+		logLevel = "warn"
+	}
+	log.Printf("sing-box log level: %s", logLevel)
+
+	config := SingBoxConfig{
+		Log: LogConfig{
+			Level: logLevel,
+		},
+		DNS: DNSConfig{
+			// DNS goes THROUGH the tunnel (final = dns-tunnel, detour = proxy).
+			// sing-box 1.12 DNS server format (type + server + port).
+			// Safeguards against DNS loops (see FIXES.md):
+			//  1. The rule below sends ALL resolution initiated by sing-box's
+			//     own outbounds (e.g. resolving the Shadowsocks SERVER domain
+			//     networkingguides.duckdns.org) DIRECT — without it, that
+			//     resolution re-enters dns-tunnel and sing-dns reports
+			//     "DNS query loopback in transport[dns-tunnel]" (issue #2207).
+			//  2. dns-tunnel MUST have an explicit detour (empty detour dials
+			//     through the router and loops back into the DNS handler).
+			Final: "dns-tunnel",
+			Servers: []DNSServer{
+				{
+					Type:       "https",
+					Tag:        "dns-tunnel",
+					Server:     "1.1.1.1",
+					ServerPort: 443,
+					Detour:     "proxy",
+				},
+				{
+					Type:       "https",
+					Tag:        "dns-direct",
+					Server:     "1.1.1.1",
+					ServerPort: 443,
+					Detour:     "direct",
+				},
+			},
+		},
+		Inbounds: []Inbound{
+			{
+				Type:          "tun",
+				Tag:           "tun-in",
+				InterfaceName: "locus0",
+				Address:       []string{"10.0.0.1/30"},
+				MTU:           1500,
+				AutoRoute:     true,
+				StrictRoute:   false,
+				// NOTE: sniff is intentionally NOT set here. The legacy
+				// `"sniff": true` tun-inbound field was deprecated in sing-box
+				// 1.11 and REMOVED in 1.13 (legacy inbound fields → rule
+				// actions migration). Leaving it in makes the whole config
+				// fail to start on any sing-box ≥ 1.13 ("removed in 1.13.0")
+				// and was a source of DNS/routing breakage. DNS sniffing is
+				// handled in the modern way by the `sniff` route rule action
+				// below (see Route.Rules).
+			},
+		},
+		Outbounds: []Outbound{
+			{
+				Type:       "shadowsocks",
+				Tag:        "proxy",
+				Server:     cfg.Server,
+				ServerPort: cfg.ServerPort,
+				Method:     cfg.Method,
+				Password:   cfg.Password,
+			},
+			{
+				Type: "direct",
+				Tag:  "direct",
+				// connect_timeout makes the direct outbound NON-EMPTY — sing-box
+				// 1.12 rejects DNS detours to an empty direct outbound — without
+				// needing bind_interface (which broke the Windows dial).
+				ConnectTimeout: "10s",
+			},
+		},
+		Route: RouteConfig{
+			AutoDetectInterface: true,
+			Final:               "proxy",
+			// The Shadowsocks server is a DOMAIN — this resolver sends ALL
+			// outbound-initiated resolution (e.g. the proxy dialing
+			// networkingguides.duckdns.org) DIRECT, preventing the DNS
+			// loopback (sing-box issue #2207; the 1.10-era outbound DNS rule
+			// is deprecated in 1.12).
+			DefaultDomainResolver: &DomainResolveOptions{Server: "dns-direct"},
+			Rules: []RouteRule{
+				// Sniff connections first (modern equivalent of the removed
+				// legacy tun-inbound `"sniff": true`) so the protocol:dns rule
+				// below can match DNS by sniffed protocol. First rule so the
+				// metadata is available to every subsequent rule.
+				{Action: "sniff"},
+				// DNS traffic is handled by the hijack-dns rule action (1.11+).
+				{Protocol: "dns", Action: "hijack-dns"},
+			},
+		},
+	}
+
+	// Exclude the VPN server itself from the tunnel: if auto_route ever
+	// captures sing-box's own Shadowsocks connection, this rule sends it
+	// DIRECT (out via the physical NIC) instead of looping it back into the
+	// proxy. Best-effort — resolution happens before the TUN exists.
+	//
+	// This rule (and the UoT UDP rule below) is APPENDED after the base
+	// [sniff, hijack-dns] rules, NEVER prepended: the DNS query must be
+	// handled by hijack-dns before any `network:`/`ip_cidr:` matcher can
+	// capture it. If a network-based rule were first it would swallow DNS
+	// (e.g. UDP DNS hitting the proxy-uot route) and nothing would resolve —
+	// the classic "TUN up but no traffic passes" symptom.
+	if serverIPs, err := net.LookupIP(cfg.Server); err == nil {
+		for _, ip := range serverIPs {
+			if ip4 := ip.To4(); ip4 != nil {
+				config.Route.Rules = append(config.Route.Rules, RouteRule{
+					// Canonical action form — the top-level `outbound` field
+					// was deprecated in 1.11 and is silently problematic; the
+					// `"action": "route"` form works on 1.12 and 1.13+.
+					IPCIDR:   []string{ip4.String() + "/32"},
+					Action:   "route",
+					Outbound: "direct",
+				})
+				break
+			}
+		}
+	}
+
+	// UDP-over-TCP (UoT) — used ONLY when the server advertises a UoT
+	// endpoint (ServerPortUOT > 0, sing-box server). sing-box's UoT is a
+	// proprietary SagerNet protocol (magic domains sp.udp-over-tcp.arpa /
+	// sp.v2.udp-over-tcp.arpa), NOT the Shadowsocks standard — the default
+	// server (shadowsocks-rust) does not implement it and RSTs every such
+	// connection (observed 2026-08-01: "forcibly closed" ~300ms after each
+	// UoT dial). So unless the tier advertises uot_port, UDP stays RAW
+	// (standard ss UDP; Strike server mode tcp_and_udp) and works wherever
+	// the network allows UDP; on UDP-blocking networks (N4L school WiFi)
+	// clients fall back to TCP.
+	//
+	// When UoT IS advertised: UDP is pinned to a dedicated UoT outbound on
+	// the sing-box server port, while TCP stays on the standard port — the
+	// school firewall only sees TCP, and game UDP rides inside it.
+	//
+	// LIVE SINCE 2026-09-19 (server side): the strike tier advertises uot_port=8446, backed by
+	// a sing-box UoT listener on the hub. Verified end-to-end (client UoT
+	// outbound -> :8446 -> UDP -> DNS answer). Note DNS does NOT use this
+	// outbound: dns-tunnel detours via "proxy" (8445) and the hijack-dns rule
+	// matches before any network:udp rule, so only non-DNS UDP rides UoT.
+	//
+	// The magic-domain detail still matters: only a sing-box server implements
+	// this protocol. Pointing uot_port at a shadowsocks-rust port silently
+	// breaks UDP rather than falling back.
+	//
+	// LIVE STATE (corrected 2026-09-19, FIXES.md 29): the strike tier DOES
+	// advertise uot_port=8446 and a sing-box UoT listener IS running on the
+	// live hub (verified: `ss -lntup` shows sing-box on TCP+UDP 8446). This
+	// comment previously claimed the feature was live, but it was not: the
+	// client's ServerConfig structs declared only "server_port_uot" while the
+	// hub sends "uot_port", so ServerPortUOT was permanently 0 and this branch
+	// never executed on any build. It now does. Stripe's gaming path is
+	// therefore active for the first time as of 2.1.0.
+	uotEnabled := cfg.UDPRelay && cfg.ServerPortUOT > 0
+	if uotEnabled {
+		config.Outbounds = append(config.Outbounds, Outbound{
+			Type:       "shadowsocks",
+			Tag:        "proxy-uot",
+			Server:     cfg.Server,
+			ServerPort: cfg.ServerPortUOT,
+			Method:     cfg.Method,
+			Password:   cfg.Password,
+			UDPOverTCP: true,
+		})
+		// Route UDP flows to the UoT outbound; TCP continues via "proxy".
+		// Appended AFTER the base sniff/hijack-dns rules so DNS over UDP is
+		// hijacked before it can match this network:udp matcher (see the
+		// server-IP exclusion comment above).
+		config.Route.Rules = append(config.Route.Rules, RouteRule{
+			Network:  "udp",
+			Action:   "route",
+			Outbound: "proxy-uot",
+		})
+	}
+
+	return json.MarshalIndent(config, "", "  ")
+}
+
+// ── Sing-box config types ──
+
+type SingBoxConfig struct {
+	Log       LogConfig   `json:"log"`
+	DNS       DNSConfig   `json:"dns"`
+	Inbounds  []Inbound   `json:"inbounds"`
+	Outbounds []Outbound  `json:"outbounds"`
+	Route     RouteConfig `json:"route"`
+}
+
+type LogConfig struct {
+	Level  string `json:"level"`
+	Output string `json:"output,omitempty"`
+}
+
+type DNSConfig struct {
+	Final   string      `json:"final"`
+	Rules   []DNSRule   `json:"rules,omitempty"`
+	Servers []DNSServer `json:"servers"`
+}
+
+type DNSRule struct {
+	Rule     string   `json:"rule,omitempty"`
+	Action   string   `json:"action,omitempty"`
+	Server   string   `json:"server,omitempty"`
+	Outbound []string `json:"outbound,omitempty"`
+}
+
+type DNSServer struct {
+	Type       string `json:"type"`
+	Tag        string `json:"tag"`
+	Server     string `json:"server"`
+	ServerPort int    `json:"server_port,omitempty"`
+	Detour     string `json:"detour,omitempty"`
+}
+
+type Inbound struct {
+	Type          string   `json:"type"`
+	Tag           string   `json:"tag,omitempty"`
+	InterfaceName string   `json:"interface_name,omitempty"`
+	Address       []string `json:"address,omitempty"`
+	MTU           int      `json:"mtu,omitempty"`
+	AutoRoute     bool     `json:"auto_route,omitempty"`
+	StrictRoute   bool     `json:"strict_route,omitempty"`
+	Sniff         bool     `json:"sniff,omitempty"`
+}
+
+type Outbound struct {
+	Type           string `json:"type"`
+	Tag            string `json:"tag,omitempty"`
+	Server         string `json:"server,omitempty"`
+	ServerPort     int    `json:"server_port,omitempty"`
+	Method         string `json:"method,omitempty"`
+	Password       string `json:"password,omitempty"`
+	ConnectTimeout string `json:"connect_timeout,omitempty"`
+	// UDPOverTCP enables SagerNet UDP-over-TCP on this outbound (only valid
+	// for shadowsocks outbounds; requires a server that implements UoT, e.g.
+	// sing-box server).
+	UDPOverTCP bool `json:"udp_over_tcp,omitempty"`
+}
+
+type RouteConfig struct {
+	Rules                 []RouteRule           `json:"rules,omitempty"`
+	AutoDetectInterface   bool                  `json:"auto_detect_interface"`
+	Final                 string                `json:"final"`
+	DefaultDomainResolver *DomainResolveOptions `json:"default_domain_resolver,omitempty"`
+}
+
+type DomainResolveOptions struct {
+	Server string `json:"server"`
+}
+
+type RouteRule struct {
+	Protocol string   `json:"protocol,omitempty"`
+	Network  string   `json:"network,omitempty"`
+	IPCIDR   []string `json:"ip_cidr,omitempty"`
+	// Outbound is the target outbound for the "route" action. This must be
+	// paired with Action == "route" (sing-box 1.11+): the bare top-level
+	// `outbound` field is the deprecated legacy form and is troublesome on
+	// sing-box 1.12+/1.13. See generateConfig.
+	Outbound string `json:"outbound,omitempty"`
+	// Action names the rule action: "route", "hijack-dns", "sniff", etc.
+	// Required for all rules on sing-box 1.11+.
+	Action string `json:"action,omitempty"`
+}

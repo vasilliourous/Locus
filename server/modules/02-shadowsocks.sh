@@ -1,0 +1,389 @@
+#!/usr/bin/env bash
+# Module 02: Shadowsocks Server — 3-tier instances
+# Installs ssserver and creates three systemd services:
+#   - Eco (port 8443, BBR, TCP only)
+#   - Stealth (port 8444, BBR, TCP only)
+#   - Strike (port 8445, BBR, TCP+UDP)
+set -euo pipefail
+
+log()  { echo "[02-shadowsocks] $*"; }
+warn() { echo "[02-shadowsocks][WARN] $*"; }
+fail() { echo "[02-shadowsocks][FAIL] $*"; exit 1; }
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SS_VERSION="v1.23.0"
+SS_BINARY="/usr/local/bin/ssserver"
+PASS_FILE="/root/.tier_passwords"
+
+# ── Shadowsocks cipher ──
+# Module 00 owns the definition and forwards it via setup.sh's run_module.
+# Defaulted here too because this file is runnable standalone
+# (`bash 02-shadowsocks.sh`), and without the default a standalone run dies on
+# `set -u` at the first ${SS_METHOD} reference. The default must mirror module
+# 00's exactly — check-consistency.sh guards the "SS_METHOD is defined in
+# modules/00-env.sh" half; this mirrors the value.
+: "${SS_METHOD:=2022-blake3-aes-256-gcm}"
+case "$SS_METHOD" in
+    2022-blake3-aes-256-gcm|2022-blake3-chacha20-poly1305) : "${SS_KEY_BYTES:=32}" ;;
+    2022-blake3-aes-128-gcm)                               : "${SS_KEY_BYTES:=16}" ;;
+esac
+export SS_METHOD SS_KEY_BYTES
+
+# ── Install ssserver if not present ──
+install_ssserver() {
+    if [ -f "$SS_BINARY" ] && $SS_BINARY --version &>/dev/null; then
+        log "ssserver already installed at ${SS_BINARY}"
+        return 0
+    fi
+
+    log "Downloading shadowsocks-rust ${SS_VERSION}..."
+    local tmpdir
+    tmpdir=$(mktemp -d)
+    cd "$tmpdir"
+
+    local url="https://github.com/shadowsocks/shadowsocks-rust/releases/download/${SS_VERSION}/shadowsocks-${SS_VERSION}.x86_64-unknown-linux-gnu.tar.xz"
+    wget -q "$url" -O shadowsocks.tar.xz 2>/dev/null || {
+        log "Version ${SS_VERSION} download failed. Falling back to latest stable..."
+        # Fetch latest release tag from GitHub API
+        local latest_tag
+        latest_tag=$(wget -q -O- "https://api.github.com/repos/shadowsocks/shadowsocks-rust/releases/latest" 2>/dev/null | \
+            python3 -c "import sys,json; print(json.load(sys.stdin)['tag_name'])" 2>/dev/null || echo "")
+        if [ -n "$latest_tag" ]; then
+            SS_VERSION="$latest_tag"
+            url="https://github.com/shadowsocks/shadowsocks-rust/releases/download/${SS_VERSION}/shadowsocks-${SS_VERSION}.x86_64-unknown-linux-gnu.tar.xz"
+            wget -q "$url" -O shadowsocks.tar.xz 2>/dev/null || fail "Download failed for latest version ${SS_VERSION} too."
+        else
+            fail "Download failed for ${SS_VERSION} and couldn't fetch latest. Check GitHub releases manually."
+        fi
+    }
+
+    tar -xf shadowsocks.tar.xz
+    cp ssserver "$SS_BINARY"
+    chmod +x "$SS_BINARY"
+    cd /
+    rm -rf "$tmpdir"
+    log "✓ ssserver installed"
+}
+
+# ── Tier key generation ──
+#
+# SS2022 keys are base64 of an EXACT number of bytes (SS_KEY_BYTES, set in
+# module 00 and derived from SS_METHOD) — not passphrases. The `tr -d '\n'` is
+# load-bearing: `openssl rand -base64 N` appends a newline, and a key carrying
+# one fails at handshake time with no useful error, which is exactly the kind
+# of fault that looks like "the server is down".
+gen_tier_key() {
+    openssl rand -base64 "${SS_KEY_BYTES:?SS_KEY_BYTES unset — module 00 must run first}" | tr -d '\n'
+}
+
+# ── Load or generate tier passwords ──
+# Priority: 1) env vars from decrypted secrets  2) existing file on VPS  3) auto-generate
+#
+# Branch 3 is a DELIBERATE ACT, not a fallback. See module 00 for the
+# precondition check and docs/operate/SECRETS-MANAGEMENT.md for why: these passwords
+# are fleet-wide, so inventing them on one host silently forks it from every
+# other host. It requires ALLOW_GENERATED_TIER_PASSWORDS=1, and when it runs
+# the generated values must be written back to secrets.env.age afterwards.
+setup_passwords() {
+    ECO_PASS="${ECO_PASS:-}"
+    STEALTH_PASS="${STEALTH_PASS:-}"
+    STRIKE_PASS="${STRIKE_PASS:-}"
+
+    if [ -n "$ECO_PASS" ] && [ -n "$STEALTH_PASS" ] && [ -n "$STRIKE_PASS" ]; then
+        log "Using tier passwords from environment (decrypted secrets)."
+        TIER_PASSWORDS_GENERATED=0
+    elif [ -f "$PASS_FILE" ]; then
+        log "Loading existing passwords from ${PASS_FILE}"
+        . "$PASS_FILE"
+        TIER_PASSWORDS_GENERATED=0
+    elif [ "${ALLOW_GENERATED_TIER_PASSWORDS:-0}" = "1" ]; then
+        warn "No secrets and no existing password file."
+        warn "ALLOW_GENERATED_TIER_PASSWORDS=1 — GENERATING new tier passwords."
+        warn "This host now DIVERGES from the fleet until you complete the"
+        warn "write-back in docs/operate/SECRETS-MANAGEMENT.md."
+        ECO_PASS=$(gen_tier_key)
+        STEALTH_PASS=$(gen_tier_key)
+        STRIKE_PASS=$(gen_tier_key)
+        TIER_PASSWORDS_GENERATED=1
+        warn "            (write these back to secrets.env.age, or this host forks)"
+        warn "            ECO_PASS=$ECO_PASS"
+        warn "            STEALTH_PASS=$STEALTH_PASS"
+        warn "            STRIKE_PASS=$STRIKE_PASS"
+    else
+        # Should be unreachable: module 00 fails the deploy first. Kept as a
+        # belt-and-braces guard so this module cannot fork the fleet if it is
+        # ever run standalone (`bash 02-shadowsocks.sh`).
+        fail "No tier passwords available and ALLOW_GENERATED_TIER_PASSWORDS is not set.
+     Refusing to invent fleet-wide credentials. See docs/operate/SECRETS-MANAGEMENT.md."
+    fi
+
+    # Persist to file so seed-pb.py and later runs can find them
+    cat > "$PASS_FILE" <<EOF
+ECO_PASS=$ECO_PASS
+STEALTH_PASS=$STEALTH_PASS
+STRIKE_PASS=$STRIKE_PASS
+EOF
+    chmod 600 "$PASS_FILE"
+
+    # Reject a key that SS2022 cannot use. The pre-migration values were
+    # `openssl rand -hex 16` (16 ASCII chars), which SS2022 refuses — a host
+    # carrying them would look deployed and serve a listener that rejects
+    # every handshake. Checked here as well as in module 00 because this file
+    # is runnable standalone (`bash 02-shadowsocks.sh`).
+    for _k in ECO_PASS STEALTH_PASS STRIKE_PASS; do
+        _v="${!_k}"
+        _bytes=$(printf '%s' "$_v" | base64 -d 2>/dev/null | wc -c) || _bytes=0
+        if [ "$_bytes" -ne "${SS_KEY_BYTES:-32}" ]; then
+            fail "${_k} is not a valid ${SS_METHOD:-SS2022} key (${_bytes} decoded bytes).
+     Generate:  openssl rand -base64 ${SS_KEY_BYTES:-32} | tr -d '\\n'"
+        fi
+    done
+
+    # Export for use in config files
+    export ECO_PASS STEALTH_PASS STRIKE_PASS
+    export TIER_PASSWORDS_GENERATED
+    log "✓ Tier passwords ready (eco/stealth/strike)"
+}
+
+# ── Create Shadowsocks config ──
+write_config() {
+    local tier="$1"    # eco, stealth, strike
+    local port="$2"
+    local pass_var="$3"
+    local mode="$4"    # tcp_only or tcp_and_udp
+
+    local config_file="/etc/shadowsocks/${tier}.json"
+    local pass="${!pass_var}"
+
+    if [ -f "$config_file" ]; then
+        log "Config ${config_file} already exists"
+        # Check if password matches
+        CURRENT_PASS=$(python3 -c "import json; print(json.load(open('${config_file}'))['password'])" 2>/dev/null || echo "")
+        if [ "$CURRENT_PASS" != "$pass" ]; then
+            warn "Password mismatch in ${config_file}. Regenerating."
+        else
+            return 0
+        fi
+    fi
+
+    mkdir -p /etc/shadowsocks
+
+    cat > "$config_file" <<EOF
+{
+  "server": "0.0.0.0",
+  "server_port": ${port},
+  "password": "${pass}",
+  "method": "${SS_METHOD}",
+  "mode": "${mode}",
+  "fast_open": true,
+  "no_delay": true
+}
+EOF
+    log "✓ Created ${config_file} (port ${port}, mode ${mode})"
+}
+
+# ── Create systemd service ──
+write_service() {
+    local tier="$1"
+    local desc="$2"
+    local extra_execstart="${3:-}"
+    local extra_deps="${4:-}"
+    local post_start="${5:-}"
+
+    local service_file="/etc/systemd/system/shadowsocks-${tier}.service"
+
+    if [ -f "$service_file" ]; then
+        log "Service ${service_file} already exists"
+        return 0
+    fi
+
+    cat > "$service_file" <<SERVICE
+[Unit]
+Description=Shadowsocks Server (${desc})
+After=network.target${extra_deps}
+${extra_deps:+Requires=${extra_deps}}
+
+[Service]
+Type=simple
+ExecStart=${SS_BINARY} -c /etc/shadowsocks/${tier}.json
+${extra_execstart}
+Restart=on-failure
+RestartSec=5
+${post_start:+ExecStartPost=${post_start}}
+
+[Install]
+WantedBy=multi-user.target
+SERVICE
+    log "✓ Created ${service_file}"
+}
+
+# ═══════════════════════════════════════════
+# Main
+# ═══════════════════════════════════════════
+
+install_ssserver
+setup_passwords
+
+mkdir -p /etc/shadowsocks
+
+# ── Eco (BBR, TCP only, 5 Mbps tc) ──
+write_config "eco" 8443 "ECO_PASS" "tcp_only"
+write_service "eco" "Eco — BBR, 5 Mbps tc cap"
+
+# ── Stealth (BBR, TCP only, 100 Mbps tc) ──
+write_config "stealth" 8444 "STEALTH_PASS" "tcp_only"
+write_service "stealth" "Stealth — BBR, 100 Mbps tc cap"
+
+# ── Strike (BBR, TCP+UDP, 200 Mbps tc) ──
+write_config "strike" 8445 "STRIKE_PASS" "tcp_and_udp"
+write_service "strike" "Strike — BBR, 200 Mbps tc cap, UDP"
+
+# ── Reload systemd ──
+systemctl daemon-reload
+
+# ── Enable services (started by setup.sh after all modules complete) ──
+systemctl enable shadowsocks-eco.service 2>/dev/null || true
+systemctl enable shadowsocks-stealth.service 2>/dev/null || true
+systemctl enable shadowsocks-strike.service 2>/dev/null || true
+log "   Services enabled (will start after all modules complete)"
+log "   Eco:     :8443 (TCP, BBR)"
+log "   Stealth: :8444 (TCP, BBR)"
+log "   Strike:  :8445 (TCP+UDP, BBR)"
+log ""
+log "   Passwords saved to ${PASS_FILE} (chmod 600)"
+
+# ═══════════════════════════════════════════
+# Strike UDP-over-TCP (sing-box server) — ON BY DEFAULT
+#
+# Installs a sing-box server listening on UOT_PORT serving Strike's
+# credentials (SS2022), so game/voice UDP can ride inside an allowed
+# TCP flow on networks that drop raw UDP (N4L school WiFi).
+#
+# ADDITIVE: the standard 8443/8444/8445 shadowsocks-rust services are
+# untouched — TCP traffic never uses this instance. Clients only route UDP
+# here when the tier's tier_configs config advertises "uot_port", which
+# seed-pb.py does automatically (same default).
+#
+# Disable with ENABLE_UOT=0 (then re-run seed-pb.py so the tier stops
+# advertising uot_port, otherwise clients are told to use a dead port).
+# ═══════════════════════════════════════════
+UOT_ENABLED="${ENABLE_UOT:-1}"
+UOT_PORT="${UOT_PORT:-8446}"
+SING_BOX_VERSION="${SING_BOX_VERSION:-v1.12.1}"
+SING_BOX_BINARY="/usr/local/bin/sing-box"
+
+install_singbox() {
+    if [ -f "$SING_BOX_BINARY" ] && $SING_BOX_BINARY version &>/dev/null; then
+        log "sing-box already installed at ${SING_BOX_BINARY}"
+        return 0
+    fi
+
+    log "Downloading sing-box ${SING_BOX_VERSION}..."
+    local tmpdir
+    tmpdir=$(mktemp -d)
+    cd "$tmpdir"
+
+    local url="https://github.com/SagerNet/sing-box/releases/download/${SING_BOX_VERSION}/sing-box-${SING_BOX_VERSION#v}-linux-amd64.tar.gz"
+    wget -q "$url" -O sing-box.tar.gz 2>/dev/null || {
+        log "Version ${SING_BOX_VERSION} download failed. Aborting UoT setup (TCP tiers unaffected)."
+        rm -rf "$tmpdir"
+        return 1
+    }
+
+    tar -xzf sing-box.tar.gz
+    cp "sing-box-${SING_BOX_VERSION#v}-linux-amd64/sing-box" "$SING_BOX_BINARY"
+    chmod +x "$SING_BOX_BINARY"
+    cd /
+    rm -rf "$tmpdir"
+    log "✓ sing-box installed"
+}
+
+write_uot_config() {
+    local config_file="/etc/sing-box/config.json"
+    mkdir -p /etc/sing-box
+
+    cat > "$config_file" <<EOF
+{
+  "log": { "level": "info" },
+  "inbounds": [
+    {
+      "type": "shadowsocks",
+      "tag": "strike-uot",
+      "listen": "::",
+      "listen_port": ${UOT_PORT},
+      "method": "${SS_METHOD}",
+      "password": "${STRIKE_PASS}"
+    }
+  ]
+}
+EOF
+    log "✓ Created ${config_file} (port ${UOT_PORT}, Strike creds, udp_over_tcp)"
+    log "  NOTE: 'network' omitted — sing-box defaults to tcp+udp; the value"
+    log "  'tcp_and_udp' (shadowsocks-rust syntax) is REJECTED by sing-box."
+    log "  NOTE: no udp_over_tcp field on the INBOUND — sing-box <=1.12.1"
+    log "  rejects it (unknown field). UoT magic-domain connections are"
+    log "  handled automatically by the shadowsocks inbound; the option only"
+    log "  exists on the client (outbound) side."
+    log "  NOTE: deliberately NO extra tuning keys here. Every field added to"
+    log "  this config is a field sing-box <=1.12.1 must already know, and an"
+    log "  unknown key makes the daemon refuse to start — taking the whole"
+    log "  Strike gaming path down for a cosmetic gain. Transport tuning lives"
+    log "  in /etc/sysctl.d/92-udp-gaming.conf (module 01) instead, where the"
+    log "  kernel applies it and a bad value cannot stop the listener booting."
+    log "  NOTE: SS2022 needs NO version bump. v1.12.1 already supports"
+    log "  ${SS_METHOD} (32-byte key), and the shadowsocks inbound has no"
+    log "  padding field to set — SS2022 padding is applied internally by the"
+    log "  implementation, not via config. Bumping sing-box for this migration"
+    log "  would add risk without adding capability; if it is ever bumped, do"
+    log "  it as its own change and re-test the UoT path end to end."
+}
+
+write_uot_service() {
+    local service_file="/etc/systemd/system/sing-box-uot.service"
+
+    cat > "$service_file" <<SERVICE
+[Unit]
+Description=sing-box server (Strike UDP-over-TCP)
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=${SING_BOX_BINARY} run -c /etc/sing-box/config.json
+Restart=on-failure
+RestartSec=5
+
+# Keep the file-descriptor limit generous.
+#
+# Every UDP flow a Strike client carries becomes a socket on this listener, and
+# UDP-over-TCP multiplexes all of them over relatively few TCP connections. The
+# default soft limit is low enough that a handful of gaming clients can exhaust
+# it, and the symptom is new UDP flows silently failing while TCP keeps working —
+# a "game doesn't connect but the VPN is fine" report that is very hard to
+# attribute. Raised here rather than left to the distro default.
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target
+SERVICE
+    log "✓ Created ${service_file}"
+}
+
+if [ "$UOT_ENABLED" = "1" ]; then
+    if install_singbox; then
+        write_uot_config
+        write_uot_service
+        systemctl daemon-reload
+        systemctl enable sing-box-uot.service 2>/dev/null || true
+        log "✓ UoT enabled: sing-box :${UOT_PORT} (Strike creds, tcp+udp, udp_over_tcp)"
+        log "  seed-pb.py advertises \"uot_port\": ${UOT_PORT} on the strike tier by default,"
+        log "  so existing Strike clients pick it up on their next heartbeat."
+    else
+        warn "UoT setup aborted (download failed). TCP tiers unaffected."
+    fi
+else
+    log "UoT disabled (ENABLE_UOT=0) — Strike clients continue on raw UDP."
+    log "  NOTE: re-run seed-pb.py so the strike tier stops advertising uot_port;"
+    log "  otherwise clients are told to use a UDP port nothing is listening on."
+fi
+
+exit 0
