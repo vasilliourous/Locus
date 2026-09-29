@@ -51,6 +51,23 @@ value      = "mihomo (bundled as verge-mihomo)"
 source     = "client/docs/UPSTREAM-CHANGES.md"
 provenance = "asserted"
 
+[licence.root]
+# The project-wide licence for original material: hub, docs, tooling.
+value      = "CC-BY-NC-ND-4.0"
+source     = "LICENSE (the \u201cExcept where otherwise noted\u201d clause)"
+provenance = "asserted"
+
+[licence.client]
+# NOT the root licence, and it cannot be: client/ is a fork of Clash Verge Rev
+# (GPL-3.0-only) and a GPL fork cannot be relicensed. The root LICENSE carves
+# client/ out in its scope table, and that row is the authority — this value is
+# checked against it, not against a preferred outcome. Recomputed by
+# check-consistency.sh §11 from the LICENSE table + both client manifests, so a
+# change to any of the three that disagrees fails the build.
+value      = "GPL-3.0-only"
+source     = "LICENSE (scope table, `client/` row); client/package.json; client/src-tauri/Cargo.toml; client/LICENSE"
+provenance = "derived"
+
 [hub.domain]
 # THE ONLY STABLE IDENTIFIER FOR THE DEPLOYED SYSTEM IS THE DOMAIN.
 # There is deliberately no host/IP fact anywhere in this file. An address that

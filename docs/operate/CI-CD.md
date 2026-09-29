@@ -83,6 +83,14 @@ without signatures is installable by nobody while looking perfectly healthy on
 the hub. The build fails loudly if `LOCUS_UPDATE_KEY` is absent. See
 `client/docs/SIGNING.md`.
 
+**The secret is checked up front, in the cheap gate.** A missing
+`LOCUS_UPDATE_KEY` is detected in `verify`, before any of the four platform
+builds start, so it costs seconds rather than four ~15-minute builds. Note that
+signing runs on **every push to `main`**, not only on tags — a branch preview also
+needs the key. Actions secrets live on the repository and do **not** come with a
+copied tree, so a migrated or recreated repo must have the secret re-set before
+its first push; the exact command is in `client/docs/SIGNING.md` §4a.
+
 **The raw binaries are staged by hand.** `createUpdaterArtifacts` is `false`, so
 `tauri build` emits the *installed* forms (NSIS, `.app`) but not the bare
 executables the updater consumes. The workflow copies the compiled binary
@@ -159,7 +167,7 @@ The full removed pipeline (job graph, Wails build tags, artifact table, the
 | A skipped release job rendered as a green check | The release job is the *last* of three and depends on `build`; a skipped tag job cannot look like a completed release because nothing is uploaded |
 | Version asserted across six files plus committed binaries | Version is pinned to `client/package.json`, and the tag drives the release name |
 | A build that could publish a partial release | `manifest.json` generation fails on any missing binary **or signature**, and every artifact is checked for its `.sig` before the release is created |
-| Signing assumed rather than required | The build fails outright if `LOCUS_UPDATE_KEY` is unset, because an unsigned release is installable by nobody |
+| Signing assumed rather than required | The build fails outright if `LOCUS_UPDATE_KEY` is unset, because an unsigned release is installable by nobody. The secret is presence-checked in `verify` before any platform build, so the failure costs seconds; and because there is no tag condition on `build`, it is caught on the first push after a repository move |
 | `--frozen-lockfile` drift (a package removed without regenerating the lockfile) | `verify` runs `pnpm install --frozen-lockfile` first, so the drift fails in seconds rather than at build time |
 
 ### The Windows-checkout trap

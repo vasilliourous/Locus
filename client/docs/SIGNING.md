@@ -154,12 +154,66 @@ tar xzf minisign.tar.gz
 
 Then, **before shipping anything**:
 
-1. Put the public key (the second line of `locus_update.pub`) into
-   `tauri.conf.json` → `plugins.updater.pubkey`.
+1. Put the public key into `tauri.conf.json` → `plugins.updater.pubkey` as
+   **base64 of the whole `.pub` file** — *not* its second line. See §3: the bare
+   key line fails at the plugin's `base64_to_string` step. Derive it:
+   `base64 -w0 locus_update.pub`.
 2. Put the whole `locus_update.key` file into the `LOCUS_UPDATE_KEY` GitHub
-   secret.
+   secret — see §4a for the exact command.
 3. Keep an offline copy. Losing it is not recoverable by any means short of §5.
 4. Re-run the sign/verify round trip in §6.
+
+---
+
+## 4a. Installing the secret on GitHub — and why a migrated repo loses it
+
+**CI reads the key from the repository's Actions secret `LOCUS_UPDATE_KEY`.**
+If it is absent the signing step fails with:
+
+```text
+::error::LOCUS_UPDATE_KEY is not set. A release without signatures cannot be
+installed by any client — see client/docs/SIGNING.md.
+```
+
+That failure is deliberate (an unsigned release is installable by nobody), but
+the message does not say *how* to fix it, which is a real cost when it fires.
+
+```sh
+# From a checkout, with gh authenticated against the right account:
+gh secret set LOCUS_UPDATE_KEY --repo vasilliourous/Locus < .locus-keys/locus_update.key
+
+# Verify it exists (prints only names and dates, never values):
+gh secret list --repo vasilliourous/Locus
+```
+
+### ⚠️ Secrets do NOT survive a repository move
+
+This is the trap that has already cost a full red CI run. GitHub Actions secrets
+are stored against the **repository**, and **none** of the following carry them:
+
+| Operation | Do secrets come with it? |
+|---|---|
+| `git clone` / copying the working tree | **No** — secrets are not in git at all |
+| Renaming the repository | **Yes** — a rename keeps the same repository |
+| Creating a new repository from this one | **No** |
+| Transferring ownership | **Yes** — same repository, new owner |
+
+So after a copy or a fresh repo, `LOCUS_UPDATE_KEY` must be re-set by hand
+**before the first `v*` tag**, or the tag fails at signing. The key file itself is
+gitignored (`.locus-keys/`), so the copy does not carry it either — it lives only
+in your offline custody and in the Actions secret.
+
+The **same key must be used**, not a freshly generated one: the matching public
+half is compiled into every already-installed client, and a new key produces
+updates those clients will all refuse (§5).
+
+### The check that cannot be done locally
+
+Nothing in the repo can prove the *secret* is set — that state lives on GitHub.
+`client/src-tauri/tests/update_signature_contract.rs` proves the config and the
+`.pub` file agree, and that the publish path guards the signature shape. It
+cannot see the secret. The only test is the first tag push, so set the secret
+*before* tagging.
 
 ---
 

@@ -9,9 +9,12 @@ an AI agent. This file is the human-facing setup and submission guide.
 
 ## Scope
 
-This fork is `UNLICENSED` and derived from GPL-3.0-only upstream. Do not assume
-the inherited `LICENSE` describes this tree; licence obligations for distribution
-are unresolved and must be settled before any release.
+This directory is **GPL-3.0-only**, inherited from its Clash Verge Rev v2.5.5
+fork base and recorded in `client/LICENSE`. It is **not** covered by the root
+`CC BY-NC-ND 4.0` licence, which carves `client/` out explicitly — a GPL fork
+cannot be relicensed. The identifier is kept in step in three places
+(`client/package.json`, `client/src-tauri/Cargo.toml`, and the root `LICENSE`
+scope table); `server/scripts/check-consistency.sh` §11 fails if they disagree.
 
 Upstream's contribution process (issue-first gating, the `ai-slop` review
 workflow, signed-commit requirements) does **not** apply here — those files were

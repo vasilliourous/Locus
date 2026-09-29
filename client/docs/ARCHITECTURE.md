@@ -90,7 +90,8 @@ Counts and paths verified against the tree in `client/`.
 | `_routers.tsx` | 18 | rewrite |
 
 **Upstream identity removed already** (`client/` state as of this document): package
-name `locus-client`, Cargo package `locus`, license `UNLICENSED`, bundle id
+name `locus-client`, Cargo package `locus`, license `GPL-3.0-only` (the forked
+upstream terms, as the root `LICENSE` carve-out states), bundle id
 `com.locus.client`, product name `Locus`, deep-link scheme `locus`, UA fallback
 `locus-client`, upstream CI and git hooks deleted. The Tauri updater plugin block was
 **removed from `tauri.conf.json`** — see §5.

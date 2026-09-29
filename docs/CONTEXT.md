@@ -140,7 +140,7 @@ and sales docs are kept privately — not in this repo.
 ## 2. Repository Structure
 
 ```
-VPN-Service/
+Locus/
 ├── client/              ← THE LOCUS CLIENT. Tauri 2, built on Clash Verge Rev
 │                        tunnelling via mihomo. Has its own docs in client/docs/.
 ├── server/              ← LIVE hub. VPS deployment modules + PocketBase hooks
@@ -597,11 +597,18 @@ Admin API token:    <see /root/.admin_api_token on the VPS>
 B2 bucket:          vpsvpnbackup
 ```
 
-> Earlier revisions of this file embedded the literal admin token. It has been
-> redacted, but it remains **in git history** — if that history is ever pushed
-> somewhere less trusted, rotate the token (`ADMIN_API_TOKEN` in `/etc/environment`
-> on the VPS, then update `/root/.admin_api_token` and the console's bookmark).
-> Rotating it invalidates any `/admin/?token=…` bookmark.
+> **History note (2026-09-29).** Earlier revisions of this file, in the *previous*
+> repository, embedded the literal admin token; it was redacted and never entered
+> this repository's history. This checkout's history is a fresh 3-commit initial
+> import with no dangling or unreachable objects, so **no token is recoverable
+> from it** — verified by searching every reachable object, not assumed from the
+> redaction. The pre-migration history was not carried over.
+>
+> That is a property of *this* history, and it stops being true the moment old
+> objects are pushed into it. If a legacy history is ever added or the repository
+> is moved somewhere less trusted, rotate the token (`ADMIN_API_TOKEN` in
+> `/etc/environment` on the VPS, then update `/root/.admin_api_token` and the
+> console's bookmark). Rotating it invalidates any `/admin/?token=…` bookmark.
 
 All credentials are stored on the VPS at `/root/` — see `docs/operate/POCKETBASE-SETUP.md` for
 the full list of credential files and locations. Secrets never go in the repo in

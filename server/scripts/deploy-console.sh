@@ -20,7 +20,7 @@
 # the same version rather than reverting to whatever was there before.
 set -euo pipefail
 
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 CONSOLE_DIR="${REPO_ROOT}/server/console"
 REMOTE_BUNDLE="/root/server/console-dist.tar.gz"
 REMOTE_DIR="/var/www/admin"

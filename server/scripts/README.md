@@ -43,7 +43,7 @@ Two conventions hold across this directory:
 
 | Script | What it proves |
 |---|---|
-| `check-consistency.sh` | The cross-language guards: platform keys, frozen wire names, hook-written fields vs the schema, the single cipher definition, and Windows-illegal tracked paths. **Runs in CI and in `deploy.sh`** — run it before any change touching a wire name |
+| `check-consistency.sh` | The cross-language guards: platform keys, frozen wire names, hook-written fields vs the schema, the single cipher definition, Windows-illegal tracked paths, the derived facts in `docs/state.toml`, and the `client/` licence carve-out. **Runs in CI and in `deploy.sh`** — run it before any change touching a wire name |
 | `smoke-test.sh` | Post-deploy health: services, ports, tc classes, hooks, DB rows (expects *N* passed / 0 failed) |
 | `smoke-publish.sh` | That `publish-release.sh` **refuses** bad input (truncated artifact, tampered bytes, wrong version) — the failure that matters is a wrong upload, not a failed one |
 | `smoke-update-endpoint.sh` | That the hub's version rules agree with the client's, by extracting the logic from the shipped hook |

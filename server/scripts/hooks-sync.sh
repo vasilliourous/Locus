@@ -45,7 +45,7 @@
 #             failure, 4 verification failure.
 set -euo pipefail
 
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 HOOKS_SRC="${REPO_ROOT}/server/pb_hooks"
 
 VPS="${VPS:-root@networkingguides.duckdns.org}"

@@ -100,3 +100,12 @@ clash-verge-*.yaml
 
 # Local agent-runner config (whale). Never part of the project.
 .whale/
+
+# The PRE-MIGRATION repository, moved alongside this one so its history (and the
+# original signing key) can be read from it. It is a separate git repository —
+# `git add -A` here would otherwise try to absorb it as a submodule/gitlink, and
+# it carries the old commit history the migration deliberately did not bring
+# across.
+#
+# Nothing in it is part of this project's source. Read from it; never build.
+VPN-Service/

@@ -68,7 +68,7 @@ LISTEN_PORT = int(os.environ.get("FETCH_PORT", os.environ.get("UPLOAD_PORT", "80
 UPDATES_DIR = os.environ.get("UPDATES_DIR", "/var/www/updates")
 TOKEN = os.environ.get("ADMIN_API_TOKEN", "")
 
-GITHUB_REPO = os.environ.get("GITHUB_REPO", "vasilliourous/VPN-Service")
+GITHUB_REPO = os.environ.get("GITHUB_REPO", "vasilliourous/Locus")
 GH_TOKEN = os.environ.get("GH_TOKEN", "")
 
 # Signing secret for one-shot links. Generated on first use and persisted, so

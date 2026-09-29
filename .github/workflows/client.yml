@@ -125,6 +125,36 @@ jobs:
         working-directory: .
         run: server/scripts/check-consistency.sh
 
+      # ── Preflight: is the signing key present? ──
+      #
+      # The signing step in each `build` job fails if LOCUS_UPDATE_KEY is unset,
+      # because an unsigned release is installable by nobody. But that step runs
+      # AFTER a ~15-minute cross-platform build on four runners — so a missing
+      # secret used to cost four full builds and four failures to discover.
+      #
+      # This checks the same secret in the cheap gate, so the failure costs
+      # seconds. It is deliberately only a presence check: CI cannot verify the
+      # key MATCHES the compiled-in pubkey without signing, and the value must
+      # never be logged. Whether the keypair is correct is covered by
+      # client/src-tauri/tests/update_signature_contract.rs.
+      #
+      # A missing secret is the expected state after the repository is copied or
+      # recreated — Actions secrets live on the repository and do not travel with
+      # the code. See client/docs/SIGNING.md §4a.
+      - name: Check the signing key is configured
+        working-directory: .
+        env:
+          LOCUS_UPDATE_KEY: ${{ secrets.LOCUS_UPDATE_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -z "${LOCUS_UPDATE_KEY:-}" ]; then
+            echo "::error::LOCUS_UPDATE_KEY is not set, so every build job would fail at signing."
+            echo "::error::Set it with: gh secret set LOCUS_UPDATE_KEY --repo ${GITHUB_REPOSITORY:-<owner>/<repo>} < .locus-keys/locus_update.key"
+            echo "::error::Secrets do not survive a repository copy. See client/docs/SIGNING.md §4a."
+            exit 1
+          fi
+          echo "LOCUS_UPDATE_KEY is present (value not printed; length ${#LOCUS_UPDATE_KEY} bytes)"
+
       - uses: pnpm/action-setup@v4
         with:
           # package.json is in client/, and defaults.run.working-directory does

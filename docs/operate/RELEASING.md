@@ -39,6 +39,23 @@ verified-against: docs/STATE.md
 > **There is no rollout percentage.** Publishing IS offering; `active` is the only
 > off switch, and there is no server-driven downgrade.
 
+### Before the *first* tag in a repository: set the signing secret
+
+CI signs every build, so `LOCUS_UPDATE_KEY` must exist as an Actions secret or
+step 2 fails (and so does every branch build — signing is not tag-gated).
+**Actions secrets are stored per-repository and are not carried by a copy or a
+clone**, so a migrated repository starts without it:
+
+```sh
+gh secret set LOCUS_UPDATE_KEY --repo vasilliourous/Locus < .locus-keys/locus_update.key
+gh secret list --repo vasilliourous/Locus   # confirms it exists; never prints the value
+```
+
+Use the **same** key, not a new one — its public half is compiled into every
+installed client, so a replacement key produces updates those clients all refuse.
+Full detail, including which operations do and do not preserve secrets, is in
+`client/docs/SIGNING.md` §4a.
+
 ---
 
 ## Publishing a build to the hub

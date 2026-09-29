@@ -18,7 +18,7 @@
 # Exit codes: 0 all assertions held, 1 an assertion failed.
 set -euo pipefail
 
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 PUBLISH="${1:-${REPO_ROOT}/server/scripts/publish-release.sh}"
 [ -f "$PUBLISH" ] || { echo "smoke: no such script: $PUBLISH" >&2; exit 1; }
 PUBLISH="$(cd "$(dirname "$PUBLISH")" && pwd)/$(basename "$PUBLISH")"
@@ -151,7 +151,7 @@ check "and says so plainly" grep -q "does not look like a version" <<<"$OUT"
 echo "case 7 — --from-github for a version that does not exist"
 if curl -fsS -m 8 -o /dev/null https://api.github.com 2>/dev/null; then
     set +e
-    OUT="$(RELEASE_DIR="$WORK/gh" GITHUB_REPO=vasilliourous/VPN-Service DRY_RUN=1 \
+    OUT="$(RELEASE_DIR="$WORK/gh" GITHUB_REPO=vasilliourous/Locus DRY_RUN=1 \
            bash "$PUBLISH" 99.99.99 --from-github 2>&1)"; RC=$?
     set -e
     check "exits 4 (artifact acquisition)" [ "$RC" -eq 4 ]

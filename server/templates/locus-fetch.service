@@ -1,6 +1,6 @@
 [Unit]
 Description=Locus release fetch service (GitHub Release -> /var/www/updates)
-Documentation=https://github.com/vasilliourous/VPN-Service
+Documentation=https://github.com/vasilliourous/Locus
 After=network-online.target
 Wants=network-online.target
 
@@ -12,7 +12,7 @@ Environment=UPDATES_DIR=/var/www/updates
 Environment=FETCH_PORT=8091
 # The repo whose Releases are pulled. Public, so no token is required; set
 # GH_TOKEN in /etc/environment if it ever becomes private.
-Environment=GITHUB_REPO=vasilliourous/VPN-Service
+Environment=GITHUB_REPO=vasilliourous/Locus
 # One-shot trigger links expire after this many seconds.
 Environment=FETCH_LINK_TTL=900
 ExecStart=/usr/bin/python3 /root/server/scripts/fetch-release.py

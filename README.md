@@ -155,7 +155,7 @@ charset `ABCDEFGHJKLMNPQRSTUVWXYZ23456789`). The `MYVPN-` form was retired in th
 ## Project Layout
 
 ```
-VPN-Service/
+Locus/
 ├── client/                   ← THE LOCUS CLIENT (Tauri 2, built on Clash Verge Rev; Locus logic in src-tauri/src/locus/)
 │   ├── src/                  ── React + TypeScript frontend
 │   ├── src-tauri/            ── Rust backend (Tauri), capabilities, bundle config

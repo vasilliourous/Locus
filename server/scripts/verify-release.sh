@@ -194,7 +194,7 @@ fi
 # ── 5. Optional: the release exists on GitHub ──────────────────────────────
 echo
 echo "5. GitHub release"
-if curl -fsS -m 15 -o /dev/null "https://api.github.com/repos/vasilliourous/VPN-Service/releases/tags/v${VERSION}" 2>/dev/null; then
+if curl -fsS -m 15 -o /dev/null "https://api.github.com/repos/vasilliourous/Locus/releases/tags/v${VERSION}" 2>/dev/null; then
     ok "GitHub Release v${VERSION} exists"
 else
     note "no GitHub Release for tag v${VERSION} (or no network) — CI may not have finished"

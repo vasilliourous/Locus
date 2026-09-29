@@ -34,7 +34,7 @@
 #   PB_ADMIN_EMAIL   PocketBase admin email   ─┐ required for update_config
 #   PB_ADMIN_PASS    PocketBase admin password ─┘ (or PB_TOKEN to skip login)
 #   RELEASE_DIR      where to find the artifacts (default ./release-artifacts)
-#   GITHUB_REPO      owner/name for --from-github (default vasilliourous/VPN-Service)
+#   GITHUB_REPO      owner/name for --from-github (default vasilliourous/Locus)
 #   GH_TOKEN         optional; only needed for a private repo or to dodge
 #                    anonymous rate limits on the download URL
 #   DRY_RUN=1        print actions without uploading or updating the DB
@@ -84,7 +84,7 @@ PB_API="${PB_API:-https://networkingguides.duckdns.org}"
 ROLLOUT_PERCENT="${ROLLOUT_PERCENT:-100}"
 RELEASE_DIR="${RELEASE_DIR:-./release-artifacts}"
 DRY_RUN="${DRY_RUN:-0}"
-GITHUB_REPO="${GITHUB_REPO:-vasilliourous/VPN-Service}"
+GITHUB_REPO="${GITHUB_REPO:-vasilliourous/Locus}"
 ALLOW_PARTIAL="${ALLOW_PARTIAL:-0}"
 FROM_GITHUB=0
 
