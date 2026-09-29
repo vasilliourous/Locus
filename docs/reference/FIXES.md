@@ -27,6 +27,112 @@ corrections are marked. For what is *still* broken, read `STILL-OPEN.md`.
 
 ---
 
+## THE GUARD THAT REFUSED EVERY RELEASE: goja HAS NO `atob` (2026-09-30)
+
+Publishing 3.2.7 from the admin console was refused outright, naming all four
+platforms:
+
+```text
+refusing to publish 3.2.7 — the fetch did not produce a verified, signed
+artifact for: linux (signature not base64 of a minisign .sig file),
+windows (signature not base64 of a minisign .sig file),
+macos_intel (signature not base64 of a minisign .sig file),
+macos_arm (signature not base64 of a minisign .sig file).
+```
+
+The message blames the **fetch**. The fetch was innocent. This is the direct
+sequel to *THE UPDATE COULD NOT BE INSTALLED: THE SIGNATURE WAS UNDECODABLE*
+(2026-09-29, above): that entry established the correct wire format —
+`base64(entire .sig file text)` — and added a shape guard at the hub. The guard
+was written against a base64 decoder **that this runtime does not have**, so it
+returned `false` for every input, correct ones included.
+
+### The defect
+
+`server/pb_hooks/admin_console.pb.js`, `isPlausibleMinisignSignature()`:
+
+```js
+var decoded = $os ? atob(s) : "";
+```
+
+`$os` is truthy, so this evaluates `atob(s)`. **`atob` is not defined in
+PocketBase 0.22.21's goja**, so the call throws a `ReferenceError` — caught by the
+function's own `catch (decErr) { return false; }`, which converts a *crash* into
+the honest-sounding verdict "not base64 of a minisign .sig file".
+
+A guard whose decoder does not exist fails **closed on every input**. That is why
+it read like a data outage: the only way to make it pass would have been to
+supply something that is not a signature at all.
+
+### What goja actually provides (measured, PB 0.22.21)
+
+Probed live with a temporary hook, then removed:
+
+| Global | Available? |
+|---|---|
+| `atob`, `btoa` | **no** |
+| `Buffer`, `TextDecoder` | **no** |
+| `$os` | yes — args/exec/**filesystem**/getenv only; **no base64** |
+| `$security` | yes — md5/sha256/sha512/hs256/hs512/equal/randomString/JWT/encrypt/decrypt; **no base64** |
+
+There is **no builtin base64 anywhere in the hook runtime**. Any hook needing it
+must implement it in pure JS. `$security`'s presence is the trap: it looks like
+the place a base64 helper would live, and it has none.
+
+### Why the error was misleading, and how that was proved
+
+Every other component in the chain was correct and was verified rather than
+assumed:
+
+- the four `.sig` files on disk under `/var/www/updates/3.2.7/` are real 4-line
+  minisign signatures;
+- `fetch-release.py` returns them base64-encoded, once, in
+  `artifacts[<platform>].signature` (linux: 364 chars, `dW50cnVzdGVk…` = base64 of
+  `untrusted…`) — confirmed by calling the live endpoint;
+- `publish-release.sh`, the client contract test, and CI's `manifest.json` all
+  agree on the same wire format.
+
+The decisive test was to **post the live fetch output straight back into
+`releases.publish`**. It reproduced the refusal verbatim — so the payload was
+right and the *consumer* was wrong. A producer/consumer error message that blames
+the producer should always be checked this way before touching the producer.
+
+### The fix
+
+Replace the `$os ? atob(s) : ""` line with a self-contained pure-JS base64
+decoder (alphabet lookup plus a bit accumulator) and scan the decoded text for
+minisign's four-line shape. No globals, so nothing to be missing. Verified
+against the four real live signatures: each decodes to 4 lines whose first line
+is `untrusted comment: ` and third is `trusted comment: `.
+
+`releases.set` shares this helper, so the activate path was refusing releases for
+the same reason. Both are fixed by the one change.
+
+### The operational trap this exposed
+
+**PocketBase caches `pb_hooks` at startup.** Editing a `.pb.js` file under
+`/opt/pocketbase/pb_hooks/` has **no effect** until `systemctl restart pocketbase`.
+During this investigation a correctly-applied patch appeared not to apply because
+the running process was still serving the previously-loaded hook — the classic
+"the fix did not work" false negative. Any hook diagnostic that relies on a new
+code path must restart first, or it will measure the *old* code and lie.
+
+### For whoever picks this up
+
+- **Prefer a guard that can fail for a legitimate reason.** A predicate returning
+  `false` on every input is indistinguishable from a total data loss in its
+  output; the failure mode here was invisible for exactly as long as nobody
+  published a release.
+- **The same class is still live elsewhere if `atob`/`btoa` are used anywhere
+  else.** At the time of the fix, `atob` appeared in the hook tree in this one
+  place only — worth re-checking with `grep -rn 'atob\|btoa' server/pb_hooks/`
+  before assuming it stays that way.
+- The client-side contract test cannot catch this: it exercises Rust and Python,
+  not goja. A hub-side guard needs a hub-side test, or the same blind spot
+  returns.
+
+---
+
 ## VOLATILE FACTS WERE ASSERTED AS PROPERTIES, AND NOTHING NOTICED (2026-09-29)
 
 The hub's IP address was recorded as a fact in `docs/STATE.md`, in a code test and

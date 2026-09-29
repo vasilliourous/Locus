@@ -77,6 +77,41 @@ routerAdd("POST", "/api/admin/console", function(e) {
         return diff === 0;
     }
 
+    // Base64-decode to a binary string, in PURE JS.
+    //
+    // WHY THIS IS HAND-ROLLED: PocketBase 0.22.21's goja defines NO base64
+    // builtin. `atob`, `btoa`, `Buffer` and `TextDecoder` are all undefined,
+    // and neither `$os` (filesystem/exec only) nor `$security` (hashes, JWT,
+    // encrypt/decrypt) exposes one. Measured on the live hub 2026-09-30.
+    //
+    // This mattered: the previous decoder line was `$os ? atob(s) : ""`. `$os`
+    // is truthy, so it called an undefined `atob`, threw ReferenceError, and the
+    // enclosing try/catch turned that CRASH into the verdict "not base64 of a
+    // minisign .sig file" — for EVERY input, correct ones included. The console
+    // refused to publish or activate any release, blaming the fetch, which was
+    // innocent throughout. See FIXES.md 2026-09-30.
+    //
+    // Standard alphabet, big-endian bit accumulation, '=' terminates. Returns
+    // "" on anything that is not clean base64 so a malformed value fails the
+    // shape check below rather than decoding to garbage.
+    function base64ToBinary(str) {
+        var ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+        var s = String(str || "").replace(/[=\s]+$/, "");
+        if (!s) return "";
+        var out = "", bits = 0, acc = 0;
+        for (var i = 0; i < s.length; i++) {
+            var v = ALPHABET.indexOf(s.charAt(i));
+            if (v < 0) return "";        // not base64 at all
+            acc = (acc << 6) | v;
+            bits += 6;
+            if (bits >= 8) {
+                bits -= 8;
+                out += String.fromCharCode((acc >> bits) & 0xFF);
+            }
+        }
+        return out;
+    }
+
     // Whether a value is plausibly a `signature_<platform>` field in the wire
     // format the client's updater expects: base64(ENTIRE .sig file text).
     //
@@ -103,20 +138,16 @@ routerAdd("POST", "/api/admin/console", function(e) {
         if (!/^[A-Za-z0-9+/]+=*$/.test(s)) return false;
         // Long enough to hold minisign's four lines (~250-350 chars pre-wrap).
         if (s.length < 200) return false;
-        try {
-            var decoded = $os ? atob(s) : "";
-            if (!decoded) return false;
-            var lines = decoded.split("\n");
-            var nonEmpty = [];
-            for (var li = 0; li < lines.length; li++) {
-                if (lines[li].replace(/\s/g, "")) nonEmpty.push(lines[li]);
-            }
-            if (nonEmpty.length < 4) return false;
-            return nonEmpty[0].indexOf("untrusted comment: ") === 0 &&
-                   nonEmpty[2].indexOf("trusted comment: ") === 0;
-        } catch (decErr) {
-            return false;
+        var decoded = base64ToBinary(s);
+        if (!decoded) return false;
+        var lines = decoded.split("\n");
+        var nonEmpty = [];
+        for (var li = 0; li < lines.length; li++) {
+            if (lines[li].replace(/\s/g, "")) nonEmpty.push(lines[li]);
         }
+        if (nonEmpty.length < 4) return false;
+        return nonEmpty[0].indexOf("untrusted comment: ") === 0 &&
+               nonEmpty[2].indexOf("trusted comment: ") === 0;
     }
 
     var CHARSET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";

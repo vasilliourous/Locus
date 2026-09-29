@@ -14,6 +14,40 @@ Ordered by whether I could have validated it here.
 
 ## Open, and blocked in this environment
 
+### The publish guard calls `atob`, which goja does not have — the fix is proven but not applied
+
+**Added 2026-09-30.** The admin console refuses to publish or activate **any**
+release, reporting for all four platforms *"signature not base64 of a minisign
+.sig file"* — a message that wrongly blames the fetch. The full diagnosis is the
+2026-09-30 entry in `FIXES.md`.
+
+In one line: `server/pb_hooks/admin_console.pb.js`
+`isPlausibleMinisignSignature()` decodes with `$os ? atob(s) : ""`, and
+**PocketBase 0.22.21's goja defines no `atob`, no `btoa`, no `Buffer`, and no
+`TextDecoder`** — nor does `$security` or `$os` expose base64. The call throws,
+the function's own `catch` returns `false`, and every value is judged invalid,
+correct ones included.
+
+**The fix is proven on the live hub but has not been committed.** A pure-JS base64
+decoder (alphabet lookup plus a bit accumulator) decodes all four real signatures
+to minisign's 4-line shape. That patch was applied, tested, and **reverted** —
+`/opt/pocketbase/pb_hooks/admin_console.pb.js` is byte-identical to
+`/root/server/pb_hooks/admin_console.pb.js` (md5 `306e7780…`), so the live hub is
+in its original, still-broken state. Nothing was left behind.
+
+To finish it: replace that one line with a self-contained pure-JS decoder, then
+**restart PocketBase** before testing — it caches `pb_hooks` at startup, and a
+stale-cached hook will make a correct patch look like it did not apply.
+
+Two things a successor should know:
+
+1. `atob`/`btoa` should be checked across the whole hook tree
+   (`grep -rn 'atob\|btoa' server/pb_hooks/`) — this class of bug is only visible
+   at runtime, never at parse time, and the Rust/Python contract test cannot see it.
+2. A guard that returns `false` for *every* input is indistinguishable from a
+   total data outage in its output. It was not noticed because nobody published a
+   release in the window.
+
 ### The term model, renewal and device binding have never met a database
 
 **Added 2026-09-29.** `9a91da1` + `6a422bc` added the term model, `codes.renew`,
