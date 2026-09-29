@@ -354,6 +354,107 @@ ssh $VPS "systemctl restart pocketbase"
 ssh $VPS "systemctl restart tc-eco-cap tc-stealth-cap tc-strike-cap"
 ```
 
+### One-command deploy (`server/scripts/deploy.sh`)
+
+`setup.sh` is the *blank-box* path. For routine changes to a running hub, use
+**`server/scripts/deploy.sh`** — it does hooks + console + staging + verify in one
+command, and it is **idempotent and diff-based** (unchanged hooks are not
+uploaded, nothing is restarted unless something changed). It never writes a
+record, so deploying code cannot withdraw a release or reset a rollout.
+
+```bash
+server/scripts/deploy.sh              # hooks + console + staging + verify
+server/scripts/deploy.sh --check      # dry run, changes nothing
+server/scripts/deploy.sh --hooks      # hooks only
+server/scripts/deploy.sh --console    # console only
+```
+
+What each step covers, and why:
+
+| Step | Destination | Why |
+|---|---|---|
+| hooks | `/opt/pocketbase/pb_hooks/` | uploaded to `.new`, hash-verified, then `install -o pocketbase`. A NEW hook needs a restart to register, so it restarts. |
+| console | `/var/www/admin/` | built, tarred, uploaded, extracted, and **served-verified** (`/admin/` must 200). |
+| staging | `/root/server/` | `setup.sh` deploys FROM here, not from the repo. Leaving it stale is how a re-run reverts hooks. |
+| locus-fetch | restart | it runs FROM the staging copy, so a changed script has no effect until the process is recycled. |
+| verify | — | health, `/api/update`, `/api/release`, heartbeat, hook-drift. |
+
+**SSH access.** Key auth is installed; nothing prompts. `~/.ssh/config` defines a
+`Host locus-hub` alias (HostName = the hub domain, User root, IdentityFile the
+deploy key in `.deploy/locus_deploy` — passphrase-free, gitignored, in
+`/root/.ssh/authorized_keys`):
+
+```bash
+ssh locus-hub 'uptime'
+```
+
+`deploy.sh` probes for the `locus-hub` alias and falls back to
+`root@<domain>` if it is absent. A password fallback exists
+(`server/scripts/vps-test/sshp.py`, reading `VPS_HOST`/`VPS_USER`/`VPS_PW` from
+the environment, never the command line) for when the key is unavailable.
+
+### Working on the live hub — techniques that work
+
+The single VPS **is** production (no sandbox). Validate on the live host, staged
+and reversible: read before write, and verify after every change. These
+techniques were hard-won here.
+
+**Arm a deadman switch before risky remote work.** Before any change that can
+lock you out (firewall, SSH):
+```bash
+ssh "$VPS" "nohup bash -c 'sleep 120; ufw allow 22/tcp; ufw reload' >/dev/null 2>&1 &"
+```
+This cost a provider-console recovery to learn. **Do not** re-add `ufw limit
+22/tcp` (see the blank-VPS gotchas above).
+
+**SSH without `sshpass`** (`sshpass` is not installed): use an askpass helper.
+Write it with a heredoc, not `printf` on one line — a password containing `%`
+gets mangled otherwise.
+```sh
+cat > /tmp/askpass.sh <<'EOF'
+#!/bin/sh
+printf '%s\n' "$VPS_PW"
+EOF
+chmod 700 /tmp/askpass.sh
+SSH_ASKPASS=/tmp/askpass.sh SSH_ASKPASS_REQUIRE=force setsid -w ssh \
+  -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+  -o PreferredAuthentications=password -o PubkeyAuthentication=no \
+  -o NumberOfPasswordPrompts=1 -o ConnectTimeout=10 -o LogLevel=ERROR \
+  root@"$VPS" '<command>'
+```
+
+**Transferring files: base64 over SSH.** Reliable for scripts and small trees;
+prefer it over a long inline `ssh "…"` with nested quoting, which failed
+repeatedly here.
+```sh
+b64=$(base64 -w0 local_file)
+ssh "$VPS" "base64 -d > /remote/path <<'B64'
+$b64
+B64"
+```
+
+**Prefer a script file over a long inline command.** Write the script locally,
+base64 it, decode remotely, then `bash /tmp/script.sh`. For tarballs,
+`cat f | ssh … 'cat > /tmp/x'`.
+
+**VPS tooling gaps (all bit us):**
+- **No `node`** — syntax-check `.pb.js` hooks locally with `node --check`.
+- **No `yaml` module** in python3 — validate workflow YAML another way.
+- `mkswap -q` is unsupported on this util-linux.
+- `b2` CLI is **v5**: use `b2 file download b2://…` / `b2 file info b2://…`
+  (`download-file-by-name` was removed and fails silently).
+
+**Always confirm staging vs live hook equality before finishing** — a re-run of
+`setup.sh` copies staging → live, so a stale staging dir silently reverts fixes:
+
+```bash
+for f in activation admin_console admin_unbind code_lookup heartbeat release update; do
+  a=$(ssh "$VPS" "md5sum /opt/pocketbase/pb_hooks/$f.pb.js 2>/dev/null | cut -d' ' -f1")
+  b=$(ssh "$VPS" "md5sum /root/server/pb_hooks/$f.pb.js 2>/dev/null | cut -d' ' -f1")
+  [ "$a" = "$b" ] && echo "$f in sync" || echo "$f DRIFT"
+done
+```
+
 ---
 
 ## Admin Console (web UI)

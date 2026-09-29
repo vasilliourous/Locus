@@ -62,10 +62,19 @@ fi
 log "✓ Build OK ($(du -sh dist | cut -f1))"
 
 # ── Package ──
+# `-C dist .` packs the CONTENTS of dist/ with index.html at the archive root.
+# This level matters: 05-caddy.sh extracts into /var/www/admin and requires
+# index.html at the top level. Packing `dist` itself (i.e. `tar czf x dist`)
+# yields `./dist/index.html` and fails the deploy with "Console bundle has no
+# index.html". Assert it here so the mistake cannot leave this machine.
 TARBALL="$(mktemp -t locus-console-XXXXXX.tar.gz)"
 trap 'rm -f "$TARBALL"' EXIT
 tar czf "$TARBALL" -C dist .
-log "✓ Packaged $(basename "$TARBALL")"
+if ! tar tzf "$TARBALL" | grep -qx './index.html'; then
+    fail "packed bundle has no ./index.html at its root — wrong directory level.
+     Expected: tar czf BUNDLE -C dist .   (NOT: tar czf BUNDLE dist)"
+fi
+log "✓ Packaged $(basename "$TARBALL") (index.html at root, $(tar tzf "$TARBALL" | wc -l | tr -d ' ') entries)"
 
 # ── Upload ──
 log "Uploading to ${VPS}"
@@ -83,9 +92,28 @@ ssh "$VPS" "
 log "✓ Deployed to ${REMOTE_DIR}"
 
 # ── Verify ──
+# The upload + extract above is the real guarantee: the bundle is on the host
+# and every asset is in place. This HTTP check is a BONUS that only means
+# something once Caddy is serving the domain — which on a BLANK box is not yet
+# true, because that is exactly what the following `setup.sh` run installs.
+#
+# It must therefore be a warning, not a failure, on that path. It used to be a
+# hard `fail`, which produced a genuinely confusing blank-box deploy: the
+# operator followed DEPLOY.md's documented order (stage -> deploy-console.sh ->
+# setup.sh), the bundle uploaded and extracted correctly, and then the script
+# exited non-zero with "console not serving (HTTP 000)" — making a SUCCESSFUL
+# console upload look like a failure at the step before the one that would have
+# made it serve. See docs/operate/DEPLOY.md "Staging the server tree".
 sleep 2
 CODE=$(curl -s -o /dev/null -w '%{http_code}' "https://${DOMAIN}/admin/" || echo 000)
-[ "$CODE" = "200" ] || fail "console not serving (HTTP ${CODE}) at https://${DOMAIN}/admin/"
+if [ "$CODE" != "200" ]; then
+    warn "https://${DOMAIN}/admin/ returned HTTP ${CODE}."
+    warn "This is EXPECTED on a fresh host where Caddy is not up yet — the bundle"
+    warn "is uploaded to ${REMOTE_BUNDLE} and will be served once you run setup.sh."
+    warn "If this host is ALREADY running the hub, a non-200 here is a real fault."
+    log "✓ Bundle staged. Continuing without the live-serving check."
+    exit 0
+fi
 
 ASSET=$(curl -s "https://${DOMAIN}/admin/" | grep -o '/admin/assets/[^"]*\.js' | head -1 || true)
 if [ -n "$ASSET" ]; then

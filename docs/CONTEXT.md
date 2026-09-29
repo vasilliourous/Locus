@@ -587,6 +587,45 @@ client in `v4/`; removed files recoverable from git history)
 11. **Do not bulk-delete `codes` or `code_events`.** Real customer data lives
     there — see the live-data warning at the top of this file.
 
+### How the operator wants work done
+
+These are working agreements established with the operator across the
+2026-09 sessions. They are instructions, not trivia; they changed the work
+materially.
+
+- **Automate anything the operator would otherwise do by hand.** They are also the
+  end user: *"make the project easy for me to deploy and use with little
+  friction. Basically everything should be done with automation."*
+  `server/scripts/deploy.sh` and the installed `locus-hub` SSH key exist for this
+  reason. Do not hand over a list of steps when a script could do it; if a manual
+  step is genuinely unavoidable, say so and say why.
+- **Functionality first; polish later.** *"Let us not go overboard before having a
+  functional product … then we prune and clean up afterwards."* Deferred cleanup
+  is correct while the product is unfinished — but keep the list and do it once
+  the thing works.
+- **Do not plan instead of doing.** Produce a plan when asked, then **execute**
+  and ask at genuine decisions — not at every step.
+- **Ask when the decision is theirs** (version numbering, deleting a feature,
+  signing-key custody). Do not guess on anything expensive or irreversible, and
+  do not present long A/B/C prose menus.
+- **Survey the whole system before deciding.** The operator pushed back hard on
+  this once: features (the admin console, the updater) were found only after they
+  prompted. Research first; this cuts the other way too — docs drift from code, so
+  when they disagree **the code wins and the doc is the bug**.
+- **Do not fixate on one thing.** The specific failure: finding Windows CI bugs
+  one per 20-minute run instead of reading the code and fixing the class at once.
+- **Communication:** direct and technical, no filler. **Correct your own earlier
+  claims explicitly** when you find they were wrong. Say what is *verified*
+  separately from what is *assumed* — "tests pass" is not "proven against the
+  live system".
+
+**Standing product decisions** (from the same sessions): TUN always on (not a mode
+choice — a system-proxy mode passes traffic the school can see); no node selection
+(one server per tier); Windows and macOS first, Linux last; **no macOS
+code-signing/notarisation** (the operator supplies a "launch unsigned apps"
+tutorial instead); the client version is its own line (not Clash Verge's inherited
+`2.5.5`), with the three version sites guarded by a test.
+
 ### Key credentials (live VPS)
 
 ```

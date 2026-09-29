@@ -121,10 +121,72 @@ ssh root@your-vps "/root/server/setup.sh"
 no Node and the console source is not shipped to it). Both `VPS` and `DOMAIN`
 MUST be set explicitly: the script has no usable default for a new host.
 
+> **On a fresh host, `deploy-console.sh` may report `HTTP 000` and stop — that
+> is expected, not a failure.** Its final check fetches `https://$DOMAIN/admin/`,
+> but on a blank box Caddy is not serving the domain until step 3 installs it.
+> The script now treats a non-200 there as a warning and exits 0 once the bundle
+> is safely staged at `/root/server/console-dist.tar.gz`; the console goes live
+> during `setup.sh`. If you are running it against a host whose hub is **already
+> up**, a non-200 is a real fault and should be investigated.
+
+**Hand-packing the bundle (only if you are not using `deploy-console.sh`).**
+The tarball must contain the **contents** of `server/console/dist/`, with
+`index.html` at the archive root — *not* the `dist/` directory itself. The
+one-character difference is the whole bug:
+
+```bash
+# RIGHT — index.html at archive root
+cd server/console && npm run build
+tar czf /tmp/console-dist.tar.gz -C dist .
+
+# WRONG — yields ./dist/index.html, and 05-caddy.sh fails with
+# "Console bundle has no index.html"
+tar czf /tmp/console-dist.tar.gz -C server/console dist
+```
+
+Then upload it: `scp /tmp/console-dist.tar.gz root@your-vps:/root/server/`.
+
 If you cannot build the console, deploy with `SKIP_CONSOLE=1` — the hub, the
 tiers and the API all come up without it, and you can add the console later by
 running `deploy-console.sh` and re-running `setup.sh` (module 05 extracts the
 bundle if it is present).
+
+### Routine changes to a running hub: `deploy.sh`
+
+`setup.sh` is the blank-box path. For changes to an **already-running** hub, use
+`server/scripts/deploy.sh` instead — one command for hooks + console + staging +
+verify, **idempotent and diff-based** (unchanged hooks are not uploaded and
+nothing is restarted unless something changed). It never writes a record, so
+deploying code cannot withdraw a release or reset a rollout.
+
+```bash
+server/scripts/deploy.sh              # hooks + console + staging + verify
+server/scripts/deploy.sh --check      # dry run, changes nothing
+server/scripts/deploy.sh --hooks      # hooks only
+server/scripts/deploy.sh --console    # console only
+```
+
+It relies on the installed SSH key (see below); it probes for the `locus-hub`
+alias and falls back to `root@<domain>`. Full step table and the staging/live
+drift check are in [`OPS.md`](OPS.md) → "One-command deploy".
+
+### SSH access to the hub
+
+Key auth is installed, so nothing prompts:
+
+```bash
+ssh locus-hub 'uptime'
+```
+
+- The deploy key is `.deploy/locus_deploy` — **passphrase-free**, gitignored,
+  installed in `/root/.ssh/authorized_keys`.
+- `~/.ssh/config` defines `Host locus-hub` (HostName = the hub domain, User
+  root, IdentityFile the deploy key).
+- This dedicated key exists because the machine's only other usable private key
+  was passphrase-protected (so `ssh` invoked `ssh-askpass`, which is not
+  installed) and the `.pub` beside it did not even match — so no tooling could
+  authenticate non-interactively. See [`OPS.md`](OPS.md) for the askpass
+  fallback and the pre-flight deadman-switch technique.
 
 ### Option A: Local Machine with Key File (Recommended)
 
