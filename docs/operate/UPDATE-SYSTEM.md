@@ -224,10 +224,23 @@ SHA-256 **fails closed**: a missing checksum is a refusal, never a warning.
 
 ### Then the installer
 
-Download, verify, hand to the platform installer. The installer is the Tauri
-plugin's (`Update::install`), driven by the metadata `/api/update` returns — it
-handles NSIS on Windows, `.app`/`.dmg` on macOS and the Linux package formats,
-including `/LANG` so the NSIS dialog does not appear mid-update.
+Download, verify, hand to the platform installer.
+
+**The download is the client's own** (`locus/update/apply.rs`): it streams to a
+file in the app data root, hashing incrementally, so the artifact is never held
+in memory. This matters — the plugin's own `download_and_install` reads the
+**whole artifact into a `Vec<u8>`** before verifying it, and that buffering is
+enough to abort the allocation on a school laptop, killing the process with no
+log line and leaving the progress bar at 0%. That was a live defect (the
+"Install Now → 0% → crash" report), and the fix is that the streaming downloader
+is now the only path.
+
+**The install is still the plugin's** (`Update::install`): it handles NSIS on
+Windows, `.app`/`.dmg` on macOS and the Linux package formats, including `/LANG`
+so the NSIS dialog does not appear mid-update, and it re-verifies the minisign
+signature over the bytes we hand it. `check-consistency.sh` §12 fails the build
+if the install path reverts to the buffering downloader, or if the streaming
+downloader loses its only production caller — the state that produced that bug.
 
 **Not ported from the retired client:** the hand-rolled backup / swap / fork /
 sentinel-revert machinery. That existed because a portable binary had to replace
@@ -271,6 +284,8 @@ Be precise about what has been proven.
 | Client version comparison, 14 cases incl. `1.9.0` vs `1.10.0` | **Verified** (Rust tests) |
 | Hub version gate agrees with the client's | **Verified** — `server/scripts/smoke-update-endpoint.sh` extracts the logic from the shipped hook |
 | Signature file validation (8 cases incl. a real signature) | **Verified** |
+| Streaming download, SHA-256 fail-closed, and the hub-checksum read | **Verified** (Rust tests) |
+| The crash class ("Install Now" → 0% → process dies) cannot recur unnoticed | **Guarded** — `check-consistency.sh` §12 fails if the install path returns to the memory-buffering downloader |
 | `/api/update` response shapes | **Not yet run against a live host** |
 | A real end-to-end update on real hardware | **Not yet done** — this is the acceptance gate |
 

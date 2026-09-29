@@ -27,6 +27,92 @@ corrections are marked. For what is *still* broken, read `STILL-OPEN.md`.
 
 ---
 
+## THE UPDATE DOWNLOADED INTO RAM AND KILLED THE APP (2026-09-30)
+
+"Install Now" left the student with a progress bar frozen at 0%, and then the
+app died. The log recorded the hub offering 3.2.8 and the heartbeat and nothing
+else — no line about the update starting, none about it failing:
+
+```text
+[2026-09-30 03:05:49.601] INFO [Config] [locus] starting heartbeat (tier strike)
+[2026-09-30 03:05:49.948] INFO [System] [locus] the hub is offering update 3.2.8
+```
+
+That is not a shortage of logs at the point of failure. It is a path with **no
+log lines to have**: `locus_install_update` was silent until it either failed to
+check or succeeded. A process that died mid-download left nothing behind, which
+is why the report could not say where it stopped.
+
+### The defect
+
+The install path called the Tauri plugin's `download_and_install`. Reading the
+plugin (`tauri-plugin-updater-2.11.0/src/updater.rs`, the body of `download`), it
+buffers the **entire artifact in memory** before verifying it:
+
+```rust
+let mut buffer = Vec::new();
+let mut stream = response.bytes_stream();
+while let Some(chunk) = stream.next().await {
+    let chunk = chunk?;
+    on_chunk(chunk.len(), content_length);
+    buffer.extend(chunk);
+}
+```
+
+On the machine this product is for — a school laptop, already running the VPN
+core — a 60 MB installer held in RAM is enough to abort the allocation. The task
+dies, the IPC call never resolves, and the UI keeps its spinner.
+
+### Why a whole module was already written to avoid this and was never called
+
+`client/src-tauri/src/locus/update/apply.rs` streams to disk, hashes
+incrementally, bounds the download, and fails closed on a missing checksum. It
+had **zero production callers**: `cmd/locus.rs` imported `crate::locus::apply`
+(the *config* module) and the update path went plugin-only. The two modules had
+also been written from incompatible plans — `apply.rs`'s header describes handing
+a hand-built `Update` to the plugin, which `install.rs`'s header explicitly says
+is impossible (`extract_path` and `context` are private). So the safe downloader
+sat beside the unsafe one, and only the unsafe one was wired up.
+
+Nothing noticed, because nothing checked.
+
+### The fix
+
+The download is now the client's (`apply::download`, streaming to disk) and only
+the install is the plugin's:
+
+- `PendingInstall::download_to_file` streams the artifact to the app data root
+  and verifies SHA-256 on the bytes on disk, then returns a `ReadyInstall`.
+- `ReadyInstall::install` hands the verified bytes to `Update::install`, which
+  still owns NSIS/AppImage/deb/rpm and still re-verifies the minisign signature.
+- The hub's checksum is read from the plugin's preserved `raw_json` (the plugin
+  does not model a checksum, but it keeps the whole response). A missing hash is
+  refused **before a byte is fetched** (`LOCUS_UPDATE_NO_CHECKSUM`) rather than
+  discovered after.
+- Progress is emitted cumulatively and throttled to one event per percent — the
+  plugin's callback fires per network chunk, and an event per chunk floods the
+  webview.
+- **Every branch now logs**: start of attempt, download started, download
+  verified, installer handed the bytes, installed, and each failure with its
+  reason.
+
+A process-wide **panic hook** was also installed at startup. An async Tauri
+command that panics is otherwise swallowed — the task dies, the call never
+resolves, and the next reader gets the same empty log. The hook writes the panic
+to the app log, so the next one of these is a stack trace rather than a spinner.
+
+### The guard
+
+`check-consistency.sh` §12 fails the build if the install path calls
+`download_and_install` again, if `apply::download` loses its production caller,
+if the install command loses its start-of-attempt log line, or if the hub
+checksum stops being enforced. This is the class of defect a guard is for: two
+modules that disagree, with no mechanism that notices.
+
+Client-side only; no server change, so nothing here waits on a `setup.sh` re-run.
+
+---
+
 ## THE GUARD THAT REFUSED EVERY RELEASE: goja HAS NO `atob` (2026-09-30)
 
 Publishing 3.2.7 from the admin console was refused outright, naming all four

@@ -883,6 +883,12 @@ pub async fn locus_install_update(app: tauri::AppHandle) -> CmdResult<()> {
     let hub = contract::HUB_URL;
     let current = env!("CARGO_PKG_VERSION");
 
+    // START-OF-INSTALL. This line is the one whose absence made the reported
+    // crash undiagnosable: the install path logged only on failure-to-check and
+    // on success, so a process that died mid-download left nothing behind at
+    // all. Every branch below now says so before it can block.
+    logging!(info, Type::System, "[locus] update install requested (running {current})");
+
     let pending = crate::locus::update::install::PendingInstall::check(&app, hub, current)
         .await
         .map_err(|error| {
@@ -904,27 +910,101 @@ pub async fn locus_install_update(app: tauri::AppHandle) -> CmdResult<()> {
             }
         })?
         .ok_or_else(|| {
+            logging!(
+                warn,
+                Type::System,
+                "[locus] update install requested but the hub offers nothing to install"
+            );
             super::coded_error("LOCUS_UPDATE_NONE", "No update is available to install.")
         })?;
 
     let installed_version = pending.version().to_owned();
 
+    // The hub publishes the artifact's SHA-256 alongside the URL and signature,
+    // and the plugin preserves it in `raw_json`. Without it we would have to
+    // install bytes we cannot hash-check, so a missing one is refused here —
+    // before a single byte is fetched — rather than discovered after.
+    let Some(sha256) = pending.sha256().map(str::to_owned) else {
+        logging!(
+            error,
+            Type::System,
+            "[locus] the hub offered {installed_version} with no sha256; refusing to install"
+        );
+        return Err(super::coded_error(
+            "LOCUS_UPDATE_NO_CHECKSUM",
+            "The update the hub offered carries no checksum, so it cannot be verified. \
+             Report this to support.",
+        ));
+    };
+
+    let staging_dir = dirs::app_home_dir()
+        .map(|root| root.join("update-staging"))
+        .map_err(|error| super::coded_error("LOCUS_PATHS_FAILED", format!("{error:#}")))?;
+
+    // A partial file from a previous attempt is dead weight and, on Windows,
+    // something antivirus may still hold a handle on. Clear it before starting.
+    crate::locus::update::apply::prune_staging_dir(&staging_dir);
+
+    logging!(
+        info,
+        Type::System,
+        "[locus] downloading update {installed_version} to {}",
+        staging_dir.display()
+    );
+
     // Progress is emitted rather than returned, because the download outlives the
     // command's usefulness to the UI: the popup needs a percentage while it runs,
     // not one number at the end.
+    //
+    // Throttled: the plugin's callback fires per network chunk, and emitting a
+    // Tauri event for each one floods the webview on a fast connection. One event
+    // per whole percent (plus the first and last) is what a progress bar needs.
     let progress_app = app.clone();
-    pending
-        .install(move |chunk, total| {
-            let _ = progress_app.emit(
-                "locus://update-progress",
-                UpdateProgress {
-                    chunk_length: chunk,
-                    content_length: total,
-                },
-            );
-        })
+    let mut last_percent = u64::MAX;
+    let on_progress = move |received: u64, total: Option<u64>| {
+        let percent = total
+            .filter(|total| *total > 0)
+            .map(|total| received.saturating_mul(100) / total);
+        if percent == Some(last_percent) {
+            return;
+        }
+        if let Some(percent) = percent {
+            last_percent = percent;
+        } else {
+            last_percent = u64::MAX;
+        }
+        let _ = progress_app.emit(
+            "locus://update-progress",
+            UpdateProgress {
+                chunk_length: usize::try_from(received).unwrap_or(usize::MAX),
+                content_length: total,
+            },
+        );
+    };
+
+    let ready = pending
+        .download_to_file(&staging_dir, &sha256, on_progress)
         .await
-        .map_err(|error| super::coded_error("LOCUS_UPDATE_FAILED", format!("{error:#}")))?;
+        .map_err(|error| {
+            let detail = format!("{error:#}");
+            logging!(error, Type::System, "[locus] update download failed: {detail}");
+            super::coded_error("LOCUS_UPDATE_DOWNLOAD_FAILED", detail)
+        })?;
+
+    logging!(
+        info,
+        Type::System,
+        "[locus] update {installed_version} downloaded and verified; running the installer"
+    );
+
+    // Hand the verified bytes to the platform installer. On Windows this exits
+    // the process, so the line below may never be reached — which is why the
+    // success log is emitted *before* the call, not after.
+    ready.install().map_err(|error| {
+        let detail = format!("{error:#}");
+        logging!(error, Type::System, "[locus] the installer refused the update: {detail}");
+        super::coded_error("LOCUS_UPDATE_INSTALL_FAILED", detail)
+    })?;
 
     logging!(
         info,
@@ -942,9 +1022,16 @@ pub async fn locus_install_update(app: tauri::AppHandle) -> CmdResult<()> {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UpdateProgress {
-    /// Bytes in the most recent chunk.
+    /// Bytes downloaded so far, **cumulative** — not the size of one chunk.
+    ///
+    /// Cumulative rather than per-chunk on purpose: the UI computes a percentage
+    /// from it directly, and a per-chunk value would need the frontend to keep a
+    /// running total that could disagree with the backend's.
     pub chunk_length: usize,
     /// Total bytes, when the server advertised a length.
+    ///
+    /// `None` means the hub used a chunked response, and the UI should show an
+    /// indeterminate bar rather than a stalled 0%.
     pub content_length: Option<u64>,
 }
 

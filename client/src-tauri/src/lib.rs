@@ -348,6 +348,30 @@ pub fn run() -> std::process::ExitCode {
                     logging!(error, Type::Setup, "Failed to init work dir/logger: {e:#}");
                 }
 
+                // Install a process-wide panic hook now that the logger exists.
+                //
+                // Without this, a panic inside an async Tauri command is
+                // swallowed: the task dies, the IPC call never resolves, and the
+                // UI is left showing a spinner over a process that is on its way
+                // out. That is exactly how a crash in the update downloader
+                // presented — "the downloader spins at 0% then the app dies",
+                // with nothing in the log to say why. A panic hook turns the
+                // next one into a stack trace in the file the student can send.
+                {
+                    let previous = std::panic::take_hook();
+                    std::panic::set_hook(Box::new(move |info| {
+                        // Log first: the default hook prints to stderr, which is
+                        // lost on a packaged GUI build.
+                        logging!(
+                            error,
+                            Type::Setup,
+                            "[locus] PANIC: {info}\n(if you are reading this from a bug report, \
+                             include this line and the lines above it)"
+                        );
+                        previous(info);
+                    }));
+                }
+
                 logging!(debug, Type::Setup, "开始应用初始化...");
                 if let Err(e) = app_init::setup_autostart(app) {
                     logging!(error, Type::Setup, "Failed to setup autostart: {}", e);

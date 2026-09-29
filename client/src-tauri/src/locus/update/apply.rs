@@ -128,7 +128,11 @@ const fn hashes_match(expected: &str, actual: &str) -> bool {
 /// launched from, which on Windows is the most heavily observed directory on the
 /// system — antivirus, the search indexer and sync clients all hold handles on a
 /// new `.exe`, and the rename failed (FIXES #54).
-pub async fn download(offer: &UpdateOffer, staging_dir: &Path) -> Result<DownloadedUpdate> {
+pub async fn download(
+    offer: &UpdateOffer,
+    staging_dir: &Path,
+    mut on_progress: impl FnMut(u64, Option<u64>),
+) -> Result<DownloadedUpdate> {
     // Fail closed before making a request. An artifact we cannot verify must
     // never be fetched, let alone installed.
     if offer.sha256.trim().is_empty() {
@@ -177,6 +181,11 @@ pub async fn download(offer: &UpdateOffer, staging_dir: &Path) -> Result<Downloa
         bail!("the advertised download is {total} bytes, larger than the accepted maximum");
     }
 
+    // Captured before the response is consumed by the stream, so progress can be
+    // reported as a percentage. `None` means the hub used a chunked response and
+    // the UI should show an indeterminate bar rather than a fake 0%.
+    let response_total = response.content_length();
+
     // Stream to disk, hashing as we go, so a large artifact is never held in
     // memory.
     let mut file = tokio::fs::File::create(&destination)
@@ -185,6 +194,11 @@ pub async fn download(offer: &UpdateOffer, staging_dir: &Path) -> Result<Downloa
     let mut hasher = Sha256::new();
     let mut received: u64 = 0;
     let mut stream = response;
+
+    // Show movement immediately: a download that reports nothing until its first
+    // full chunk has landed looks stalled, which is the complaint this whole
+    // path exists to answer.
+    on_progress(0, response_total);
 
     use tokio::io::AsyncWriteExt as _;
     while let Some(chunk) = stream
@@ -201,6 +215,10 @@ pub async fn download(offer: &UpdateOffer, staging_dir: &Path) -> Result<Downloa
         file.write_all(&chunk)
             .await
             .with_context(|| format!("could not write to {}", destination.display()))?;
+
+        // Report after the write, so a UI reading `received` never claims more
+        // bytes are on disk than actually are.
+        on_progress(received, response_total);
     }
 
     // Flush explicitly and surface a failure as its own error. On Windows a

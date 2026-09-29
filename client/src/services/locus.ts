@@ -220,8 +220,8 @@ export const locusDismissUpdate = () => invoke<void>('locus_dismiss_update')
 
 /** Progress of an in-flight update download, from `locus://update-progress`. */
 export interface UpdateProgress {
-  /** Bytes in the most recent chunk. */
+  /** Bytes downloaded so far, cumulative — not the size of one chunk. */
   chunkLength: number
-  /** Total bytes, when the server advertised a length. */
+  /** Total bytes, when the server advertised a length. `null` means unknown. */
   contentLength: number | null
 }

@@ -41,6 +41,7 @@
 //! is already atomic on all three platforms.
 
 use anyhow::{Context as _, Result};
+use std::path::Path;
 
 /// Where the plugin should look for an update manifest.
 ///
@@ -142,26 +143,130 @@ impl PendingInstall {
         &self.update.version
     }
 
-    /// Downloads and installs, reporting progress through `on_chunk`.
+    /// The SHA-256 the hub published for this artifact, if any.
     ///
-    /// On Windows the plugin launches NSIS and then exits the app, so a
-    /// successful return may not happen. Callers must treat completion as
-    /// "expect a restart" rather than assuming the process survives.
+    /// The plugin does not model a checksum — it verifies a minisign signature
+    /// instead — but it **preserves the whole response** in `raw_json`. The hub
+    /// already includes `sha256` there (`/api/update`), so the hash travels with
+    /// the offer at no extra cost and without a second request.
+    ///
+    /// Returning `Option` rather than defaulting to `""` is deliberate:
+    /// [`super::apply::download`] fails closed on an empty hash, so a hub that
+    /// stopped publishing one produces a clear refusal instead of an unverified
+    /// install.
+    #[must_use]
+    pub fn sha256(&self) -> Option<&str> {
+        sha256_from_manifest(&self.update.raw_json)
+    }
+
+    /// Downloads the offered update to a verified file, reporting progress.
+    ///
+    /// Does **not** install; the returned [`ReadyInstall`] runs the platform
+    /// installer. Splitting the two is the whole point: the download is ours
+    /// (streaming, bounded, SHA-256-verified on disk) and only the install is
+    /// the plugin's.
+    ///
+    /// # Why this delegates the download to [`super::apply`]
+    ///
+    /// The plugin's own `download_and_install` buffers the **entire artifact
+    /// into a `Vec<u8>` in memory** before verifying it (`updater.rs`, the body
+    /// of `download`). On a school laptop — the machine this product is for —
+    /// a 60 MB installer held in RAM alongside a running VPN core is enough to
+    /// abort the allocation, which kills the process with no log line and
+    /// leaves the progress bar at 0%: exactly the reported symptom.
+    ///
+    /// `apply::download` streams to disk, hashes incrementally, bounds the
+    /// download, and fails closed on a missing checksum — so the only bytes in
+    /// memory at the end are what `install()` reads once.
+    ///
+    /// The plugin still owns the *install* (NSIS on Windows, AppImage/deb/rpm
+    /// on Linux, `.app`/`.dmg` on macOS) and still re-verifies the minisign
+    /// signature over the bytes we hand it. That is the part worth keeping:
+    /// hand-rolling the swap destroyed an installation once (FIXES #22).
     ///
     /// # Errors
     ///
-    /// Returns an error if the download fails, if **either** integrity check
-    /// fails (SHA-256 inside the plugin, minisign signature), or if the
-    /// installer refuses.
-    pub async fn install<C>(self, on_chunk: C) -> Result<()>
-    where
-        C: FnMut(usize, Option<u64>) + Send + 'static,
-    {
+    /// Returns an error if the download fails, if the SHA-256 does not match (or
+    /// the hub published none), or if the artifact is implausibly small.
+    pub async fn download_to_file(
+        self,
+        staging_dir: &Path,
+        sha256: &str,
+        on_progress: impl FnMut(u64, Option<u64>),
+    ) -> Result<ReadyInstall> {
+        let offer = super::signal::UpdateOffer {
+            version: self.update.version.clone(),
+            url: self.update.download_url.to_string(),
+            sha256: sha256.to_owned(),
+            signature: self.update.signature.clone(),
+        };
+
+        let downloaded = super::apply::download(&offer, staging_dir, on_progress).await?;
+        Ok(ReadyInstall {
+            update: self.update,
+            downloaded,
+        })
+    }
+}
+
+/// A downloaded, SHA-256-verified artifact and the plugin handle that installs it.
+///
+/// This is the hand-off point: the bytes on disk were verified by
+/// [`super::apply::download`], and the plugin will verify the minisign signature
+/// over them a second time before the platform installer runs.
+pub struct ReadyInstall {
+    update: tauri_plugin_updater::Update,
+    downloaded: super::apply::DownloadedUpdate,
+}
+
+impl ReadyInstall {
+    /// The version that is about to be installed.
+    #[must_use]
+    pub fn version(&self) -> &str {
+        &self.downloaded.version
+    }
+
+    /// The verified artifact on disk.
+    #[must_use]
+    pub fn path(&self) -> &Path {
+        &self.downloaded.path
+    }
+
+    /// Runs the platform installer over the verified bytes.
+    ///
+    /// On Windows this launches NSIS and exits the app, so a successful return
+    /// may never happen — callers must treat completion as "expect a restart".
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the artifact cannot be read back, if the plugin's
+    /// minisign verification rejects it, or if the installer refuses to run.
+    pub fn install(self) -> Result<()> {
+        let bytes = self
+            .downloaded
+            .read()
+            .context("could not read the verified update for installation")?;
         self.update
-            .download_and_install(on_chunk, || {})
-            .await
+            .install(bytes)
             .context("the update could not be installed")
     }
+}
+
+/// Extracts the hub's checksum from a manifest the plugin preserved.
+///
+/// Pulled out as a free function so it can be tested without constructing a
+/// `tauri_plugin_updater::Update` (whose fields are private, so a test cannot
+/// build one). All the logic lives here; the accessor is a one-line call.
+///
+/// Returns `None` — never an empty string — for a missing, non-string, or
+/// whitespace-only value, so the caller's fail-closed path is reached rather
+/// than an "empty hash" silently matching.
+fn sha256_from_manifest(manifest: &serde_json::Value) -> Option<&str> {
+    manifest
+        .get("sha256")
+        .and_then(serde_json::Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
 }
 
 /// Records why an offered update was not taken.
@@ -234,5 +339,52 @@ mod tests {
         let url = manifest_endpoint("https://hub.example.org", "1.0.0&admin=1", "linux");
         assert!(!url.contains("&admin=1"), "an injected & must be encoded, got {url}");
         assert!(url.contains("%261.0.0") || url.contains("%26admin"));
+    }
+
+    /// The hub's `/api/update` response carries `sha256`, and the plugin keeps
+    /// the whole response in `raw_json`. This is where the install path gets the
+    /// hash it verifies the download against.
+    #[test]
+    fn the_checksum_is_read_from_the_hub_manifest() {
+        let manifest = serde_json::json!({
+            "version": "3.2.8",
+            "url": "https://hub.example.org/updates/3.2.8/locus-linux-amd64",
+            "signature": "untrusted comment: signature\nRWQ...",
+            "sha256": "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2"
+        });
+        assert_eq!(
+            sha256_from_manifest(&manifest),
+            Some("a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2")
+        );
+    }
+
+    /// Surrounding whitespace must be tolerated — a hub field written by a
+    /// person could carry it, and refusing a correct hash over a stray newline
+    /// would be an infuriating bug.
+    #[test]
+    fn a_checksum_with_surrounding_whitespace_is_trimmed() {
+        let manifest = serde_json::json!({ "sha256": "  a1b2c3  " });
+        assert_eq!(sha256_from_manifest(&manifest), Some("a1b2c3"));
+    }
+
+    /// A manifest with no checksum must yield `None`, not `""`.
+    ///
+    /// This is the difference between failing closed and installing unverified
+    /// bytes: `apply::download` refuses an empty hash, so returning `Some("")`
+    /// would be indistinguishable from a real hash to a careless caller.
+    #[test]
+    fn a_missing_checksum_yields_none_not_an_empty_string() {
+        assert_eq!(sha256_from_manifest(&serde_json::json!({ "version": "3.2.8" })), None);
+        assert_eq!(sha256_from_manifest(&serde_json::json!({ "sha256": "" })), None);
+        assert_eq!(sha256_from_manifest(&serde_json::json!({ "sha256": "   " })), None);
+    }
+
+    /// A non-string checksum (a number, an object, a null) must not be coerced
+    /// into one — it is a malformed manifest, not a hash.
+    #[test]
+    fn a_non_string_checksum_yields_none() {
+        assert_eq!(sha256_from_manifest(&serde_json::json!({ "sha256": 12345 })), None);
+        assert_eq!(sha256_from_manifest(&serde_json::json!({ "sha256": null })), None);
+        assert_eq!(sha256_from_manifest(&serde_json::json!({ "sha256": { "h": "1" } })), None);
     }
 }
