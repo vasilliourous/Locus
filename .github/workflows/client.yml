@@ -482,6 +482,22 @@ jobs:
       # per-task `retry: 5`, so this does not need the wrapper below. What that
       # retry does NOT cover is cargo's registry access: see "Fetch the crate
       # registry".
+      #
+      # RUNS ON EVERY PLATFORM, WINDOWS INCLUDED, AND THAT IS LOAD-BEARING.
+      #
+      # The Windows task list in `prebuild.mjs` is not a subset of the Unix one: the
+      # `winOnly` entries (`resolvePlugin`) are skipped on Linux/macOS and are exactly
+      # the files the NSIS bundle needs. The Windows runner is also the only place
+      # `SIDECAR_HOST` is a Windows triple.
+      #
+      # This step is what stands in for `beforeBuildCommand`, which is BLANKED by
+      # `TAURI_CONFIG` in the build step below (the frontend bundle is built once in
+      # `verify` and downloaded). Anything that used to run implicitly inside `tauri
+      # build` — including, historically, `packages/windows/core-hashes.nsh`, whose
+      # absence made makensis abort with `!include: could not open file` and put a
+      # "File not found" dialog in front of a student installing an update — must run
+      # HERE instead. `check-consistency.sh` §14 fails the tree if a bundler config
+      # names an `installerHooks` or `template` file that nothing in this job produces.
       - name: Fetch sidecars and geo data
         run: node scripts/prebuild.mjs "${{ matrix.triple }}"
 
@@ -1361,3 +1377,22 @@ jobs:
           echo
           echo "Run summary written. Read it rather than inferring from a green tick:"
           echo "  ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+
+          # ── Say what this run did NOT verify ──
+          #
+          # `v3.2.9` was fully green and shipped a Windows installer that a student
+          # could not get past: the NSIS bundle was built (so the build jobs passed) but
+          # nothing in this workflow ever RAN it, and the defect only existed at install
+          # time. A green tick next to an installer nobody executed is the same
+          # "true when written, relied on later" trap as a stale host address.
+          #
+          # Stated here, in the job whose only purpose is to be read instead of inferred
+          # from, so the next person does not have to rediscover the gap.
+          {
+            echo
+            echo "### What this run did NOT verify"
+            echo
+            echo "The Windows NSIS installer is **built and signed, never executed**. A bundle that builds is not an installer that installs: no step here runs the setup \`.exe\`, so an \`!include\` that cannot resolve, a WebView2 section that fails to reopen its own file, or a service that never registers all reach this point green and fail on a student's machine."
+            echo
+            echo "If an installer is reported broken, the cause is in this job's blind spot by construction — reproduce it on a real Windows machine, not by re-reading a green run."
+          } >> "$GITHUB_STEP_SUMMARY"

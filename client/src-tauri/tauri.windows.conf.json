@@ -15,9 +15,7 @@
         "displayLanguageSelector": true,
         "installerIcon": "icons/icon.ico",
         "languages": ["SimpChinese", "English", "Russian"],
-        "installMode": "perMachine",
-        "installerHooks": "./packages/windows/core-hashes.nsh",
-        "template": "./packages/windows/installer.nsi"
+        "installMode": "perMachine"
       }
     }
   },

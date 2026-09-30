@@ -128,6 +128,24 @@ Suggested first test: publish a signed release with `active = false`, flip it to
 `true`, and watch one Linux client — the only platform verifiable from a headless
 Linux box.
 
+#### And the Windows *installer itself* was broken on 3.2.9 (2026-09-30)
+
+A student ran the 3.2.9 Windows setup and got an NSIS "File not found" dialog
+carrying an **Edge** logo and `ERR_FILE_NOT_FOUND` — see `FIXES.md`
+("THE WINDOWS INSTALLER ABORTED", 2026-09-30). The cause was
+`tauri.windows.conf.json` naming a custom `template` and an `installerHooks`
+`.nsh` that `prebuild.mjs` generates inside `beforeBuildCommand` — which CI
+**blanks**. The bundle built; the installer could not.
+
+The config no longer names either file and `check-consistency.sh` §14 guards
+that. **But the fix is a structural argument, not a running installer**: no NSIS
+bundle was produced on the machine where it was made, and nothing in CI executes
+one. So the standalone Windows install on 3.2.10 is **unverified** — the first
+real Windows install is the test, and it should be done before any Windows user
+is told the release fixes their problem. Tracked as CLAIMS.md §5 **A6**.
+
+### The installed app data root and the app's own idea of it can disagree
+
 ### The suspension path has not been exercised against a live hub
 
 **Added 2026-09-28 (third round).** The activation screen now shows a refusal, and

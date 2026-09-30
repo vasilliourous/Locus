@@ -666,31 +666,21 @@ async function resolveServiceBundle() {
   }
 }
 
-/// The NSIS installer publishes the bundled cores into the service's approved directory and must
-/// attest exactly the bytes it unpacked. The digests are computed here, where the sidecars land,
-/// and reach installer.nsi through the installerHooks include (see tauri.windows.conf.json).
-const CORE_HASHES_NSH = path.join(
-  cwd,
-  'src-tauri',
-  'packages',
-  'windows',
-  'core-hashes.nsh',
-)
-async function resolveCoreHashes() {
-  const lines = []
-  for (const [define, name] of [
-    ['MIHOMO_SHA256', 'verge-mihomo'],
-    ['MIHOMO_ALPHA_SHA256', 'verge-mihomo-alpha'],
-  ]) {
-    const sidecar = path.join(SIDECAR_DIR, `${name}-${SIDECAR_HOST}.exe`)
-    const digest = createHash('sha256')
-      .update(await fsp.readFile(sidecar))
-      .digest('hex')
-    lines.push(`!define ${define} "${digest}"`)
-  }
-  await fsp.writeFile(CORE_HASHES_NSH, `${lines.join('\n')}\n`)
-  log_success(`Generated ${CORE_HASHES_NSH}`)
-}
+/// REMOVED in 3.2.10: `resolveCoreHashes` / `core-hashes.nsh`.
+///
+/// It generated an `installerHooks` `.nsh` that only the project's custom copy of
+/// `installer.nsi` included, and it ran as a `winOnly` task inside `prebuild` — which
+/// every CI build job skips, because `TAURI_CONFIG` blanks `beforeBuildCommand` (the
+/// frontend bundle is built once in `verify`). The file was therefore never generated
+/// where the Windows bundle was built, the bundler's one `!include "{{installer_hooks}}"`
+/// pointed at a path that did not exist, and makensis aborted with `!include: could not
+/// open file` — NSIS's own "File not found" dialog.
+///
+/// The custom template went with it in the same release, so nothing consumed these
+/// digests any more. Core digests still reach the service by the route that always
+/// worked: `externalBin` bundles the cores as sidecars, and the installer publishes the
+/// shipped bytes. Nothing here should be reintroduced without both the template and a
+/// build step that can actually generate the file on Windows.
 
 const resolveMmdb = () =>
   resolveResource({
@@ -742,8 +732,6 @@ const tasks = [
       getLatestReleaseVersion().then(() => resolveSidecar(clashMeta())),
     retry: 5,
   },
-  // After both sidecar tasks: it hashes what they downloaded.
-  { name: 'core_hashes', func: resolveCoreHashes, retry: 1, winOnly: true },
   { name: 'plugin', func: resolvePlugin, retry: 5, winOnly: true },
   { name: 'service', func: resolveServiceBundle, retry: 5 },
   { name: 'mmdb', func: resolveMmdb, retry: 5 },
