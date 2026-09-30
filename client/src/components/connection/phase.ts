@@ -47,14 +47,30 @@ import type { LocusStatus } from '@/services/locus'
  * instead of leaving a green light on.
  */
 export type ConnectionPhase =
-  | 'unknown'
+  /**
+   * No read has settled yet. NOT the same fact as `unactivated`.
+   *
+   * These were one phase (`unknown`) until it caused a visible lie: the screen
+   * rendered "This device needs an activation code before it can connect" for the
+   * one render between mounting and the first `locusStatus()` reply, on a device
+   * that was perfectly well activated. The reporter saw it on every navigation
+   * Home -> Settings, for "milliseconds, sometimes over a second" — the length of
+   * the status read, which proves the tunnel with a real request through it and so
+   * is slow exactly when a connection is settling.
+   *
+   * So "we have not asked yet" and "we asked, and this device is not activated"
+   * are separate states. Only the second one may tell a student to find their card.
+   */
+  | 'checking'
+  /** Read, and this device holds no entitlement. The activation prompt applies. */
+  | 'unactivated'
   | 'disconnected'
   | 'connecting'
   | 'disconnecting'
   | 'connected'
 
 export const phaseFromStatus = (status: LocusStatus): ConnectionPhase => {
-  if (!status.activated) return 'unknown'
+  if (!status.activated) return 'unactivated'
   // Running but not yet able to carry a packet: this is the connecting window,
   // and it is a backend fact rather than a UI guess.
   if (status.connected && !status.ready) return 'connecting'

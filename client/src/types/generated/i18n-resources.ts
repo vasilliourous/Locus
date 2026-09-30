@@ -95,6 +95,9 @@ export interface TranslationResources {
             platform: string
             preferences: string
             refresh: string
+            refreshBusy: string
+            refreshed: string
+            refreshFailed: string
             subscription: string
             themeDark: string
             themeLight: string

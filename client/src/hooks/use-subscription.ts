@@ -101,10 +101,20 @@ export const useSubscription = (): SubscriptionState => {
     tier: data?.tier ?? null,
     refresh: () => mutate(),
     checkNow: async () => {
+      // Awaits the beat, not merely its request.
+      //
+      // `locus_check_subscription` used to return as soon as the loop was woken,
+      // so this cleared the caller's pending state before the request had left
+      // the machine — and the "Check status now" control flicked to "Checking…"
+      // and back in single-digit milliseconds, unrelated to the hub round trip
+      // the student was waiting for. The command now resolves once the beat has
+      // completed and its outcome has been applied, so awaiting it IS the
+      // progress bar.
       const started = await locusCheckSubscription()
-      // Re-read regardless: a beat that found a refusal will have torn the
-      // entitlement down on its own path, and the screen must not keep showing
-      // the pre-check state until the next poll.
+      // Re-read regardless: the beat that just completed will have written an
+      // expiry, recorded a refusal, or applied a refreshed config on its own
+      // path, and the screen must show that rather than the pre-check state until
+      // the next poll.
       await mutate()
       return started
     },

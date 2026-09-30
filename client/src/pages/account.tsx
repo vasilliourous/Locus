@@ -11,6 +11,7 @@ import {
 import {
   Box,
   Button,
+  CircularProgress,
   Divider,
   MenuItem,
   Paper,
@@ -54,6 +55,11 @@ const AccountPage = () => {
   const { checkNow } = useSubscription()
   const onError = useCallback((err: unknown) => showNotice.error(err), [])
   const [checking, setChecking] = useState(false)
+  // The Preferences refresh's own progress and its stated outcome. Separate from
+  // `checking` because the two controls are different operations and a shared
+  // flag would make one appear to be doing the other's work.
+  const [refreshing, setRefreshing] = useState(false)
+  const [refreshNote, setRefreshNote] = useState<string | null>(null)
 
   const subscription = status?.subscription ?? { state: 'unknown' as const }
 
@@ -206,14 +212,33 @@ const AccountPage = () => {
           <Button
             size="small"
             variant="text"
-            startIcon={<RefreshOutlined fontSize="small" />}
-            disabled={checking || !status?.activated}
+            startIcon={
+              checking ? (
+                <CircularProgress size={14} color="inherit" />
+              ) : (
+                <RefreshOutlined fontSize="small" />
+              )
+            }
+            // Disabled ONLY while this control's own work is running.
+            //
+            // It used to also disable on `!status?.activated`, and `status` is
+            // briefly `null` on mount — so the control flickered between enabled
+            // and disabled while the page settled, which is part of the "flicks
+            // from state to state" report. Whether the device is activated is not
+            // this button's business anyway: asking the hub is always safe, and
+            // the answer when there is nothing to confirm is a sentence, not a
+            // greyed-out control. `checkNow()` already reports that case.
+            disabled={checking}
             onClick={() => {
               void (async () => {
                 setChecking(true)
                 try {
-                  const started = await checkNow()
-                  if (!started)
+                  // Resolves once the beat has completed and its outcome has been
+                  // applied — NOT when it was merely requested. That is what makes
+                  // this spinner last as long as the work it is reporting, instead
+                  // of blinking for one IPC round trip.
+                  const checked = await checkNow()
+                  if (!checked)
                     showNotice.error(
                       t(
                         'home.components.connection.account.notActivatedToCheck',
@@ -389,11 +414,65 @@ const AccountPage = () => {
 
         <Divider sx={{ my: 1.5 }} />
 
-        <Box sx={{ display: 'flex', justifyContent: 'flex-end' }}>
+        {/* Re-read this device's status now.
+            
+            This is a DIFFERENT operation from "Check status now" above: that one
+            asks the *hub* to confirm the account, this one re-reads what the
+            client already holds. They looked identical — two text buttons,
+            one of them silent — so this one now says what it did, every time.
+
+            It used to be silent on both outcomes: a no-op while any read was in
+            flight (which is every 750 ms during a connect, exactly when a student
+            is most likely to press it), and an invisible success the rest of the
+            time, because re-reading an unchanged status renders identically to
+            doing nothing. A control whose success and whose failure look the same
+            as its silence reads as broken. */}
+        <Box
+          sx={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'flex-end',
+            gap: 1,
+            flexWrap: 'wrap',
+          }}
+        >
+          {refreshNote && (
+            <Typography variant="caption" color="text.secondary">
+              {refreshNote}
+            </Typography>
+          )}
           <Button
             size="small"
-            startIcon={<RefreshOutlined />}
-            onClick={() => void refresh()}
+            startIcon={
+              refreshing ? (
+                <CircularProgress size={14} color="inherit" />
+              ) : (
+                <RefreshOutlined />
+              )
+            }
+            // Never disabled: a disabled control cannot explain itself, and the
+            // only reason this can fail to act is "a read was already running",
+            // which is a fact worth telling the student rather than hiding.
+            onClick={() => {
+              void (async () => {
+                setRefreshing(true)
+                setRefreshNote(null)
+                try {
+                  const outcome = await refresh()
+                  // Every outcome is stated, including the one where nothing
+                  // needed doing. "Already current" is an answer; silence is not.
+                  setRefreshNote(
+                    outcome === 'refreshed'
+                      ? t('home.components.connection.account.refreshed')
+                      : outcome === 'busy'
+                        ? t('home.components.connection.account.refreshBusy')
+                        : t('home.components.connection.account.refreshFailed'),
+                  )
+                } finally {
+                  setRefreshing(false)
+                }
+              })()
+            }}
           >
             {t('home.components.connection.account.refresh')}
           </Button>

@@ -106,20 +106,26 @@ const Layout = () => {
       <NoticeManager position={verge?.notice_position} />
       <ServiceMigrationDialog />
       <SysproxyPrivilegeDialog />
-      <div
-        style={{
-          animation: 'fadeIn 0.5s',
-          WebkitAnimation: 'fadeIn 0.5s',
-        }}
-      />
-      <style>
-        {`
-            @keyframes fadeIn {
-              from { opacity: 0; }
-              to { opacity: 1; }
-            }
-          `}
-      </style>
+      {/* A page-entry fade used to live here as an empty <div> carrying
+          `animation: fadeIn 0.5s`, with the `@keyframes` in an inline <style>
+          element in this same component body.
+
+          Both are gone, and the reason is the reported "it doesn't feel
+          responsive": this component re-renders on every sidebar traffic tick
+          (the traffic hooks publish through context that changes identity), and
+          each render re-created that <style> element — which the browser
+          re-parses, restarting the animation. The visible result was a content
+          area that faded in again several times a second while a transfer was
+          running, which reads as the page reloading itself. The animation also
+          declared no `fill-mode`, so between restarts the element sat at its
+          default opacity — the effect was a 0.5 s flicker rather than a fade.
+
+          It was removed rather than repaired because it animated nothing: the
+          div was empty and its only child relationship was to the `.layout` it
+          sat beside, so no visible element ever faded. A page transition is a
+          real thing to want, but it belongs on the element that actually
+          appears, driven by the router — not on a sibling <style> tag whose
+          lifetime is tied to the render count. */}
       <Paper
         square
         elevation={0}

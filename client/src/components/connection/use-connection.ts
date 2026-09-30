@@ -18,6 +18,21 @@ import { errorDetail } from '@/services/notice-service'
 export type { ConnectionPhase }
 
 /**
+ * The last status any `useConnection` instance read, for the lifetime of the
+ * process.
+ *
+ * Exists so that navigating between Home and Account does not remount the screen
+ * into a state that claims nothing is known. Module-scoped rather than persisted:
+ * a restart must still do a real read before saying anything about the account,
+ * and a stale on-disk value surviving a reinstall would be worse than a spinner.
+ *
+ * It is a *rendering* cache only. No decision is made from it — `locus_connect`
+ * re-checks entitlement in Rust — so a value that is a few seconds old can only
+ * affect what is painted, never what is allowed.
+ */
+let statusSeed: { phase: ConnectionPhase; status: LocusStatus } | null = null
+
+/**
  * The tunnel state machine, lifted from the home card that used to own it.
  *
  * Kept as one hook rather than inlined in the screen because the screen will
@@ -32,8 +47,18 @@ export interface ConnectionState {
   /** The activation/subscription state, once read. */
   status: LocusStatus | null
   toggle: () => Promise<void>
-  /** Force a status re-read, e.g. after an action elsewhere changes it. */
-  refresh: () => Promise<void>
+  /**
+   * Force a status re-read, e.g. after an action elsewhere changes it.
+   *
+   * Returns what actually happened rather than resolving bare, because a caller
+   * that cannot tell "already busy" from "done" cannot tell the student either —
+   * and a control whose success looks identical to its silence reads as broken.
+   *
+   *  - `refreshed` — a read ran and settled. Aliases are updated.
+   *  - `busy`      — a read was already in flight, so this was a no-op.
+   *  - `failed`    — the read ran and threw; the phase is deliberately untouched.
+   */
+  refresh: () => Promise<'refreshed' | 'busy' | 'failed'>
   /**
    * Whether connecting is currently possible on this machine.
    *
@@ -70,9 +95,28 @@ const POLL_INTERVAL_MS = 15000
 const CONNECTING_POLL_INTERVAL_MS = 750
 
 export const useConnection = (): ConnectionState => {
-  const [phase, setPhase] = useState<ConnectionPhase>('unknown')
+  // Seeded from the last status any `useConnection` saw, so a remount does not
+  // start blind.
+  //
+  // This is the second half of the "This device needs an activation code" flash.
+  // The first half was the phase itself (`unknown` meant both "not read" and "not
+  // activated"); the fix there is `checking`. But a phase that is merely *honest*
+  // still renders a spinner on every mount, and this hook is remounted by every
+  // navigation between Home and Account. Since the app already holds the last
+  // good reading, the honest and the useful answer are the same one: start from
+  // what we last knew, and correct it when the read lands.
+  //
+  // Deliberately NOT persisted to storage — this is a lifetime-of-process cache,
+  // so a restart still does a real read before claiming anything about the
+  // account. Nothing here is trusted for a decision either: `locus_connect` makes
+  // its own checks in Rust, and this seed only decides what is painted first.
+  const [phase, setPhase] = useState<ConnectionPhase>(
+    () => statusSeed?.phase ?? 'checking',
+  )
   const [error, setError] = useState<string | null>(null)
-  const [status, setStatus] = useState<LocusStatus | null>(null)
+  const [status, setStatus] = useState<LocusStatus | null>(
+    () => statusSeed?.status ?? null,
+  )
 
   // Whether TUN can start here, as Rust decided it. Read from the same run-state
   // snapshot the manager uses, so the warning on screen cannot disagree with the
@@ -83,7 +127,7 @@ export const useConnection = (): ConnectionState => {
   // captured by the closure at render time, so a `toggle` that started before a
   // poll landed would act on a stale phase — the exact double-fire the poll
   // guard below exists to prevent. A ref always reads the current value.
-  const phaseRef = useRef<ConnectionPhase>('unknown')
+  const phaseRef = useRef<ConnectionPhase>(phase)
   phaseRef.current = phase
 
   // Whether THIS hook has a connect command in flight.
@@ -110,7 +154,13 @@ export const useConnection = (): ConnectionState => {
   const readingRef = useRef(false)
 
   const refresh = useCallback(async () => {
-    if (readingRef.current) return
+    // A read already in flight. Reported rather than silently swallowed.
+    //
+    // This used to `return` bare, which made the control wired to it
+    // indistinguishable from a dead one: pressing it during a connect (when this
+    // branch is taken every 750 ms) did nothing and said nothing. The caller can
+    // now tell the student why.
+    if (readingRef.current) return 'busy' as const
     readingRef.current = true
     try {
       const next = await locusStatus()
@@ -141,10 +191,16 @@ export const useConnection = (): ConnectionState => {
         if (current === 'disconnecting') return current
         return phaseFromStatus(next)
       })
+      // Remember what we just learned, so a remount starts from it rather than
+      // from `checking`. Written only on a *successful* read: a failed one told us
+      // nothing, and caching "we could not read" would be caching a non-answer.
+      statusSeed = { phase: phaseFromStatus(next), status: next }
+      return 'refreshed' as const
     } catch {
       // Leave the phase alone. A status read failing is not evidence about the
       // tunnel, and flapping the UI on a transient error is worse than a stale
       // label a moment longer.
+      return 'failed' as const
     } finally {
       readingRef.current = false
     }
@@ -199,7 +255,13 @@ export const useConnection = (): ConnectionState => {
       return
     }
 
-    if (current === 'disconnecting' || current === 'unknown') {
+    // `checking` is "no read has settled"; a press there has nothing to act on
+    // yet, and the button is labelled as such.
+    if (
+      current === 'disconnecting' ||
+      current === 'checking' ||
+      current === 'unactivated'
+    ) {
       return
     }
 

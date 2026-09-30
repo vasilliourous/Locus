@@ -87,10 +87,29 @@ describe('connection phase from backend status', () => {
    * somehow running — the activation gate owns the UI, and the connect control
    * is not reachable from there.
    */
-  test('an unactivated device is unknown regardless of core state', () => {
-    expect(phaseFromStatus(status(false, false, false))).toBe('unknown')
-    expect(phaseFromStatus(status(false, true, false))).toBe('unknown')
-    expect(phaseFromStatus(status(false, true, true))).toBe('unknown')
+  test('an unactivated device reads as unactivated regardless of core state', () => {
+    expect(phaseFromStatus(status(false, false, false))).toBe('unactivated')
+    expect(phaseFromStatus(status(false, true, false))).toBe('unactivated')
+    expect(phaseFromStatus(status(false, true, true))).toBe('unactivated')
+  })
+
+  /**
+   * `unactivated` and `checking` are different facts, and conflating them was a
+   * visible bug: the app told an activated student to find their activation card
+   * on every navigation, for as long as one status read took.
+   *
+   * A settled status can never produce `checking` — only the absence of a status
+   * does. Pinned here so a future "simplification" that folds `checking` back into
+   * `unactivated` has to delete an explicit test to do it.
+   */
+  test('a settled status never reports the not-yet-read phase', () => {
+    for (const activated of [true, false])
+      for (const connected of [true, false])
+        for (const ready of [true, false])
+          expect(
+            phaseFromStatus(status(activated, connected, ready)),
+            `${activated}/${connected}/${ready}`,
+          ).not.toBe('checking')
   })
 
   /**

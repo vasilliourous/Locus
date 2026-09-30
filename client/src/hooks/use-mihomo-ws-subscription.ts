@@ -7,6 +7,7 @@ import {
   setCacheData,
   useQuery,
 } from '@/services/query-client'
+import { createCoalescer, type Coalescer } from '@/utils/coalescer'
 
 const RECONNECT_DELAY_MS = 1000
 
@@ -248,42 +249,49 @@ export const useMihomoWsSubscription = <T>(
     }
 
     if (throttleMs && throttleMs > 0) {
-      let pendingData: T | ((current?: T) => T | undefined) | undefined
-      let hasPending = false
-      let timerId: ReturnType<typeof setTimeout> | null = null
-
-      const flush = () => {
-        timerId = null
-        if (hasPending) {
-          const data = pendingData
-          pendingData = undefined
-          hasPending = false
-          baseNext(undefined, data)
-        }
-      }
+      // The scheduling rule lives in `utils/coalescer.ts` so it can be tested
+      // against a fake clock — the version that was inline here was wrong in a way
+      // no real-time test could see (see that module's header for the full story:
+      // it re-armed its window on every message, so it bounded nothing, and the
+      // value that survived was an arbitrary sample of the burst rather than the
+      // newest one).
+      //
+      // What this wrapper adds over the coalescer is the error path: an error is
+      // NEVER held. Dropping the last error in a burst would leave the UI showing
+      // a stale reading with no way to learn it was wrong, and it must not be
+      // reordered behind a value that was received before it.
+      let coalescer: Coalescer<T | ((current?: T) => T | undefined)> | null =
+        null
 
       wrappedNext = (
         error?: any,
         data?: T | ((current?: T) => T | undefined),
       ) => {
         if (error !== undefined && error !== null) {
+          // Drop anything held rather than emitting it first: the error
+          // supersedes a reading that is already out of date.
+          coalescer?.cancel()
+          coalescer = null
           baseNext(error, data)
           return
         }
-        if (!timerId) {
-          baseNext(undefined, data)
-          timerId = setTimeout(flush, throttleMs)
-        } else {
-          pendingData = data
-          hasPending = true
-        }
+
+        // `undefined` is "no payload", which upstream treats as nothing to report
+        // — see `baseNext`, which returns early for it. Filtered here rather than
+        // pushed, so an empty frame cannot displace a real reading that is already
+        // held in the current window.
+        if (data === undefined) return
+
+        coalescer ??= createCoalescer<T | ((current?: T) => T | undefined)>(
+          throttleMs,
+          (value) => baseNext(undefined, value),
+        )
+        coalescer.push(data)
       }
 
       throttleCleanup = () => {
-        if (timerId) {
-          clearTimeout(timerId)
-          timerId = null
-        }
+        coalescer?.cancel()
+        coalescer = null
       }
     } else {
       wrappedNext = baseNext

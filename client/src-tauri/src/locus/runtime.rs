@@ -119,23 +119,65 @@ pub fn is_running() -> bool {
 /// Returns `false` when nothing is beating (no activation, or the loop is
 /// stopped), which the caller reports honestly rather than pretending a check
 /// happened.
+///
+/// Returns as soon as the request is *registered*, not when the beat completes.
+/// Callers with nothing to report about the outcome want this one; a UI control
+/// that must bracket a pending state wants [`beat_now_and_wait`].
 #[must_use]
 pub fn beat_now() -> bool {
+    with_running(HeartbeatLoop::beat_now).is_some()
+}
+
+/// Asks the running loop to beat, and waits for that beat to complete.
+///
+/// # Why the UI needs this one
+///
+/// `beat_now` only wakes the loop, so a control that treated its return as
+/// "finished" cleared its pending state before the request had left the machine —
+/// the "Check status now" button flicked to "Checking…" and back in
+/// single-digit milliseconds, unrelated to the hub round trip the student was
+/// actually waiting for.
+///
+/// # What resolves, and what does not
+///
+/// Resolves `true` once a requested beat has completed **and its outcome has been
+/// applied** (`runtime::handle_outcome` runs first), so a `locus_status` issued
+/// afterwards sees the result. Resolves `false` immediately when nothing is
+/// beating — no activation, or the loop is stopped — because in that case no beat
+/// will complete and waiting would hang the control forever.
+///
+/// Deliberately does not return the outcome. The hub's answer is interpreted in
+/// exactly one place, which also stops the tunnel on a refusal; a verdict
+/// returned here would be a second interpretation that could disagree with it.
+/// The caller re-reads status instead, the same single source the rest of the UI
+/// uses.
+///
+/// The wait is bounded by the beat's own request timeout, so a dead network
+/// delays this by that timeout rather than indefinitely.
+pub async fn beat_now_and_wait() -> bool {
+    // The control handle is cloned out of the lock, and the guard dropped, before
+    // anything is awaited. Holding the mutex across the network round trip would
+    // block every other reader of `RUNNING` — including the one that stops the
+    // loop on exit.
+    let Some(control) = with_running(HeartbeatLoop::control) else {
+        return false;
+    };
+
+    control.beat_now_and_wait().await;
+    true
+}
+
+/// Runs `f` against the running heartbeat handle, if there is one.
+///
+/// One place for the lock/poison dance, because duplicating it is how the
+/// poisoned-arm behaviour drifted out of step with the healthy one.
+fn with_running<T>(f: impl FnOnce(&HeartbeatLoop) -> T) -> Option<T> {
     match RUNNING.lock() {
-        Ok(guard) => match guard.as_ref() {
-            Some(handle) => {
-                handle.beat_now();
-                true
-            }
-            None => false,
-        },
-        Err(poisoned) => match poisoned.into_inner().as_ref() {
-            Some(handle) => {
-                handle.beat_now();
-                true
-            }
-            None => false,
-        },
+        Ok(guard) => guard.as_ref().map(f),
+        // A panic while holding this lock poisoned it. The handle is still
+        // usable — it is an `Arc<Notify>` pair and some atomics — so recover it
+        // rather than silently dropping the ability to check status at all.
+        Err(poisoned) => poisoned.into_inner().as_ref().map(f),
     }
 }
 

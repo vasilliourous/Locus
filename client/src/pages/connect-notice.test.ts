@@ -30,7 +30,7 @@ describe('what the connection screen says a student cannot connect', () => {
    * already had and which had been refused. The reason must win.
    */
   test('a refusal is shown instead of the generic card prompt', () => {
-    const notice = connectNotice('unknown', false, refused)
+    const notice = connectNotice('unactivated', false, refused)
     expect(notice.kind).toBe('refused')
     expect(notice).toMatchObject({
       reason: 'Account suspended — contact your middleman',
@@ -43,7 +43,7 @@ describe('what the connection screen says a student cannot connect', () => {
    * description of one.
    */
   test('the refusal carries the hubs own wording unchanged', () => {
-    const notice = connectNotice('unknown', false, refused)
+    const notice = connectNotice('unactivated', false, refused)
     if (notice.kind !== 'refused')
       throw new Error(`expected refused, got ${notice.kind}`)
     expect(notice.reason).toBe(
@@ -59,7 +59,8 @@ describe('what the connection screen says a student cannot connect', () => {
    */
   test('a refusal is reported whatever the connection phase says', () => {
     for (const phase of [
-      'unknown',
+      'checking',
+      'unactivated',
       'connected',
       'connecting',
       'disconnected',
@@ -77,12 +78,43 @@ describe('what the connection screen says a student cannot connect', () => {
    * student is most likely looking at.
    */
   test('a live error suppresses the generic prompt but not a refusal', () => {
-    expect(connectNotice('unknown', true, unknown).kind).toBe('none')
-    expect(connectNotice('unknown', true, refused).kind).toBe('refused')
+    expect(connectNotice('unactivated', true, unknown).kind).toBe('none')
+    expect(connectNotice('checking', true, unknown).kind).toBe('none')
+    expect(connectNotice('unactivated', true, refused).kind).toBe('refused')
   })
 
-  test('a fresh device with no refusal gets the card prompt', () => {
-    expect(connectNotice('unknown', false, unknown).kind).toBe('unactivated')
+  test('a device the backend reports as unactivated gets the card prompt', () => {
+    expect(connectNotice('unactivated', false, unknown).kind).toBe(
+      'unactivated',
+    )
+  })
+
+  /**
+   * The flash bug, stated as its own test.
+   *
+   * `checking` means "no status read has settled yet", which the connection hook
+   * starts in and which a remount returns to. It is NOT "not activated", and
+   * treating it as such is what made an activated student read "This device needs
+   * an activation code before it can connect" on every navigation Home -> Settings
+   * — for as long as one status read took.
+   */
+  test('a not-yet-read status never produces the card prompt', () => {
+    expect(connectNotice('checking', false, unknown).kind).not.toBe(
+      'unactivated',
+    )
+    expect(connectNotice('checking', false, unknown).kind).toBe('none')
+  })
+
+  /**
+   * And it must not produce it for a device we last knew was activated either —
+   * the seeded phase, which is the common case on navigation.
+   */
+  test('a settled connected phase never produces the card prompt', () => {
+    for (const phase of ['connected', 'connecting', 'disconnected']) {
+      expect(connectNotice(phase, false, unknown).kind, phase).not.toBe(
+        'unactivated',
+      )
+    }
   })
 
   /**
@@ -91,7 +123,9 @@ describe('what the connection screen says a student cannot connect', () => {
    * suspension that never happened.
    */
   test('an ordinary unactivated device is never shown a refusal', () => {
-    expect(connectNotice('unknown', false, unknown).kind).not.toBe('refused')
+    expect(connectNotice('unactivated', false, unknown).kind).not.toBe(
+      'refused',
+    )
   })
 
   /**

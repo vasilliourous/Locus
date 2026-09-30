@@ -133,13 +133,25 @@ export const locusActivate = (code: string) =>
 export const locusHubUrl = () => invoke<string>('locus_hub_url')
 
 /**
- * Asks the client to confirm the subscription with the hub right now.
+ * Asks the client to confirm the subscription with the hub right now, and waits
+ * for that confirmation to complete.
  *
- * Resolves `true` when a beat was started. It deliberately does NOT return the
- * subscription state: the hub's answer is interpreted in exactly one place (the
- * heartbeat's own outcome handler, which also stops the tunnel on a refusal), and
- * returning a verdict here would be a second interpretation that could disagree
- * with it. Callers re-read status after this settles.
+ * Resolves `true` when a beat ran, `false` when nothing is beating (no
+ * activation, or the loop is stopped) — so a caller can distinguish "we asked and
+ * it finished" from "there was nobody to ask", and say so rather than reporting a
+ * check that never happened.
+ *
+ * It deliberately does NOT return the subscription state: the hub's answer is
+ * interpreted in exactly one place (the heartbeat's own outcome handler, which
+ * also stops the tunnel on a refusal), and returning a verdict here would be a
+ * second interpretation that could disagree with it. Callers re-read status after
+ * this settles.
+ *
+ * **The wait is the point.** This used to resolve as soon as the beat was
+ * requested, which made a UI control's pending state last one IPC round trip
+ * (milliseconds) while the work it claimed to be reporting had not started. A
+ * progress indicator must bracket the operation, and this resolve point is now
+ * that boundary.
  */
 export const locusCheckSubscription = () =>
   invoke<boolean>('locus_check_subscription')

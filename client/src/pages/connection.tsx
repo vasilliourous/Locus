@@ -61,8 +61,13 @@ const ConnectionPage = () => {
   // While connecting, the button's job is to STAY AVAILABLE and offer a way out.
   // A disabled spinner is the retired client's failure: the tunnel never settled,
   // the control never came back, and the only recovery was to kill the app.
+  //
+  // `checking` and `unactivated` share the same label because they are the same
+  // thing to a student — "nothing to press yet" — even though they are different
+  // facts to the app. Which of the two it is decides the *notice* below, not the
+  // button.
   const label =
-    phase === 'unknown'
+    phase === 'checking' || phase === 'unactivated'
       ? t('home.components.connection.checking')
       : phase === 'connecting'
         ? t('home.components.connection.cancel')
@@ -81,15 +86,22 @@ const ConnectionPage = () => {
   // "connecting" rather than "not connected" while the tunnel is coming up —
   // those are different facts, and the second one would be a lie a student can
   // catch by watching the panel appear a moment later.
+  //
+  // No read has settled yet is NOT "not connected". Saying so would be the same
+  // class of lie as the activation flash, one line down.
   const statusText =
-    phase === 'connecting'
-      ? t('home.components.connection.connecting')
-      : connected
-        ? t('home.components.connection.connected')
-        : t('home.components.connection.notConnected')
+    phase === 'checking'
+      ? t('home.components.connection.checking')
+      : phase === 'connecting'
+        ? t('home.components.connection.connecting')
+        : connected
+          ? t('home.components.connection.connected')
+          : t('home.components.connection.notConnected')
 
   // Spec §5: connected green, connecting amber, disconnected grey. The dot is
   // paired with the word everywhere it appears, so colour is never the only cue.
+  // `checking` stays grey like disconnected: it is an absence of information, not
+  // a state of the tunnel, and colouring it would assert something we do not know.
   const accent =
     phase === 'connecting' || phase === 'disconnecting'
       ? theme.palette.warning.main
@@ -154,7 +166,11 @@ const ConnectionPage = () => {
           // Disabled ONLY when there is nothing to do. `connecting` stays
           // pressable and means "cancel"; `disconnecting` stays pressable and is
           // ignored by the hook, because a stop mid-stop is not a new intent.
-          disabled={phase === 'unknown'}
+          //
+          // `unactivated` is included because the gate above the router should
+          // make it unreachable — if it is reached, the honest state is "there is
+          // nothing this button can do", and the notice below says why.
+          disabled={phase === 'checking' || phase === 'unactivated'}
           onClick={() => void toggle()}
           sx={{ minWidth: 220, py: 1.6, fontSize: 16 }}
         >

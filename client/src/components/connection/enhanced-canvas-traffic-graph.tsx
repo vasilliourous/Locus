@@ -128,6 +128,10 @@ export const EnhancedCanvasTrafficGraph = memo(
     const drawFrameRef = useRef<number | undefined>(undefined)
     const hoverFrameRef = useRef<number | undefined>(undefined)
     const mouseMoveFrameRef = useRef<number | undefined>(undefined)
+    /** Monotonic time of the last completed graph draw, for the frame budget. */
+    const lastDrawAtRef = useRef(0)
+    /** Whether a redraw was requested while the budget window was closed. */
+    const drawPendingRef = useRef(false)
     const scheduleDrawGraphRef = useRef<() => void>(() => {})
     const pendingMousePositionRef = useRef<{
       clientX: number
@@ -142,7 +146,6 @@ export const EnhancedCanvasTrafficGraph = memo(
       [],
     )
     const debounceTimeoutRef = useRef<number | null>(null)
-    const [currentFPS, setCurrentFPS] = useState(GRAPH_CONFIG.targetFPS)
 
     const colors = useMemo(
       () => ({
@@ -183,8 +186,6 @@ export const EnhancedCanvasTrafficGraph = memo(
       if (displayData.length === 0) {
         lastDataTimestampRef.current = 0
         dataStaleRef.current = false
-        // eslint-disable-next-line @eslint-react/set-state-in-effect
-        setCurrentFPS(GRAPH_CONFIG.targetFPS)
         return
       }
 
@@ -200,18 +201,14 @@ export const EnhancedCanvasTrafficGraph = memo(
       }
     }, [displayData])
 
-    const handleFocusStateChange = useCallback(
-      (focused: boolean) => {
-        isWindowFocusedRef.current = focused
-
-        if (focused || !pause_render_traffic_stats_on_blur) {
-          setCurrentFPS(GRAPH_CONFIG.targetFPS)
-        }
-
-        scheduleDrawGraphRef.current()
-      },
-      [pause_render_traffic_stats_on_blur],
-    )
+    // No dependency on `pause_render_traffic_stats_on_blur`: this callback only
+    // records focus and asks for a redraw. Whether a redraw is actually *allowed*
+    // while blurred is decided in `shouldSkipGraphDraw`, which reads the setting
+    // at draw time and so can never be working from a stale closure.
+    const handleFocusStateChange = useCallback((focused: boolean) => {
+      isWindowFocusedRef.current = focused
+      scheduleDrawGraphRef.current()
+    }, [])
 
     useEffect(() => {
       if (typeof window === 'undefined' || typeof document === 'undefined') {
@@ -908,17 +905,52 @@ export const EnhancedCanvasTrafficGraph = memo(
       })
     }, [drawHoverOverlay])
 
+    /**
+     * Redraw at most once per frame budget, coalescing everything that asks.
+     *
+     * # Why this is rate-limited
+     *
+     * It used to coalesce only to *one rAF*, with no rate limit at all — so the
+     * worker's 200 ms snapshots, the `ResizeObserver`, the focus handler and the
+     * style toggle each produced a full canvas repaint, and `TARGET_FPS` was
+     * declared but never consulted. That is a redraw every 200 ms (plus hover's
+     * own two rAF slots), which is work the display never asked for: the graph
+     * shows 10 minutes of data at ~5 Hz, so redrawing faster than the data arrives
+     * cannot reveal anything new.
+     *
+     * # Why the pending flag rather than a dropped frame
+     *
+     * The last caller inside a budget window must still win, or a redraw requested
+     * while the window was closed would be lost and the graph would show stale
+     * data until the next snapshot. So a coalesced request is *deferred*, not
+     * discarded: `drawPendingRef` re-arms the timer for the remainder of the
+     * budget.
+     *
+     * Uses `setTimeout` rather than rAF for the budget, because rAF stops while
+     * the window is hidden and this must still settle when it comes back.
+     */
     const scheduleDrawGraph = useCallback(() => {
-      if (drawFrameRef.current !== undefined) return
+      // One already in flight inside the current budget window: remember that
+      // another is wanted and let the running one deal with it.
+      if (drawFrameRef.current !== undefined) {
+        drawPendingRef.current = true
+        return
+      }
 
-      drawFrameRef.current = requestAnimationFrame(() => {
+      const budgetMs = 1000 / GRAPH_CONFIG.targetFPS
+      const elapsed = performance.now() - lastDrawAtRef.current
+      const waitMs = Math.max(0, budgetMs - elapsed)
+
+      drawFrameRef.current = window.setTimeout(() => {
         drawFrameRef.current = undefined
+        lastDrawAtRef.current = performance.now()
 
-        if (shouldSkipGraphDraw()) return
-
-        drawGraph()
-        drawHoverOverlay()
-      })
+        drawPendingRef.current = false
+        if (!shouldSkipGraphDraw()) {
+          drawGraph()
+          drawHoverOverlay()
+        }
+      }, waitMs)
     }, [drawGraph, drawHoverOverlay, shouldSkipGraphDraw])
 
     useEffect(() => {
@@ -959,7 +991,7 @@ export const EnhancedCanvasTrafficGraph = memo(
     useEffect(() => {
       return () => {
         if (drawFrameRef.current !== undefined) {
-          cancelAnimationFrame(drawFrameRef.current)
+          window.clearTimeout(drawFrameRef.current)
           drawFrameRef.current = undefined
         }
         if (hoverFrameRef.current !== undefined) {
@@ -1128,6 +1160,21 @@ export const EnhancedCanvasTrafficGraph = memo(
             )}
           </Box>
 
+          {/* The live diagnostic readout.
+          
+              This used to print a `fps` figure that could never change: it was
+              `useState(GRAPH_CONFIG.targetFPS)` and both of its setters wrote that
+              same value back, so it rendered a constant presented as a
+              measurement. A student trying to describe "it feels janky" would
+              point at it, and it would always say the same number. Removed rather
+              than "measured properly", because the honest options were to measure
+              it or to stop showing it, and a live FPS counter is not useful to the
+              audience this screen has — it is an internals readout on the one page
+              that is supposed to hide internals.
+
+              What remains is genuinely derivable and honest: how many points are
+              on the graph. Kept behind the same styling so the layout does not
+              shift. */}
           <Box
             sx={{
               position: 'absolute',
@@ -1142,7 +1189,6 @@ export const EnhancedCanvasTrafficGraph = memo(
             {t('home.components.traffic.diagnostics', {
               points: displayData.length,
               compressed: samplerStats.compressedBufferSize,
-              fps: currentFPS,
             })}
           </Box>
 

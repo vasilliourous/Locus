@@ -19,6 +19,23 @@ import type { SubscriptionStatus } from '@/services/locus'
  *
  * The fix is priority, not new copy: when we know why access ended, that is the
  * whole message, and the generic prompt stands down.
+ *
+ * # The second bug this file carries (2026-09-30)
+ *
+ * The card prompt then appeared when it should not have, for a different reason.
+ * The rule keyed on `phase === 'unknown'`, and `unknown` meant two different
+ * things: "we read the status and this device is not activated" AND "we have not
+ * read the status yet". The connection hook starts in the second state and moves
+ * to a settled one when its read lands, so on EVERY mount the screen rendered the
+ * card prompt for one render — "milliseconds, sometimes over a second", which is
+ * exactly how long `locus_status` takes while it proves the tunnel with a real
+ * request through it. Navigating Home -> Settings remounts the page, so it
+ * happened on every navigation.
+ *
+ * The fix is the same shape as the first one: stop conflating two facts. The
+ * phase is now `checking` until a read settles and `unactivated` only once the
+ * backend has said so, and this rule keys on the latter. A student is told to find
+ * their card only when the backend has actually established they need to.
  */
 export type ConnectNotice =
   /** The hub refused this device; show its own sentence, verbatim. */
@@ -52,9 +69,12 @@ export const connectNotice = (
   // An error is the most specific thing we have: it is about this attempt.
   if (hasError) return { kind: 'none' }
 
-  // `unknown` is "not activated" — a fresh device, which is what the card prompt
-  // is for. Any other phase has its own affordances and needs no notice.
-  if (phase === 'unknown') return { kind: 'unactivated' }
+  // `unactivated` is "we read the status, and this device holds no entitlement".
+  // It is deliberately NOT `unknown`/`checking`, which means "no read has settled
+  // yet" — see the note below.
+  //
+  // Any other phase has its own affordances and needs no notice.
+  if (phase === 'unactivated') return { kind: 'unactivated' }
 
   return { kind: 'none' }
 }

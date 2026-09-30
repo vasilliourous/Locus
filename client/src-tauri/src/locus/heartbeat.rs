@@ -344,6 +344,30 @@ pub struct HeartbeatLoop {
     /// a backoff that was computed for a network problem that has long since
     /// passed.
     beat_now: Arc<Notify>,
+    /// Completions of a beat that was asked for by [`HeartbeatLoop::beat_now`].
+    ///
+    /// # Why a second primitive, rather than reusing `beat_now`
+    ///
+    /// `beat_now` only *wakes the loop*. Its `notify_one` returns as soon as the
+    /// value is stored, so a caller that awaits nothing learns nothing — and the
+    /// UI did exactly that: it cleared its "Checking…" flag the moment the IPC
+    /// command returned, which is before the request was even sent. The button
+    /// therefore animated a state it had not observed, in single-digit
+    /// milliseconds, while the hub round trip that the student is actually waiting
+    /// for had not begun. That is the "flicks from state to state so fast it seems
+    /// off" report.
+    ///
+    /// So the request and the completion are separate signals. A caller that only
+    /// wants to shorten the wait uses `beat_now` and returns immediately (the
+    /// tray, the periodic nudge); a caller that must *report* the outcome awaits
+    /// [`HeartbeatLoop::beat_now_and_wait`].
+    ///
+    /// This is not a queue: `Notify::notify_waiters` wakes whoever is waiting at
+    /// that instant, so a beat completing with nobody listening is simply not
+    /// observed. That is the intended semantic — the completion is an event for
+    /// whoever asked, not a durable record. The durable record is the stored
+    /// expiry, which `locus_status` reads.
+    beat_done: Arc<Notify>,
     task: tokio::task::JoinHandle<()>,
 }
 
@@ -362,6 +386,8 @@ impl HeartbeatLoop {
         let stop_signal = Arc::clone(&stop);
         let beat_now = Arc::new(Notify::new());
         let beat_now_signal = Arc::clone(&beat_now);
+        let beat_done = Arc::new(Notify::new());
+        let beat_done_signal = Arc::clone(&beat_done);
 
         let task = tokio::spawn(async move {
             let mut backoff = Backoff::new();
@@ -373,18 +399,27 @@ impl HeartbeatLoop {
                     BeatOutcome::Ok(_) => backoff.reset(),
                     // A refusal is terminal for this run: the account is not in
                     // good standing, and hammering the hub will not change it.
+                    //
+                    // The completion signal is raised here rather than shared with
+                    // the path below, so the terminal case stays a single obvious
+                    // exit — a caller waiting on a manual check needs the wake on
+                    // a refusal too, since that is an answer to the question it
+                    // asked.
                     BeatOutcome::Refused { .. } => {
                         on_outcome(outcome);
+                        wake_waiting_beat(&beat_done_signal);
                         break;
                     }
                     BeatOutcome::Unreachable { .. } => backoff.record_failure(),
                 }
 
-                let refused = matches!(outcome, BeatOutcome::Refused { .. });
                 on_outcome(outcome);
-                if refused {
-                    break;
-                }
+                // Raised AFTER `on_outcome`, so a caller awaiting this can rely on
+                // everything a completed beat changes — the stored expiry, the
+                // applied config — having already happened. Signalling first would
+                // hand the UI a fresh flag over stale state, which is the same lie
+                // in a new place.
+                wake_waiting_beat(&beat_done_signal);
 
                 let delay = backoff.jittered_delay();
                 tokio::select! {
@@ -399,7 +434,12 @@ impl HeartbeatLoop {
             }
         });
 
-        Self { stop, beat_now, task }
+        Self {
+            stop,
+            beat_now,
+            beat_done,
+            task,
+        }
     }
 
     /// Asks the loop to beat as soon as it can, without waiting out its delay.
@@ -407,6 +447,10 @@ impl HeartbeatLoop {
     /// A no-op if a beat is already in flight or imminent; the point is to stop a
     /// *long* wait, not to queue extra requests. Deliberately does not reset the
     /// backoff, so this cannot be used to keep a failing device hammering the hub.
+    ///
+    /// Returns immediately. Use [`Self::control`] and
+    /// [`HeartbeatControl::beat_now_and_wait`] when the caller has something to
+    /// *report* about the outcome.
     pub fn beat_now(&self) {
         self.beat_now.notify_one();
     }
@@ -416,6 +460,65 @@ impl HeartbeatLoop {
         self.stop.notify_one();
         let _ = self.task.await;
     }
+
+    /// A cloneable handle for asking the loop to beat and waiting for it.
+    ///
+    /// Separate from `self` because `HeartbeatLoop` owns the task's
+    /// `JoinHandle` and therefore cannot be cloned — while the *waiting* caller
+    /// sits in an async command that must not hold the loop's mutex across a
+    /// network round trip. The handle carries only the two notifiers.
+    #[must_use]
+    pub fn control(&self) -> HeartbeatControl {
+        HeartbeatControl {
+            beat_now: Arc::clone(&self.beat_now),
+            beat_done: Arc::clone(&self.beat_done),
+        }
+    }
+}
+
+/// The cloneable half of a running loop: request a beat, wait for it, hear about
+/// it.
+///
+/// Holds neither the task nor the stop signal, so it cannot stop or restart the
+/// loop — it can only ask it to do the thing it already does.
+#[derive(Clone)]
+pub struct HeartbeatControl {
+    beat_now: Arc<Notify>,
+    beat_done: Arc<Notify>,
+}
+
+impl HeartbeatControl {
+    /// Asks the loop to beat as soon as it can. Returns immediately.
+    pub fn beat_now(&self) {
+        self.beat_now.notify_one();
+    }
+
+    /// Asks the loop to beat, and resolves once that beat has completed and its
+    /// outcome has been applied.
+    ///
+    /// Registration happens **before** the request, or a fast completion could
+    /// land in the window between the two and be missed — leaving the caller
+    /// asleep until the *next* beat, minutes later.
+    pub async fn beat_now_and_wait(&self) {
+        let done = self.beat_done.notified();
+        tokio::pin!(done);
+        done.as_mut().enable();
+
+        self.beat_now.notify_one();
+        done.await;
+    }
+}
+
+/// Wakes anything awaiting a beat completion, without storing a permit.
+///
+/// `notify_waiters` rather than `notify_one`: a completion is a broadcast to
+/// whoever is currently waiting, and nobody is owed a completion that happened
+/// while they were not listening. `notify_one` would leave a permit behind, so a
+/// later `beat_now_and_wait` could resolve on a *previous* beat's completion and
+/// report success for a request that had not been sent — the precise bug this
+/// signal exists to remove.
+fn wake_waiting_beat(signal: &Arc<Notify>) {
+    signal.notify_waiters();
 }
 
 #[cfg(test)]
@@ -700,5 +803,112 @@ mod tests {
             "nested uot_port must survive deserialisation or the Strike tier loses UDP"
         );
         assert!(config.uot_enabled(response.udp_relay));
+    }
+
+    /// A beat requested through the control handle must **resolve**, not return
+    /// immediately.
+    ///
+    /// This is the guard for the "Check status now" flicker. The old path used
+    /// `Notify::notify_one` alone, which returns as soon as the value is stored —
+    /// so the UI cleared its pending state in single-digit milliseconds while the
+    /// hub round trip it was reporting on had not begun. The test asserts the
+    /// command's own contract: it resolves only after a completion is signalled.
+    ///
+    /// Written against the raw signal rather than a live loop, because the point
+    /// is the *waiting* behaviour, not the network. The loop's own completion
+    /// signalling is covered by `a_completed_beat_wakes_a_waiter`.
+    #[tokio::test]
+    async fn beat_now_and_wait_does_not_resolve_before_completion() {
+        let beat_now = Arc::new(Notify::new());
+        let beat_done = Arc::new(Notify::new());
+        let control = HeartbeatControl {
+            beat_now: Arc::clone(&beat_now),
+            beat_done: Arc::clone(&beat_done),
+        };
+
+        // Race the wait against a short timer. The wait must NOT win: nothing has
+        // signalled completion yet.
+        let waiter = tokio::spawn(async move { control.beat_now_and_wait().await });
+
+        let early = tokio::time::timeout(std::time::Duration::from_millis(50), waiter)
+            .await
+            .is_ok();
+        assert!(
+            !early,
+            "beat_now_and_wait resolved before any completion was signalled; \
+             this is the flicker bug — the caller would report success for a beat \
+             that had not happened"
+        );
+
+        // Now signal completion, as the loop does.
+        beat_done.notify_waiters();
+
+        // And confirm the request itself was actually made.
+        assert!(
+            tokio::time::timeout(std::time::Duration::from_millis(50), beat_now.notified())
+                .await
+                .is_ok(),
+            "beat_now_and_wait must request a beat, not merely wait for one"
+        );
+    }
+
+    /// The order matters: the request must be issued before the wait begins, and
+    /// a completion signalled *after* registration must reach the waiter.
+    #[tokio::test]
+    async fn a_completed_beat_wakes_a_waiter() {
+        let beat_now = Arc::new(Notify::new());
+        let beat_done = Arc::new(Notify::new());
+        let control = HeartbeatControl {
+            beat_now: Arc::clone(&beat_now),
+            beat_done: Arc::clone(&beat_done),
+        };
+
+        let signaller = tokio::spawn(async move {
+            // Wait for the request, then report completion, as the loop does.
+            beat_now.notified().await;
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+            beat_done.notify_waiters();
+        });
+
+        let waited = tokio::time::timeout(std::time::Duration::from_millis(1000), control.beat_now_and_wait()).await;
+
+        assert!(
+            waited.is_ok(),
+            "a signalled completion must reach the waiter; a missed wake means the \
+             caller sleeps until the next beat, minutes later"
+        );
+        signaller.await.expect("signaller task must finish");
+    }
+
+    /// `notify_waiters` leaves no permit behind, so a completion that happens with
+    /// nobody listening cannot be mistaken for a later request's completion.
+    ///
+    /// This is why the signal is `notify_waiters` and not `notify_one`: a stored
+    /// permit would let a subsequent `beat_now_and_wait` resolve on a *previous*
+    /// beat, reporting success for a request that had not been sent.
+    #[tokio::test]
+    async fn a_completion_with_no_waiter_is_not_replayed() {
+        let beat_now = Arc::new(Notify::new());
+        let beat_done = Arc::new(Notify::new());
+        let control = HeartbeatControl {
+            beat_now: Arc::clone(&beat_now),
+            beat_done: Arc::clone(&beat_done),
+        };
+
+        // A completion happens while nothing is waiting.
+        beat_done.notify_waiters();
+
+        // A later wait must still block until a NEW completion is signalled.
+        let waiter = tokio::spawn(async move { control.beat_now_and_wait().await });
+        let early = tokio::time::timeout(std::time::Duration::from_millis(50), waiter)
+            .await
+            .is_ok();
+        assert!(
+            !early,
+            "a stale completion was replayed to a later waiter; the control would \
+             report a check that never ran"
+        );
+
+        beat_done.notify_waiters();
     }
 }

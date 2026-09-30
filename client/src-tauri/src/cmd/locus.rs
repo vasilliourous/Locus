@@ -1064,14 +1064,28 @@ pub async fn locus_hub_url() -> String {
 /// or who wants to know whether a suspension has been lifted, had no way to ask
 /// without waiting for a timer they cannot see.
 ///
-/// This triggers one beat now. It returns whether a beat was *started*, not what
-/// it found: the result arrives through the ordinary heartbeat path (which stops
-/// the tunnel on a refusal and refreshes the stored date on success), so there is
-/// exactly one place that interprets the hub's answer. Reporting a verdict here
-/// would be a second interpretation that could disagree with the first.
+/// This triggers one beat now, and **waits for it to finish**. It returns whether
+/// a beat was started, not what it found: the result arrives through the ordinary
+/// heartbeat path (which stops the tunnel on a refusal and refreshes the stored
+/// date on success), so there is exactly one place that interprets the hub's
+/// answer. Reporting a verdict here would be a second interpretation that could
+/// disagree with the first.
+///
+/// # Why it waits rather than returning immediately (2026-09-30)
+///
+/// It used to return the moment the beat was *requested*, so the caller's pending
+/// state lasted one IPC round trip — single-digit milliseconds — while the hub
+/// round trip the student was waiting for had not begun. The button therefore
+/// animated a state it had not observed: "Check status now" flicked to
+/// "Checking…" and straight back, and the confirmation landed afterwards, from a
+/// poll. Waiting makes the control's pending state bracket the work, which is the
+/// only honest thing a progress indicator can do.
+///
+/// The wait is bounded by the beat's own request timeout, so an unreachable hub
+/// delays the reply rather than hanging it.
 #[tauri::command]
 pub async fn locus_check_subscription() -> bool {
-    crate::locus::runtime::beat_now()
+    crate::locus::runtime::beat_now_and_wait().await
 }
 
 #[cfg(test)]
