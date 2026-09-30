@@ -162,7 +162,7 @@ the claim is not verified.**
 | A5 | A published release is installable by an existing client end to end | **unverified** | needs real Windows/macOS hardware — see `../reference/STILL-OPEN.md` |
 | A6 | The **Windows** NSIS installer completes on a clean machine (setup runs, WebView2 checks pass, service registers) | **unverified** | run the staged `installer-Locus_3.2.12_x64-setup.exe` on real Windows; nothing in CI executes it — see `../reference/FIXES.md`, 2026-09-30 |
 | A7 | The **installed Windows client stays installed** — it launches from `C:\Program Files\Locus\`, serves its own bundled assets, and is not relaunched out of its install directory by its own updater | **unverified** | install on Windows, let it take an advertised update, then launch from the Start Menu and confirm the window renders the app. Nothing in CI launches either artifact, which is why three green releases shipped this broken — see `../reference/FIXES.md`, 2026-09-30 (second entry) |
-| A8 | The **shipped client resolves its own bundled assets at run time** — a build carries no CI-runner path, so an installed app on a machine without the runner's drive renders the app rather than `ERR_FILE_NOT_FOUND` | **unverified** | reported on a freshly-installed 3.2.12 (not an update) with `start_page: /` and `file:///D:/` in `latest.log`; confirm on real Windows after the next build. `server/scripts/check-consistency.sh` §16 is the tree-side half — it fails if an absolute `frontendDist` is reintroduced, but it cannot prove the *built* binary is clean |
+| A8 | The **shipped client resolves its own bundled assets at run time** — a build carries no CI-runner path, so an installed app on a machine without the runner's drive renders the app rather than `ERR_FILE_NOT_FOUND` | **verified 2026-09-30** for `a8b0acf` (CI run `36686775049`) | the built `locus-windows-amd64.exe` was read back from the run's artifacts and the Tauri context string now carries the relative `../dist` where the broken `5ebfc89` build carried `d:/a/Locus/Locus/client/dist`. Re-check with `strings locus-windows-amd64.exe \| grep -c 'a/Locus/Locus'` (expect `0`) |
 
 > **A7 was previously written to claim the opposite thing** — that a stale
 > `start_page` in `verge.yaml` produced a blank window. That was a misdiagnosis,
@@ -182,8 +182,31 @@ the claim is not verified.**
 > CI workspace `D:\a\Locus\Locus`, compiled into the binary by an absolute
 > `frontendDist` override added by the "better workflow" speed change. Normalizing
 > that path's separators (`17ef21a`) made CI green without removing the defect.
-> **Do not read A8 as verified because the guard passes** — the guard is on the
-> tree, and the artifact is the thing that shipped broken three times running.
+
+> **A8 is now VERIFIED, and the way it was verified is the point.** The earlier
+> entry here read "do not read A8 as verified because the guard passes — the guard
+> is on the tree, and the artifact is the thing that shipped broken." That warning
+> was correct, and the distinction it drew is exactly what the verification had to
+> cross: a **green run proves nothing** (four consecutive green runs preceded this
+> bug). So verification was done on the **built artifact**, not the run colour —
+> the raw `locus-windows-amd64.exe` was downloaded from run `36686775049` and the
+> Tauri context string inside it was read directly:
+>
+> ```text
+> broken  (5ebfc89, v3.2.12):  ...localhost:3000/ d:/a/Locus/Locus/client/dist icons/128x128.png...
+> fixed   (a8b0acf, run #17):  ...localhost:3000/ ../dist                        icons/32x32.png...
+> ```
+>
+> The defect string is **present** in the broken binary and **absent** (`grep -c`
+> returns `0`) in the fixed one, which carries the committed relative `../dist`
+> instead. This is the class-level check the project kept saying it lacked: the
+> build's own output was inspected, so a defect that only exists *after* "the
+> bundle compiled" is now visible. See `FIXES.md` for the full entry.
+
+> **Green still proves nothing on its own.** A8 was verified by reading the
+> *artifact*; A4's green run and A6/A7 below it were not advanced by it. Do not
+> generalise one artifact check into "the pipeline is trustworthy" — the next
+> platform-specific leak (a macOS path, a Linux path) would need its own read-back.
 
 > **A6 and A7 are NOT advanced by A4 going green.** The `v3.2.12` run is green and
 > its published `manifest.json` was checked live — the `windows` entry now names
@@ -198,18 +221,18 @@ the claim is not verified.**
 **This file does not make any Class A claim true.** It makes them dated,
 single-homed, and checkable, and it stops them being laundered into derived
 sentences that read as facts about the code. A5–A7 above are **not verified**; A4
-carries a single dated verification of one run and nothing more. When
-this documentation overhaul was performed (2026-09-29) the environment had no route
-to the hub: the previous address no longer existed and no credentials were
+and A8 each carry a single dated verification of one artifact and nothing more.
+When this documentation overhaul was performed (2026-09-29) the environment had no
+route to the hub: the previous address no longer existed and no credentials were
 available. That is itself an example of the rule — the honest state is written
 down, not assumed away.
 
-**A verification is a dated observation of one run, never a property.** A4 now
-says "verified for `5ebfc89`", not "the workflow is green" — the next commit
-invalidates it, and a reader who needs the current state must re-run the check in
-the right-hand column. This is the distinction the file exists to preserve; a
-"verified" cell without a commit attached is the drift this table is here to
-prevent.
+**A verification is a dated observation of one run, never a property.** A4 says
+"verified for `5ebfc89`", not "the workflow is green"; A8 says "verified for
+`a8b0acf`", not "the client resolves its assets". The next commit invalidates both,
+and a reader who needs the current state must re-run the check in the right-hand
+column. This is the distinction the file exists to preserve; a "verified" cell
+without a commit attached is the drift this table is here to prevent.
 
 ---
 

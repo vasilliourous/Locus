@@ -159,10 +159,16 @@ download the bundle to `client/dist`. The guard was shown to fail against all th
 shapes it can be reintroduced in (the `ba01ed2` literal, the `17ef21a`
 node-assembled form, and an absolute committed config).
 
-**The guard proves the tree, not the artifact.** Nothing in CI launches the built
-binary, so the guard cannot see a path that is already inside a shipped executable.
-That is why this shipped four times: see `../reference/STILL-OPEN.md` and
-`CLAIMS.md` §5 **A8**.
+**The guard proves the tree, not the artifact** — and the artifact is what ships. On
+2026-09-30 the fix was confirmed by reading the built binary back: the raw
+`locus-windows-amd64.exe` from run `36686775049` (`a8b0acf`) carries the relative
+`../dist` where the broken build carried `d:/a/Locus/Locus/client/dist`, and
+`strings … | grep -c 'a/Locus/Locus'` returns `0`. See `../reference/FIXES.md`,
+`../reference/STILL-OPEN.md`, and `CLAIMS.md` §5 **A8**.
+
+> **Nothing in CI performs that read-back.** It was done by hand, so the next
+> platform-specific path leak ships the same way. A step that runs the built binary
+> and asserts its page-load URL is not `file://` remains the missing mechanism.
 
 ---
 

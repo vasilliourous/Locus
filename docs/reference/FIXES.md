@@ -127,15 +127,56 @@ The guard was **reintroduced against all three defect shapes and failed on each*
 the original `ba01ed2` literal, the `17ef21a` node-assembled form, and an absolute
 committed config. Restored, the tree passes. Guard can fail, and does.
 
-### What was NOT verified
+### How it was verified — on the artifact, not the run colour
 
-No Windows build was produced and no Windows machine was available. The claim that
-a freshly-built client now resolves its own bundled assets is **unverified** and is
-recorded as `CLAIMS.md` §5 **A8**. The tree-side guard passes; the *artifact* is
-what shipped broken three releases running, and only a real Windows install of the
-next build settles it. Two checks would corroborate cheaply: `strings
-locus.exe | grep 'a/Locus/Locus'` on the currently-installed binary (expect a hit,
-proving the embed), and the same on the next build (expect none).
+The fix was pushed to `main` (no tag; the `preview` job runs, `release` is skipped)
+as `a8b0acf`, and the push triggered CI run **`36686775049`**. Every job went green
+— `Verify`, all four builds incl. `windows-2022`, `Preview installers` — and
+`Release` correctly skipped.
+
+**That is exactly why the run colour was not the verification.** Four consecutive
+green runs preceded this bug: 3.2.9, 3.2.10, 3.2.11, 3.2.12. A green run means a
+bundle *built*; this defect lived entirely in the built artifact. So the
+**artifact was read back** — the raw Windows updater payload
+(`locus-windows-amd64.exe`) was downloaded from the run and the Tauri context
+string embedded in it was inspected directly, with the broken `v3.2.12` build
+(`5ebfc89`) as the control:
+
+```text
+broken  (5ebfc89):  ...localhost:3000/ d:/a/Locus/Locus/client/dist icons/128x128.png...
+fixed   (a8b0acf):  ...localhost:3000/ ../dist                        icons/32x32.png...
+```
+
+```sh
+strings locus-windows-amd64.exe | grep -c 'a/Locus/Locus'   # broken: 1   fixed: 0
+```
+
+The defect string is present in the broken binary and **absent** in the fixed one,
+which now carries the committed relative `../dist` — resolved beside the executable
+at run time, which is the correct behaviour and the thing `file:///D:/` violated.
+The app identity (`com.locus.client`, `icons/128x128.png`) is intact in both, so
+the context was not merely stripped. `CLAIMS.md` §5 **A8** is moved to
+**verified 2026-09-30 for `a8b0acf`**.
+
+This is the class-level check the project had been saying it lacked, performed once
+by hand: **inspect the build's own output, not the run's colour.** It is not yet a
+CI step — see the note below.
+
+### What is still NOT verified
+
+- **The interactive install on Windows is untested.** The artifact is proven clean,
+  but no one has run `installer-Locus_3.2.12_x64-setup.exe` on a real desktop and
+  watched the window appear. That is `CLAIMS.md` §5 **A6**, still unverified — the
+  artifact check rules out *this* defect, not a broken installer.
+- **The artefact-level check is manual.** It is not wired into CI, so the next
+  platform-specific path leak would ship undetected exactly as this one did. The
+  suggested CI step (run the built binary, assert its page-load URL is not
+  `file://`) remains unbuilt — see below.
+- **The `build-preview` release is accumulating assets rather than replacing
+  them.** Observed 2026-09-30: it held installers for 3.2.7 through 3.2.12 at once,
+  contradicting the workflow's stated "replaced wholesale on each run". Not the
+  defect above and not fixed here; recorded so it is not mistaken for a clean
+  state.
 
 ### The class this is the fourth instance of
 
@@ -145,9 +186,14 @@ this project tests that a bundle **builds**; none launches either artifact, so
 each defect after "the bundle compiled" is invisible. This one is worse than its
 predecessors in one respect: a build-machine path was *deliberately* injected into
 a user-facing artifact for speed, and the only thing standing between it and the
-fleet was nobody noticing. A CI step that runs the built binary and asserts its
-page-load URL is not `file://` would have caught all four. That is still the fix
-this class needs and does not have.
+fleet was nobody noticing.
+
+**This entry is the first where the artifact was read back by hand** — and that
+read is what turned an unverified fix into a verified one. It is the proof the
+class has needed: the build's output is inspectable, and inspecting it catches what
+run colour cannot. The CI step that does this automatically (run the built binary,
+assert its page-load URL is not `file://`) is still not built. Until it is, this
+class is caught by whoever remembers to look, which is not a mechanism.
 
 ---
 

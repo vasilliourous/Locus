@@ -176,10 +176,19 @@ bakes `frontendDist` into the executable as its runtime asset root. See `FIXES.m
 The override is removed (the committed relative `../dist` resolves correctly, and
 the bundle is already downloaded to `client/dist`) and `check-consistency.sh` §16
 guards it — shown to fail against all three shapes it can be reintroduced in.
-**Still unverified, and the whole point of this entry**: none of that proves the
-*artifact* is clean. No Windows build was produced. The next Windows install is the
-test, and `strings locus.exe | grep 'a/Locus/Locus'` on the shipped binary would
-corroborate the embed cheaply. Tracked as CLAIMS.md §5 **A8**.
+
+**Verified on the artifact, 2026-09-30.** Pushed as `a8b0acf` (preview, no tag); CI
+run `36686775049` went green, and the built `locus-windows-amd64.exe` was read back
+from the run's artifacts. The Tauri context string inside it now carries the
+relative `../dist` where the broken `5ebfc89` build carried
+`d:/a/Locus/Locus/client/dist`; `strings … | grep -c 'a/Locus/Locus'` returns `0`.
+Tracked as CLAIMS.md §5 **A8**, now **verified for `a8b0acf`**.
+
+**What remains open, and is the point of keeping this entry**: the check was done
+**by hand**, not by CI. Nothing runs the built binary, so the next platform path
+leak (macOS, Linux) ships the same way. The CI step that would close this is still
+unbuilt — see the class note below. The interactive Windows install is also still
+untested (`CLAIMS.md` **A6**).
 
 #### Nothing in CI runs either artifact — the class behind all three
 
@@ -200,6 +209,13 @@ have caught 3.2.9, 3.2.10 and 3.2.12 outright; the 3.2.11 miss was a **reasoning
 failure that no CI can catch — it came from inferring a cause from source instead
 of asking for the log. The first is worth building. The second is worth
 remembering.
+
+**As of 2026-09-30, the artifact check exists but only as a hand-run.** 3.2.12's
+fix was verified by downloading the built `locus-windows-amd64.exe` and reading the
+Tauri context string out of it (see the entry above) — the same evidence a CI step
+would produce. **The step itself is still not written.** So the answer to "does
+anything check the artifact?" is now *"a person did, once"* — which is not the
+mechanism this class needs. The next platform path leak would ship the same way.
 
 > **The 3.2.12 row is the one to sit with.** A build-machine path was deliberately
 > injected into a user-facing artifact for build speed, its *separators* were
