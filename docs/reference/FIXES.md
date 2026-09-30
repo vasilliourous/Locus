@@ -164,10 +164,14 @@ CI step — see the note below.
 
 ### What is still NOT verified
 
-- **The interactive install on Windows is untested.** The artifact is proven clean,
-  but no one has run `installer-Locus_3.2.12_x64-setup.exe` on a real desktop and
-  watched the window appear. That is `CLAIMS.md` §5 **A6**, still unverified — the
-  artifact check rules out *this* defect, not a broken installer.
+- **The interactive install on Windows is now CONFIRMED** (2026-09-30, after this
+  entry was first written): `installer-Locus_3.2.12_x64-setup.exe` was run
+  interactively on real Windows, the NSIS setup completed, and Locus installed.
+  That closes `CLAIMS.md` §5 **A6**, which had been unverified since the NSIS
+  `installerHooks` defect. This is the first Windows install the project has ever
+  confirmed. It settles the installer, not the app: the window rendering after a
+  real install is A8's interactive side, and A7 (surviving an *update*) remains
+  unverified.
 - **The artefact-level check is manual.** It is not wired into CI, so the next
   platform-specific path leak would ship undetected exactly as this one did. The
   suggested CI step (run the built binary, assert its page-load URL is not
@@ -454,6 +458,11 @@ Deleting the template is a **compile-time and structural** argument, not a
 running installer. No NSIS bundle was produced on this machine (no Windows toolchain),
 so the claim "the Windows installer works" is **unverified** as of this entry
 and belongs in `CLAIMS.md` §5 as such. The next Windows install is the test.
+
+> **UPDATE 2026-09-30 (later the same day).** That test has now happened:
+> `installer-Locus_3.2.12_x64-setup.exe` was run interactively on real Windows and
+> completed, installing Locus. `CLAIMS.md` §5 **A6** is verified. The paragraph
+> above is kept as written because it was true when written; read it as history.
 
 ### The guard
 

@@ -160,7 +160,7 @@ the claim is not verified.**
 | A3 | The rolling `build-preview` release is current for the pushed commit | **unverified** | `gh release view build-preview --json tagName,assets,createdAt` |
 | A4 | The client CI workflow has run and gone green for a given commit | **verified 2026-09-30** for `5ebfc89` | run `36669449010` — `Verify`, all four builds incl. `windows-2022`, `Release`, `Report` — read from the GitHub REST API. Re-check with `gh run list --workflow=client.yml` |
 | A5 | A published release is installable by an existing client end to end | **unverified** | needs real Windows/macOS hardware — see `../reference/STILL-OPEN.md` |
-| A6 | The **Windows** NSIS installer completes on a clean machine (setup runs, WebView2 checks pass, service registers) | **unverified** | run the staged `installer-Locus_3.2.12_x64-setup.exe` on real Windows; nothing in CI executes it — see `../reference/FIXES.md`, 2026-09-30 |
+| A6 | The **Windows** NSIS installer completes on a clean machine — the setup runs interactively and installs Locus | **verified 2026-09-30** for the `v3.2.12` installer (`installer-Locus_3.2.12_x64-setup.exe`) | opened the NSIS setup on real Windows and completed the install; Locus installed. Re-check by running the setup on a clean machine and confirming the install finishes |
 | A7 | The **installed Windows client stays installed** — it launches from `C:\Program Files\Locus\`, serves its own bundled assets, and is not relaunched out of its install directory by its own updater | **unverified** | install on Windows, let it take an advertised update, then launch from the Start Menu and confirm the window renders the app. Nothing in CI launches either artifact, which is why three green releases shipped this broken — see `../reference/FIXES.md`, 2026-09-30 (second entry) |
 | A8 | The **shipped client resolves its own bundled assets at run time** — a build carries no CI-runner path, so an installed app on a machine without the runner's drive renders the app rather than `ERR_FILE_NOT_FOUND` | **verified 2026-09-30** for `a8b0acf` (CI run `36686775049`) | the built `locus-windows-amd64.exe` was read back from the run's artifacts and the Tauri context string now carries the relative `../dist` where the broken `5ebfc89` build carried `d:/a/Locus/Locus/client/dist`. Re-check with `strings locus-windows-amd64.exe \| grep -c 'a/Locus/Locus'` (expect `0`) |
 
@@ -208,31 +208,42 @@ the claim is not verified.**
 > generalise one artifact check into "the pipeline is trustworthy" — the next
 > platform-specific leak (a macOS path, a Linux path) would need its own read-back.
 
-> **A6 and A7 are NOT advanced by A4 going green.** The `v3.2.12` run is green and
-> its published `manifest.json` was checked live — the `windows` entry now names
-> `installer-Locus_3.2.12_x64-setup.exe` rather than the raw executable. That
-> proves the *pipeline* emits the right artifact. It does **not** prove the
-> artifact installs (A6) or that the installed app survives an update (A7). The
-> three preceding green runs are the standing evidence that this distinction is
-> real, so do not read the ✓ beside A4 as progress on the two rows below it.
+> **A6 is now VERIFIED — the installer is confirmed to install.** The
+> `installer-Locus_3.2.12_x64-setup.exe` was run interactively on real Windows and
+> completed, installing Locus. This is the first Windows install this project has
+> ever confirmed; A6 had been carried as unverified since 2026-09-30 because
+> nothing in CI executes an installer. Note what it does **not** settle: the
+> install completing is the installer's job, and A7 (the installed app surviving an
+> update) and A8's interactive end — the window rendering after a real install —
+> are separate properties. The artifact read-back covers A8's side; A7 remains
+> unverified.
+
+> **A6 was NOT advanced by A4 going green, and that distinction still stands.**
+> The `v3.2.12` run is green and its published `manifest.json` names
+> `installer-Locus_3.2.12_x64-setup.exe` rather than the raw executable — but
+> neither proves an installer *installs*. It took an actual interactive run on
+> Windows to move A6, which is exactly why the row sat unverified while three
+> preceding green runs shipped unusable releases. Do not read the ✓ beside A4 as
+> progress on any row below it.
 
 ### The honest limit of this file
 
 **This file does not make any Class A claim true.** It makes them dated,
 single-homed, and checkable, and it stops them being laundered into derived
-sentences that read as facts about the code. A5–A7 above are **not verified**; A4
-and A8 each carry a single dated verification of one artifact and nothing more.
-When this documentation overhaul was performed (2026-09-29) the environment had no
-route to the hub: the previous address no longer existed and no credentials were
-available. That is itself an example of the rule — the honest state is written
+sentences that read as facts about the code. A5 and A7 above are **not verified**;
+A4, A6 and A8 each carry a single dated verification of one artifact and nothing
+more. When this documentation overhaul was performed (2026-09-29) the environment
+had no route to the hub: the previous address no longer existed and no credentials
+were available. That is itself an example of the rule — the honest state is written
 down, not assumed away.
 
 **A verification is a dated observation of one run, never a property.** A4 says
-"verified for `5ebfc89`", not "the workflow is green"; A8 says "verified for
-`a8b0acf`", not "the client resolves its assets". The next commit invalidates both,
-and a reader who needs the current state must re-run the check in the right-hand
-column. This is the distinction the file exists to preserve; a "verified" cell
-without a commit attached is the drift this table is here to prevent.
+"verified for `5ebfc89`", not "the workflow is green"; A6 says "verified for the
+`v3.2.12` installer", not "the installer works"; A8 says "verified for `a8b0acf`",
+not "the client resolves its assets". The next release invalidates each, and a
+reader who needs the current state must re-run the check in the right-hand column.
+This is the distinction the file exists to preserve; a "verified" cell without an
+artifact or commit attached is the drift this table is here to prevent.
 
 ---
 

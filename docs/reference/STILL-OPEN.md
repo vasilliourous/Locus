@@ -138,11 +138,16 @@ carrying an **Edge** logo and `ERR_FILE_NOT_FOUND` — see `FIXES.md`
 **blanks**. The bundle built; the installer could not.
 
 The config no longer names either file and `check-consistency.sh` §14 guards
-that. **But the fix is a structural argument, not a running installer**: no NSIS
+that. **The fix is a structural argument, not a running installer**: no NSIS
 bundle was produced on the machine where it was made, and nothing in CI executes
-one. So the standalone Windows install on 3.2.10 is **unverified** — the first
-real Windows install is the test, and it should be done before any Windows user
-is told the release fixes their problem. Tracked as CLAIMS.md §5 **A6**.
+one.
+
+**RESOLVED 2026-09-30.** `installer-Locus_3.2.12_x64-setup.exe` was run
+interactively on real Windows and completed, installing Locus — the first Windows
+install the project has confirmed. `CLAIMS.md` §5 **A6** is now verified for that
+installer. (This was unverified when the entry was written; it is kept here rather
+than deleted because the reasoning about *why* it went unverified for so long —
+nothing in CI executes an installer — still holds, and still applies to A7.)
 
 #### The *update* path put the client outside its install directory (2026-09-30)
 
@@ -187,8 +192,12 @@ Tracked as CLAIMS.md §5 **A8**, now **verified for `a8b0acf`**.
 **What remains open, and is the point of keeping this entry**: the check was done
 **by hand**, not by CI. Nothing runs the built binary, so the next platform path
 leak (macOS, Linux) ships the same way. The CI step that would close this is still
-unbuilt — see the class note below. The interactive Windows install is also still
-untested (`CLAIMS.md` **A6**).
+unbuilt — see the class note below.
+
+The interactive Windows install is **no longer** part of this gap: it was run and
+completed on 2026-09-30 (`CLAIMS.md` **A6**, verified). What that does **not**
+cover is the app surviving an advertised *update* on that install — still
+unverified (`CLAIMS.md` **A7**).
 
 #### Nothing in CI runs either artifact — the class behind all three
 
