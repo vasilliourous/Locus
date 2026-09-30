@@ -161,6 +161,26 @@ old behaviour. **What is still unverified is the same shape as everything else
 here**: no Windows machine took an update and then launched from the Start Menu.
 Tracked as CLAIMS.md §5 **A7**.
 
+#### The shipped binary embedded the CI runner's `D:` path as its asset root (2026-09-30)
+
+The **third** report of the same `ERR_FILE_NOT_FOUND` text, and this one rules out
+both earlier causes on its own facts: the installer was pulled **fresh from the
+release page** (no update), and `verge.yaml` had `start_page: /` (no config path).
+The log's `url=file:///D:/` is the Windows CI workspace `D:\a\Locus\Locus`,
+compiled into the binary by an absolute `frontendDist` override that the "better
+workflow" speed change added to `TAURI_CONFIG` — because `tauri::generate_context!()`
+bakes `frontendDist` into the executable as its runtime asset root. See `FIXES.md`
+("THE SHIPPED CLIENT LOOKED FOR ITS ASSETS ON THE CI RUNNER'S `D:` DRIVE",
+2026-09-30).
+
+The override is removed (the committed relative `../dist` resolves correctly, and
+the bundle is already downloaded to `client/dist`) and `check-consistency.sh` §16
+guards it — shown to fail against all three shapes it can be reintroduced in.
+**Still unverified, and the whole point of this entry**: none of that proves the
+*artifact* is clean. No Windows build was produced. The next Windows install is the
+test, and `strings locus.exe | grep 'a/Locus/Locus'` on the shipped binary would
+corroborate the embed cheaply. Tracked as CLAIMS.md §5 **A8**.
+
 #### Nothing in CI runs either artifact — the class behind all three
 
 Worth stating as one thing rather than three. Every check in this project verifies
@@ -172,12 +192,20 @@ installer. So:
 | 3.2.9 | ✓ green | an installer that could not install |
 | 3.2.10 | ✓ green | an update that could not update |
 | 3.2.11 | ✓ green | a fix for a cause that did not exist |
+| 3.2.12 | ✓ green | a signed installer that carried a CI runner path as its asset root |
 
-Three consecutive green runs, three releases a student could not use. A CI step
+Four consecutive green runs, four releases a student could not use. A CI step
 that runs the built binary and asserts its page-load URL is not `file://` would
-have caught 3.2.9 and 3.2.10 outright; the 3.2.11 miss was a **reasoning** failure
-that no CI can catch — it came from inferring a cause from source instead of
-asking for the log. The first is worth building. The second is worth remembering.
+have caught 3.2.9, 3.2.10 and 3.2.12 outright; the 3.2.11 miss was a **reasoning**
+failure that no CI can catch — it came from inferring a cause from source instead
+of asking for the log. The first is worth building. The second is worth
+remembering.
+
+> **The 3.2.12 row is the one to sit with.** A build-machine path was deliberately
+> injected into a user-facing artifact for build speed, its *separators* were
+> fixed when the build panicked, and it shipped signed. The defect was never the
+> escaping — it was the decision, and nothing in the pipeline asks "should this
+> value be in the artifact at all".
 
 ### The installed app data root and the app's own idea of it can disagree
 

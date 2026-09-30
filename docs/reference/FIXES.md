@@ -27,6 +27,130 @@ corrections are marked. For what is *still* broken, read `STILL-OPEN.md`.
 
 ---
 
+## THE SHIPPED CLIENT LOOKED FOR ITS ASSETS ON THE CI RUNNER'S `D:` DRIVE (2026-09-30)
+
+> **This supersedes both earlier `ERR_FILE_NOT_FOUND` diagnoses for THIS report.**
+> The first attributed it to a stale `start_page` (withdrawn); the second, the
+> updater re-executing the client's own binary (real, and fixed in v3.2.12, but a
+> different report — it needs an *update*, and this one was a fresh install). Read
+> the distinctions before reaching for either.
+
+A Windows client installed `installer-Locus_3.2.12_x64-setup.exe` **pulled
+directly from the release page** and launched it. The window showed:
+
+```text
+File not found
+It may have been moved, edited, or deleted.
+ERR_FILE_NOT_FOUND
+```
+
+with a **Microsoft Edge logo**, inside a Locus window. Two facts in the report
+rule out both earlier causes:
+
+- the install was **fresh from the release page**, so no `tauri_plugin_updater`
+  handoff occurred — the process that failed is the installed application;
+- `verge.yaml` carried `start_page: /`, so no persisted-URL path could produce a
+  bad value.
+
+The decisive line, in `latest.log`:
+
+```text
+[Window] page load started:  url=file:///D:/
+[Window] page load finished: url=file:///D:/
+```
+
+### The defect
+
+`frontendDist` is not only a build-time input. `tauri::generate_context!()`
+(`client/src-tauri/src/lib.rs`) resolves it **at compile time and bakes the
+resolved path into the binary**, where it becomes the runtime asset root for
+`WebviewUrl::App(..)`. The committed `tauri.conf.json` carries the correct
+relative `"frontendDist": "../dist"`.
+
+The "better workflow" commit (`ba01ed2`), which made CI faster by building the
+frontend once in `verify` and downloading it into each build job, overrode
+`frontendDist` to an **absolute runner path** so `tauri build` would reuse that
+bundle:
+
+```json
+{"build":{"beforeBuildCommand":"","frontendDist":"${{ github.workspace }}/client/dist"}}
+```
+
+On the Windows runner `github.workspace` is `D:\a\Locus\Locus`, so the shipped
+binary carried `D:/a/Locus/Locus/client/dist` as the directory it expected its
+web assets in. On a student's machine that path does not exist. Tauri resolved
+the start page against a missing root, WebView2 rendered Chromium's own error
+page (Edge logo, `ERR_FILE_NOT_FOUND`) in a window that is `.visible(false)` until
+page-load *Finished* — which never arrives — so the app never appeared at all.
+
+Nothing in the report names Locus, Tauri, or CI. And because the bad value is in
+the **executable**, not in config: a restart changes nothing, and a reinstall
+changes nothing (it installs the same binary).
+
+### Why a green build hid it, twice
+
+`17ef21a` ("don't interpolate a Windows path raw into `TAURI_CONFIG` JSON") fixed
+a *different* symptom of the same line: interpolated raw into JSON, `D:\a\...`
+contains `\a`, an invalid JSON escape, and the `tauri` build script panicked at
+`invalid escape at line 1 column 54`. That commit normalised the path to forward
+slashes and encoded it with a real JSON encoder, so **the build went green** — and
+the absolute runner path stayed in the binary. The escaping was never the defect;
+an absolute build-machine path had no business in a shipped artifact at all. The
+commit message shows the author reading `D:\a\Locus\Locus` and treating it as a
+character-encoding problem rather than asking why it was there.
+
+### The fix
+
+**Workflow**, `.github/workflows/client.yml` — `TAURI_CONFIG` now sets **only**
+the empty `beforeBuildCommand`:
+
+```yaml
+TAURI_CONFIG: '{"build":{"beforeBuildCommand":""}}'
+```
+
+`frontendDist` is not mentioned. The build job already downloads the bundle to
+`client/dist`, and `tauri.conf.json` (in `client/src-tauri/`) resolves its
+relative `../dist` to exactly that directory — on every runner, with no path
+arithmetic, and nothing to escape, so the JSON-panic cannot recur either. The
+shell-time normalization (`DIST=`, the `node` encoder) is deleted with it.
+
+**Guard**, `check-consistency.sh` §16 — three assertions:
+
+- no **live** line of the workflow may set `frontendDist` (comment lines are
+  excluded: a `#` line cannot set an environment variable, so it cannot reach the
+  build — a trailing comment on a live line is still checked);
+- the committed `tauri.conf.json` must keep `frontendDist` relative;
+- the build job must download the bundle to `client/dist`, the directory `../dist`
+  resolves to, or the relative path silently points at nothing.
+
+The guard was **reintroduced against all three defect shapes and failed on each**:
+the original `ba01ed2` literal, the `17ef21a` node-assembled form, and an absolute
+committed config. Restored, the tree passes. Guard can fail, and does.
+
+### What was NOT verified
+
+No Windows build was produced and no Windows machine was available. The claim that
+a freshly-built client now resolves its own bundled assets is **unverified** and is
+recorded as `CLAIMS.md` §5 **A8**. The tree-side guard passes; the *artifact* is
+what shipped broken three releases running, and only a real Windows install of the
+next build settles it. Two checks would corroborate cheaply: `strings
+locus.exe | grep 'a/Locus/Locus'` on the currently-installed binary (expect a hit,
+proving the embed), and the same on the next build (expect none).
+
+### The class this is the fourth instance of
+
+Three consecutive green releases shipped something unusable (3.2.9 the installer,
+3.2.10 the update, 3.2.11 the wrong fix), and this is the fourth. Every check in
+this project tests that a bundle **builds**; none launches either artifact, so
+each defect after "the bundle compiled" is invisible. This one is worse than its
+predecessors in one respect: a build-machine path was *deliberately* injected into
+a user-facing artifact for speed, and the only thing standing between it and the
+fleet was nobody noticing. A CI step that runs the built binary and asserts its
+page-load URL is not `file://` would have caught all four. That is still the fix
+this class needs and does not have.
+
+---
+
 ## THE APP RE-EXECUTED ITSELF INSTEAD OF UPDATING, AND SHOWED AN EDGE "FILE NOT FOUND" (2026-09-30)
 
 > **This is the entry the two above were looking for.** Both earlier 2026-09-30

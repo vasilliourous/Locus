@@ -162,6 +162,7 @@ the claim is not verified.**
 | A5 | A published release is installable by an existing client end to end | **unverified** | needs real Windows/macOS hardware — see `../reference/STILL-OPEN.md` |
 | A6 | The **Windows** NSIS installer completes on a clean machine (setup runs, WebView2 checks pass, service registers) | **unverified** | run the staged `installer-Locus_3.2.12_x64-setup.exe` on real Windows; nothing in CI executes it — see `../reference/FIXES.md`, 2026-09-30 |
 | A7 | The **installed Windows client stays installed** — it launches from `C:\Program Files\Locus\`, serves its own bundled assets, and is not relaunched out of its install directory by its own updater | **unverified** | install on Windows, let it take an advertised update, then launch from the Start Menu and confirm the window renders the app. Nothing in CI launches either artifact, which is why three green releases shipped this broken — see `../reference/FIXES.md`, 2026-09-30 (second entry) |
+| A8 | The **shipped client resolves its own bundled assets at run time** — a build carries no CI-runner path, so an installed app on a machine without the runner's drive renders the app rather than `ERR_FILE_NOT_FOUND` | **unverified** | reported on a freshly-installed 3.2.12 (not an update) with `start_page: /` and `file:///D:/` in `latest.log`; confirm on real Windows after the next build. `server/scripts/check-consistency.sh` §16 is the tree-side half — it fails if an absolute `frontendDist` is reintroduced, but it cannot prove the *built* binary is clean |
 
 > **A7 was previously written to claim the opposite thing** — that a stale
 > `start_page` in `verge.yaml` produced a blank window. That was a misdiagnosis,
@@ -170,6 +171,19 @@ the claim is not verified.**
 > because the *unverified property* it names is real and load-bearing; only the
 > proposed cause was wrong. `docs/README.md` rule 3 — the code wins, and the doc
 > was the bug.
+
+> **A8 is the third attempt at one symptom, and the report that exposed it.**
+> The same `ERR_FILE_NOT_FOUND` was attributed first to a stale `start_page`
+> (withdrawn) and then to the updater re-executing the client's own binary (real,
+> fixed in `v3.2.12`, but not this report). This report differs on two facts that
+> rule both out: the installer was **pulled from the release page and run fresh**
+> (no update involved), and `verge.yaml` carried `start_page: /` (so no config
+> path could fire). What remains is the log line `url=file:///D:/` — the Windows
+> CI workspace `D:\a\Locus\Locus`, compiled into the binary by an absolute
+> `frontendDist` override added by the "better workflow" speed change. Normalizing
+> that path's separators (`17ef21a`) made CI green without removing the defect.
+> **Do not read A8 as verified because the guard passes** — the guard is on the
+> tree, and the artifact is the thing that shipped broken three times running.
 
 > **A6 and A7 are NOT advanced by A4 going green.** The `v3.2.12` run is green and
 > its published `manifest.json` was checked live — the `windows` entry now names

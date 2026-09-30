@@ -408,33 +408,37 @@ jobs:
       # committed config, so local `pnpm build` and every other consumer of that
       # file keep working exactly as they do today.
       #
-      # `frontendDist` is ABSOLUTE here, and that is load-bearing. The macro
-      # `tauri::generate_context!()` resolves it at COMPILE time and panics if
-      # the path is missing (\"The `frontendDist` configuration is set to
-      # \"../dist\" but this path doesn't exist\"), and a relative path is
-      # resolved against the config file's directory on some code paths and the
-      # CWD on others.
+      # `frontendDist` is NOT overridden here, and that is load-bearing.
       #
-      # ── THE PATH IS NORMALIZED TO FORWARD SLASHES, AND THAT IS NOT COSMETIC ──
+      # The committed `tauri.conf.json` sets `"frontendDist": "../dist"`,
+      # relative to the config file. The downloaded bundle lands at
+      # `client/dist` (see the download step below), and `tauri.conf.json`
+      # lives in `client/src-tauri/`, so `../dist` resolves to exactly that
+      # directory — on every runner, with no path arithmetic.
       #
-      # `TAURI_CONFIG` is JSON, and Tauri parses it with `serde_json::from_str`
-      # (`tauri-utils` `acl/build.rs`). On Windows `github.workspace` is
-      # `D:\a\Locus\Locus`, and interpolated raw into JSON that becomes
-      # `"D:\a\Locus\..."` — where `\a` and `\L` are **invalid JSON escapes**.
-      # The parse fails and the `tauri` build script panics with:
+      # ── WHY AN ABSOLUTE `frontendDist` MUST NEVER BE SET HERE ──
       #
-      #   called `Result::unwrap()` on an `Err` value: invalid escape at line 1 column 54
+      # `frontendDist` is not only a build-time input. `tauri::generate_context!()`
+      # (`client/src-tauri/src/lib.rs`) resolves it at COMPILE time and BAKES the
+      # resolved path into the binary, where it becomes the runtime asset root for
+      # `WebviewUrl::App(..)`. An absolute path from the runner therefore ships
+      # inside the artifact: a Windows build from `D:\a\Locus\Locus` carries
+      # `D:/a/Locus/Locus/client/dist` as the place it expects its web assets.
       #
-      # (`\a` sits at exactly column 54 for this workspace path.) That is a
-      # Windows-only failure, which is why Linux and macOS stayed green while the
-      # Windows leg died in the build script before compiling a line.
+      # On a student's machine that directory does not exist, so Tauri resolves the
+      # start page against a missing root and WebView2 renders Chromium's own
+      # "File not found / ERR_FILE_NOT_FOUND" page — with an Edge logo, in a window
+      # titled Locus, on a perfectly healthy install. Nothing in that message names
+      # the cause.
       #
-      # An earlier revision of this file claimed the raw `${{ github.workspace }}`
-      # form "is correct on every runner, including Windows where it yields
-      # `D:\\a\\...`". It does not: a YAML block scalar does no JSON escaping, so
-      # what reached `serde_json` was `D:\a\Locus\Locus`. Windows accepts forward
-      # slashes in every path context involved here, and they are valid JSON
-      # unescaped, so the path is normalized in the shell below.
+      # An earlier revision set the absolute path to dodge a `tauri` build-script
+      # panic, then normalized the separators to fix a JSON-escape panic
+      # ("invalid escape at line 1 column 54"). Both were treating symptoms of
+      # the same mistake: an absolute runner path had no business in a shipped
+      # binary. The relative path the committed config already carries is correct
+      # (`tauri::generate_context!()` resolves it against the config file's own
+      # directory, which is stable), and `check-consistency.sh` §16 now fails if
+      # an absolute `frontendDist` is ever reintroduced.
       #
       # The download MUST precede the build, because that macro runs during
       # compilation.
@@ -589,41 +593,21 @@ jobs:
           # Empty `beforeBuildCommand`: the bundle was built once in `verify` and
           # downloaded above. See "Download the frontend bundle".
           #
-          # `frontendDist` is absolute because `tauri::generate_context!()`
-          # resolves it at compile time and panics on a missing path.
+          # That override is the ONLY thing `TAURI_CONFIG` sets. It deliberately
+          # does not touch `frontendDist`: an absolute path there is compiled into
+          # the binary as its runtime asset root and breaks the app on machines
+          # that lack the runner's directory (the `file:///D:/` report). The
+          # committed `"../dist"` already resolves to the downloaded bundle. See
+          # the note above the download step.
           #
-          # `TAURI_CONFIG` is NOT set here. It is built in the `run` block below,
-          # because the absolute path must be normalized to forward slashes first
-          # — on Windows a raw `${{ github.workspace }}` carries backslashes that
-          # are invalid JSON escapes and make the `tauri` build script panic
-          # ("invalid escape at line 1 column 54"). See the note above.
-          #
-          # `GITHUB_WORKSPACE` (the runner's own env var) is used rather than an
-          # `${{ }}` interpolation so the value is normalized by the shell at run
-          # time, in the same place it is consumed. It may legitimately contain
-          # spaces (a Windows runner path like `C:\Users\runner admin\...`), which
-          # is exactly why the JSON is assembled by a real encoder rather than by
-          # string interpolation — the encoder escapes spaces and quotes for us.
-          #
-          # `node` is used, not `jq`: node is guaranteed present because the whole
-          # build runs through pnpm, whereas `jq` is an extra runner dependency to
-          # rely on for six characters of JSON.
-          GITHUB_WORKSPACE: ${{ github.workspace }}
+          # Static JSON, not built by the shell: with no path interpolated there
+          # is nothing to escape, so the earlier JSON-escape panic ("invalid
+          # escape at line 1 column 54") cannot recur — that panic came from
+          # interpolating `D:\a\Locus\Locus` into JSON, a path that no longer
+          # appears here at all.
+          TAURI_CONFIG: '{"build":{"beforeBuildCommand":""}}'
         run: |
           set -euo pipefail
-
-          # Forward slashes: valid JSON unescaped, and accepted by tauri on
-          # Windows. Runs of `/` are collapsed so a path with a trailing
-          # separator does not produce `//client/dist`.
-          DIST="${GITHUB_WORKSPACE//\\//}/client/dist"
-          DIST="$(printf '%s' "$DIST" | tr -s '/')"
-
-          # A real JSON encoder, so a space or quote in the path cannot produce
-          # invalid JSON the way raw interpolation did.
-          export TAURI_CONFIG="$(node -e 'process.stdout.write(JSON.stringify({
-            build: { beforeBuildCommand: "", frontendDist: process.argv[1] }
-          }))' "$DIST")"
-          echo "TAURI_CONFIG=$TAURI_CONFIG"
 
           if [ "${{ github.ref_type }}" = "tag" ]; then
             echo "Tag build — using the release profile."

@@ -100,6 +100,70 @@ executables the updater consumes. The workflow copies the compiled binary
 binary or signature is missing, and a second check verifies every
 `locus-*` artifact has a `.sig` before the release is created.
 
+### The speed optimisation, and the trap it opened (read before touching `frontendDist`)
+
+To avoid rebuilding the byte-identical Vite bundle on all four build runners, the
+pipeline builds it **once** in `verify`, uploads it as the `frontend-dist`
+artifact, and each build job downloads it into `client/dist`. To make `tauri build`
+reuse that bundle instead of rebuilding it, the build step sets an empty
+`beforeBuildCommand` through `TAURI_CONFIG`:
+
+```yaml
+TAURI_CONFIG: '{"build":{"beforeBuildCommand":""}}'
+```
+
+**That override sets `beforeBuildCommand` and NOTHING ELSE. `frontendDist` must
+not appear here.** This is the single most expensive mistake made in this file and
+it is not obvious from the code, so it is written out in full.
+
+`frontendDist` is not only a build-time input. `tauri::generate_context!()`
+(`client/src-tauri/src/lib.rs`) resolves it at **compile time** and **bakes the
+resolved path into the binary**, where it becomes the runtime asset root for
+`WebviewUrl::App(..)`. So an *absolute* `frontendDist` — which is what a CI runner
+needs to point at its own checkout — **ships inside the artifact**:
+
+```jsonc
+// the Shape that shipped v3.2.12 broken
+{"build":{"beforeBuildCommand":"","frontendDist":"${{ github.workspace }}/client/dist"}}
+// On the Windows runner github.workspace is D:\a\Locus\Locus, so the binary
+// carries D:/a/Locus/Locus/client/dist as the directory it expects its web
+// assets in.
+```
+
+On a student's machine that directory does not exist. Tauri resolves the start
+page against a missing root, WebView2 renders Chromium's own page — **Edge logo,
+`File not found`, `ERR_FILE_NOT_FOUND`** — inside a window still titled Locus. The
+window is `.visible(false)` until page-load *Finished*, which never arrives, so the
+app never appears at all, and nothing in the message names Locus, Tauri, or CI.
+Because the bad value is in the **executable**, a restart changes nothing and a
+reinstall changes nothing (it installs the same binary). Reported 2026-09-30 on a
+**fresh install pulled from the release page** with a clean `verge.yaml`
+(`start_page: /`) and `url=file:///D:/` in `latest.log`.
+
+**The correct path is the relative one already committed.** `tauri.conf.json`
+lives in `client/src-tauri/` and carries `"frontendDist": "../dist"`, which
+resolves to `client/dist` — exactly where the download step places the bundle, on
+every runner, with no path arithmetic and nothing to escape. Do not "fix" it to an
+absolute path, and do not reintroduce the shell-time assembly
+(`DIST=$GITHUB_WORKSPACE/...; node -e ...`) that once lived in the build step.
+
+> **A separators fix is not a fix.** `17ef21a` normalised `D:\a\...` to `D:/a/...`
+> to stop a JSON-escape panic (`invalid escape at line 1 column 54`) after the raw
+> path was interpolated into JSON. That turned the build green and left the defect
+> fully intact — the absolute runner path was still embedded. If a change makes the
+> build pass, ask **why the value was there at all** before assuming it is fixed.
+
+**Guarded** by `check-consistency.sh` §16: no *live* line of the workflow may set
+`frontendDist`; the committed config must keep it relative; and the build job must
+download the bundle to `client/dist`. The guard was shown to fail against all three
+shapes it can be reintroduced in (the `ba01ed2` literal, the `17ef21a`
+node-assembled form, and an absolute committed config).
+
+**The guard proves the tree, not the artifact.** Nothing in CI launches the built
+binary, so the guard cannot see a path that is already inside a shipped executable.
+That is why this shipped four times: see `../reference/STILL-OPEN.md` and
+`CLAIMS.md` §5 **A8**.
+
 ---
 
 ## What still holds (independent of the removed workflow)
