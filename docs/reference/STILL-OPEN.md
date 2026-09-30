@@ -136,30 +136,13 @@ carrying an **Edge** logo and `ERR_FILE_NOT_FOUND` — see `FIXES.md`
 `tauri.windows.conf.json` naming a custom `template` and an `installerHooks`
 `.nsh` that `prebuild.mjs` generates inside `beforeBuildCommand` — which CI
 **blanks**. The bundle built; the installer could not.
+
 The config no longer names either file and `check-consistency.sh` §14 guards
 that. **But the fix is a structural argument, not a running installer**: no NSIS
 bundle was produced on the machine where it was made, and nothing in CI executes
 one. So the standalone Windows install on 3.2.10 is **unverified** — the first
 real Windows install is the test, and it should be done before any Windows user
 is told the release fixes their problem. Tracked as CLAIMS.md §5 **A6**.
-
-#### CAUTION: `ERR_FILE_NOT_FOUND` has TWO causes here, and one is fixed (2026-09-30)
-
-An **install-time** `ERR_FILE_NOT_FOUND` and a **launch-time** one are different
-bugs. Both name Edge, neither names Locus, and the one question that separates
-them is *when* the dialog appears:
-
-- **Install time** (the setup `.exe` aborts while installing) — the bundler config
-  named an unproducible `installerHooks`/`template` file. Fixed in 3.2.10,
-  guarded by `check-consistency.sh` §14.
-- **Launch time** (installs fine, then no window) — a `start_page` persisted in
-  `verge.yaml` by an older build resolved to no bundled asset. **This was live in
-  every version up to 3.2.11**, and is why "restart the PC" and "reinstall" both
-  changed nothing: the value is in the app data root, not the install dir. Fixed
-  by `resolve_start_page`, guarded by §15 and by a Rust test that reads the
-  frontend's own route list. See `FIXES.md`, "THE APP OPENED A BLANK WINDOW".
-
-Neither fix was verified on a real Windows machine. See A6.
 
 ### The installed app data root and the app's own idea of it can disagree
 
