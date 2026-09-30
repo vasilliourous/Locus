@@ -27,7 +27,167 @@ corrections are marked. For what is *still* broken, read `STILL-OPEN.md`.
 
 ---
 
+## THE APP RE-EXECUTED ITSELF INSTEAD OF UPDATING, AND SHOWED AN EDGE "FILE NOT FOUND" (2026-09-30)
+
+> **This is the entry the two above were looking for.** Both earlier 2026-09-30
+> entries — *THE WINDOWS INSTALLER ABORTED* and the withdrawn
+> *start_page* diagnosis — described real defects that were **not** this report.
+> Read this one first; the distinctions are in *Why the earlier entries were the
+> wrong diagnosis* below.
+
+A student installed `installer-Locus_3.2.10_x64-setup.exe` successfully, launched
+Locus from the Start Menu, and got:
+
+```text
+File not found
+It may have been moved, edited, or deleted.
+ERR_FILE_NOT_FOUND
+```
+
+with a **Microsoft Edge logo**, drawn **inside the Locus window**. Their app data
+root held a freshly written default `verge.yaml` (`start_page: /`, every `locus_*`
+field null — never activated), and their install was in `C:\Program Files\Locus\`.
+
+The decisive evidence was two lines from `latest.log`:
+
+```text
+[Window] page load started:  url=file:///D:/
+[Window] page load finished: url=file:///D:/
+```
+
+**`file:///D:/` on a machine with no `D:` drive at all.** That cannot be a stored
+path; it has to be *generated*. It is Tauri resolving `WebviewUrl::App(..)`
+against a resource directory that does not exist, with the drive letter coming
+from the process's current directory — a GitHub Actions runner path
+(`D:\a\Locus\Locus`) leaked through the build, and reappearing at run time because
+the process was started from a leftover `D:`-rooted staging directory.
+
+### The defect
+
+The artifact this project advertises for a Windows client to **install from
+itself** is a raw executable, not an installer. In `manifest.json`, as published
+with `v3.2.9` and `v3.2.10`:
+
+```json
+"windows": { "file": "locus-windows-amd64.exe", "sha256": "8cdfa29c…", "signature": "…" }
+```
+
+That file is staged by `Stage the raw updater artifact (windows)`, which copies
+`target/x86_64-pc-windows-msvc/release/locus.exe`. It is the client's own program.
+
+`tauri_plugin_updater` 2.11.0 does not check what it is handed. `extract_exe`
+asks only whether the bytes are a PE:
+
+```rust
+fn extract_exe(&self, bytes: &[u8]) -> Result<WindowsUpdaterType> {
+    if infer::app::is_exe(bytes) {
+        let (path, temp) = self.write_to_temp(bytes, ".exe")?;
+        Ok(WindowsUpdaterType::nsis(path, temp))
+```
+
+`install_inner` then runs it with `ShellExecuteW(.., "open", ..)` and calls
+`std::process::exit(0)`. So the update **launched a second copy of Locus as if it
+were a setup program** and quit the first one.
+
+### Why the symptom looked like an installer failure
+
+The second copy is not the installed application. It is a bare executable, so:
+
+- nothing it needs is beside it — no `resources/` tree, and no bundled web assets;
+- Tauri resolves `WebviewUrl::App` against a resource root that does not exist;
+- Windows 11 hands the window to the installed WebView2 runtime, which shows
+  Chromium's own error page — Edge logo, `ERR_FILE_NOT_FOUND` — inside a frame
+  that still says "Locus".
+
+Nothing in that chain names Locus, Tauri, or the updater. And because the
+relaunch happens per *release*, not per launch, the failure is stabilised by the
+time anyone looks: the client keeps accepting whatever the manifest names as
+newest, so every new release reproduces it and every reinstall "does not help".
+
+### Why the earlier entries were the wrong diagnosis
+
+| | This defect | The NSIS `installerHooks` defect | The withdrawn `start_page` claim |
+|---|---|---|---|
+| When | After install, on app launch | While the setup `.exe` runs | On app launch |
+| Who draws the error | The launched process's WebView2 | The installer's WebView2 bootstrapper | The app's WebView2 |
+| Where the URL comes from | The manifest's `windows` entry | A missing `.nsh` at makensis time | A persisted config value |
+| Does the reporting config allow it? | **Yes** — nothing in it is involved | No — 3.2.10 installed fine | **No** — `start_page` was `/` |
+
+The `start_page` claim is withdrawn for the plainest reason available:
+`config/verge.rs` already rewrites a stored `/home` to `/`, and the config in the
+report contained `/`. The code path could not fire. It was inferred from source
+twice and ship-checked never, which is what let two wrong releases out.
+
+### The fix
+
+Both halves, deliberately — either alone would have prevented this.
+
+**Client**, `client/src-tauri/src/locus/update/install.rs` — a new
+`is_installer_payload` runs **before** the bytes reach the plugin:
+
+- a PE/ELF is accepted only on **positive** evidence that it is an NSIS installer
+  (`NullsoftInstaller`, scanned over a bounded window);
+- everything else must be a container the platform installer owns — DMG, deb,
+  rpm, MSI, AppImage — by an explicit allow-list;
+- anything unrecognised, empty, or truncated is refused with a coded error.
+
+The direction matters more than the rules. This began as
+`!is_bare_executable(bytes)`, which is true of a one-byte file — a test written
+alongside it caught that, and it is why the guard is now built from what a payload
+*is* rather than what it is not. A guard for executing the wrong binary cannot be
+assembled out of double negatives.
+
+**CI**, `.github/workflows/client.yml` — the `windows` platform entry now names
+`installer-Locus_*_x64-setup.exe`. Linux and macOS entries are unchanged: their
+formats reach a package manager rather than a bare executable, so they were never
+this bug. The manifest step additionally refuses to publish if the Windows entry
+is the raw binary, and refuses if no installer can be found at all — it never
+falls back.
+
+`v3.2.11` was **reverted in full** (`45d9402`). It shipped a fix for the
+withdrawn `start_page` cause and would have added a third wrong explanation to
+this log.
+
+### The guard
+
+`check-consistency.sh` §15 asserts that no manifest platform entry advertises
+`locus-windows-amd64.exe` for self-install, that the Windows entry resolves to a
+setup executable, and that the client still calls `is_installer_payload`. The
+defect was reintroduced line-for-line and the guard failed on it; the Rust tests
+were run against a simulated pre-fix `return true` and 4 of them failed,
+including the one that pins this bug. Both were restored before the tree was kept.
+
+Server-side halves do not reach the live host until `setup.sh` re-runs; this change
+is client and CI only, so nothing here waits on that.
+
+### What was NOT verified, and must be
+
+No Windows machine and no NSIS bundle were available. The claim "an installed
+Windows client survives an advertised update and keeps launching from its install
+directory" is **unverified** and is recorded as `CLAIMS.md` §5 **A7**. The next
+Windows install *and an update taken on it* is the test — installing alone does
+not exercise this path, which is precisely how it survived three releases.
+
+### What this says about CI
+
+Every check in this project tests that a bundle **builds**. None launches either
+artifact, so each defect after "the bundle compiled" is invisible: the installer
+that cannot install (3.2.9), the update that cannot update (3.2.10), the window
+that cannot draw. A step that runs the built binary and asserts its page-load URL
+is not `file://` would have caught all three. That is the real fix this class
+still needs and does not yet have.
+
+---
+
 ## THE WINDOWS INSTALLER ABORTED WITH AN EDGE "FILE NOT FOUND" DIALOG (2026-09-30)
+
+> **CORRECTED 2026-09-30.** This entry was written as the explanation for a report
+> of `ERR_FILE_NOT_FOUND` and **is not it**. That report was an *update* that
+> re-executed the client's own binary — see the entry above. The defect described
+> here is real and shipped in a build with a different symptom: the setup `.exe`
+> aborting *while installing*. Kept on its own terms, because a matching error
+> string is not a matching cause and the deciding question is **when** the dialog
+> appears.
 
 A student installed the 3.2.9 Windows setup and got, instead of an application:
 

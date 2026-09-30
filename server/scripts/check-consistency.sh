@@ -1269,6 +1269,82 @@ else
     fi
 fi
 
+# ─────────────────────────────────────────────────────────────
+# 15. No platform's manifest entry may name the raw updater binary.
+#
+# WHY THIS EXISTS
+#
+# `v3.2.9` and `v3.2.10` both published `manifest.json` with
+#
+#     "windows": { "file": "locus-windows-amd64.exe", ... }
+#
+# and that is the RAW PE EXECUTABLE, not an installer. The client downloads the
+# entry named for its platform and hands the bytes to `tauri_plugin_updater`,
+# which accepts *any* PE as an NSIS installer (`extract_exe` asks only
+# `infer::app::is_exe(bytes)`) and ShellExecutes it.
+#
+# So the update did not install anything: it relaunched a copy of the client's
+# own binary, standalone, outside the install directory, and exited. With no
+# bundled web assets beside it, Tauri resolved the start page to a `file://`
+# path that does not exist and Chromium displayed, inside a Locus window:
+#
+#     File not found
+#     It may have been moved, edited, or deleted.
+#     ERR_FILE_NOT_FOUND
+#
+# Nothing named Locus. The install directory was never touched, so reinstalling
+# and restarting both changed nothing — and it recurred on every release, because
+# the client accepts whatever the manifest names as newest.
+#
+# WHY A GUARD AND NOT JUST A FIX
+#
+# The fix is a line or two in the workflow. What made this bug expensive is that
+# `locus-windows-amd64.exe` is a legitimate asset with a legitimate consumer —
+# the retired portable client — so "stage the binary" and "advertise it for
+# self-install" look identical in review, and this manifest was read several
+# times without anyone noticing. This check names the distinction.
+#
+# The two halves are deliberately independent:
+#   - the manifest must not advertise a raw updater payload for self-install;
+#   - the client must refuse one even if a manifest does (see
+#     `is_installer_payload` in `client/src-tauri/src/locus/update/install.rs`).
+# Either alone would have prevented the bug; both together mean a future
+# regression has to defeat two mechanisms in two different languages.
+# ─────────────────────────────────────────────────────────────
+echo
+echo "15. No manifest platform entry advertises a raw updater binary for self-install"
+
+# The name CI stages as the Windows updater payload. It is what the hub serves
+# to a client that is going to EXECUTE the bytes, so it must be an installer.
+if grep -qE '"windows"[[:space:]]*:[[:space:]]*"locus-windows-amd64\.exe"' "$WORKFLOW" 2>/dev/null; then
+    bad "the workflow's manifest platform map advertises 'locus-windows-amd64.exe' for windows"
+    bad "  that is the raw updater executable, which a client cannot install from itself:"
+    bad "  tauri_plugin_updater treats any PE as an NSIS installer and would ShellExecute it"
+    bad "  advertise the NSIS setup executable (installer-Locus_*_x64-setup.exe) instead"
+else
+    ok "the manifest does not advertise the raw Windows binary for self-install"
+fi
+
+# The positive half: the Windows entry must name a setup executable. Without
+# this, deleting the platform map entirely would pass the check above.
+if grep -qE 'installer-Locus_\*_x64-setup\.exe|windows_installer\(\)' "$WORKFLOW" 2>/dev/null; then
+    ok "the Windows platform entry resolves to an installer"
+else
+    bad "the workflow does not appear to advertise an installer for windows"
+    bad "  the windows platform key must resolve to installer-Locus_*_x64-setup.exe"
+fi
+
+# The client-side half must still exist, or the guard above is decorative.
+INSTALL_GUARD="$REPO/client/src-tauri/src/locus/update/install.rs"
+if [ ! -f "$INSTALL_GUARD" ]; then
+    bad "client/src-tauri/src/locus/update/install.rs is missing — the payload guard cannot be checked"
+elif grep -q 'is_installer_payload' "$INSTALL_GUARD"; then
+    ok "the client refuses to execute a payload that is not an installer"
+else
+    bad "the client no longer calls is_installer_payload before install()"
+    bad "  without it, any manifest edit can hand a raw executable to ShellExecute"
+fi
+
 echo
 echo "════════════════════════════════════════════════════════════"
 if [ "$FAIL" -eq 0 ]; then

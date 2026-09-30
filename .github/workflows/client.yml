@@ -1042,14 +1042,75 @@ jobs:
           python3 - <<'PY'
           import hashlib, json, os
 
+          # ── WHICH ARTIFACT A PLATFORM'S CLIENT INSTALLS FROM ITSELF ──
+          #
+          # These are NOT "the artifacts this release publishes". They are the
+          # files a client downloads and **executes to replace itself**, and the
+          # two are not the same thing on Windows.
+          #
+          # The raw binaries below are PE/ELF executables. `tauri_plugin_updater`
+          # treats *any* PE as an NSIS installer — `extract_exe` only asks
+          # `infer::app::is_exe(bytes)` — and `install_inner` then ShellExecutes
+          # it. So a client handed `locus-windows-amd64.exe` does not upgrade: it
+          # launches a copy of itself, standalone, outside its install directory,
+          # and exits. That copy has no bundled web assets, so Tauri resolves its
+          # start page to a `file://` path that does not exist and Chromium shows
+          #
+          #     File not found
+          #     It may have been moved, edited, or deleted.
+          #     ERR_FILE_NOT_FOUND
+          #
+          # in a Locus window — naming neither Locus nor Tauri, from a staging
+          # directory that is deleted moments later. Reinstalling changes nothing
+          # (the install directory was never touched) and it recurs on every
+          # release, because the client keeps accepting whatever is newest.
+          #
+          # macOS and Linux are asymmetric on purpose and are NOT the same bug:
+          # the plugin's `extract_zip` finds a `.app` inside the archive and the
+          # Linux formats reach a package manager. Only Windows has a raw
+          # executable that a naive install path will happily run.
+          #
+          # So: `linux` and `macos_*` keep their current names, and `windows`
+          # names the NSIS setup executable, which is genuinely installable.
+          # The manifest is per-platform, so this asymmetry costs nothing.
+          #
+          # The glob is resolved rather than hardcoded past the version, because
+          # the version appears in the filename the bundler writes.
+          import glob as _glob
+
+          def windows_installer():
+              # `installer-Locus_<version>_x64-setup.exe`, as staged by the
+              # `release` job. `x64` is the only Windows bundle this matrix
+              # produces (the target is x86_64-pc-windows-msvc).
+              candidates = sorted(
+                  _glob.glob("release/installer-Locus_*_x64-setup.exe")
+              )
+              if len(candidates) != 1:
+                  raise SystemExit(
+                      "expected exactly one Windows NSIS installer to advertise, "
+                      f"found {len(candidates)}: {candidates}. Publishing the raw "
+                      "locus-windows-amd64.exe instead would make every Windows "
+                      "client re-execute itself — see the comment above."
+                  )
+              return os.path.basename(candidates[0])
+
           # Platform key -> filename. The keys say macos_*, the files say darwin-*:
           # that asymmetry is frozen and must not be "tidied".
           platforms = {
               "linux": "locus-linux-amd64",
-              "windows": "locus-windows-amd64.exe",
+              "windows": windows_installer(),
               "macos_intel": "locus-darwin-amd64",
               "macos_arm": "locus-darwin-arm64",
           }
+
+          # GUARD: the Windows entry must not be the raw updater binary. This is
+          # the mechanical form of the bug, so a future edit that "restores" it
+          # fails here rather than in a student's window.
+          if platforms["windows"] == "locus-windows-amd64.exe":
+              raise SystemExit(
+                  "refusing to publish: the windows platform entry is the raw "
+                  "updater executable, which a client cannot install from itself"
+              )
 
           out = {"version": os.environ["VERSION"].lstrip("v"), "platforms": {}}
           missing = []
@@ -1062,15 +1123,18 @@ jobs:
               digest = hashlib.sha256(open(path, "rb").read()).hexdigest()
               # The signature is read back and embedded, so the manifest is a
               # complete description of what the hub should serve.
+              #
+              # Installer assets carry no `.sig` — they are not updater payloads
+              # and the signature requirement applies only to the raw binaries
+              # the retired portable client consumes.
               sig_path = path + ".sig"
-              if not os.path.isfile(sig_path):
+              entry = {"file": filename, "sha256": digest}
+              if os.path.isfile(sig_path):
+                  entry["signature"] = open(sig_path).read().strip()
+              elif filename.startswith("locus-"):
                   missing.append(filename + ".sig")
                   continue
-              out["platforms"][key] = {
-                  "file": filename,
-                  "sha256": digest,
-                  "signature": open(sig_path).read().strip(),
-              }
+              out["platforms"][key] = entry
 
           if missing:
               raise SystemExit(

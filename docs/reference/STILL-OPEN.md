@@ -144,6 +144,41 @@ one. So the standalone Windows install on 3.2.10 is **unverified** — the first
 real Windows install is the test, and it should be done before any Windows user
 is told the release fixes their problem. Tracked as CLAIMS.md §5 **A6**.
 
+#### The *update* path put the client outside its install directory (2026-09-30)
+
+This is the defect the two windows above were actually chasing. The artifact
+advertised for a Windows client to install from itself was
+`locus-windows-amd64.exe` — the raw PE executable, not an installer. The plugin
+accepts any PE as an NSIS installer and ShellExecutes it, so an update relaunched
+a copy of the client outside `C:\Program Files\Locus\`, with no bundled assets,
+and it reported `ERR_FILE_NOT_FOUND` in a Locus window. See `FIXES.md`
+("THE APP RE-EXECUTED ITSELF", 2026-09-30).
+
+Fixed on both sides — the client refuses a non-installer payload, and the
+manifest's `windows` entry names the setup executable — and guarded by
+`check-consistency.sh` §15 plus Rust tests, all of which were shown to fail on the
+old behaviour. **What is still unverified is the same shape as everything else
+here**: no Windows machine took an update and then launched from the Start Menu.
+Tracked as CLAIMS.md §5 **A7**.
+
+#### Nothing in CI runs either artifact — the class behind all three
+
+Worth stating as one thing rather than three. Every check in this project verifies
+that a bundle **builds**. None launches the built binary, and none executes an
+installer. So:
+
+| Release | Built | Shipped broken |
+|---|---|---|
+| 3.2.9 | ✓ green | an installer that could not install |
+| 3.2.10 | ✓ green | an update that could not update |
+| 3.2.11 | ✓ green | a fix for a cause that did not exist |
+
+Three consecutive green runs, three releases a student could not use. A CI step
+that runs the built binary and asserts its page-load URL is not `file://` would
+have caught 3.2.9 and 3.2.10 outright; the 3.2.11 miss was a **reasoning** failure
+that no CI can catch — it came from inferring a cause from source instead of
+asking for the log. The first is worth building. The second is worth remembering.
+
 ### The installed app data root and the app's own idea of it can disagree
 
 ### The suspension path has not been exercised against a live hub

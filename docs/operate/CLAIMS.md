@@ -161,12 +161,21 @@ the claim is not verified.**
 | A4 | The client CI workflow has actually run and gone green for a given commit | **unverified** | `gh run list --workflow=client.yml` |
 | A5 | A published release is installable by an existing client end to end | **unverified** | needs real Windows/macOS hardware — see `../reference/STILL-OPEN.md` |
 | A6 | The **Windows** NSIS installer completes on a clean machine (setup runs, WebView2 checks pass, service registers) | **unverified** | run the staged `installer-locus_*_x64-setup.exe` on real Windows; nothing in CI executes it — see `../reference/FIXES.md`, 2026-09-30 |
+| A7 | The **installed Windows client stays installed** — it launches from `C:\Program Files\Locus\`, serves its own bundled assets, and is not relaunched out of its install directory by its own updater | **unverified** | install on Windows, let it take an advertised update, then launch from the Start Menu and confirm the window renders the app. Nothing in CI launches either artifact, which is why three green releases shipped this broken — see `../reference/FIXES.md`, 2026-09-30 (second entry) |
+
+> **A7 was previously written to claim the opposite thing** — that a stale
+> `start_page` in `verge.yaml` produced a blank window. That was a misdiagnosis,
+> withdrawn on 2026-09-30: the reporting user's config carried `start_page: /`,
+> so the described code path could not fire. The claim is retained at this number
+> because the *unverified property* it names is real and load-bearing; only the
+> proposed cause was wrong. `docs/README.md` rule 3 — the code wins, and the doc
+> was the bug.
 
 ### The honest limit of this file
 
 **This file does not make any Class A claim true.** It makes them dated,
 single-homed, and checkable, and it stops them being laundered into derived
-sentences that read as facts about the code. A1–A5 above are **not verified**. When
+sentences that read as facts about the code. A1–A7 above are **not verified**. When
 this documentation overhaul was performed (2026-09-29) the environment had no route
 to the hub: the previous address no longer existed and no credentials were
 available. That is itself an example of the rule — the honest state is written
