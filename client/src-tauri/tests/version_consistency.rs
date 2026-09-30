@@ -102,6 +102,23 @@ fn every_version_site_agrees() {
     );
 }
 
+// The lockfile is NOT checked here, deliberately.
+//
+// `release-version.mjs` writes `Cargo.lock` as a fourth site, so a partial bump
+// could in principle leave it behind and pin the old version into a `--locked`
+// build. Two things make a test here the wrong tool:
+//
+//   1. It could never fail. Cargo rewrites `Cargo.lock` to match `Cargo.toml`
+//      before any test binary runs, so a desynced lockfile is repaired on the
+//      way in and this file always sees agreement. An assertion that cannot be
+//      made to fail is not a guard; it is a comment that reports success.
+//   2. It is already covered where it can actually bite. Every build job runs
+//      `cargo fetch --locked`, which aborts with "cannot update the lock file
+//      because --locked was passed" on exactly this drift — before the build,
+//      and before anything is signed or published.
+//
+// Recorded here so the next reader does not "restore" the missing check.
+
 /// The version must be parseable by our own comparison, because the updater runs
 /// every advertised version through it before acting.
 #[test]

@@ -109,3 +109,11 @@ clash-verge-*.yaml
 #
 # Nothing in it is part of this project's source. Read from it; never build.
 VPN-Service/
+
+# Release worktrees. A tagged release is rebuilt from the historical commit it
+# names, in a linked worktree, so the release does not depend on (or disturb)
+# whatever is in the main working tree at the time. `git worktree add` places
+# the linked worktree's metadata in the main repo's `.git/worktrees/`, and the
+# checkout itself lives here. Nothing in it is source; it is a build directory
+# that happens to be a git checkout.
+release-worktrees/

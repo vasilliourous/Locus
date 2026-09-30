@@ -148,6 +148,59 @@ jobs:
         working-directory: .
         run: server/scripts/check-consistency.sh
 
+      # ── Preflight: does the TAG name the version the code actually builds? ──
+      #
+      # WHY THIS EXISTS: on 2026-09-30 the `v3.2.13` tag was pushed on a commit
+      # whose version sites all still said `3.2.12`. Nothing caught it,
+      # because every existing check verifies that the version sites AGREE WITH
+      # EACH OTHER — which they did, correctly, at 3.2.12. The check below is
+      # also the reason a bump is FIVE files, not the four `release-version.mjs`
+      # writes: the fifth is `docs/state.toml`'s derived `[client.version]`,
+      # enforced against client/package.json by `check-consistency.sh` §7.
+      #
+      # CI never bumps versions. The bump is a separate manual step
+      # (`pnpm release-version X`) that lands in a `chore(release): X` commit;
+      # the workflow only LABELS the release and the manifest from
+      # `github.ref_name`. So a tag with no bump built honest 3.2.12 binaries,
+      # published them under a 3.2.13 release, and wrote `"version": "3.2.13"`
+      # into the manifest. The hub then published 3.2.13 serving 3.2.12 bytes,
+      # and a client offered that "update" downloads 3.2.12, restarts, and is
+      # offered it again on the next heartbeat — a loop with no exit, because
+      # the version can never advance.
+      #
+      # The gap was exactly one comparison: TAG NAME vs. version files. This is
+      # it, and it is deliberately in the cheap gate so the failure costs
+      # seconds rather than four full platform builds.
+      #
+      # Tag builds only. A branch build has no tag to agree with, and the file
+      # version is checked for internal agreement by
+      # `client/src-tauri/tests/version_consistency.rs` regardless.
+      - name: Tag must name the version being built
+        working-directory: .
+        if: github.ref_type == 'tag'
+        run: |
+          set -euo pipefail
+          tag="${{ github.ref_name }}"
+          # Strip the leading `v`: the version files never carry it.
+          want="${tag#v}"
+          have=$(grep -m1 '"version"' client/package.json \
+                 | sed 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/')
+          if [ -z "$have" ]; then
+            echo "::error::could not read the version from client/package.json"
+            exit 1
+          fi
+          if [ "$have" != "$want" ]; then
+            echo "::error::tag ${tag} names version ${want}, but the code builds ${have}."
+            echo "::error::CI does not bump versions. Bump first, commit, then tag:"
+            echo "::error::  cd client && pnpm release-version ${want}"
+            echo "::error::  git add -A && git commit -m 'chore(release): ${want}'"
+            echo "::error::  git tag -a ${tag} -m 'Locus client ${tag}' && git push origin ${tag}"
+            echo "::error::Publishing this would ship ${have} binaries under a ${want} tag, and"
+            echo "::error::the hub would offer an 'update' that installs the same version forever."
+            exit 1
+          fi
+          echo "tag ${tag} and client/package.json agree on ${have}"
+
       # ── Preflight: is the signing key present? ──
       #
       # The signing step in each `build` job fails if LOCUS_UPDATE_KEY is unset,

@@ -19,11 +19,22 @@ verified-against: docs/STATE.md
 >   `client/src-tauri/tauri.conf.json` must agree, enforced by
 >   `client/src-tauri/tests/version_consistency.rs`). There is no root `VERSION`.
 >
+> **A bump is FIVE sites, not three.** `pnpm release-version X` (from `client/`)
+> writes four: `package.json`, `src-tauri/Cargo.toml`, `src-tauri/tauri.conf.json`
+> **and `client/Cargo.lock`**. The fifth is `docs/state.toml`'s
+> `[client.version]`, which records the client version as a **derived** fact with
+> `provenance = "derived"` and is checked against `client/package.json` by
+> `check-consistency.sh` §7 — so a bump that skips it fails the `verify` job with
+> `BAD client.version`. `cargo fetch --locked` separately catches a stale
+> `Cargo.lock` in each build job.
+>
 > **Read `UPDATE-SYSTEM.md` for the full pipeline**, and `client/docs/SIGNING.md`
 > for key custody. The short version:
 
 ```
-1. Bump the version in all three sites, so they agree.
+1. Bump the version in every site, so they agree:
+       cd client && pnpm release-version X.Y.Z     # the four manifest sites
+       # then docs/state.toml `[client.version]` — the fifth (see below)
 2. git tag -a vX.Y.Z && git push origin vX.Y.Z
      → CI builds + signs all four platforms, creates the GitHub Release
 3. Fetch:  console Releases → "Fetch & publish",  or
@@ -31,6 +42,19 @@ verified-against: docs/STATE.md
      → the hub pulls from GitHub, verifies format + SHA-256 + signature
 4. Publish: writes update_config. The console does 3 and 4 in one button.
 ```
+
+> **CI does not bump versions — it labels the release from the tag name.**
+> `github.ref_name` supplies the release title and the manifest's `version`
+> field, while the number compiled into the binaries comes from the version
+> files. So if the tag and the files disagree, CI publishes binaries that
+> misreport their own version under the tag's name, and the hub offers an
+> "update" that reinstalls the same version forever.
+>
+> This happened on 2026-09-30: the `v3.2.13` tag was pushed on a commit whose
+> version files still said `3.2.12`. The `verify` job now fails in seconds on
+> any tag whose name disagrees with `client/package.json` (step
+> "Tag must name the version being built"), so the mistake costs a red check
+> rather than a published release. **Bump, commit, then tag.**
 
 > **Fetch and publish are two steps.** Forgetting step 4 leaves the artifacts
 > served while `/api/release` still advertises the old version — nothing looks
