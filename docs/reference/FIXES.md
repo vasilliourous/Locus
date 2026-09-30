@@ -148,6 +148,27 @@ falls back.
 withdrawn `start_page` cause and would have added a third wrong explanation to
 this log.
 
+### Shipped in v3.2.12, and what the release itself proved
+
+The tag build is **run `36669449010`**, fully green: `Verify`, all four `Build`
+jobs (including `windows-2022`), `Release`, `Report`. That is deliberately
+recorded here rather than left to a session log, because this release's whole
+lesson is that a green run proves very little on its own — three consecutive
+green runs (3.2.9, 3.2.10, 3.2.11) each shipped something unusable.
+
+So the check that matters is the *artifact*, not the colour of the run. The
+published `manifest.json` for `v3.2.12` was fetched and read back:
+
+```json
+"windows": { "file": "installer-Locus_3.2.12_x64-setup.exe", "sha256": "…" }
+```
+
+The `windows` key now names the NSIS setup executable, and the release carries
+the asset to match it. The three other platform entries are unchanged
+(`locus-linux-amd64`, `locus-darwin-amd64`, `locus-darwin-arm64`), which is the
+evidence that this change was scoped to the one platform with the bug rather than
+applied blindly to all four.
+
 ### The guard
 
 `check-consistency.sh` §15 asserts that no manifest platform entry advertises

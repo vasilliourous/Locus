@@ -158,9 +158,9 @@ the claim is not verified.**
 | A1 | The hub endpoint `https://networkingguides.duckdns.org` resolves and answers `/api/health` | **unverified** | `server/scripts/verify-live.sh` |
 | A2 | The hub holds paid codes in active use (count deliberately not recorded — §4) | **unverified** | sign in to the console at `/admin/`, Codes & Clients |
 | A3 | The rolling `build-preview` release is current for the pushed commit | **unverified** | `gh release view build-preview --json tagName,assets,createdAt` |
-| A4 | The client CI workflow has actually run and gone green for a given commit | **unverified** | `gh run list --workflow=client.yml` |
+| A4 | The client CI workflow has run and gone green for a given commit | **verified 2026-09-30** for `5ebfc89` | run `36669449010` — `Verify`, all four builds incl. `windows-2022`, `Release`, `Report` — read from the GitHub REST API. Re-check with `gh run list --workflow=client.yml` |
 | A5 | A published release is installable by an existing client end to end | **unverified** | needs real Windows/macOS hardware — see `../reference/STILL-OPEN.md` |
-| A6 | The **Windows** NSIS installer completes on a clean machine (setup runs, WebView2 checks pass, service registers) | **unverified** | run the staged `installer-locus_*_x64-setup.exe` on real Windows; nothing in CI executes it — see `../reference/FIXES.md`, 2026-09-30 |
+| A6 | The **Windows** NSIS installer completes on a clean machine (setup runs, WebView2 checks pass, service registers) | **unverified** | run the staged `installer-Locus_3.2.12_x64-setup.exe` on real Windows; nothing in CI executes it — see `../reference/FIXES.md`, 2026-09-30 |
 | A7 | The **installed Windows client stays installed** — it launches from `C:\Program Files\Locus\`, serves its own bundled assets, and is not relaunched out of its install directory by its own updater | **unverified** | install on Windows, let it take an advertised update, then launch from the Start Menu and confirm the window renders the app. Nothing in CI launches either artifact, which is why three green releases shipped this broken — see `../reference/FIXES.md`, 2026-09-30 (second entry) |
 
 > **A7 was previously written to claim the opposite thing** — that a stale
@@ -171,15 +171,31 @@ the claim is not verified.**
 > proposed cause was wrong. `docs/README.md` rule 3 — the code wins, and the doc
 > was the bug.
 
+> **A6 and A7 are NOT advanced by A4 going green.** The `v3.2.12` run is green and
+> its published `manifest.json` was checked live — the `windows` entry now names
+> `installer-Locus_3.2.12_x64-setup.exe` rather than the raw executable. That
+> proves the *pipeline* emits the right artifact. It does **not** prove the
+> artifact installs (A6) or that the installed app survives an update (A7). The
+> three preceding green runs are the standing evidence that this distinction is
+> real, so do not read the ✓ beside A4 as progress on the two rows below it.
+
 ### The honest limit of this file
 
 **This file does not make any Class A claim true.** It makes them dated,
 single-homed, and checkable, and it stops them being laundered into derived
-sentences that read as facts about the code. A1–A7 above are **not verified**. When
+sentences that read as facts about the code. A5–A7 above are **not verified**; A4
+carries a single dated verification of one run and nothing more. When
 this documentation overhaul was performed (2026-09-29) the environment had no route
 to the hub: the previous address no longer existed and no credentials were
 available. That is itself an example of the rule — the honest state is written
 down, not assumed away.
+
+**A verification is a dated observation of one run, never a property.** A4 now
+says "verified for `5ebfc89`", not "the workflow is green" — the next commit
+invalidates it, and a reader who needs the current state must re-run the check in
+the right-hand column. This is the distinction the file exists to preserve; a
+"verified" cell without a commit attached is the drift this table is here to
+prevent.
 
 ---
 
