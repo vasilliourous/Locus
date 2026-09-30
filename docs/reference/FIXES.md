@@ -29,7 +29,17 @@ corrections are marked. For what is *still* broken, read `STILL-OPEN.md`.
 
 ## THE WINDOWS INSTALLER ABORTED WITH AN EDGE "FILE NOT FOUND" DIALOG (2026-09-30)
 
-A student installed the 3.2.9 Windows setup and got, instead of an application:
+> **CORRECTED 2026-09-30.** This entry was originally written as the explanation for
+a report of `ERR_FILE_NOT_FOUND` on 3.2.9. **It was not.** The report turned out to
+be the *app-launch* failure documented in the entry below ("THE APP OPENED A BLANK
+WINDOW"). The defect described here is real and was shipped in a build with a
+different symptom — the setup `.exe` aborting *while installing* — and is worth
+keeping on its own terms. The lesson is recorded rather than deleted: a matching
+error string is not a matching cause, and the deciding question is **when** the
+dialog appears.
+
+A build of the 3.2.9 line aborted while installing, instead of producing an
+application:
 
 ```text
 File not found
@@ -111,6 +121,92 @@ an `installerHooks`/`template` file that is absent — or that exists but is
 **generated and uncommitted**, which is the exact `v3.2.9` state — and when no
 workflow step runs `prebuild.mjs` directly. All three failure modes were
 reproduced against a deliberately broken tree before the guard was kept.
+
+Client-side only; no server change, so nothing here waits on a `setup.sh` re-run.
+
+---
+
+## THE APP OPENED A BLANK WINDOW WITH CHROMIUM'S "FILE NOT FOUND" (2026-09-30)
+
+A student installed 3.2.10 successfully, clicked the Locus shortcut, and got:
+
+```text
+File not found
+It may have been moved, edited, or deleted.
+ERR_FILE_NOT_FOUND
+```
+
+with a **Microsoft Edge logo**. Restarting the PC changed nothing. Reinstalling
+changed nothing. The app never drew a window.
+
+### Why the earlier entry in this file was the wrong diagnosis
+
+The 2026-09-30 entry above ("THE WINDOWS INSTALLER ABORTED") found a real defect —
+the bundler config named an NSIS hooks file and template CI could not produce —
+and fixed it. **It was not this bug.** The two produce a superficially similar
+dialog, which is exactly why the distinction matters:
+
+| | Installer defect (3.2.9, fixed) | This defect (all versions) |
+|---|---|---|
+| When | While the setup `.exe` runs | After a successful install, on **app launch** |
+| Where | NSIS, before any file is copied | WebView2, resolving the start page |
+| Survives a restart | Yes | Yes — the bad value is **on disk** |
+| Survives a reinstall | Yes | Yes — the value is **not in the install dir** |
+
+Both report as "File not found" because both are literal file-resolution
+failures. The tell is **when** it appears, and the first report said "on launch".
+
+### The defect
+
+`build_new_window` passed the persisted `start_page` straight to
+the webview URL builder with no validation:
+
+```rust
+let start_page = latest.start_page.as_deref().unwrap_or("/");
+// ...
+tauri::WebviewWindowBuilder::new(app_handle, "main", tauri::WebviewUrl::App(start_page.into()))
+```
+
+`start_page` lives in `verge.yaml` in the **app data root**, and every identity
+this fork has shipped reads that same key — including the upstream Clash Verge
+Rev root it was migrated from. Verge's build had four nav pages (`/home`,
+`/proxies`, `/logs`, `/settings`); Locus kept two (`/`, `/account`). A config
+written by any earlier build can therefore carry a route this build does not
+serve, and `WebviewUrl::App` resolves it against the bundled web assets. No asset
+matches, so the webview loads a document that does not exist and Chromium reports
+its own generic error — naming Edge's runtime and never Locus.
+
+The window is built `.visible(false)` until the theme script runs, so the failure
+is a process that starts, shows nothing, and looks like a broken install.
+
+There was already a one-shot migration for one of these values — `"/home"` was
+rewritten to `"/"` at config load. Every *other* stale value was missed, and any
+value written after that migration ran was never checked again.
+
+### The fix
+
+Validation at the point of use, so it covers every stale writer at once,
+including ones shipped by versions this tree no longer contains:
+
+- `resolve_start_page` accepts a stored value only if it is a route this build
+  serves (`SERVED`), and otherwise logs a warning and uses `/`.
+- The list is deliberately **not** derived from the frontend; it is a Rust-side
+  guard, and the conservative direction is to degrade a real-but-unlisted page to
+  `/` rather than to blank the window.
+- The old `"/home" → "/"` migration is left in place — it repairs the file, which
+  this does not.
+
+### The guards
+
+- A Rust test pins the stale values (`/home`, `/proxies`, `/logs`, `/settings`,
+  `home`, ``, `#`, `/index.html`) as refused, and the real routes as kept.
+- `the_served_list_matches_the_frontend_routes` **reads
+  `src/pages/_navigation-meta.ts`** and fails if `SERVED` and the frontend's routes
+  ever disagree in either direction — a route removed from the frontend but left in
+  `SERVED` is this bug from the other side.
+- `check-consistency.sh` §15 is the cross-language half of the same check, because
+  a `.rs` list and a `.ts` list agreeing is not something a single-language test
+  can be trusted to keep true.
 
 Client-side only; no server change, so nothing here waits on a `setup.sh` re-run.
 

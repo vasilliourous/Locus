@@ -1270,6 +1270,35 @@ else
 fi
 
 echo
+echo "15. Every route the app will navigate to is a route the frontend defines"
+
+WIN_DEFAULT="$REPO/client/src-tauri/src/utils/resolve/window.rs"
+NAV_META="$REPO/client/src/pages/_navigation-meta.ts"
+if [ ! -f "$WIN_DEFAULT" ] || [ ! -f "$NAV_META" ]; then
+    warn "start-page guard cannot run (missing $WIN_DEFAULT or $NAV_META)"
+else
+    # The Rust-side list of routes the window will accept.
+    served=$(sed -n 's/^const SERVED: &\[&str\] = &\[\(.*\)\];$/\1/p' "$WIN_DEFAULT" \
+        | tr ',' '\n' | tr -d ' "' | grep -v '^$' | sort)
+    # The routes the frontend actually defines.
+    routes=$(sed -n "s/^[[:space:]]*path:[[:space:]]*'\(.*\)',*$/\1/p" "$NAV_META" | sort)
+
+    if [ -z "$served" ]; then
+        bad "no 'const SERVED' list found in window.rs — the start-page guard is gone"
+    elif [ -z "$routes" ]; then
+        bad "no routes found in _navigation-meta.ts — the extraction pattern has drifted"
+    elif [ "$served" = "$routes" ]; then
+        ok "window.rs accepts exactly the routes _navigation-meta.ts defines"
+    else
+        bad "window.rs SERVED and _navigation-meta.ts disagree — a start_page the window accepts"
+        bad "  but the frontend does not define loads no bundled asset, and the webview reports"
+        bad "  Chromium's ERR_FILE_NOT_FOUND in a window that never becomes visible"
+        printf '         window.rs:    %s\n' "$(echo "$served" | tr '\n' ' ')"
+        printf '         frontend:     %s\n' "$(echo "$routes" | tr '\n' ' ')"
+    fi
+fi
+
+echo
 echo "════════════════════════════════════════════════════════════"
 if [ "$FAIL" -eq 0 ]; then
     echo -e "${GREEN}All consistency checks passed.${NC}"

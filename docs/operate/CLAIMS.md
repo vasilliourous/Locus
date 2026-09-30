@@ -161,6 +161,7 @@ the claim is not verified.**
 | A4 | The client CI workflow has actually run and gone green for a given commit | **unverified** | `gh run list --workflow=client.yml` |
 | A5 | A published release is installable by an existing client end to end | **unverified** | needs real Windows/macOS hardware — see `../reference/STILL-OPEN.md` |
 | A6 | The **Windows** NSIS installer completes on a clean machine (setup runs, WebView2 checks pass, service registers) | **unverified** | run the staged `installer-locus_*_x64-setup.exe` on real Windows; nothing in CI executes it — see `../reference/FIXES.md`, 2026-09-30 |
+| A7 | The installed Windows client **opens its window** on a machine that carries a `verge.yaml` written by an earlier build | **unverified** | install on Windows with a pre-existing `%APPDATA%\com.locus.client\verge.yaml` containing a stale `start_page`; the code path is unit-tested, the real config is not |
 
 ### The honest limit of this file
 

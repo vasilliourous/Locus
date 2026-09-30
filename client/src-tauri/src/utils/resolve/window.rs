@@ -82,6 +82,67 @@ const fn restored_window_size_is_too_small(width: u32, height: u32) -> bool {
     width < MINIMAL_WIDTH as u32 || height < MINIMAL_HEIGHT as u32
 }
 
+/// A `start_page` we are willing to hand to `WebviewUrl::App`.
+///
+/// WHY THIS EXISTS
+///
+/// `start_page` is not a value this build chooses. It is **persisted** in
+/// `verge.yaml` in the app data root, and every previous identity the fork has
+/// shipped reads and writes the same key — the renamed Locus root, and the
+/// upstream Clash Verge Rev root it was migrated from. So a student who ran an
+/// older build can arrive with a stored value this build does not serve.
+///
+/// The failure is severe and confusing out of proportion to its cause: the value
+/// is passed straight to `WebviewUrl::App(..)`, which resolves it against the
+/// bundled web assets. A path that is not one of the app's real routes matches no
+/// asset, so the webview loads a document that does not exist and Chromium
+/// reports its own generic error:
+///
+/// ```text
+/// File not found
+/// It may have been moved, edited, or deleted.
+/// ERR_FILE_NOT_FOUND
+/// ```
+///
+/// Nothing in that message names Locus, and the window stays hidden (the builder
+/// is `.visible(false)` until the theme script runs), so the app looks like it
+/// failed to install — while a **restart changes nothing**, because the bad value
+/// is in the config file, not in memory. Reinstalling does not help either: the
+/// installer replaces the install directory, and this value lives in the app data
+/// root.
+///
+/// The router is a HASH router (`createHashRouter`, see `src/pages/_routers.tsx`)
+/// with `/` as its only top-level route and every page a child of it, so a valid
+/// page is `/` or a known nav path. Anything else is not a route this build can
+/// serve, and is replaced with `/`.
+///
+/// This deliberately does NOT rewrite the student's config — repairing the file
+/// is the config layer's job and would need the same list kept in step. It
+/// refuses the value at the point of use instead, which covers every stale writer
+/// at once, including ones shipped by versions this tree no longer contains.
+fn resolve_start_page(stored: Option<&str>) -> &str {
+    let Some(page) = stored else {
+        return "/";
+    };
+
+    if SERVED.contains(&page) {
+        page
+    } else {
+        logging!(warn, Type::Window, "ignoring an unroutable start_page {page:?}; using /");
+        "/"
+    }
+}
+
+/// The nav paths this build actually serves.
+///
+/// An explicit list rather than something derived from `navItems`, because the
+/// frontend owns that list and this is a Rust-side guard: an unlisted-but-real
+/// page degrades to `/` (a harmless, visible home screen), while a
+/// listed-but-removed one would be a blank window. Prefer the former when the two
+/// disagree — and `the_served_list_matches_the_frontend_routes` fails the test
+/// suite if they ever do.
+const SERVED: &[&str] = &["/", "/account"];
+
 fn restore_default_size_if_needed(window: &WebviewWindow) {
     let Ok(size) = window.outer_size() else {
         return;
@@ -103,7 +164,7 @@ pub async fn build_new_window() -> Result<WebviewWindow, String> {
 
     let config = Config::verge().await;
     let latest = config.latest_arc();
-    let start_page = latest.start_page.as_deref().unwrap_or("/");
+    let start_page = resolve_start_page(latest.start_page.as_deref());
     let initial_theme_mode = match latest.theme_mode.as_deref() {
         Some("dark") => "dark",
         Some("light") => "light",
@@ -325,5 +386,72 @@ mod tests {
         // Alpha is always opaque: a translucent window background would show the
         // desktop through the app before the page painted.
         assert_eq!(parse_hex("#06130C").3, 255);
+    }
+
+    /// The loaded page is always one this build can actually serve.
+    ///
+    /// The bug this pins: a `start_page` persisted by an older build reached
+    /// `WebviewUrl::App` unvalidated, matched no bundled asset, and the webview
+    /// reported Chromium's own `ERR_FILE_NOT_FOUND` in a window that never became
+    /// visible — so the app looked uninstalled, and a restart changed nothing
+    /// because the bad value was on disk. See `resolve_start_page`.
+    #[test]
+    fn an_unroutable_start_page_is_refused() {
+        // Values a previous identity could plausibly have left behind. Verge had
+        // /home, /proxies, /logs and /settings; the fork kept only the first two
+        // routes.
+        for stale in ["/home", "/proxies", "/logs", "/settings", "home", "", "#", "/index.html"] {
+            assert_eq!(
+                resolve_start_page(Some(stale)),
+                "/",
+                "start_page {stale:?} is not a route this build serves and must degrade to /"
+            );
+        }
+    }
+
+    /// The default and the real routes are preserved exactly.
+    #[test]
+    fn a_routable_start_page_is_kept() {
+        assert_eq!(resolve_start_page(None), "/", "a missing start_page means /");
+        assert_eq!(resolve_start_page(Some("/")), "/");
+        assert_eq!(resolve_start_page(Some("/account")), "/account");
+    }
+
+    /// `SERVED` lists every route the frontend actually defines.
+    ///
+    /// Without this, adding a nav entry in `_navigation-meta.ts` and setting it as
+    /// a start page would silently fall back to `/` — and, worse, a route REMOVED
+    /// from the frontend but left in `SERVED` would hand the webview a path that
+    /// no longer exists, i.e. the original bug from the other direction. The
+    /// frontend file is the source of truth; this reads it.
+    #[test]
+    fn the_served_list_matches_the_frontend_routes() {
+        // `CARGO_MANIFEST_DIR` is `client/src-tauri/`; the frontend is a sibling of it.
+        let source = std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../src/pages/_navigation-meta.ts"),
+        )
+        .expect("the navigation metadata must be readable from the crate root");
+
+        // `path: '/...'` is the shape every nav entry uses.
+        let mut routes: Vec<String> = source
+            .lines()
+            .filter_map(|line| {
+                let rest = line.trim().strip_prefix("path:")?;
+                let value = rest.trim().trim_end_matches(',');
+                let path = value.strip_prefix('\'')?.strip_suffix('\'')?;
+                Some(path.to_string())
+            })
+            .collect();
+        routes.sort();
+
+        let mut served: Vec<String> = super::SERVED.iter().map(|p| (*p).to_string()).collect();
+        served.sort();
+
+        assert_eq!(
+            served, routes,
+            "SERVED in window.rs has drifted from the frontend's navigation metadata: a route \
+             here that the frontend does not define hands the webview a document that does not \
+             exist, which is the ERR_FILE_NOT_FOUND blank window this guard exists to prevent"
+        );
     }
 }
