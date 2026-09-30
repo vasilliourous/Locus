@@ -98,7 +98,20 @@ export const useConnection = (): ConnectionState => {
   // which is a disconnect. This ref is what tells the two apart.
   const connectInFlightRef = useRef(false)
 
+  // Whether a status read is already running.
+  //
+  // The poll is a `setInterval`, which fires on the clock rather than after the
+  // previous read finishes. A status read is not instant — the backend proves
+  // the tunnel with a real request through it, so a settling or failing read can
+  // take seconds — and without this guard every interval tick stacks another
+  // `locusStatus` call on top of the last. The reads then race to set `phase`,
+  // and a slow, stale one can land *after* a newer good one and drag a connected
+  // tunnel back to "connecting". One read in flight at a time is the fix.
+  const readingRef = useRef(false)
+
   const refresh = useCallback(async () => {
+    if (readingRef.current) return
+    readingRef.current = true
     try {
       const next = await locusStatus()
       setStatus(next)
@@ -132,6 +145,8 @@ export const useConnection = (): ConnectionState => {
       // Leave the phase alone. A status read failing is not evidence about the
       // tunnel, and flapping the UI on a transient error is worse than a stale
       // label a moment longer.
+    } finally {
+      readingRef.current = false
     }
   }, [])
 

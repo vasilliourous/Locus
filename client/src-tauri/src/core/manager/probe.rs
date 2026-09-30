@@ -60,14 +60,50 @@ use std::time::Duration;
 /// student's traffic, so the timeout is a *decision*, not just a guard.
 pub const PROBE_TIMEOUT: Duration = Duration::from_millis(400);
 
-/// How long the through-tunnel egress check may take.
+/// How long a **single** through-tunnel egress attempt may take, as reported to
+/// mihomo's own delay test.
 ///
-/// Longer than the local probe because it is a *real* request that leaves the
-/// machine, crosses the tunnel and returns — but still short, because it runs on
-/// the path the UI polls while a connect settles. A tunnel that cannot complete
-/// a small request in this window is not one a student should be told is up.
-/// Kept in sync with the timeout passed to mihomo's delay test.
-pub const EGRESS_TIMEOUT: Duration = Duration::from_secs(3);
+/// This is the per-attempt budget handed to `delay_group`, not a cap on the
+/// whole check — see [`EGRESS_DEADLINE`]. It is longer than the local probe
+/// because it is a *real* request that leaves the machine, crosses the tunnel
+/// and returns, and the first request through a freshly-dialled tunnel pays a
+/// cold start that a warm link never does.
+///
+/// Deliberately generous relative to the old 3 s: on a slow school link the
+/// first packet can take several seconds to get through, and calling that "no
+/// egress" is the single most likely way to strand a *working* tunnel on
+/// "connecting" forever. A tunnel this slow is still a tunnel the student
+/// bought.
+pub const EGRESS_ATTEMPT_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// How long the **whole** egress check may take, across all attempts.
+///
+/// Bounds the status path — the UI polls at 750 ms while a connect settles, and
+/// an unbounded check would make the button feel frozen in the one moment it is
+/// being watched. It is larger than a single attempt so the Core's own answer
+/// (a timeout, a refusal) wins in the normal case, and large enough to cover
+/// [`EGRESS_ATTEMPTS`] attempts plus the small gap between them.
+pub const EGRESS_DEADLINE: Duration = Duration::from_secs(12);
+
+/// How many times one egress check may try before it reports `Failing`.
+///
+/// More than one because a single failed round trip is not evidence the tunnel
+/// is broken: a CDN blip, a DNS answer that had to be re-queried, or a cold
+/// proxy connection all fail once and succeed immediately after. The retired
+/// behaviour judged the tunnel on one attempt, so a transient miss flipped a
+/// working tunnel back to "connecting" — the report this fixes. All attempts
+/// still share [`EGRESS_DEADLINE`], so a genuinely dead tunnel is reported fast
+/// rather than retried forever.
+pub const EGRESS_ATTEMPTS: u32 = 2;
+
+/// The pause between egress attempts.
+///
+/// A transient failure — a proxy socket still tearing down, a DNS answer still in
+/// flight — will fail again instantly if the retry races it, so the second
+/// attempt waits long enough for the first attempt's socket to be gone. Short
+/// enough not to matter against [`EGRESS_DEADLINE`], long enough to actually be
+/// a second attempt rather than a repeat of the first.
+pub const EGRESS_RETRY_GAP: Duration = Duration::from_millis(500);
 
 /// The URL the egress check fetches **through the tunnel**.
 ///
@@ -267,18 +303,56 @@ pub async fn probe_core_api(running: bool) -> ProbeOutcome {
 ///
 /// # Interpreting the result
 ///
-/// `delay_group` returns a map of proxy-name -> delay for the group's members. A
-/// non-empty map with at least one delay > 0 is a completed round trip: traffic
-/// moved. An error (no uplink, dead server, DNS failure), a timeout, or an empty
-/// / all-zero map is [`EgressOutcome::Failing`] — the tunnel cannot carry a
-/// packet right now. All failures collapse to one outcome on purpose: from the
-/// student's side "the internet does not work through the tunnel" is one fact.
+/// `delay_group` returns a map of proxy-name -> delay for the group's members.
+/// mihomo only inserts an entry for a member whose test *succeeded*, so a
+/// non-empty map already means at least one member completed a round trip. The
+/// values are still classified — see [`delay_is_a_measurement`] — rather than
+/// merely checked for `> 0`, so this probe and the delay UI agree about what a
+/// real measurement is. An error (no uplink, dead server, DNS failure), a
+/// timeout, or a map with no usable value is [`EgressOutcome::Failing`].
+///
+/// # Why it tries more than once
+///
+/// One failed round trip is not proof the tunnel is broken. A cold proxy
+/// connection, a CDN blip or a DNS answer that had to be re-queried all fail
+/// once and succeed on the next attempt, and judging the tunnel on a single
+/// attempt is what let a working connection drop back to "connecting" — the
+/// report this fixes. `EGRESS_ATTEMPTS` bounds the retries and `EGRESS_DEADLINE`
+/// bounds the whole check, so a genuinely dead tunnel is reported promptly.
 pub async fn probe_egress(core_serving: bool) -> EgressOutcome {
     if !core_serving {
         return EgressOutcome::NotAttempted;
     }
 
-    let timeout_secs = u32::try_from(EGRESS_TIMEOUT.as_secs()).unwrap_or(3);
+    // One deadline for the whole check, not per attempt: a Core that answers
+    // each attempt slowly must not be given `EGRESS_ATTEMPTS * budget` on a path
+    // the UI polls every 750 ms.
+    let deadline = tokio::time::Instant::now() + EGRESS_DEADLINE;
+
+    for _ in 0..EGRESS_ATTEMPTS {
+        if tokio::time::Instant::now() >= deadline {
+            break;
+        }
+
+        if egress_attempt_once().await {
+            return EgressOutcome::Ok;
+        }
+
+        // A short gap so a transient failure (a socket still tearing down, a DNS
+        // cache miss in flight) is given a moment to clear before the retry —
+        // otherwise the second attempt races the first and fails the same way.
+        tokio::time::sleep(EGRESS_RETRY_GAP).await;
+    }
+
+    EgressOutcome::Failing
+}
+
+/// One through-tunnel attempt. `true` when a real round trip completed.
+///
+/// Split out so the retry loop above reads as policy (how many tries, how long)
+/// while the single attempt stays the one place that talks to the Core.
+async fn egress_attempt_once() -> bool {
+    let timeout_secs = u32::try_from(EGRESS_ATTEMPT_TIMEOUT.as_secs()).unwrap_or(5);
     let probe = crate::core::handle::Handle::mihomo().delay_group(
         crate::locus::tier::GROUP_NAME,
         EGRESS_TEST_URL,
@@ -289,16 +363,38 @@ pub async fn probe_egress(core_serving: bool) -> EgressOutcome {
     // too: a Core that accepts the request and then never answers must not hang
     // the status path. The wrapper is slightly longer than the inner timeout so
     // the Core's own answer wins in the normal case.
-    match tokio::time::timeout(EGRESS_TIMEOUT + PROBE_TIMEOUT, probe).await {
-        Ok(Ok(delays)) => {
-            if delays.values().any(|&delay| delay > 0) {
-                EgressOutcome::Ok
-            } else {
-                EgressOutcome::Failing
-            }
-        }
-        Ok(Err(_)) | Err(_) => EgressOutcome::Failing,
+    match tokio::time::timeout(EGRESS_ATTEMPT_TIMEOUT + PROBE_TIMEOUT, probe).await {
+        Ok(Ok(delays)) => delays
+            .values()
+            .any(|&delay| delay_is_a_measurement(delay, timeout_secs)),
+        Ok(Err(_)) | Err(_) => false,
     }
+}
+
+/// Whether a mihomo delay value is a real round-trip measurement.
+///
+/// This mirrors the frontend's `classifyDelay` (`client/src/utils/delay.ts`),
+/// which is the app's single definition of what a delay value means. Keeping the
+/// two in step is the point: mihomo reports non-measurements inside the same
+/// numeric field it reports measurements in — `0` for a failed test and the
+/// timeout value itself for a timed-out one — so a probe that merely checked
+/// `> 0` would accept a sentinel and announce a tunnel that had just timed out.
+///
+/// The sentinels, and what they mean:
+///
+///   * `0`                    -> the test failed; not a measurement.
+///   * `>= timeout_secs*1000` -> the test hit its budget; not a measurement.
+///   * `> 100_000` (1e5)      -> implausible as milliseconds; an error sentinel.
+///   * anything else `> 0`    -> a measured round trip.
+///
+/// The budget used here is the probe's own [`EGRESS_ATTEMPT_TIMEOUT`], not the
+/// frontend's `DEFAULT_DELAY_TIMEOUT`: the probe is judging *its* request, so its
+/// own deadline is the one that decides when a value is a timeout.
+#[must_use]
+const fn delay_is_a_measurement(delay: u32, timeout_secs: u32) -> bool {
+    const IMPLAUSIBLE_DELAY: u32 = 100_000;
+    let timeout_ms = timeout_secs.saturating_mul(1000);
+    delay > 0 && delay < timeout_ms && delay <= IMPLAUSIBLE_DELAY
 }
 
 #[cfg(test)]
@@ -410,5 +506,58 @@ mod tests {
         assert!(!revokes_latch(ProbeOutcome::NotRunning, true));
         // Nothing to revoke.
         assert!(!revokes_latch(ProbeOutcome::Unresponsive, false));
+    }
+
+    /// The egress target is a 204-only endpoint on a CDN.
+    ///
+    /// Pinned by value so a change is deliberate: the URL decides whether the
+    /// probe tests *general* internet egress (the point — a tunnel that reaches
+    /// only the hub has not proven it can carry the student's traffic) and
+    /// whether a captive portal answering in the tunnel's place is caught, which
+    /// depends on the target returning a body-less 204 rather than a redirect or
+    /// an HTML page. `tests/egress_probe_engine.rs` restates this URL because
+    /// `core` is private to the crate; this test is what makes a change here
+    /// visible.
+    #[test]
+    fn the_egress_target_is_the_expected_cdn_204() {
+        assert_eq!(EGRESS_TEST_URL, "http://cp.cloudflare.com/generate_204");
+    }
+
+    /// A real measurement is a positive delay that fits inside the attempt's own
+    /// budget. This is the case the probe is *for*: a round trip happened.
+    #[test]
+    fn a_plausible_delay_is_a_measurement() {
+        assert!(delay_is_a_measurement(1, 5));
+        assert!(delay_is_a_measurement(54, 5));
+        assert!(delay_is_a_measurement(4999, 5));
+    }
+
+    /// The zero sentinel: mihomo reports a *failed* test as `0` in the same field
+    /// it reports measurements in. Counting it as egress would announce a tunnel
+    /// whose test had just failed — the exact false "connected" the readiness
+    /// probe exists to prevent.
+    #[test]
+    fn a_zero_delay_is_not_a_measurement() {
+        assert!(!delay_is_a_measurement(0, 5));
+    }
+
+    /// The timeout sentinel: mihomo reports a *timed-out* test as the timeout
+    /// value itself (ms). A mere `> 0` check would count this as success, so the
+    /// probe would call a timed-out tunnel connected. This is the specific
+    /// disagreement with `classifyDelay` this function removes.
+    #[test]
+    fn a_timeout_sentinel_is_not_a_measurement() {
+        // 5 s budget -> a delay of 5000 ms is the timeout sentinel, not a result.
+        assert!(!delay_is_a_measurement(5000, 5));
+        // Anything at or beyond the budget is the same non-answer.
+        assert!(!delay_is_a_measurement(6000, 5));
+    }
+
+    /// An implausible value is an error sentinel, not a round trip. It must not be
+    /// allowed to outrank a real measurement, and it must not read as success.
+    #[test]
+    fn an_implausible_delay_is_not_a_measurement() {
+        assert!(!delay_is_a_measurement(100_001, 60));
+        assert!(!delay_is_a_measurement(u32::MAX, 5));
     }
 }

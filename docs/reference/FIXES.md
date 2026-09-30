@@ -27,7 +27,90 @@ corrections are marked. For what is *still* broken, read `STILL-OPEN.md`.
 
 ---
 
-## THE SHIPPED CLIENT LOOKED FOR ITS ASSETS ON THE CI RUNNER'S `D:` DRIVE (2026-09-30)
+## THE BUTTON SAT ON "CONNECTING" WHILE THE TUNNEL WAS CARRYING TRAFFIC (2026-10-01)
+
+A connect reported **connecting** forever even though every packet was routed
+through the tunnel — `whatsmyip` showed the exit node, browsing worked, and the
+button still pulsed amber. The screen derives its state from one backend field,
+`ready`, so "always connecting" means the backend was persistently returning
+`connected: true, ready: false` — which is exactly `Readiness::NoEgress`, the state
+where the Core is up but the through-tunnel egress proof failed.
+
+This is the mirror image of the school-wifi fix (FIXES.md, "Connected on a machine
+with no usable internet"): that one stopped a *false* `ready`; this one is a
+*false* `not-ready`. Both come from the same egress check, and both are worth the
+same discipline.
+
+> **What was actually observed, and what was inferred.** The three defects below
+> are all real and all fixed, and each *can* produce this symptom. What was **not**
+> available to pin the runtime trigger was a live Locus hub and a real school
+> tunnel: against a real mihomo sidecar the probe's rule and its call shape behave
+> correctly (see "checked against a real engine" below). So the specific transient
+> that fired on the reporter's machine is inferred, not proven — but a check that
+> judges a tunnel on one 3 s round trip is the shape of thing that fails exactly
+> this way, and it is now gone.
+
+### What was wrong
+
+The egress check judged the tunnel on **one** round trip, with a **3 s** budget,
+and classified the result with `delays.values().any(|&delay| delay > 0)`:
+
+- **One attempt, 3 s.** A cold proxy connection, a CDN blip, or a DNS answer that
+  had to be re-queried fails once and succeeds immediately after. A single transient
+  miss flipped a working tunnel back to "connecting", and a first request through a
+  freshly-dialled tunnel can exceed 3 s on a slow link. The docs had already named
+  this "the most likely false negative".
+- **`> 0` disagreed with the app's own delay semantics.** mihomo reports a *failed*
+  test and a *timed-out* test in the same numeric field a real measurement uses —
+  `0` for a failure, and the timeout value itself for a timeout. The frontend's
+  `classifyDelay` (`client/src/utils/delay.ts`) already treats `0`, `>= timeout` and
+  `> 1e5` as non-measurements; the probe's bare `> 0` did not. Two implementations
+  of one rule, free to drift — and the probe's half would accept a sentinel.
+- **The poll storm multiplied the check.** Readiness is re-read every 750 ms while a
+  connect settles (and every 250 ms by the connect loop), and each read ran its own
+  full through-tunnel request. So a slow tunnel did not merely look slow: every
+  tick was a fresh chance to catch a transient miss, and each read could be
+  overtaken by a later, stale one.
+
+### The fix
+
+**`probe_egress` retries within a bounded deadline.** A per-attempt budget of **5 s**
+stands in for the old 3 s; up to **two** attempts run inside a **12 s** overall
+deadline, with a 500 ms gap so the retry does not race the first attempt's socket.
+A genuinely dead tunnel is still reported promptly — the deadline is shared, not
+per-attempt.
+
+**One classifier for delay values.** New `delay_is_a_measurement(delay, timeout_secs)`
+mirrors `classifyDelay`: `0`, the timeout value, and anything above `1e5` are not
+measurements. Unit tests pin each sentinel, and were shown to fail against the old
+`> 0` check before being kept.
+
+**The check is coalesced and briefly cached.** `CoreManager::observe_egress`
+serialises the through-tunnel probe behind a lock and reuses a completed result for
+**1.5 s**, so the status timer and the connect loop collapse onto one round trip. The
+cache is cleared on every `core_started`/`core_stopped`, so a fresh connect never
+reads a pre-connect answer and a stopped Core never leaves a stale `Ready` behind.
+
+**The frontend stops stacking status reads.** `use-connection.ts`'s poll is a
+`setInterval`, which fires on the clock rather than after the previous read
+finishes; a re-entrancy guard now keeps one `locusStatus` call in flight at a time,
+so a slow, stale read cannot land after a newer good one and drag a connected
+tunnel back to "connecting".
+
+### The contract is now checked against a real engine
+
+`cargo test --test egress_probe_engine` (new) starts the real sidecar with the
+tier's own group name and pins three facts the probe depends on: a reachable member
+yields `200` with a usable delay; an unreachable one yields a non-`200`; and the
+`sentinel` values in the delay map are not measurements. It also recorded a
+behavioural fact that had been assumed — mihomo's `direct` outbound reports `0` for
+a *loopback* target, so the positive case uses the real egress URL and SKIPs when
+the runner has no network. What is *still* unverified — a real Locus tunnel on a
+real school network — is listed in `STILL-OPEN.md`.
+
+---
+
+
 
 > **This supersedes both earlier `ERR_FILE_NOT_FOUND` diagnoses for THIS report.**
 > The first attributed it to a stale `start_page` (withdrawn); the second, the

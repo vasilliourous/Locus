@@ -254,52 +254,62 @@ Two specific unknowns:
   The two therefore share the *interval constant* rather than the cache, and can in
   principle disagree for one poll cycle. Acceptable, but worth knowing.
 
-### The readiness probes have never been run against a live Core
+### The readiness probes against a live Core (partly closed 2026-10-01)
 
-**Added 2026-09-28 (second round); extended 2026-09-29 for the egress check.**
+**Added 2026-09-28 (second round); extended 2026-09-29 for the egress check; the
+engine-side contract closed 2026-10-01.**
 
-Readiness now asks **two** questions, and neither probe has talked to a real
-mihomo. `probe_core_api` asks the Core's control API; `probe_egress` makes a real
-request *through* the tunnel (`delay_group`).
+Readiness asks **two** questions. `probe_core_api` asks the Core's control API;
+`probe_egress` makes a real request *through* the tunnel (`delay_group`).
 
-`probe_core_api` is the fix for claiming "connected" with a Core that had not
-started. Its *rule* is pinned by unit tests (only a serving Core is `Ready`; a
-failed probe revokes the latch). `probe_egress` is the fix for the case
-`probe_core_api` could not catch — **a Core that is up and answering locally on a
-machine with no usable uplink**, where mihomo binds its control port and answers
-`/version` whether or not a packet can leave. That is the school-wifi report. Both
-are unit-tested as rules; the probes themselves have never talked to a real core:
+**Now verified against a real engine.** `cargo test --test egress_probe_engine`
+starts the real sidecar with the tier's own group name (`Locus Auto`) and pins the
+three facts the probe depends on:
 
-- **Does `delay_group("Locus Auto", …)` return a usable delay through the tunnel?**
-  It goes through the mihomo plugin, so it should exercise the same path the delay
-  UI uses — but that is assumed, untested here. If the group name, the tier config
-  or the plugin transport is wrong, every connect would stall into "no egress" and
-  the button would say **connecting** forever. Fail-safe (it never says "connected"
-  wrongly) but still wrong, and it would look like the bug we just fixed.
-- **Is the 3 s egress budget right on a school network?** A real tunnel on a slow
-  link (or one whose first request pays a cold start) could exceed it, falsely
-  reporting no egress on a working tunnel. This is the most likely false negative —
-  watch it on a genuinely slow link before trusting it.
+- a **reachable** member yields HTTP 200 with a delay map carrying a usable
+  measurement — the `Ok` path that lets the UI leave "connecting";
+- an **unreachable** member yields a non-200 (mihomo answers `504 "get delay: all
+  proxies timeout"`, and in some paths `200` with a `0` value) that the probe reads
+  as `Failing`;
+- the sentinels mihomo reports in the same field a measurement uses — `0` for a
+  failed test and the timeout value itself for a timed-out one — are classified as
+  **not** measurements, so a tunnel that just timed out cannot read as connected.
+
+That test also settled one behavioural fact that had been assumed: mihomo's
+`direct` outbound reports a delay of `0` for a **loopback** target (loopback
+bypasses the proxy path), which is why the positive case uses the real egress URL
+and SKIPs when the runner has no network. The two deterministic cases need no
+network.
+
+What remains genuinely unverified, because it needs a live Locus hub and a real
+tunnel:
+
+- **Does `delay_group("Locus Auto", …)` return a usable delay through a *real* Locus
+  tunnel?** The engine contract is now proven; whether the tier's `ss` member carries
+  the probe's request on a real school network is not. If the group name, the tier
+  config or the plugin transport is wrong in the live app, every connect would stall
+  into "no egress" and the button would say **connecting** forever — the report this
+  work started from. Fail-safe (it never says "connected" wrongly) but still wrong.
+- **Is the egress budget right on a school network?** Raised from 3 s to a 5 s
+  per-attempt budget within a 12 s overall deadline, with two attempts (see
+  FIXES.md). Still a judgement made without a live slow link — watch it on a
+  genuinely slow network before trusting it.
 - **Does `get_version()` actually answer over the configured transport?** It goes
   through the plugin, so it should use the same channel as every other Core call —
   but that assumption is untested here. If the address/secret/socket path is wrong
   in a way that only shows at runtime, the probe would report `Unresponsive` for a
-  healthy Core, and the button would say **connecting** forever. That failure is
-  fail-safe (it never says "connected" wrongly) but it is still wrong, and it would
-  look exactly like the bug we just fixed.
+  healthy Core, and the button would say **connecting** forever.
 - **Is 400 ms enough on a loaded machine?** Chosen short because the status command
-  is polled at 750 ms while connecting. If a real Core on a slow school laptop takes
-  longer to answer, every connect would stall into the "still starting" branch.
-  (The egress check has its own, larger budget — 3 s — so the two do not share this
-  risk.)
+  is polled at 750 ms while connecting. A real Core on a slow school laptop that
+  takes longer to answer would stall every connect into the "still starting" branch.
 - **The no-wifi case end to end.** With the Core running, disconnect the network and
   confirm the button leaves `connected` and settles on **connecting** — the core
   answers `/version` but `probe_egress` fails — rather than hanging on a socket that
   never answers or falsely reporting connected.
-
-Worth checking first: the `client/src-tauri/sidecar/verge-mihomo-*` binary is
-present, so `cargo test --test tier_profile_engine` exercises a real core for the
-*profile*, and could be extended to exercise this probe the same way.
+- **The poll-storm coalescing under load.** `observe_egress` now serialises and
+  caches the through-tunnel check for 1.5 s so the 750 ms status timer and the
+  250 ms connect loop collapse onto one round trip. The rule is unit-shaped and
+  reviewed; the live timing on a slow machine is not measured.
 
 ### Nothing has confirmed the refusal is visible on a real screen
 

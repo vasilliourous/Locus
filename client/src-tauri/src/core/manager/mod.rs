@@ -13,8 +13,9 @@ use std::{
         Arc,
         atomic::{AtomicBool, AtomicU64, Ordering},
     },
-    time::Instant,
+    time::{Duration, Instant},
 };
+
 use crate::core::runstate::{RUN_STATE, RealEnv, RunStateStore};
 use crate::singleton;
 
@@ -22,6 +23,21 @@ pub(crate) static CLASH_LOGGER: Lazy<Arc<LogRing>> = Lazy::new(|| Arc::new(LogRi
 
 const CORE_READINESS_ACTIVE_BIT: u64 = 1;
 const CORE_READINESS_GENERATION_STEP: u64 = 1 << 1;
+
+/// How long a completed through-tunnel egress result stays fresh.
+///
+/// Readiness is polled far faster than a real round trip needs to be re-proven:
+/// the status command re-reads every 750 ms while a connect settles, and the
+/// connect loop every 250 ms. Re-running a *real* request through the tunnel on
+/// every one of those reads is both wasteful and, worse, makes a working tunnel
+/// look flaky — each poll is an independent chance to catch a transient miss.
+///
+/// A window short enough that a tunnel that genuinely goes down is noticed within
+/// a fraction of a second, and long enough to collapse the poll storm into one
+/// round trip. The window applies to `Ok` and `Failing` alike: caching only
+/// success would let the UI oscillate, and caching only failure would hide a
+/// recovered tunnel.
+const EGRESS_CACHE_TTL: Duration = Duration::from_millis(1500);
 
 const fn next_active_core_readiness_state(state: u64) -> u64 {
     (state.wrapping_add(CORE_READINESS_GENERATION_STEP) & !CORE_READINESS_ACTIVE_BIT) | CORE_READINESS_ACTIVE_BIT
@@ -76,6 +92,25 @@ pub struct CoreManager {
     last_update: ArcSwapOption<Instant>,
     config_update_in_progress: AtomicBool,
     core_readiness_state: AtomicU64,
+    /// The last completed through-tunnel egress check, and when it ran.
+    ///
+    /// Readiness is polled from several places at once — the status command on a
+    /// 750 ms timer while a connect settles, and the connect loop itself every
+    /// 250 ms — and the egress check is the expensive half of the probe. Without
+    /// this, every poller starts its own round trip, so the Core is asked to run
+    /// the same delay test many times over and the slow case multiplies instead
+    /// of being bounded by [`probe::EGRESS_DEADLINE`].
+    ///
+    /// A recent result is reused (see [`Self::observe_egress`]) so the common
+    /// case — a poll a few hundred milliseconds after the last one — costs no
+    /// round trip at all.
+    last_egress: std::sync::Mutex<Option<(Instant, probe::EgressOutcome)>>,
+    /// Serialises the through-tunnel check so only one runs at a time.
+    ///
+    /// Taken only around the egress probe inside [`Self::observe_readiness`],
+    /// never held across the lifecycle lock, so the fixed lock order
+    /// `config_update_in_progress → lifecycle_lock` is unaffected.
+    egress_probe_lock: tokio::sync::Mutex<()>,
     // 串行化 start/stop/restart。
     // 锁序固定为 config_update_in_progress → lifecycle_lock。
     pub(crate) lifecycle_lock: tokio::sync::Mutex<()>,
@@ -92,6 +127,8 @@ impl Default for CoreManager {
             last_update: ArcSwapOption::new(None),
             config_update_in_progress: AtomicBool::new(false),
             core_readiness_state: AtomicU64::new(0),
+            last_egress: std::sync::Mutex::new(None),
+            egress_probe_lock: tokio::sync::Mutex::new(()),
             lifecycle_lock: tokio::sync::Mutex::new(()),
         }
     }
@@ -128,6 +165,11 @@ impl CoreManager {
         if previous != mode {
             logging!(info, Type::Core, "Core running mode changed: {previous} -> {mode}");
         }
+        // A fresh start must not answer egress from before it: the whole point of
+        // the check is that it observed *this* Core moving a packet, and a cached
+        // result from a previous Core would let a just-starting tunnel read as
+        // connected on the strength of a round trip it never made.
+        self.clear_egress();
         self.run_state.core_started(mode);
     }
 
@@ -141,6 +183,7 @@ impl CoreManager {
             logging!(info, Type::Core, "Core running mode changed: {previous} -> NotRunning");
         }
         self.invalidate_core_readiness();
+        self.clear_egress();
         self.run_state.core_stopped();
     }
 
@@ -149,6 +192,10 @@ impl CoreManager {
     /// Must be paired with [`Self::core_start_settled`] on every path out, including the ones
     /// where the start never happened.
     pub fn core_starting(&self) {
+        // The transition begins here, so a result from the previous Core must not
+        // survive into this one: a *new* start could otherwise read as egress-proven
+        // on the strength of a round trip made before it existed.
+        self.clear_egress();
         self.run_state.core_starting();
     }
 
@@ -234,9 +281,82 @@ impl CoreManager {
         // that is up but cannot move a packet reports NoEgress, which the UI
         // renders as "connected but no service" rather than "connected" — the
         // fix for the machine with no wifi that still claimed a tunnel.
-        let egress = probe::probe_egress(outcome == probe::ProbeOutcome::Serving).await;
+        let egress = self
+            .observe_egress(outcome == probe::ProbeOutcome::Serving)
+            .await;
 
         probe::decide(outcome, egress, latch_active)
+    }
+
+    /// The through-tunnel egress answer, coalesced and briefly cached.
+    ///
+    /// The expensive half of readiness, so it is run once at a time and its
+    /// result reused for [`EGRESS_CACHE_TTL`]. This is what stops the poll storm
+    /// from turning one round trip into many: without it, the 750 ms status timer
+    /// and the 250 ms connect loop each start their own request through the
+    /// tunnel, so a slow tunnel looks flaky rather than merely slow, and a
+    /// transient miss on any one of them strands the UI on "connecting" even
+    /// though the tunnel is carrying traffic.
+    ///
+    /// Fresh results are returned without a round trip. Stale ones are re-proven
+    /// under a lock, so concurrent callers serialise onto a single check rather
+    /// than racing; a caller that arrives while a check is in flight waits for it
+    /// and then reuses its result.
+    async fn observe_egress(&self, core_serving: bool) -> probe::EgressOutcome {
+        // A Core that is not serving has no egress to check, and asking is both
+        // pointless and a request guaranteed to fail. Short-circuit before the
+        // lock so a stopped Core never blocks on it.
+        if !core_serving {
+            self.store_egress(probe::EgressOutcome::NotAttempted);
+            return probe::EgressOutcome::NotAttempted;
+        }
+
+        if let Some(outcome) = self.fresh_egress() {
+            return outcome;
+        }
+
+        let _guard = self.egress_probe_lock.lock().await;
+
+        // Re-check under the lock: another caller may have completed the check
+        // while this one waited, in which case there is nothing left to do.
+        if let Some(outcome) = self.fresh_egress() {
+            return outcome;
+        }
+
+        let outcome = probe::probe_egress(true).await;
+        self.store_egress(outcome);
+        outcome
+    }
+
+    /// The cached egress result, if one was recorded within the TTL.
+    fn fresh_egress(&self) -> Option<probe::EgressOutcome> {
+        let cached = self.last_egress.lock().ok()?;
+        let (at, outcome) = (*cached)?;
+        let fresh = at.elapsed() < EGRESS_CACHE_TTL;
+        // Drop the guard before returning so the lock is held only for the read.
+        drop(cached);
+        fresh.then_some(outcome)
+    }
+
+    /// Forgets the cached egress result.
+    ///
+    /// Called on every start and stop so a result is only ever reused across polls
+    /// of the *same* running Core, never across a transition.
+    fn clear_egress(&self) {
+        if let Ok(mut cached) = self.last_egress.lock() {
+            *cached = None;
+        }
+    }
+
+    /// Records an egress result and the instant it was observed.
+    ///
+    /// A poisoned lock is ignored rather than propagated: the value it guards is
+    /// a cache, and refusing to update it would leave a stale `Failing` in place
+    /// for a tunnel that has since recovered — the worse failure.
+    fn store_egress(&self, outcome: probe::EgressOutcome) {
+        if let Ok(mut cached) = self.last_egress.lock() {
+            *cached = Some((Instant::now(), outcome));
+        }
     }
 
     pub(crate) fn invalidate_core_readiness(&self) {
