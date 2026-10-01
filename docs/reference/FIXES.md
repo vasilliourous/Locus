@@ -537,6 +537,112 @@ it. `the_claimed_contract_test_exists` now makes the claim self-checking.
 
 ---
 
+## THE WINDOWS INSTALLER WAS NEVER SIGNED: TWO DEFECTS IN ONE STEP (2026-10-01)
+
+*CI-side fix. Found by cutting a release, not by reading the workflow.*
+
+The entry below ("NO WINDOWS CLIENT COULD UPDATE") diagnosed the hub half of the
+Windows outage. This is the **other half**, and it is upstream of it: CI was
+never producing the signature the hub needed to publish.
+
+It took two releases to surface, because each defect hid the other.
+
+### Defect 1 — the step's condition could never be true
+
+```yaml
+- name: Sign the Windows installer
+  if: matrix.os == 'windows-latest'     # the matrix pins os: windows-2022
+```
+
+The build matrix (`.github/workflows/client.yml`) pins runner images on purpose —
+`ubuntu-24.04`, `windows-2022`, `macos-14` — because a `*-latest` label is a world
+claim nobody re-checks, and this project already lost every Intel macOS run to the
+retirement of `macos-13`. But this step's condition still tested the old
+`windows-latest` name, so it **silently skipped on every run**.
+
+The installer was therefore built, staged and uploaded **unsigned**, and the
+failure was invisible: a skipped step is a green step. Nothing in CI could see it.
+
+Every other platform gate in the job already used `matrix.label`
+(`linux`/`windows`/`macos-intel`/`macos-arm`). This was the lone outlier. The rule
+now: **gate on `matrix.label`, not `matrix.os`** — `label` is a name the file
+chooses, while `os` is a runner image that gets bumped and silently detaches every
+condition written against the old value.
+
+### Defect 2 — the step globbed a name that does not exist yet
+
+With the condition fixed the step ran for the first time, and failed:
+
+```console
+##[error]no installer-Locus_*_x64-setup.exe to sign in installer/
+-rwxr-xr-x  runneradmin  ...  Locus_3.2.16_x64-setup.exe
+```
+
+The `installer-` prefix is added by the **release** job's "Prefix and stage the
+installers" step. The sign step runs in the **build** job, where the file still
+carries Tauri's raw name (`Locus_<v>_x64-setup.exe`). The glob could never match,
+so the step exited 1 — and the cost was a ~30 minute four-platform build that ends
+with no release.
+
+The fix signs the file under its build-job name and lets the release job prefix
+both the file and its `.sig` together. **The pairing is the point:** minisign signs
+exact bytes and the `.sig` is a sibling filename, so a rename applied to one and
+not the other produces a signature that verifies nothing.
+
+### Why v3.2.14 published anyway, and v3.2.15 did not
+
+`v3.2.14` reached the hub with an unsigned Windows installer because the manifest
+step did not yet require the signature — so the hub published an entry every
+Windows client refused. `v3.2.15` is where the manifest step's
+`elif filename.startswith("locus-") or key == "windows"` clause began refusing it:
+
+```console
+$ gh run view … --log-failed
+refusing to publish a partial release — missing: installer-Locus_3.2.15_x64-setup.exe.sig
+```
+
+That refusal is correct, and it is the guard working. It simply fires ~30 minutes
+in, at the end of the expensive part, which is why it took two attempts to isolate
+the two defects behind it.
+
+### The guards, and the evidence they can fail
+
+Two sections in `check-consistency.sh`, each demonstrated failing against the
+pre-fix tree:
+
+| Guard | Broken deliberately by | Observed failure |
+|---|---|---|
+| §19 — every `if: matrix.X == 'lit'` names a value the matrix produces | `matrix.os == 'windows-latest'` | `BAD …: condition tests matrix.os, which the matrix does not define` |
+| §18 — the sign step's glob and the release job's prefix **agree** | glob → `installer/installer-Locus_*` | `BAD the sign step globs 'installer/installer-Locus_*_x64-setup.exe' in the BUILD job` |
+| §18 — the step is gated on `matrix.label` | `if: matrix.os == 'windows-latest'` | `BAD the sign step is gated on matrix.os … , not matrix.label` |
+
+§18 asserts the **agreement between the two jobs** rather than each half
+(`AGENTS.md`, "when two things must agree, assert the agreement"): checking only
+that the sign step has *a* glob, or only that the release job has *a* prefix,
+passes while the pair disagrees — which is exactly the state that shipped.
+
+### Verified / not verified
+
+**Verified:** `v3.2.17` built all four platforms and released with
+`installer-Locus_3.2.17_x64-setup.exe.sig` present; its `manifest.json` carries a
+`signature` for the `windows` platform; the served installer's SHA-256 matches the
+manifest (`da881fe0…`, 58,595,274 bytes, `MZ` header). `check-consistency.sh`
+exits 0, and both new sections were shown failing before being kept.
+
+**Not verified:** that a Windows client *installs* the resulting update. That needs
+the hub to publish `3.2.17`, which needs the host — see below.
+
+### Still blocked on the host
+
+CI now produces a signed installer, but the hub cannot serve it until
+`fetch-release.py` is redeployed (`hooks-sync.sh --fetch-service`) and the release
+is re-published. The deployed fetcher still resolves the raw binary, and the host
+was unreachable throughout this work. Until then the Windows path is fixed at the
+supply end and not at the serving end —
+`RECOVER-WINDOWS-UPDATE.md` remains the operator's guide.
+
+---
+
 ## NO WINDOWS CLIENT COULD UPDATE: THE HUB SERVED THE RAW BINARY, NOT THE INSTALLER (2026-10-01)
 
 A Windows client on `3.2.13` was offered `3.2.14`. The download reached **100%**
