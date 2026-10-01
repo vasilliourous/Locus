@@ -27,6 +27,90 @@ corrections are marked. For what is *still* broken, read `STILL-OPEN.md`.
 
 ---
 
+## DEVICE IDENTITY WAS NOT DURABLE — CODES "STOPPED BEING RECOGNISED", AND A REINSTALL LOST THEM (2026-10-01)
+
+*Ships in the client's 3.2.x line; the hub half is inert until `setup.sh` re-runs.*
+
+Two symptoms reported as separate problems, both **one defect**:
+
+* a code bound to a device stops being recognised as bound to it (noticed around
+  updates, but not caused by one);
+* an uninstall/reinstall loses the code, and a student who discarded the paper
+  card has no self-service recovery.
+
+### `bound_fingerprint` was right; the identifier was not
+
+The hub's `boundFp !== incomingFp` guard fired correctly. The device presented a
+**different** value, because `device.rs::compute()` derived the fingerprint from
+hardware on every launch and **fell back to a random value** when the hardware
+told it nothing:
+
+```rust
+match platform_sources() {
+    Some(fingerprint) => fingerprint,
+    None => random_fingerprint(),   // <- persisted ONLY in the app's own config
+}
+```
+
+That random value lived in the app config — the file an uninstall deletes — so
+a reinstall could not re-derive it and generated a new one. The device became a
+stranger to its own code. The `OnceLock` cache made it stable *within* a process,
+which is why it presented as "works, then randomly does not".
+
+### The fix
+
+* `locus/identity.rs` — a durable identity split into three parts that must not
+  be conflated: a **device id** (a non-secret name), a **secret** (the
+  credential), and the hub's `sha256(secret)` verifier. A stored identity is
+  reused **verbatim**, so neither a hardware change nor a reinstall re-derives it.
+* Persisted machine-scoped (`/var/lib/locus`, `/Library/Application Support/Locus`,
+  `%PROGRAMDATA%\Locus`) so it survives an uninstall, with an app-config fallback
+  that **reports it does not** — so the UI cannot over-promise.
+* `resolve()` is pure over injected sources, so the reinstall-vs-wipe distinction
+  is provable **without** real Windows/macOS hardware. That is what unblocked a
+  fix that had been deliberately deferred for exactly that reason (see
+  `business/redesign/implementation/05-not-yet-true.md` §5.2).
+
+### Two things learned the hard way while building it
+
+* **The hook runtime HAS crypto.** A hand-rolled mixing function was written for
+  the token hash on the assumption that goja had none. `$security.sha256` /
+  `randomString` exist (confirmed by the 2026-09-30 global probe above). Use the
+  real primitive; home-made crypto is this file's most repeated lesson.
+* **A recursive async loop start does not compile.** `runtime::start` was made
+  async to read the token, then called from inside the heartbeat's own outcome
+  callback — the spawned future was non-`Send` and the compiler refused it. Split
+  into `start` (async, resolves the credential) and `start_with` (sync, spawns
+  the loop).
+
+Detail, wire contracts and debugging steps:
+[`DEVICE-IDENTITY.md`](../reference/DEVICE-IDENTITY.md).
+
+---
+
+## A GUARD THAT WAS CITED IN SIX DOCUMENTS DID NOT EXIST (2026-10-01)
+
+`activation_contract_test` was named as pinning the 403/409 refusal contract in
+**six live documents and two code comments**. No such test was in the tree.
+
+The contract it claimed to protect is genuinely fragile: the client classifies an
+activation refusal by status first, then by whether a **403's message contains the
+substring `suspended`**. A hub-side reword would make every deployed client report
+a suspension as "your code is bound to another device" and send the student to a
+middleman with the wrong question — and **nothing in the build would fail**.
+
+It now exists: `client/src-tauri/tests/activation_contract.rs`, reading the hook
+source and asserting the literal status codes and messages the classifier is
+written against. Verified by mutating the hook's suspension wording and watching
+it fail, then restoring the file byte-identical.
+
+**The lesson is the meta-guard it now carries.** A guard described in prose but
+absent is worse than no guard: it stops anyone from checking. The claim was
+repeated until it read as fact, and the planning pass for the work above trusted
+it. `the_claimed_contract_test_exists` now makes the claim self-checking.
+
+---
+
 ## NO WINDOWS CLIENT COULD UPDATE: THE HUB SERVED THE RAW BINARY, NOT THE INSTALLER (2026-10-01)
 
 A Windows client on `3.2.13` was offered `3.2.14`. The download reached **100%**
@@ -133,6 +217,81 @@ that was actually broken was the one unchecked.
   passes against the new one.
 - The client's existing tests (`the_raw_windows_binary_is_not_an_installer`,
   `an_nsis_installer_is_an_installer`) already pin the client half — 17 passed.
+
+### The hub deploy, and the evidence it took
+
+The repo fix is inert until the host's copy is replaced, so the deploy is part of
+the fix, not a follow-up. Recorded here because the *verification* is the part
+worth copying.
+
+**Before** — confirmed on the host, not inferred:
+
+```console
+$ ssh root@<host> 'sha256sum /root/server/scripts/fetch-release.py'
+68f4aaf88b247c33428a2cdf379b98b69e9879493d3d0ef4cb454864f92da3b8
+$ ssh root@<host> 'grep -c "installer-Locus" /root/server/scripts/fetch-release.py'   # 0
+$ ssh root@<host> 'grep -c "locus-windows-amd64.exe" /root/server/scripts/fetch-release.py'  # 1
+```
+
+The deployed fetcher knew nothing about the installer and resolved the raw
+binary. That is the defect, standing on the box.
+
+**Deploy** — `hooks-sync.sh --fetch-service` (added in this change; no script
+previously synced this file at all). The sequence, for reproducing by hand:
+
+1. `scp` to `fetch-release.py.uploading` (never in place — the unit execs this file).
+2. `python3 -m py_compile` the **uploaded** copy on the host, *before* swapping.
+   An `active` service with a syntax error serves every request as a failure,
+   which is the same silent-failure shape as the original bug.
+3. Keep a timestamped `.bak`, then `mv` into place; `chown root:root`, `chmod 755`.
+4. `rm -rf __pycache__` — a stale bytecode cache can mask the swap.
+5. `systemctl restart locus-fetch`, then poll `/health` rather than sleeping fixed.
+
+**After** — matched by hash and by behaviour:
+
+```console
+$ ssh root@<host> 'sha256sum /root/server/scripts/fetch-release.py'
+35920d63eec98e815fe24c5817cec04b5ad40e6f735d5d936b03048be1ed8c96   # == repo
+$ ssh root@<host> 'curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:8091/health'
+200
+$ ssh root@<host> 'journalctl -u locus-fetch --since "-2 min" -p err -q'   # (empty)
+```
+
+and the loaded file resolves the right name — asked of the copy that runs, since
+`grep` counts prose comments too:
+
+```console
+$ ssh root@<host> 'cd /root/server/scripts && python3 -c "…resolve_platform_names(\"3.2.14\")"'
+   linux        -> locus-linux-amd64
+   windows      -> installer-Locus_3.2.14_x64-setup.exe
+   macos_intel  -> locus-darwin-amd64
+   macos_arm    -> locus-darwin-arm64
+```
+
+**The service was restarted and verified; the fleet is still affected.** A deploy
+does not change `update_config` — that happens at publish, and neither 3.2.14 nor
+any existing release can be published (see below). The live row continued to
+serve the raw `.exe` after the deploy, correctly.
+
+### Bookkeeping the deploy required
+
+- **The host's SSH key had changed.** `known_hosts` carried three entries whose
+  fingerprints matched none of the keys the server now offers. Replaced with a
+  fresh `ssh-keyscan` **after** comparing fingerprints and stating the ambiguity:
+  a changed host key is indistinguishable from an interception at that layer.
+  The stale-entry reading was accepted on two pieces of evidence (the box
+  resolves to a private address, and it had been rebuilt), not waved through.
+- **Access was borrowed, not assumed.** The box had password-only root SSH, so a
+  short-lived key was generated, installed, used, and removed — then the removal
+  **verified** (`ssh` refused, `authorized_keys` back to 0 bytes). The local key
+  material was deleted. Leaving standing access behind is a worse defect than the
+  one being fixed.
+- **`authorized_keys` held only that temporary key.** Confirmed before emptying
+  it, so no pre-existing access was destroyed.
+
+Server-side halves do not reach the live host until `setup.sh` re-runs; that does
+**not** apply here, because the fetcher was deployed directly and verified by
+hash.
 
 ### What this says about the class
 

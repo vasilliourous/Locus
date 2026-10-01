@@ -460,6 +460,60 @@ finding stated as a to-do.
 
 ## Open, and fixable now
 
+### Device identity has never met a real PocketBase
+
+**Added 2026-10-01.** The durable-identity work (see
+[`DEVICE-IDENTITY.md`](DEVICE-IDENTITY.md)) is complete, tested and compiling, but
+**no part of the hub half has run**. There is no PocketBase runtime in this
+checkout, so the hooks are syntax-checked and covered by the
+`check-consistency.sh` trap wave — the same standard as every other hook here, and
+not a substitute for executing them.
+
+Specifically unverified:
+
+| Claim | Status |
+|---|---|
+| `device_identities` can be created on the live database | **Untested.** `seed-pb.py` is additive-only and idempotent, but this collection is new. |
+| The hooks execute correctly on PB 0.22.21 | **Untested.** Never run. |
+| A real recognition round-trip returns a token | **Untested.** |
+| The token renewal path (`401` -> `StaleCredential` -> `renew_credential`) | **Untested.** Needs a real hub to return a 401; compiles and is reasoned, never executed. The most likely place a field bug hides. |
+| The unique constraints actually reject duplicates | **Untested** — same class as the existing `device_bindings` open item. |
+
+To close it: deploy (`setup.sh`), then call `/api/device-recognise` with a known
+verifier and confirm a token comes back and a heartbeat with it succeeds. Then
+age a token deliberately and confirm the 401 path renews rather than tearing the
+tunnel down.
+
+### "The identity survives a real reinstall" still needs real hardware
+
+**Added 2026-10-01.** The design moves the *decision logic* out of the
+"cannot verify here" bucket: `resolve()` is pure over injected sources, and the
+reinstall-vs-wipe distinction is unit-tested. What remains genuinely hardware-gated
+is the thing that sank the previous attempt — whether the machine-scoped store
+**survives an actual uninstall** and is **writable without elevation** in each
+deployment shape.
+
+Needs a real Windows and a real macOS machine, an install -> uninstall ->
+reinstall cycle per platform, and confirmation the path is writable by a
+non-elevated process. The paths chosen are `/var/lib/locus` (Linux),
+`/Library/Application Support/Locus` (macOS), `%PROGRAMDATA%\Locus` (Windows).
+
+Until then, the honest position: an update no longer breaks the identity (that
+part was fixable and is fixed), and a reinstall *should* keep it because the
+identity is now written outside the app's own directory — but nobody has watched
+it happen.
+
+### The account screen cannot yet say "remembered only until reinstall"
+
+**Added 2026-10-01.** `RecognitionResult::Recognised` carries `durable: bool`, and
+`Store::AppFallback.describe()` already produces the right sentence. It is not
+surfaced in `pages/account.tsx`, so a student on a device where the machine store
+was unwritable is not told their identity will not survive a reinstall — which is
+the honesty the design explicitly requires.
+
+Small, and the data is already there: read the flag and render the sentence.
+
+
 ### The client works; a real update has never been INSTALLED
 
 **This section used to say the client port had not started. It has, and it

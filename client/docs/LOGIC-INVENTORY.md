@@ -34,8 +34,9 @@ src-tauri/src/
 ├─ locus/
 │  ├─ mod.rs
 │  ├─ contract.rs        # every wire name (HUB_URL, tier payload, platform keys, artifact names)
-│  ├─ activation.rs      # code validation + /api/activate + /api/code-lookup
+│  ├─ activation.rs      # code validation + /api/activate + /api/code-lookup + /api/device-recognise
 │  ├─ device.rs          # device fingerprint (per-OS), cached for the process
+│  ├─ identity.rs        # durable device identity (id + secret + verifier), the reinstall fix
 │  ├─ heartbeat.rs       # loop, backoff, jitter, grace, outcome classification
 │  ├─ expiry.rs          # subscription date parsing + connect-gate decision
 │  ├─ tier.rs            # tier payload -> mihomo config (incl. the UoT outbound)
@@ -273,7 +274,7 @@ add a connect path, take the flag from `store` — do not pass a literal.
 
 **Reference:** `legacy/wails-client/internal/activation/fingerprint_{linux,darwin,windows}.go`.
 
-Per-OS device fingerprint used as the code-binding key. Behaviours to preserve:
+Per-OS device fingerprint. Behaviours to preserve:
 
 - Stable across app restarts and reinstall.
 - Distinct per machine (a code is bound to one device).
@@ -281,6 +282,40 @@ Per-OS device fingerprint used as the code-binding key. Behaviours to preserve:
   (the old client's diagnostics deliberately truncate it).
 
 Windows is the priority platform; Linux is best-effort (~2% of clients).
+
+> **Its role changed on 2026-10-01.** The fingerprint is still computed and still
+> sent, but it is **no longer what an entitlement hangs on**. It is derived from
+> hardware and falls back to a random value, so it could not survive a reinstall —
+> which is why codes "stopped being recognised". Durable identity now lives in
+> `identity.rs`; the fingerprint is a supporting signal. Do not reintroduce a
+> dependency on it for authorisation.
+
+---
+
+## 5a. `locus/identity.rs`
+
+**Added 2026-10-01.** The durable device identity, and the reinstall fix. The full
+design, the wire contract and the debugging steps are in
+[`../../docs/reference/DEVICE-IDENTITY.md`](../../docs/reference/DEVICE-IDENTITY.md);
+this is the module summary.
+
+Three parts that must **not** be conflated:
+
+| Part | What | Visible to |
+|---|---|---|
+| `device_id` | stable, non-secret name | logs/support (truncated to 12) |
+| `secret` | 32 random bytes — the credential | nobody |
+| `sha256(secret)` | the hub's verifier | the hub only |
+
+Behaviours to preserve:
+
+- **A stored identity is reused verbatim**, whatever the hardware now reports.
+  Re-deriving it is the bug this module exists to fix.
+- The machine store is preferred; the app-config fallback is used only when it is
+  unwritable without elevation, and is **reported as not surviving a reinstall**.
+- `resolve()` stays **pure over `IdentitySources`** — that is what makes the
+  reinstall-vs-wipe distinction testable without real Windows/macOS hardware.
+- The secret is never logged, exported, or sent to the frontend.
 
 ---
 

@@ -43,8 +43,9 @@ retired client hand-rolled each of those and re-earned a bug for every one.
 | Module | Responsibility | Why it is not upstream's |
 |---|---|---|
 | `contract.rs` | Every wire name in one place: the tier payload, the frozen `uot_port` key, platform ids and artifact filenames | Three languages (goja JS, Rust, Go) must agree on these and nothing enforced it before |
-| `activation.rs` | Luhn-mod-N code validation, `/api/activate`, `/api/code-lookup` | Verge has no concept of a user, a code, or an entitlement |
-| `device.rs` | Per-OS hardware fingerprint, cached for the process lifetime | The code-binding key; Verge has no device identity |
+| `activation.rs` | Luhn-mod-N code validation, `/api/activate`, `/api/code-lookup`, `/api/device-recognise` | Verge has no concept of a user, a code, or an entitlement |
+| `device.rs` | Per-OS hardware fingerprint, cached for the process lifetime | The original code-binding key; now a supporting signal only |
+| `identity.rs` | Durable device identity (id + secret + verifier) and the session token | The fingerprint was not durable, so a reinstall lost the entitlement |
 | `heartbeat.rs` | The loop, backoff, jitter, 7-day grace, config refresh | Verge has no server relationship at all |
 | `tier.rs` | Tier payload → mihomo YAML, including the UoT outbound | Verge generates config from *profiles*; Locus generates it from an entitlement |
 | `store.rs` | Product state as additive `IVerge` fields | Deliberately reuses Verge's store rather than adding a second JSON file |
@@ -215,6 +216,24 @@ The document is valid YAML and every unit test passed; only running the real eng
 no-update, whereas a `200` whose body it cannot parse is raised as an **error it
 logs**. Returning `200 {}` would make every up-to-date client log a failure on every
 check.
+
+### The device identity is not the fingerprint
+
+Added 2026-10-01. The activation-code binding used to hang on the hardware
+fingerprint, which `device.rs` derives on every launch and — when the hardware
+tells it nothing — **falls back to a random value** persisted only in the app's
+own config. A reinstall deleted it, and the device came back a stranger to its
+own code.
+
+Identity now lives in `locus/identity.rs` and is three things that must not be
+conflated: a **device id** (a non-secret name, safe in logs), a **secret** (the
+credential, never logged or exported), and the hub's `sha256(secret)` verifier.
+A stored identity is reused **verbatim**, so neither a hardware change nor a
+reinstall re-derives it.
+
+**Do not put authorisation back on the fingerprint.** It is still computed and
+still sent, but it is a supporting signal. Full design:
+[`../../docs/reference/DEVICE-IDENTITY.md`](../../docs/reference/DEVICE-IDENTITY.md).
 
 ---
 

@@ -162,6 +162,19 @@ update signal and a refreshed tier config.
 |-------|------|:--------:|-------------|
 | `code` | string | ✅ | Full activation code |
 | `fingerprint` | string | ❌ | Device fingerprint (binds the check-in to this device) |
+| `token` | string | ❌ | Session token, **instead of** `code`, for a device restored by recognition |
+
+> **`code` OR `token` is required — not both, not neither.** A device restored by
+> device recognition has no activation code (the hub never re-sends it), so it
+> authenticates with the session token minted at recognition. The hub resolves
+> the token to its code **before** any enforcement, so suspension, expiry and the
+> update signal behave identically whichever credential was used. See
+> [`DEVICE-IDENTITY.md`](DEVICE-IDENTITY.md) §4.
+>
+> A `401` means the **credential** is stale (an expired token) and the entitlement
+> is intact — the client renews rather than giving up. It is deliberately **not**
+> a 403: that is a refusal, and tearing down a working tunnel for a student whose
+> session merely lapsed is the wrong call.
 
 **Response `200` (strike tier — carries a UoT endpoint):**
 ```json
@@ -237,7 +250,78 @@ way out (`server/pb_hooks/heartbeat.pb.js`), frozen because deployed clients rea
 
 ---
 
-## 3. Admin Unbind
+## 3. Device Recognition
+
+### `POST /api/device-recognise`
+
+Asks whether this **device** already holds a live entitlement, so a reinstalling
+student is not forced to find their card again. Takes **no code** — the student
+may not have one to give. Full rationale in [`DEVICE-IDENTITY.md`](DEVICE-IDENTITY.md).
+
+**Rate limited:** 10 attempts per 10 minutes per IP (own bucket, `recognise_`).
+
+**Request:**
+```json
+{
+  "verifier": "9f2c…(64 hex chars)…",
+  "device_id": "3b1a…(64 hex chars)…",
+  "store": "machine"
+}
+```
+
+| Field | Type | Required | Description |
+|-------|------|:--------:|-------------|
+| `verifier` | string | ✅ | `sha256(secret)` — the credential. The secret itself never crosses the wire |
+| `device_id` | string | ❌ | Non-secret device name. Diagnostic only; **not** used for authorisation |
+| `store` | string | ❌ | `"machine"` or `"app"` — where the client persisted its secret |
+
+The `verifier` is what authenticates. `device_id` is a *name* that appears in
+support logs; a name is not a credential, and treating one as a credential is how
+a screenshot becomes a takeover. See [`DEVICE-IDENTITY.md`](DEVICE-IDENTITY.md) §2.
+
+**Response `200` (recognised):**
+```json
+{
+  "status": "recognised",
+  "tier": "strike",
+  "expires_at": "2027-03-14 00:00:00.000Z",
+  "store": "machine",
+  "server_config": { "server": "…", "server_port": 8445, "uot_port": 8446, "…": "…" },
+  "udp_relay": true,
+  "token": "…(64 hex chars)…",
+  "token_expires_at": "2026-10-31T00:00:00.000Z"
+}
+```
+
+**Response `200` (any negative):**
+```json
+{"status": "unknown", "message": "This device is not recognised"}
+```
+
+> **Every negative is deliberately identical.** Unknown device, revoked identity,
+> malformed verifier, and a device with no entitlement all return the same body,
+> so the endpoint cannot be used to confirm a guessed credential. The rate-limit
+> response (`429`) carries the same body, so "we are busy" and "we do not know
+> you" are not distinguishable either.
+
+> **This endpoint NEVER returns the activation code.** The code is a bearer
+> credential for the entitlement; returning it would let anyone producing a
+> matching identity read it out. The client does not need it — `server_config` is
+> what builds a tunnel. Enforced by the test
+> `recognition_never_returns_the_activation_code`.
+
+> **`token` is a credential.** It authenticates the heartbeat in place of a code
+> (see §2). The hub stores only `sha256(token)`. It expires after 30 days and is
+> re-minted on every recognition. Never log it.
+
+**Status codes:** `200` for every well-formed request (so the client can tell
+"not recognised" from "transport failed"); `429` when rate-limited; `500` on an
+internal failure — which the client also treats as "cannot tell", falling back to
+the code prompt.
+
+---
+
+## 4. Admin Unbind
 
 ### `POST /api/admin/unbind-code`
 
@@ -282,7 +366,7 @@ Requires valid admin API token.
 
 ---
 
-## 4. Health
+## 5. Health
 
 ### `GET /api/health`
 
@@ -300,7 +384,7 @@ Standard PocketBase health check.
 
 ---
 
-## 5. Update Check
+## 6. Update Check
 
 ### `GET /api/update?version=<running>&platform=<key>`
 
@@ -338,7 +422,7 @@ See `../operate/UPDATE-SYSTEM.md` §2.
 
 ---
 
-## 6. Release Manifest (public)
+## 7. Release Manifest (public)
 
 ### `GET /api/release`
 
@@ -377,7 +461,7 @@ omitted entirely.
 
 ---
 
-## 7. Update Manifest (static placeholder)
+## 8. Update Manifest (static placeholder)
 
 ### `GET /update.json`
 
@@ -396,7 +480,7 @@ Static file served by Caddy. A placeholder — the updater does NOT read it; it 
 
 ---
 
-## 8. PocketBase Admin UI
+## 9. PocketBase Admin UI
 
 ### `GET /_/`
 
@@ -404,12 +488,13 @@ PocketBase admin interface at `https://networkingguides.duckdns.org/_/`.
 
 ---
 
-## 9. Client→Server Protocol Summary
+## 10. Client→Server Protocol Summary
 
 ```
 Activation:    POST /api/activate            ─── JSON body (PocketBase hook)
 Code lookup:   POST /api/code-lookup         ─── JSON body, read-only pre-check (PB hook)
-Heartbeat:     POST /api/heartbeat           ─── JSON body (PB hook)
+Recognition:   POST /api/device-recognise    ─── JSON body, no code required (PB hook)
+Heartbeat:     POST /api/heartbeat           ─── JSON body, code OR token (PB hook)
 Release manifest: GET /api/release           ─── Public, credential-free (PB hook)
 Update manifest:  GET /api/update            ─── Query: version, platform (PB hook, no auth)
 Admin Unbind:  POST /api/admin/unbind-code   ─── JSON body (admin_token)
@@ -453,7 +538,7 @@ Three things about this API that are easy to get wrong:
 
 ---
 
-## 10. Error Response Format
+## 11. Error Response Format
 
 All error responses follow this structure:
 
@@ -468,12 +553,13 @@ HTTP status code matches the `code` field in the JSON body.
 
 ---
 
-## 11. Rate Limiting
+## 12. Rate Limiting
 
 | Endpoint | Limit | Window | Mechanism |
 |----------|:-----:|:------:|-----------|
 | `/api/activate` | 5 | 10 minutes | Caddy + JS hook |
 | `/api/code-lookup` | 10 | 10 minutes | JS hook (own bucket) |
+| `/api/device-recognise` | 10 | 10 minutes | JS hook (own bucket, keyed on IP) |
 | `/api/heartbeat` | 1 | 10 seconds | Caddy |
 | `/api/*` (general) | 100 | 10 seconds | Caddy default zone |
 | `/api/admin/unbind-code` | None | — | Admin token required instead |
@@ -494,3 +580,10 @@ would have explained the mistake. Confirmed live 2026-09-19. See FIXES.md 33.
 A successful activation clears that device's `activate_…` rows, so a student who
 finds their code is not counted against themselves afterwards. Lookups are never
 cleared, since they are the enumeration surface.
+
+**`/api/device-recognise` is keyed on the IP, not the verifier.** Keying it on
+the verifier would let an attacker spread guesses across many verifiers and never
+trip the limit. Its bucket is `recognise_…`, separate from the other two, so a
+student retrying recognition cannot consume the activation or lookup budget. The
+verifier is never written to `activation_attempts` — only a redacted device-id
+prefix — because that table is read by operators, and a verifier is a credential.
