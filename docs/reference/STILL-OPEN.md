@@ -12,6 +12,35 @@ Ordered by whether I could have validated it here.
 
 ---
 
+## Open, and blocked in this environment
+
+### The recognition path has never been exercised against the live hub
+
+**Added 2026-10-01.** The wiring is complete (see the 2026-10-01 `FIXES.md`
+entry), and the *unit* behaviour is tested — the result-to-sentence mapping in
+`src/pages/recognition-notice.ts` has eight tests, one of which pins that an
+unreachable hub is never reported as a refusal.
+
+What is **not** observed, and cannot be from here:
+
+- That `locus_recognise()` returns `recognised` for a real returning device, and
+  that the gate then clears. That is a **structural argument** from the code
+  (`cmd/locus.rs` stores the entitlement and applies the tier; `locus_status`
+  reads the same store), not a measurement.
+- That `durable` is `true` on a machine where the identity went to the machine
+  store rather than the app-config fallback. `identifier::DeviceIdentity::
+  store.survives_reinstall()` decides it, and the UI now *renders* that decision
+  as a warning — so a wrong `false` is a visible over-caution, and a wrong `true`
+  is a broken promise to a student that a reinstall will be easy.
+- That the new immediate re-read (the `entitlementRestored` counter in
+  `main.tsx`) actually replaces the five-minute wait. The counter's effect is
+  asserted only by reading the code; no test mounts `Shell` against a Tauri mock.
+
+Confirming any of these needs a device with a durable identity, a hub that knows
+it, and a reinstall. Do not read "87 tests pass" as covering them.
+
+---
+
 ## Open, and needs a decision rather than work
 
 ### Nothing in the UI can clear a selected theme — `theme_mode` becomes unreachable
@@ -743,15 +772,15 @@ Recording these so they are not re-investigated:
   existing guard, because the preset test checks the decoration's *shape* (no
   braces, no `url(`), not its contrast against the palette using it. See
   `THEMES.md` §10 item 3.
-- **`eslint src/main.tsx` has an unused `recognised` binding, and it fails the CI
-  lint gate.** **Added 2026-10-01.** It is committed in-progress work from the
-  device-recognition branch (`039bb41`) and was explicitly left alone by
-  `09a985f`, which said so in its own commit message. **It is not from the theme
-  change** — but `pnpm run lint` runs with `--max-warnings=0`, so the `verify` job
-  is red until someone decides: finish the recognition wiring, mark it `_recognised`,
-  or remove it. Flagged rather than fixed because it belongs to that branch's
-  author, and silently deleting another agent's in-progress binding is worse than
-  a red lint.
+- **~~`eslint src/main.tsx` has an unused `recognised` binding~~ — FIXED
+  2026-10-01, see `FIXES.md`.** Resolved by finishing the feature rather than
+  suppressing the binding: the recognition result now reaches the activation
+  screen. Two things were wrong, and only one of them was lint-visible —
+  the state was never rendered, **and nothing re-read the status after a
+  successful recognition**, so a returning student would have waited up to
+  `ENTITLEMENT_POLL_MS` (five minutes) on a screen telling them their device was
+  registered. The second was found by tracing what happens after
+  `locus_recognise` returns, not by the linter.
 - **`shadowsocks-eco` WARN lines** — `decrypt length failed` from AWS-range IPs.
   Internet scanners probing open ports; they cannot complete the AEAD handshake.
   Benign, and the volume is low.

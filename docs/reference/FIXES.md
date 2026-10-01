@@ -27,7 +27,105 @@ corrections are marked. For what is *still* broken, read `STILL-OPEN.md`.
 
 ---
 
-## THEME SUPPORT — AND THE FRONTEND TEST SUITE THAT NOTHING WAS RUNNING (2026-10-01)
+## DEVICE RECOGNITION WORKED, AND THE STUDENT WAS LEFT ON THE CODE PROMPT FOR FIVE MINUTES (2026-10-01)
+
+*Client-side fix; ships in the next version tagged. Not a hub change.*
+
+> **This closes the half of `039bb41` ("device recognition and code-free
+> re-activation") that was never wired up.** The Rust side was complete and
+> correct; the frontend fetched its answer and threw it away.
+
+### The two defects, one of which no check could see
+
+**1. The recognition result never reached the UI.** `main.tsx` held it in state
+and never read it, so `ActivationScreen` had no idea whether the hub had
+recognised the device. The only visible symptom was an eslint error
+(`State variable 'recognised' is defined but never used`) — which is the kind of
+finding that gets silenced with an underscore rather than investigated. The
+feature was inert on every install.
+
+**2. Nothing re-read the status after a successful recognition.** This is the one
+that took tracing rather than linting, and it is the worse of the two:
+
+```text
+locus_recognise() -> hub recognises the device
+  -> Rust STORES the entitlement and applies the tier   (cmd/locus.rs)
+  -> returns RecognitionResult::Recognised { tier, durable }
+  -> ...and the UI does not re-read locus_status
+  -> `activated` stays false until the NEXT poll
+  -> ENTITLEMENT_POLL_MS is 5 minutes
+```
+
+So the fix for defect 1, on its own, would have produced a **worse** screen than
+the bug: a returning student told *"this device is already registered, no code is
+needed"* while staring at a code prompt that would not go away for five minutes.
+The entitlement was already live on disk the whole time — the gate simply had no
+reason to look again.
+
+**The lesson, which generalises past this feature:** a command that mutates state
+the rest of the app polls must say so. `locus_recognise` changes `activated` as a
+side effect and its own return value does not carry that change, so the caller is
+the only place the two can be joined. Nothing in the type system or the linter
+flagged it, because both halves are individually correct.
+
+### The fixes
+
+1. `ActivationScreen` takes an optional `recognition` prop; `main.tsx` passes the
+   result through.
+2. `main.tsx` gained an `entitlementRestored` counter, bumped when recognition
+   returns `recognised`, and `entitlementRestored` is a dependency of the status
+   effect — so the gate re-reads **immediately** instead of waiting out the poll.
+   A counter rather than a boolean because re-recognition should re-trigger, and a
+   boolean would latch and fire once.
+
+### The decisions, and why
+
+**The mapping from result to sentence is a pure function.**
+`src/pages/recognition-notice.ts`, following `connect-notice.ts` and `phase.ts`.
+It decides whether a student is told something *true* about their own account,
+which is not a rule to bury in JSX.
+
+**`unavailable` is never rendered as a refusal.** `cmd/locus.rs` is explicit that
+`RecognitionResult` is deliberately not a `bool` because "we could not reach the
+hub" and "the hub does not know you" are different claims — telling a student
+their device is not recognised during an outage is a false statement about their
+entitlement. The test that pins this (`reports an unreachable hub as a caution,
+not as a refusal`) was demonstrated failing by collapsing `unavailable` into
+silence.
+
+**`unknownDevice` renders nothing at all.** The code prompt is already the correct
+message; adding "we do not recognise you" would be a claim that changes nothing
+the student can do.
+
+**`durable: false` shows the warning INSTEAD of the "restoring" message,** not
+alongside it. Two notices would say "we remember you" and "we might not next
+time" at once, which reads as a contradiction rather than a caveat. The Rust type
+carries `durable` specifically so the UI cannot promise durability an install does
+not have.
+
+**The sentences are literals, not i18n keys.** `activation.tsx` uses **no i18n at
+all** — "Enter the activation code from your card." and "Secure school VPN" are
+both fixed English — so a lone translated string would be the odd one out. The
+pure function still returns i18n *keys*, so translating the screen later is a
+change to one lookup table.
+
+### Verified / not verified
+
+**Verified locally:** 87/87 vitest (12 files); `tsc --noEmit` clean;
+`eslint src --max-warnings=0` clean — **the CI lint gate is green again**;
+`check-consistency.sh` exits 0.
+
+**Demonstrated failing:** the `unavailable` guard, by returning `null` for that
+case — the intended regression, and only that test went red.
+
+**Not verified:** the recognition path has never been exercised against the live
+hub from this environment. That the entitlement is restored and the gate then
+clears is a **structural argument** from the code (`cmd/locus.rs` stores it;
+`locus_status` reads it), not an observed behaviour. Confirming it needs a device
+with a durable identity, a hub that knows it, and a reinstall — see
+`STILL-OPEN.md`.
+
+---
 
 *Client-side only. Not a defect fix: a feature, plus the guard gap it exposed.*
 

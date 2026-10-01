@@ -64,6 +64,27 @@ Three rules live here and each was a real bug:
   left it covering the activation screen permanently — a blank window over a
   working app.
 
+### A command that mutates a polled value must trigger the re-read
+
+`Shell` also runs the **device-recognition** check once: `locus_recognise()` asks
+the hub whether it already knows this device, so a reinstalling student is not
+asked for a card they may have thrown away. Its result is passed to
+`ActivationScreen` as a prop, and the three cases (`recognised` /
+`unknownDevice` / `unavailable`) map to one sentence through the pure function in
+`src/pages/recognition-notice.ts` — never re-derived in JSX.
+
+**The rule to carry forward:** `locus_recognise` STORES the entitlement and
+applies the tier as a side effect, but `activated` is not what it returns — that
+is what `locus_status` reports. The two are joined only at the call site, so the
+successful case bumps an `entitlementRestored` counter which is a dependency of
+the status effect. Without it the gate had no reason to look again and a returning
+student was left on the code prompt for a full poll interval — **five minutes** —
+while the app knew perfectly well they had a working device.
+
+Nothing in the type system or the linter can see that mistake: both halves are
+individually correct. It was found by tracing what happens *after* the command
+returns. See the 2026-10-01 entry in `docs/reference/FIXES.md`.
+
 ### Routing is a HASH router — do not "simplify" it
 
 `createHashRouter`, not `createBrowserRouter`. In production Tauri serves `dist/`

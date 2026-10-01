@@ -56,6 +56,43 @@ const initializeApp = (initialThemeMode: 'light' | 'dark') => {
   const Shell = () => {
     const [activated, setActivated] = useState<boolean | null>(null)
 
+    // ── Device recognition ──
+    //
+    // Before showing the code prompt, ask the hub whether it already knows this
+    // device. This is the fix for a reinstall losing the entitlement: the
+    // identity is durable now, so a returning student is recognised and never
+    // asked for a card they may have thrown away.
+    //
+    // Why this is safe to add: EVERY failure path ends at the code prompt, which
+    // is exactly the behaviour before this existed. A student with their card is
+    // never worse off. The only way it could hurt is by claiming a device is
+    // known when it is not — and only the hub can make that claim, so the
+    // decision is not made here.
+    //
+    // It runs once, and only when this device is not already activated (a device
+    // with a stored entitlement needs nothing). A slow or dead hub cannot leave
+    // a student staring at a spinner, because this does not gate the first
+    // paint: the code screen renders and is replaced if recognition succeeds.
+    const [recognised, setRecognised] = useState<RecognitionResult | null>(null)
+
+    /**
+     * A counter bumped when recognition restores an entitlement.
+     *
+     * This is the trigger for the status re-read below. Without it, recognition
+     * succeeded and nothing told the poll — so a returning student sat on the
+     * activation screen being told their device was registered, for up to a full
+     * `ENTITLEMENT_POLL_MS` (five minutes), waiting for a poll that had already
+     * run and found nothing.
+     *
+     * Declared here, above the status effect that depends on it, because that
+     * effect's dependency array evaluates during the first render: a `const`
+     * declared below its first use is a temporal-dead-zone error, not a warning.
+     *
+     * A counter rather than a boolean because re-recognition should re-trigger;
+     * a boolean would latch and could only ever fire once.
+     */
+    const [entitlementRestored, setEntitlementRestored] = useState(0)
+
     // Remove the initial loading overlay once this component has painted.
     //
     // This MUST live here, not in `Layout`. The overlay is an opaque full-screen
@@ -108,26 +145,16 @@ const initializeApp = (initialThemeMode: 'light' | 'dark') => {
         cancelled = true
         window.clearInterval(timer)
       }
-    }, [])
+      // `entitlementRestored` is a dependency so that a successful recognition
+      // re-reads the status IMMEDIATELY rather than waiting for the next poll.
+      // The read itself is idempotent, so re-running it costs one command call
+      // and cannot hurt a device that was already activated.
+    }, [entitlementRestored])
 
-    // ── Device recognition ──
+    // ── Device recognition, performed ──
     //
-    // Before showing the code prompt, ask the hub whether it already knows this
-    // device. This is the fix for a reinstall losing the entitlement: the
-    // identity is durable now, so a returning student is recognised and never
-    // asked for a card they may have thrown away.
-    //
-    // Why this is safe to add: EVERY failure path ends at the code prompt, which
-    // is exactly the behaviour before this existed. A student with their card is
-    // never worse off. The only way it could hurt is by claiming a device is
-    // known when it is not — and only the hub can make that claim, so the
-    // decision is not made here.
-    //
-    // It runs once, and only when this device is not already activated (a device
-    // with a stored entitlement needs nothing). A slow or dead hub cannot leave
-    // a student staring at a spinner, because this does not gate the first
-    // paint: the code screen renders and is replaced if recognition succeeds.
-    const [recognised, setRecognised] = useState<RecognitionResult | null>(null)
+    // The state for this is declared at the top of `Shell` (it is a dependency of
+    // the status read above); this effect is what actually asks the hub, once.
     useEffect(() => {
       let cancelled = false
 
@@ -137,6 +164,15 @@ const initializeApp = (initialThemeMode: 'light' | 'dark') => {
         )
         if (cancelled) return
         setRecognised(result)
+        // The Rust side STORES the entitlement and applies the tier, so the
+        // device is activated from this moment — but `activated` is not what
+        // `locus_recognise` returns, it is what `locusStatus` reports. Nothing
+        // else re-reads it between here and the next 5-minute poll, so without
+        // this bump the app would know it had a working device and keep showing
+        // the code prompt.
+        if (result.kind === 'recognised') {
+          setEntitlementRestored((n) => n + 1)
+        }
       }
 
       void attempt()
@@ -162,7 +198,12 @@ const initializeApp = (initialThemeMode: 'light' | 'dark') => {
     }
 
     if (!activated) {
-      return <ActivationScreen onActivated={() => setActivated(true)} />
+      return (
+        <ActivationScreen
+          recognition={recognised}
+          onActivated={() => setActivated(true)}
+        />
+      )
     }
 
     const contexts = [
