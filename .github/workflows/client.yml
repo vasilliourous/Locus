@@ -1044,7 +1044,27 @@ jobs:
       # binaries (they reach a package manager or a `.app`, not a ShellExecute of
       # an unvetted PE), and those are already signed above.
       - name: Sign the Windows installer
-        if: matrix.os == 'windows-latest'
+        # `matrix.label`, NOT `matrix.os`. This step tested `matrix.os ==
+        # 'windows-latest'`, and the matrix pins `os: windows-2022` (see the
+        # runner-image note at the top of this file) — so the condition was
+        # never true and this step SILENTLY SKIPPED ON EVERY RUN.
+        #
+        # The result was that the NSIS installer was built, staged and uploaded
+        # unsigned: `installer-Locus_<v>_x64-setup.exe` with no `.sig`. The
+        # Release job then refused to publish ("missing:
+        # installer-Locus_3.2.15_x64-setup.exe.sig"), which is correct but only
+        # fires at the end of a ~30 minute four-platform build. v3.2.14 got
+        # through because the manifest step did not yet require the signature —
+        # so the hub published a Windows entry it could not sign, and every
+        # Windows client refused the update. That is `RECOVER-WINDOWS-UPDATE.md`
+        # in full.
+        #
+        # Every other platform gate in this job uses `matrix.label`; this one
+        # was the outlier. Prefer `label` over `os`: `label` is a name this file
+        # chooses (linux/windows/macos-intel/macos-arm), while `os` is a runner
+        # image that gets bumped (macos-13 -> macos-14) and silently detaches
+        # every condition written against the old value.
+        if: matrix.label == 'windows'
         shell: bash
         env:
           LOCUS_UPDATE_KEY: ${{ secrets.LOCUS_UPDATE_KEY }}
