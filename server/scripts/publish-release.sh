@@ -101,9 +101,20 @@ done
 
 # The filenames are a contract with the client (PlatformDownloadURL) and with
 # CI's raw-artifact staging step. Keep them in one place.
+#
+# WINDOWS IS AN INSTALLER, NOT THE RAW BINARY. `locus-windows-amd64.exe` is the
+# PE the *retired portable client* ran; a Windows client that is handed it
+# ShellExecutes it as if it were an installer, relaunching a copy of itself
+# outside its install directory (FIXES.md, "THE APP RE-EXECUTED ITSELF"). CI has
+# advertised the NSIS setup executable in manifest.json since v3.2.12 and this
+# script did not follow, so the hub served the raw binary and every Windows
+# client refused it. The name carries the version because Tauri names the bundle
+# with it — kept in step with `installer_name()` in fetch-release.py.
+WINDOWS_INSTALLER="installer-Locus_${VERSION}_x64-setup.exe"
+
 PLATFORMS=(
     "linux:locus-linux-amd64:update_linux"
-    "windows:locus-windows-amd64.exe:update_windows"
+    "windows:${WINDOWS_INSTALLER}:update_windows"
     "macos_intel:locus-darwin-amd64:update_macos_intel"
     "macos_arm:locus-darwin-arm64:update_macos_arm"
 )
@@ -292,19 +303,41 @@ fi
 MANIFEST="${RELEASE_DIR}/manifest.json"
 if [ -f "$MANIFEST" ]; then
     log "Cross-checking against manifest.json…"
-    python3 - "$MANIFEST" "$RELEASE_DIR" "${HAVE_KEYS[@]}" <<'PY' || fail "manifest cross-check FAILED — refusing to publish"
+    python3 - "$MANIFEST" "$RELEASE_DIR" "$WINDOWS_INSTALLER" "${HAVE_KEYS[@]}" <<'PY' || fail "manifest cross-check FAILED — refusing to publish"
 import base64, hashlib, json, os, sys
 manifest_path, rel_dir = sys.argv[1], sys.argv[2]
-keys = sys.argv[3:]
+win_installer = sys.argv[3]
+keys = sys.argv[4:]
 m = json.load(open(manifest_path))
 plats = m.get("platforms", {})
+# What this script will actually advertise, per platform. The Windows entry is
+# the installer, NOT the raw `locus-windows-amd64.exe` — see the note above
+# PLATFORMS. Kept in step with fetch-release.py's `resolve_platform_names`.
+ours = {"linux": "locus-linux-amd64",
+        "windows": win_installer,
+        "macos_intel": "locus-darwin-amd64",
+        "macos_arm": "locus-darwin-arm64"}
 bad = 0
 for k in keys:
     entry = plats.get(k)
     if not entry:
         print(f"  {k}: absent from manifest — skipping check")
         continue
+    # The NAME first, and this is the check that matters. The hash comparison
+    # below hashes whichever file the *manifest* names, so it agrees with itself
+    # by construction: when this script resolved `locus-windows-amd64.exe` while
+    # CI's manifest said `installer-Locus_<v>_x64-setup.exe`, both were checked
+    # and both "passed", and the hub shipped the raw binary anyway. Comparing the
+    # filename is the only way the two halves can be caught disagreeing.
+    if entry.get("file") != ours.get(k):
+        print(f"  {k}: NAME MISMATCH manifest={entry.get('file')!r} we would serve={ours.get(k)!r}")
+        bad += 1
+        continue
     p = os.path.join(rel_dir, entry["file"])
+    if not os.path.isfile(p):
+        print(f"  {k}: {entry['file']} missing from {rel_dir}")
+        bad += 1
+        continue
     actual = hashlib.sha256(open(p, "rb").read()).hexdigest()
     if actual != entry["sha256"]:
         print(f"  {k}: MISMATCH manifest={entry['sha256'][:16]}… actual={actual[:16]}…")
@@ -385,13 +418,14 @@ if [ -z "$PB_TOKEN" ]; then
 fi
 
 # Build the record. Only advertise platforms we actually uploaded.
-python3 - "$PB_API" "$PB_TOKEN" "$VERSION" "$ROLLOUT_PERCENT" "$RELEASE_DIR" "${HAVE_KEYS[@]}" <<'PY' || fail "update_config update failed" 3
+python3 - "$PB_API" "$PB_TOKEN" "$VERSION" "$ROLLOUT_PERCENT" "$RELEASE_DIR" "$WINDOWS_INSTALLER" "${HAVE_KEYS[@]}" <<'PY' || fail "update_config update failed" 3
 import base64, hashlib, json, os, subprocess, sys
 api, token, version, rollout, rel_dir = sys.argv[1], sys.argv[2], sys.argv[3], int(sys.argv[4]), sys.argv[5]
-keys = sys.argv[6:]
+win_installer = sys.argv[6]
+keys = sys.argv[7:]
 
 FILES = {"linux": "locus-linux-amd64",
-         "windows": "locus-windows-amd64.exe",
+         "windows": win_installer,
          "macos_intel": "locus-darwin-amd64",
          "macos_arm": "locus-darwin-arm64"}
 

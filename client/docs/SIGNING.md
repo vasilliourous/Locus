@@ -243,7 +243,13 @@ change on the same level as changing the app ID, and it must be planned as one.
 ## 6. Verifying a signature by hand
 
 ```sh
-minisign -V -p locus_update.pub -m locus-windows-amd64.exe -x locus-windows-amd64.exe.sig
+# A raw updater payload (Linux/macOS, and the retired portable Windows client):
+minisign -V -p locus_update.pub -m locus-linux-amd64 -x locus-linux-amd64.sig
+# The Windows installer — signed separately, because minisign signs exact bytes
+# and a Windows client updates from THIS file, not from the raw binary:
+minisign -V -p locus_update.pub \
+  -m installer-Locus_3.2.14_x64-setup.exe \
+  -x installer-Locus_3.2.14_x64-setup.exe.sig
 ```
 
 Expected: `Signature and comment signature verified`.
@@ -259,9 +265,10 @@ verifying its own output.
 ## 7. Where signing happens in the pipeline
 
 ```
-CI build  →  four raw binaries + manifest.json
-          →  sign EACH binary with minisign        ← LOCUS_UPDATE_KEY
-          →  attach binaries + .sig files to the GitHub Release
+CI build  →  four raw binaries + the Windows NSIS installer + manifest.json
+          →  sign EACH raw binary with minisign       ← LOCUS_UPDATE_KEY
+          →  sign the Windows INSTALLER separately
+          →  attach binaries, installers and .sig files to the GitHub Release
                                                     ↓
 hub       →  fetch-release.py downloads and verifies format + SHA-256
           →  update_config gains signature_<platform> columns
@@ -272,6 +279,13 @@ client    →  checks GET /api/update?version=…&platform=…
           →  UpdaterBuilder::endpoints([our url]) -> check() -> Update
           →  install(), which re-verifies the minisign signature
 ```
+
+> **On Windows the signed payload is the installer, not the raw binary.** The
+> signature must cover the exact bytes the client installs — minisign signs
+> bytes, not filenames — so signing only `locus-windows-amd64.exe` would leave
+> the installer unverifiable and no Windows client able to update. The Windows
+> slot in `update_config` therefore points at the installer, carrying the
+> installer's own signature.
 
 ### Why the dynamic manifest shape, and not a hand-built `Update`
 

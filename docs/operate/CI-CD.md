@@ -71,11 +71,23 @@ requires every one of them:
 | Asset | Notes |
 |---|---|
 | `locus-linux-amd64` | raw executables, for the auto-updater |
-| `locus-windows-amd64.exe` | |
+| `locus-windows-amd64.exe` | the raw PE, for the **retired portable client** only — no longer what a Windows client updates from |
 | `locus-darwin-amd64` | the *filename* says darwin while the *platform key* says `macos_intel` — a frozen asymmetry, not an oversight |
 | `locus-darwin-arm64` | |
 | **`.sig` for each of the four** | minisign signatures; without them no client can install the update |
+| `installer-Locus_<v>_x64-setup.exe` | the Windows NSIS installer — **this is what a Windows client installs from itself** |
+| `installer-Locus_<v>_x64-setup.exe.sig` | its own minisign signature; minisign signs exact bytes, so the raw binary's cannot substitute |
 | `manifest.json` | version + per-platform filename, SHA-256 and signature |
+
+> **Windows updates from the installer, not the raw binary.** A Windows client does
+> not run the payload it downloads — `tauri_plugin_updater` ShellExecutes it and
+> accepts *any* PE — so being handed `locus-windows-amd64.exe` made an installed
+> client relaunch a copy of itself outside its install directory (`FIXES.md`, "THE
+> APP RE-EXECUTED ITSELF"). CI's `manifest.json` has named the NSIS setup
+> executable since v3.2.12; the hub's `fetch-release.py` did not follow, and every
+> Windows client refused the raw binary it was served. Nothing could update until
+> the hub was corrected — `check-consistency.sh` §1a now pins the name on both
+> sides of that contract.
 
 **Signing is mandatory, not best-effort.** The Tauri updater verifies a minisign
 signature over every download and offers no bypass, so a release published

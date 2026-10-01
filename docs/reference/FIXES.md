@@ -27,6 +27,134 @@ corrections are marked. For what is *still* broken, read `STILL-OPEN.md`.
 
 ---
 
+## NO WINDOWS CLIENT COULD UPDATE: THE HUB SERVED THE RAW BINARY, NOT THE INSTALLER (2026-10-01)
+
+A Windows client on `3.2.13` was offered `3.2.14`. The download reached **100%**
+and then the app refused it:
+
+```text
+the update to 3.2.14 is not an installer (51741696 bytes); refusing to execute it
+  — this build cannot install a raw executable, and neither can the platform installer
+```
+
+`51741696` is the exact size of `locus-windows-amd64.exe` — the **raw PE**, not
+the NSIS setup. Reproduced against the live hub:
+
+```console
+$ curl -s "https://…/api/update?version=3.2.13&platform=windows"
+{"version":"3.2.14","url":"…/updates/3.2.14/locus-windows-amd64.exe",
+ "signature":"dW50cnVzdGVkIGNvbW1lbnQ6…","sha256":"50ef4bcb…"}
+```
+
+### The client was right; the hub was wrong
+
+The refusal came from `is_installer_payload`, which is the **3.2.12 fix working
+as designed**. It refuses a payload that is a PE without an NSIS overlay, because
+`tauri_plugin_updater` accepts *any* PE as an NSIS installer and ShellExecutes
+it. Had that guard not existed, `3.2.13` would have relaunched a copy of itself
+outside `C:\Program Files\Locus\` — the same defect as the entry below.
+
+So this is not a regression of the client fix. It is the **other half of the
+contract** having been left behind.
+
+### The defect: the hub's fetcher never followed CI
+
+The 3.2.12 change taught CI to advertise the installer. It updated
+`manifest.json` — verified on the real release:
+
+```json
+"windows": { "file": "installer-Locus_3.2.14_x64-setup.exe", "sha256": "519164…" }
+```
+
+Three sites were missed, all on the hub side:
+
+| File | Stale value |
+|---|---|
+| `server/scripts/fetch-release.py` | `("windows", "locus-windows-amd64.exe", "download_windows")` |
+| `server/scripts/publish-release.sh` | `"windows:locus-windows-amd64.exe:update_windows"` |
+| `server/scripts/publish-release.sh` | `FILES = {… "windows": "locus-windows-amd64.exe" …}` |
+
+`fetch-release.py` resolves assets from that hardcoded allowlist and **discards
+`manifest.json`'s `file` field entirely**. So it staged the raw binary into the
+Windows slot, hashed it, and paired it with the raw binary's own signature —
+which is why the served signature reads `trusted comment: Locus_windows`. The
+installer has no `.sig` at all on the release; it was never on this path.
+
+### Why three guards passed on a release no Windows client could install
+
+This is the part worth keeping. Every check was real, and every one was blind to
+the actual disagreement:
+
+- **`check-consistency.sh` §15** greps `.github/workflows/client.yml` for the
+  manifest entry. The workflow was correct. It never looked at the hub.
+- **`fetch-release.py`'s all-or-nothing check** asserts all four *platforms* are
+  present. They were — all four were the wrong files.
+- **The manifest hash cross-check** (in both scripts) hashed whichever file the
+  **manifest** named. The manifest named the installer, the check hashed the
+  installer, the hashes matched, and it printed `ok`. It agreed with itself by
+  construction and never compared the name the hub would actually **serve**.
+- **§1's platform check** only asserted the string `"windows"` appeared somewhere
+  in the file. It was present before, during and after the bug.
+
+A check that cannot tell a right answer from a wrong one reads exactly like a
+check that passed.
+
+### The fix
+
+**Hub scripts.** `fetch-release.py` and `publish-release.sh` now resolve
+`installer-Locus_<version>_x64-setup.exe` for the Windows slot, from a single
+named template (`installer_name()` on the Python side, `WINDOWS_INSTALLER` on the
+shell side) so the name has one definition per script. Both scripts now also
+**compare the filename against `manifest.json`** and refuse to publish on a
+mismatch — the check that was missing.
+
+`fetch-release.py` additionally refuses a Windows PE with **no NSIS overlay**,
+mirroring the client's `is_installer_payload`. Hub and client now apply the same
+rule to the same bytes.
+
+**CI.** The installer needs its **own** minisign signature. It is not
+interchangeable with the raw binary's — minisign signs exact bytes — and the
+plugin verifies one mandatorily with no bypass (`RemoteReleaseInner` refuses to
+deserialize without a `signature` field; `install_inner` calls
+`verify_signature()` unconditionally). A new `Sign the Windows installer` step
+signs the staged NSIS setup, the manifest embeds that signature, and the
+`Verify every artifact is signed` step now covers `installer-*` as well as
+`locus-*` — previously it looped over `release/locus-*` only, so the one artifact
+that was actually broken was the one unchecked.
+
+**Guards, each shown to fail.**
+
+- `check-consistency.sh` §1a pins the filename in **both** hub scripts and fails
+  on the stale one. Run against the reintroduced pre-fix tree, it emits three
+  `BAD` lines and exits non-zero; the old mention-only check passed on the same
+  tree.
+- `smoke-publish.sh` case **5b** publishes with a manifest that names a different
+  file. It fails `reports the name mismatch` against the pre-fix cross-check and
+  passes against the new one.
+- The client's existing tests (`the_raw_windows_binary_is_not_an_installer`,
+  `an_nsis_installer_is_an_installer`) already pin the client half — 17 passed.
+
+### What this says about the class
+
+The 3.2.12 entry below ends by saying every check tests that a bundle *builds*,
+and that none launches either artifact. This is that observation one level up:
+every check tested that **one side** of a two-sided contract was right. CI and
+the hub are separate programs, in separate languages, that must agree on a
+filename — and nothing compared them. The fix is not a stronger assertion about
+either side; it is a check that the two sides **agree**.
+
+### What is NOT verified
+
+**`CLAIMS.md` §5 A7 remains unverified.** A real Windows machine has still never
+taken an advertised update and relaunched from the Start Menu. This change makes
+the hub serve the right bytes with a signature that verifies; it does not
+demonstrate an install. The end-to-end test needs Windows hardware, and the
+release must be re-published for any client to see the fix — the currently-live
+`update_config` row still names the raw binary, so **Windows clients remain
+unable to update until that publish happens**.
+
+---
+
 ## THE BUTTON SAT ON "CONNECTING" WHILE THE TUNNEL WAS CARRYING TRAFFIC (2026-10-01)
 
 A connect reported **connecting** forever even though every packet was routed

@@ -53,7 +53,7 @@ mkart() {
     done
 }
 
-ALL_FILES=(locus-linux-amd64 locus-windows-amd64.exe locus-darwin-amd64 locus-darwin-arm64)
+ALL_FILES=(locus-linux-amd64 "installer-Locus_2.2.1_x64-setup.exe" locus-darwin-amd64 locus-darwin-arm64)
 
 echo "smoke-publish: exercising $PUBLISH"
 echo
@@ -70,7 +70,7 @@ check "does not reach the update_config step" bash -c '! grep -q "Updating updat
 # ── 2. Partial platform set is refused by default ──────────────────────────
 echo "case 2 — a partial platform set is refused"
 mkdir -p "$WORK/partial"
-for f in locus-linux-amd64 locus-windows-amd64.exe; do
+for f in locus-linux-amd64 "installer-Locus_2.2.1_x64-setup.exe"; do
     head -c 2097152 /dev/urandom > "$WORK/partial/$f"
 done
 run "$WORK/partial" bash "$PUBLISH" 2.2.1
@@ -96,7 +96,8 @@ done
 python3 - "$WORK/full" "${ALL_FILES[@]}" <<'PY'
 import hashlib, json, os, sys
 d = sys.argv[1]
-mapping = {"locus-linux-amd64": "linux", "locus-windows-amd64.exe": "windows",
+mapping = {"locus-linux-amd64": "linux",
+           "installer-Locus_2.2.1_x64-setup.exe": "windows",
            "locus-darwin-amd64": "macos_intel", "locus-darwin-arm64": "macos_arm"}
 out = {"version": "2.2.1", "platforms": {}}
 for name in sys.argv[2:]:
@@ -126,6 +127,29 @@ PY
 run "$WORK/mismatch" bash "$PUBLISH" 2.2.1
 check "exits non-zero" [ "$RC" -ne 0 ]
 check "reports the mismatch" grep -q "manifest cross-check FAILED" <<<"$OUT"
+
+# ── 5b. A manifest that names a DIFFERENT file for a platform is refused ───
+# This is the check that did not exist, and its absence shipped a broken
+# Windows update: CI's manifest advertised the NSIS installer while this script
+# resolved the raw `locus-windows-amd64.exe`. Every hash still matched — the
+# check hashed whichever file the MANIFEST named, so it agreed with itself —
+# and the hub shipped the raw binary to every Windows client, which refused it.
+echo "case 5b — a manifest naming a different file is refused"
+cp -r "$WORK/full" "$WORK/namemismatch"
+python3 - "$WORK/namemismatch/manifest.json" <<'PY'
+import json, sys
+m = json.load(open(sys.argv[1]))
+# Point the windows entry back at the raw binary, as the pre-fix tree did.
+m["platforms"]["windows"]["file"] = "locus-windows-amd64.exe"
+json.dump(m, open(sys.argv[1], "w"))
+PY
+# The file it now names must exist, or the check would trip on the missing-file
+# branch instead of the name-mismatch branch and pass for the wrong reason.
+head -c 2097152 /dev/urandom > "$WORK/namemismatch/locus-windows-amd64.exe"
+run "$WORK/namemismatch" bash "$PUBLISH" 2.2.1
+check "exits non-zero" [ "$RC" -ne 0 ]
+check "reports the name mismatch" grep -q "NAME MISMATCH" <<<"$OUT"
+check "refuses to publish" grep -q "manifest cross-check FAILED" <<<"$OUT"
 
 # ── 6. Option and version parsing ──────────────────────────────────────────
 echo "case 6 — argument handling"

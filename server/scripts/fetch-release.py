@@ -79,9 +79,40 @@ LINK_TTL_SECONDS = int(os.environ.get("FETCH_LINK_TTL", "900"))  # 15 minutes
 # The filenames the client's updater looks for. This is a contract with the
 # client (PlatformDownloadURL), not a preference — a wrong name is a silent
 # no-update for that platform.
+# The WINDOWS entry is an INSTALLER, not a raw executable, and that distinction is
+# the whole point of this list.
+#
+# A Windows client does not run the payload it downloads — it hands the bytes to
+# `tauri_plugin_updater`, which ShellExecutes them. `locus-windows-amd64.exe` is
+# the raw PE the *retired portable client* consumed; advertising it for
+# self-install made an installed client relaunch a copy of its own binary
+# outside its install directory (FIXES.md, "THE APP RE-EXECUTED ITSELF").
+#
+# CI has advertised the NSIS setup executable in `manifest.json` since v3.2.12.
+# This list was NOT updated with it, and because the name is never cross-checked
+# against the manifest (only the *hash* of whichever file the name resolves to),
+# the hub happily staged the raw binary into the Windows slot and served it with
+# the raw binary's own signature. Every Windows client refused it — correctly,
+# via `is_installer_payload` — and no Windows client could update at all.
+#
+# The name carries `<version>` because Tauri names the bundle with it. It is
+# filled per publish by `installer_name()`, below.
+INSTALLER_NAME_TEMPLATE = "installer-Locus_%s_x64-setup.exe"
+
+
+def installer_name(version):
+    """The NSIS setup executable CI produces for `version`.
+
+    Kept as a function rather than an f-string at the call site so the template
+    exists in exactly one place: `check-consistency.sh` pins this name, and CI
+    builds the same one in `.github/workflows/client.yml`.
+    """
+    return INSTALLER_NAME_TEMPLATE % version
+
+
 PLATFORMS = [
     ("linux", "locus-linux-amd64", "download_linux"),
-    ("windows", "locus-windows-amd64.exe", "download_windows"),
+    ("windows", None, "download_windows"),  # resolved by installer_name()
     ("macos_intel", "locus-darwin-amd64", "download_macos_intel"),
     ("macos_arm", "locus-darwin-arm64", "download_macos_arm"),
 ]
@@ -107,6 +138,20 @@ def log(msg):
     print("[fetch %s] %s" % (time.strftime("%H:%M:%S"), msg), flush=True)
 
 
+def resolve_platform_names(version):
+    """The asset name carrying each platform, for a given version.
+
+    One place decides what the hub fetches for each platform, so the names can
+    be checked against `manifest.json` (see `cross_check_manifest`) instead of
+    being trusted. The Windows entry is version-bearing because Tauri names its
+    NSIS bundle with the version.
+    """
+    names = []
+    for key, name, column in PLATFORMS:
+        names.append((key, installer_name(version) if name is None else name, column))
+    return names
+
+
 class FetchError(Exception):
     """A failure with a message safe to show the operator."""
 
@@ -122,8 +167,8 @@ VERSION_RE = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+([-.][0-9A-Za-z.]+)?$")
 # Every binary is accompanied by a minisign signature. The Tauri updater
 # verifies a signature mandatorily and offers no bypass, so a release fetched
 # without them is not installable by any client.
-ALLOWED_FILENAMES = {name for _, name, _ in PLATFORMS} | {MANIFEST_NAME}
-ALLOWED_FILENAMES |= {name + ".sig" for _, name, _ in PLATFORMS}
+ALLOWED_FILENAMES = {name for _, name, _ in PLATFORMS if name} | {MANIFEST_NAME}
+ALLOWED_FILENAMES |= {name + ".sig" for _, name, _ in PLATFORMS if name}
 
 
 def validate_version(version):
@@ -328,11 +373,11 @@ def fetch_release(version, force=False):
     target_dir = os.path.join(UPDATES_DIR, version)
     assets = resolve_release(version)
 
-    wanted = [(key, name) for key, name, _ in PLATFORMS]
+    wanted = [(key, name) for key, name, _ in resolve_platform_names(version)]
     # The signature for each binary is required, not optional: a published
     # update nobody can install is worse than no update, because it looks like
     # it worked from the operator's seat.
-    wanted += [("sig_" + key, name + ".sig") for key, name, _ in PLATFORMS]
+    wanted += [("sig_" + key, name + ".sig") for key, name, _ in resolve_platform_names(version)]
     wanted += [("manifest", MANIFEST_NAME)]
     missing = [name for _, name in wanted if name not in assets]
     if missing:
@@ -429,6 +474,61 @@ def fetch_release(version, force=False):
                 pass
             raise
 
+    # ── Cross-check the filenames against CI's manifest ──
+    #
+    # THE DEFECT THIS EXISTS FOR. `manifest.json` names, per platform, the file
+    # CI intends a client to install from itself — and for Windows that has been
+    # `installer-Locus_<v>_x64-setup.exe` since v3.2.12, the fix for the client
+    # that re-executed its own binary. This list was not updated alongside it.
+    #
+    # Nothing caught that, and the reason is worth stating precisely: the
+    # existing check verified the *hash of whichever file our name resolved to*
+    # against `manifest[platform].sha256`. Our name was wrong, so it resolved a
+    # different file, and the hash of that different file obviously matched the
+    # hash of that different file. A self-consistent check on the wrong subject
+    # reads exactly like a check that passed.
+    #
+    # Comparing the FILENAME closes it. It is the one field that cannot agree by
+    # accident, and it is the field the two halves had drifted on.
+    manifest_path = staged.get(MANIFEST_NAME)
+    if manifest_path:
+        try:
+            with open(manifest_path, "r", encoding="utf-8") as mf:
+                published = json.load(mf)
+        except (OSError, ValueError, UnicodeDecodeError) as exc:
+            raise FetchError(
+                "could not read manifest.json to cross-check the platform "
+                "filenames: %s" % exc,
+                400,
+            )
+
+        advertised = published.get("platforms") or {}
+        mismatches = []
+        for key, name, _ in resolve_platform_names(version):
+            stated = (advertised.get(key) or {}).get("file")
+            if not stated:
+                # Not fatal here: a platform CI chose not to advertise is the
+                # all-or-nothing check's business, not this one's. Reporting it
+                # as a name mismatch would blame the wrong half.
+                continue
+            if stated != name:
+                mismatches.append(
+                    "%s: the hub would serve %s, but CI's manifest advertises %s"
+                    % (key, name, stated)
+                )
+
+        if mismatches:
+            raise FetchError(
+                "the hub's platform filenames disagree with CI's manifest for "
+                "v%s — refusing to publish, because serving a file other than "
+                "the one CI named is how a Windows client was handed a raw "
+                "executable it could not install: %s. Update PLATFORMS in "
+                "fetch-release.py (and publish-release.sh) to match the "
+                "manifest." % (version, "; ".join(mismatches)),
+                400,
+            )
+        log("  ✓ platform filenames agree with manifest.json")
+
     # Fold each platform's signature INTO that platform's entry.
     #
     # The console reads `artifacts[<platform>].signature` and hands it to
@@ -437,7 +537,7 @@ def fetch_release(version, force=False):
     # assets), so without this join the publish path receives no signature and
     # refuses a release the operator just watched succeed — while the files sit
     # correctly on disk, which makes it look like a bug in the publishing half.
-    for key, _, _ in PLATFORMS:
+    for key, _, _ in resolve_platform_names(version):
         entry = results.get(key)
         sig_entry = results.get("sig_" + key)
         if not entry or not sig_entry:
@@ -485,6 +585,27 @@ def _sha256_file(path):
     return digest.hexdigest()
 
 
+def _is_nsis_installer(path):
+    """Whether a Windows PE carries the NSIS overlay header.
+
+    The header sits near the start of the installer's overlay rather than at a
+    fixed offset, so this scans a bounded window — the same approach, and the
+    same 4 MiB bound, as the client's `is_installer_payload`. Scanning the whole
+    file would mean reading 58 MB to find a 17-byte marker in the first few.
+
+    Fail-closed on an unreadable file: a payload whose shape cannot be confirmed
+    is not one to publish for execution.
+    """
+    NSIS_SIGNATURE = b"NullsoftInstaller"
+    NSIS_SCAN_LIMIT = 4 * 1024 * 1024
+    try:
+        with open(path, "rb") as f:
+            window = f.read(NSIS_SCAN_LIMIT)
+    except OSError:
+        return False
+    return NSIS_SIGNATURE in window
+
+
 def verify_artifact_kind(path, platform_key):
     """Sanity-check that the bytes match the platform they are filed under.
 
@@ -527,7 +648,26 @@ def verify_artifact_kind(path, platform_key):
     if platform_key == "windows":
         if not is_pe(head):
             return False, "not a Windows PE executable"
-        return True, "PE"
+        # A PE is not enough HERE, and this is the one slot where it matters.
+        #
+        # Both artifacts CI produces for Windows are PEs: the NSIS setup
+        # executable (what a client must install from itself) and the raw
+        # `locus-windows-amd64.exe` (what only the retired portable client ever
+        # ran). "Is a PE" is true of both, so it cannot distinguish them — and
+        # the wrong one gets ShellExecuted by `tauri_plugin_updater`, which
+        # accepts any PE as an NSIS installer.
+        #
+        # What separates them is the NullsoftInstaller header makensis writes
+        # into the overlay. This mirrors `is_installer_payload` in
+        # client/src-tauri/src/locus/update/install.rs: the hub refuses the same
+        # payload the client would refuse, so a mistake is caught here at publish
+        # time rather than on a student's machine.
+        if not _is_nsis_installer(path):
+            return False, (
+                "a Windows PE without an NSIS header — this is the raw updater "
+                "binary, not an installer; a client cannot install from it"
+            )
+        return True, "PE (NSIS installer)"
     if platform_key == "linux":
         if not is_elf(head):
             return False, "not an ELF executable"
@@ -621,7 +761,8 @@ def verify_signature_file(path):
 def verify_and_report(result):
     """Post-fetch format check. Raises FetchError on a cross-slot mixup."""
     problems = []
-    for key, name, _ in PLATFORMS:
+    names = resolve_platform_names(result["version"])
+    for key, name, _ in names:
         entry = result["artifacts"].get(key)
         if not entry:
             problems.append("%s: not fetched" % name)

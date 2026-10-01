@@ -34,6 +34,23 @@
 #   server/scripts/hooks-sync.sh --no-restart   # upload only
 #   server/scripts/hooks-sync.sh --check        # verify only, upload nothing
 #
+#   server/scripts/hooks-sync.sh --fetch-service            # the release fetcher
+#   server/scripts/hooks-sync.sh --fetch-service --dry-run  # just show its diff
+#
+# WHY --fetch-service EXISTS
+# --------------------------
+# The release fetcher (`server/scripts/fetch-release.py`) decides which GitHub
+# asset lands in which platform slot and is the ONLY thing that can publish a
+# release. It lives on the host at /root/server/scripts/ and had no repo-vs-host
+# check at all — so a fix committed here could be inert on the hub while every
+# test in the tree passed, which is exactly what happened on 2026-10-01: CI had
+# advertised the Windows installer since v3.2.12, the repo's fetcher was corrected
+# to match, and the DEPLOYED fetcher still resolved the raw PE — so every Windows
+# client was offered a binary it refuses, and no Windows client could update.
+#
+# The lesson is the same one that produced the hooks half: two sources of truth
+# with no reconciliation. This mode is that reconciliation for the fetcher.
+#
 # Environment:
 #   VPS      ssh target (default root@networkingguides.duckdns.org)
 #   PB_API   hub base URL for the liveness probe (default the duckdns host)
@@ -52,9 +69,15 @@ VPS="${VPS:-root@networkingguides.duckdns.org}"
 PB_API="${PB_API:-https://networkingguides.duckdns.org}"
 SSH="${SSH:-ssh}"
 REMOTE_HOOKS="/opt/pocketbase/pb_hooks"
+# The release fetcher's home on the host. `05-caddy.sh` refuses to install the
+# service unless this file is present here, and the systemd unit runs it from
+# this path — so this is the location that matters, not the repo's copy.
+REMOTE_FETCH="/root/server/scripts/fetch-release.py"
+FETCH_SRC="${REPO_ROOT}/server/scripts/fetch-release.py"
 DRY_RUN=0
 DO_RESTART=1
 CHECK_ONLY=0
+FETCH_SERVICE=0
 
 log()  { printf '\033[0;32m[hooks]\033[0m %s\n' "$*"; }
 warn() { printf '\033[1;33m[hooks][WARN]\033[0m %s\n' "$*"; }
@@ -71,13 +94,144 @@ fail() {
 
 for arg in "$@"; do
     case "$arg" in
-        --dry-run)    DRY_RUN=1 ;;
-        --no-restart) DO_RESTART=0 ;;
-        --check)      CHECK_ONLY=1 ;;
-        -h|--help)    sed -n '2,45p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
-        *)            fail "unknown option: $arg" ;;
+        --dry-run)       DRY_RUN=1 ;;
+        --no-restart)    DO_RESTART=0 ;;
+        --check)         CHECK_ONLY=1 ;;
+        --fetch-service) FETCH_SERVICE=1 ;;
+        -h|--help)       sed -n '2,60p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        *)               fail "unknown option: $arg" ;;
     esac
 done
+
+# ── Mode: the release fetcher ──────────────────────────────────────────────
+# Deliberately a separate path rather than a list of "extra files" folded into
+# the hook loop: the two have different remote homes, different owners and
+# different restart targets, and a shared loop would have to branch at every
+# line. Keeping them apart is what makes each one readable.
+if [ "$FETCH_SERVICE" = "1" ]; then
+    [ -f "$FETCH_SRC" ] || fail "fetch service source not found: ${FETCH_SRC}"
+
+    svc_verify() {
+        local rc=0
+        log "Verifying the fetch service…"
+
+        local active
+        active="$(remote 'systemctl is-active locus-fetch' 2>/dev/null || true)"
+        if [ "$active" = "active" ]; then
+            log "  ✓ locus-fetch is active"
+        else
+            warn "  ✗ locus-fetch is '${active:-unknown}'"
+            rc=4
+        fi
+
+        # The file on the host must match the repo. This is the check whose
+        # absence let a corrected fetcher sit in the repo while the hub served
+        # the raw Windows binary.
+        local local_sha remote_sha
+        local_sha="$(sha256sum "$FETCH_SRC" | awk '{print $1}')"
+        remote_sha="$(remote "sha256sum '${REMOTE_FETCH}' 2>/dev/null | awk '{print \$1}'" 2>/dev/null || true)"
+        if [ "$local_sha" != "$remote_sha" ]; then
+            warn "  ✗ fetch-release.py differs (repo ${local_sha:0:12}… host ${remote_sha:0:12}…)"
+            rc=4
+        else
+            log "  ✓ fetch-release.py matches the repo"
+        fi
+
+        # Running python is not the same as running THIS python: a syntax error
+        # leaves the service up and failing per-request. Ask the host to compile
+        # the file it will actually execute.
+        if remote "python3 -m py_compile '${REMOTE_FETCH}'" 2>/dev/null; then
+            log "  ✓ the host's copy compiles"
+        else
+            warn "  ✗ the host's fetch-release.py does not compile — the service will fail every publish"
+            rc=4
+        fi
+
+        # The service answers on loopback only; /health is its own endpoint and
+        # needs no admin token.
+        local code
+        code="$(remote 'curl -s -m 10 -o /dev/null -w "%{http_code}" http://127.0.0.1:8091/health' 2>/dev/null || echo 000)"
+        if [ "$code" = "200" ]; then
+            log "  ✓ GET /health -> 200"
+        else
+            warn "  ✗ GET /health -> HTTP ${code} (service not answering)"
+            rc=4
+        fi
+
+        return "$rc"
+    }
+
+    if [ "$CHECK_ONLY" = "1" ]; then
+        svc_verify || exit $?
+        log "✓ Fetch service in sync and answering"
+        exit 0
+    fi
+
+    log "Comparing fetch-release.py against ${VPS}:${REMOTE_FETCH}"
+    local_sha="$(sha256sum "$FETCH_SRC" | awk '{print $1}')"
+    remote_sha="$(remote "sha256sum '${REMOTE_FETCH}' 2>/dev/null | awk '{print \$1}'" 2>/dev/null || true)"
+
+    if [ -z "$remote_sha" ]; then
+        warn "not deployed at all at ${REMOTE_FETCH}"
+    fi
+
+    if [ "$local_sha" = "$remote_sha" ]; then
+        log "  already current (${local_sha:0:12}…)"
+        if [ "$DO_RESTART" = "1" ]; then
+            log "Restarting to pick up any in-place edits…"
+            remote 'systemctl restart locus-fetch' || fail "restart command failed" 3
+            sleep 2
+        fi
+    else
+        log "  repo ${local_sha:0:12}… -> host ${remote_sha:0:12}…"
+    fi
+
+    if [ "$DRY_RUN" = "1" ]; then
+        warn "DRY_RUN — not uploading, not restarting"
+        exit 0
+    fi
+
+    if [ "$local_sha" != "$remote_sha" ]; then
+        # Upload to a temp name, then move atomically. The unit execs this file,
+        # so a partially written copy would be executed on the next restart.
+        if ! $SSH -o StrictHostKeyChecking=accept-new "$VPS" \
+                "cat > '${REMOTE_FETCH}.uploading'" < "$FETCH_SRC"; then
+            fail "upload failed for fetch-release.py" 2
+        fi
+        remote "mv '${REMOTE_FETCH}.uploading' '${REMOTE_FETCH}' && chown root:root '${REMOTE_FETCH}' && chmod 755 '${REMOTE_FETCH}'" \
+            || fail "could not finalise fetch-release.py" 2
+        log "  ✓ uploaded fetch-release.py"
+    fi
+
+    if [ "$DO_RESTART" = "1" ]; then
+        local_since="$(date -u '+%Y-%m-%d %H:%M:%S')"
+        log "Restarting locus-fetch…"
+        remote 'systemctl restart locus-fetch' || fail "restart command failed" 3
+
+        for _ in $(seq 1 20); do
+            if remote 'curl -fsS -m 3 -o /dev/null http://127.0.0.1:8091/health' 2>/dev/null; then
+                log "  ✓ locus-fetch is answering on 127.0.0.1:8091"
+                break
+            fi
+            sleep 1
+        done
+
+        errs="$(remote "journalctl -u locus-fetch --since '${local_since}' --no-pager -p err -q 2>/dev/null | wc -l" || echo 0)"
+        errs="$(printf '%s' "$errs" | tr -dc '0-9')"
+        if [ "${errs:-0}" -gt 0 ]; then
+            warn "locus-fetch logged ${errs} error line(s) since the restart:"
+            remote "journalctl -u locus-fetch --since '${local_since}' --no-pager -p err -q" | tail -20 | sed 's/^/    /'
+        else
+            log "  ✓ no new errors in the journal"
+        fi
+    else
+        warn "--no-restart: the file is on disk but the running service has not reloaded it"
+    fi
+
+    svc_verify || fail "deployed, but the fetch service did not pass verification. Do not treat this as a successful deploy." 4
+    log "✓ Fetch service in sync and answering"
+    exit 0
+fi
 
 [ -d "$HOOKS_SRC" ] || fail "hook source dir not found: ${HOOKS_SRC}"
 shopt -s nullglob

@@ -161,8 +161,41 @@ the claim is not verified.**
 | A4 | The client CI workflow has run and gone green for a given commit | **verified 2026-09-30** for `5ebfc89` | run `36669449010` — `Verify`, all four builds incl. `windows-2022`, `Release`, `Report` — read from the GitHub REST API. Re-check with `gh run list --workflow=client.yml` |
 | A5 | A published release is installable by an existing client end to end | **unverified** | needs real Windows/macOS hardware — see `../reference/STILL-OPEN.md` |
 | A6 | The **Windows** NSIS installer completes on a clean machine — the setup runs interactively and installs Locus | **verified 2026-09-30** for the `v3.2.12` installer (`installer-Locus_3.2.12_x64-setup.exe`) | opened the NSIS setup on real Windows and completed the install; Locus installed. Re-check by running the setup on a clean machine and confirming the install finishes |
-| A7 | The **installed Windows client stays installed** — it launches from `C:\Program Files\Locus\`, serves its own bundled assets, and is not relaunched out of its install directory by its own updater | **unverified** | install on Windows, let it take an advertised update, then launch from the Start Menu and confirm the window renders the app. Nothing in CI launches either artifact, which is why three green releases shipped this broken — see `../reference/FIXES.md`, 2026-09-30 (second entry) |
+| A7 | The **installed Windows client stays installed** — it launches from `C:\Program Files\Locus\`, serves its own bundled assets, and is not relaunched out of its install directory by its own updater | **unverified** — and was **falsified in the field** on 2026-09-30 (see the note) | install on Windows, let it take an advertised update, then launch from the Start Menu and confirm the window renders the app. Nothing in CI launches either artifact, which is why three green releases shipped this broken — see `../reference/FIXES.md`, 2026-09-30 (second entry) |
 | A8 | The **shipped client resolves its own bundled assets at run time** — a build carries no CI-runner path, so an installed app on a machine without the runner's drive renders the app rather than `ERR_FILE_NOT_FOUND` | **verified 2026-09-30** for `a8b0acf` (CI run `36686775049`) | the built `locus-windows-amd64.exe` was read back from the run's artifacts and the Tauri context string now carries the relative `../dist` where the broken `5ebfc89` build carried `d:/a/Locus/Locus/client/dist`. Re-check with `strings locus-windows-amd64.exe \| grep -c 'a/Locus/Locus'` (expect `0`) |
+
+> **A7 is no longer merely unverified — it was observed FAILING on 2026-09-30, and
+> the failure was a different one from the two already fixed.**
+>
+> A Windows client on `3.2.13` was offered `3.2.14`: the download reached 100%
+> and then the client refused it with *"the update to 3.2.14 is not an installer
+> (51741696 bytes); refusing to execute it."* That byte count is exactly
+> `locus-windows-amd64.exe` — the raw PE, not the NSIS installer.
+>
+> The client's guard was **correct** and did its job: it stopped an unvetted PE
+> from being ShellExecuted, which is precisely the 3.2.12 fix. The defect was
+> upstream of it. CI had correctly advertised
+> `installer-Locus_3.2.14_x64-setup.exe` in `manifest.json`, but the hub's
+> `fetch-release.py` still resolved the raw binary for the `windows` slot and
+> served it with the *raw binary's* signature. So the client was offered the
+> wrong artifact at every version, and **no Windows client could update at all**.
+>
+> Three separate checks passed throughout: CI's manifest guard (§15, which greps
+> the workflow, not the hub), the fetch service's all-or-nothing check (all four
+> *wrong* files were present), and the manifest hash cross-check — which hashed
+> whichever file the *manifest* named, so it agreed with itself by construction.
+> The lesson is the one `docs/README.md` rule 3 states for prose, applied to
+> guards: **a check that cannot distinguish a right answer from a wrong one reads
+> exactly like a check that passed.**
+>
+> Fixed on the hub side (`fetch-release.py`, `publish-release.sh` now resolve the
+> installer and verify the filename against `manifest.json`; the fetch service
+> also refuses a Windows PE that carries no NSIS header), with a new guard in
+> `check-consistency.sh` §1a pinning the name on both sides, plus a
+> `smoke-publish.sh` case shown to fail against the pre-fix code. **A7 itself
+> remains unverified**: a real Windows machine has still never taken an update
+> and relaunched from the Start Menu. That is the test, and it cannot be run from
+> a Linux CI box.
 
 > **A7 was previously written to claim the opposite thing** — that a stale
 > `start_page` in `verge.yaml` produced a blank window. That was a misdiagnosis,

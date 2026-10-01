@@ -113,7 +113,9 @@ release. They are independent beyond the model in phase 1.
 
 **Gate:**
 - `check-consistency.sh` green.
-- `activation_contract_test` updated in the same commit and passing.
+- `activation_contract_test` updated in the same commit and passing. (Added
+  2026-10-01 to `client/src-tauri/tests/activation_contract.rs`; until then this
+  gate named a test that did not exist.)
 - A renewal on a **test** code extends from its existing expiry, not from now —
   demonstrated, not asserted.
 - An unbind does **not** change `expires_at`.

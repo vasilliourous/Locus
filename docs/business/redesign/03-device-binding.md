@@ -267,13 +267,21 @@ This is a genuine contract with deployed clients, and the code says so:
 > *"that is fragile, and it is the existing contract with deployed clients: the
 > hub must not reword these messages without shipping a matching client.
 > `activation_contract_test` pins the exact strings against the live hook."*
+>
+> **Correction (2026-10-01).** That claim was false when written. No
+> `activation_contract_test` existed — the name was cited in six documents and
+> two code comments, and nothing enforced it. The test now exists:
+> `client/src-tauri/tests/activation_contract.rs`. It reads the hook source and
+> asserts the literal status codes and messages the client's classifier is
+> written against.
 
 **Implication for this redesign:** the new `DeviceAlreadyActivated` outcome
 must use a **new status code or a new message string that the existing client
 will not mistake for `Suspended`**. Do not reuse 403 with a message containing
 the word "suspended". A new 409 is cleanest and cannot be confused by any
-deployed build. Any such change must update `activation_contract_test` in the
-same commit.
+deployed build. Any such change must update `activation_contract_test`
+(`client/src-tauri/tests/activation_contract.rs`) in the same commit — it reads
+the hook source, so a reworded message fails the build rather than shipping.
 
 ## 3.4 The destructive combination to avoid
 

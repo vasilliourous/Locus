@@ -128,6 +128,31 @@ Suggested first test: publish a signed release with `active = false`, flip it to
 `true`, and watch one Linux client — the only platform verifiable from a headless
 Linux box.
 
+#### The *update* path served the client a raw executable (2026-10-01) — FIXED, publish pending
+
+A Windows client on `3.2.13` was offered `3.2.14`, downloaded 100%, and refused
+it: *"not an installer (51741696 bytes)"*. That size is `locus-windows-amd64.exe`.
+The hub was serving the raw PE because `fetch-release.py` and
+`publish-release.sh` still resolved it for the `windows` slot, while CI's
+`manifest.json` had correctly named the NSIS installer since v3.2.12. See
+`FIXES.md` ("NO WINDOWS CLIENT COULD UPDATE", 2026-10-01).
+
+The client's refusal was its **own guard working** (`is_installer_payload`,
+added in 3.2.12), so no client was ever handed a program it would execute. The
+cost was that **no Windows client could update at all**.
+
+Fixed in the hub scripts, with a filename cross-check against `manifest.json`
+that did not exist, an NSIS check in the fetch service, an installer-signing step
+in CI, and guards in `check-consistency.sh` §1a and `smoke-publish.sh` case 5b —
+each shown to fail against the pre-fix code.
+
+> **OPEN: the live hub still serves the old row.** No client sees the fix until
+> `3.2.14` is re-published (a build carrying the installer signature, then
+> Fetch & publish). Until then every Windows client remains offered the raw
+> binary and refuses it. **`CLAIMS.md` §5 A7 is still unverified** — this
+> demonstrates the hub serves the right bytes, not that a Windows machine
+> installs them.
+
 #### And the Windows *installer itself* was broken on 3.2.9 (2026-09-30)
 
 A student ran the 3.2.9 Windows setup and got an NSIS "File not found" dialog

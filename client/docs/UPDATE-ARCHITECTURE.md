@@ -125,7 +125,7 @@ pub const PLATFORMS: [&str; 4] = ["linux", "windows", "macos_intel", "macos_arm"
 | Platform identifier | Artifact filename |
 |---|---|
 | `linux` | `locus-linux-amd64` |
-| `windows` | `locus-windows-amd64.exe` |
+| `windows` | `installer-Locus_<version>_x64-setup.exe` |
 | `macos_intel` | `locus-darwin-amd64` |
 | `macos_arm` | `locus-darwin-arm64` |
 
@@ -134,6 +134,27 @@ says `darwin-*`. A fork that "tidies" this to `macos-*` breaks the publish pipel
 because CI produces `darwin-*` and the release job asserts against these names.
 (FIXES #47: a 1 MB floor also silently rejected a valid release; FIXES #25:
 `download-artifact` does not flatten, and the release job assumed it did.)
+
+**Windows is an installer, not a raw executable.** A Windows client does not run
+the payload it downloads — it hands the bytes to `tauri_plugin_updater`, which
+ShellExecutes them. `locus-windows-amd64.exe` is a PE the *retired portable
+client* consumed; serving it for self-install made an installed client relaunch a
+copy of itself outside its install directory. The Windows slot is therefore the
+NSIS setup executable, and it carries its **own** minisign signature (the raw
+binary's signature cannot stand in — minisign signs exact bytes). The other three
+platforms still use raw payloads: they reach a package manager or a `.app` rather
+than a ShellExecuted PE.
+
+The name is version-bearing because Tauri names its NSIS bundle with the version.
+It is produced in three places that must agree — CI's `manifest.json`,
+`fetch-release.py`'s `installer_name()`, and `publish-release.sh`'s
+`WINDOWS_INSTALLER` — and `check-consistency.sh` §1a pins it.
+
+> **This drifted once and broke every Windows update.** CI corrected the manifest
+> for v3.2.12; the hub's fetcher did not follow, staged the raw binary into the
+> Windows slot, and served it with the raw binary's signature. Every Windows
+> client refused it — correctly — so no Windows client could update at all, and
+the failure only surfaced when a student tried. See `docs/reference/FIXES.md`.
 
 ### 2.3 Where the update signal comes from
 

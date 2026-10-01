@@ -166,7 +166,7 @@ if printf '%s' "$ROW" | grep -q '"found": false\|"error"'; then
     note "skipped — no usable row"
 else
     for pair in "dl_linux:sha_linux:locus-linux-amd64" \
-                "dl_windows:sha_windows:locus-windows-amd64.exe" \
+                "dl_windows:sha_windows:installer-Locus_<v>_x64-setup.exe" \
                 "dl_macos_intel:sha_macos_intel:locus-darwin-amd64" \
                 "dl_macos_arm:sha_macos_arm:locus-darwin-arm64"; do
         url_key="$(printf '%s' "$pair" | cut -d: -f1)"
@@ -205,7 +205,7 @@ if [ -n "$LOCAL_DIR" ]; then
     echo
     echo "6. Local artifacts match what is served"
     [ -d "$LOCAL_DIR" ] || bad "local dir not found: ${LOCAL_DIR}"
-    for f in locus-linux-amd64 locus-windows-amd64.exe locus-darwin-amd64 locus-darwin-arm64; do
+    for f in locus-linux-amd64 "installer-Locus_${VERSION}_x64-setup.exe" locus-darwin-amd64 locus-darwin-arm64; do
         [ -f "${LOCAL_DIR}/${f}" ] || { note "${f} not present locally — skipped"; continue; }
         local_sha="$(sha256sum "${LOCAL_DIR}/${f}" | awk '{print $1}')"
         remote_sha="$(remote "sha256sum '${REMOTE_UPDATES}/${f}' 2>/dev/null | awk '{print \$1}'" 2>/dev/null || true)"

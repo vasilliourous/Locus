@@ -374,7 +374,7 @@ async fn egress_attempt_once() -> bool {
 /// Whether a mihomo delay value is a real round-trip measurement.
 ///
 /// This mirrors the frontend's `classifyDelay` (`client/src/utils/delay.ts`),
-/// which is the app's single definition of what a delay value means. Keeping the
+/// which is the app's single definition of what a delay value *is*. Keeping the
 /// two in step is the point: mihomo reports non-measurements inside the same
 /// numeric field it reports measurements in — `0` for a failed test and the
 /// timeout value itself for a timed-out one — so a probe that merely checked
@@ -383,18 +383,31 @@ async fn egress_attempt_once() -> bool {
 /// The sentinels, and what they mean:
 ///
 ///   * `0`                    -> the test failed; not a measurement.
-///   * `>= timeout_secs*1000` -> the test hit its budget; not a measurement.
 ///   * `> 100_000` (1e5)      -> implausible as milliseconds; an error sentinel.
 ///   * anything else `> 0`    -> a measured round trip.
 ///
-/// The budget used here is the probe's own [`EGRESS_ATTEMPT_TIMEOUT`], not the
-/// frontend's `DEFAULT_DELAY_TIMEOUT`: the probe is judging *its* request, so its
-/// own deadline is the one that decides when a value is a timeout.
+/// # Why the timeout value counts as a measurement *here*
+///
+/// It deliberately does **not** count as one in the frontend, and the two are
+/// meant to differ. `classifyDelay` answers "how fast is this node?" for a
+/// latency list, where a node that hit its budget should be *shown* as a timeout.
+/// This function answers a different question — "did the tunnel carry a packet
+/// at all?" — and for that, a node that hit its budget is the strongest possible
+/// yes: the engine dialled the target, the request left the machine, and the only
+/// thing that ran out was the clock we set. Treating it as failure is what
+/// stranded a working tunnel on "connecting" forever, because the school link's
+/// first packet through a cold proxy routinely exceeds any per-attempt budget we
+/// would pick.
+///
+/// `timeout_secs` is therefore no longer used to reject values; it is kept in the
+/// signature because the caller passes the same budget to the engine, and the
+/// coupling is worth seeing at the call site rather than hiding. The `0` sentinel
+/// is the one unambiguous "the test failed" answer mihomo gives, and the only
+/// value this probe may interpret as "no traffic moved".
 #[must_use]
-const fn delay_is_a_measurement(delay: u32, timeout_secs: u32) -> bool {
+const fn delay_is_a_measurement(delay: u32, _timeout_secs: u32) -> bool {
     const IMPLAUSIBLE_DELAY: u32 = 100_000;
-    let timeout_ms = timeout_secs.saturating_mul(1000);
-    delay > 0 && delay < timeout_ms && delay <= IMPLAUSIBLE_DELAY
+    delay > 0 && delay <= IMPLAUSIBLE_DELAY
 }
 
 #[cfg(test)]
@@ -523,8 +536,8 @@ mod tests {
         assert_eq!(EGRESS_TEST_URL, "http://cp.cloudflare.com/generate_204");
     }
 
-    /// A real measurement is a positive delay that fits inside the attempt's own
-    /// budget. This is the case the probe is *for*: a round trip happened.
+    /// A real measurement is a positive delay that the engine actually observed.
+    /// This is the case the probe is *for*: a round trip happened.
     #[test]
     fn a_plausible_delay_is_a_measurement() {
         assert!(delay_is_a_measurement(1, 5));
@@ -535,26 +548,47 @@ mod tests {
     /// The zero sentinel: mihomo reports a *failed* test as `0` in the same field
     /// it reports measurements in. Counting it as egress would announce a tunnel
     /// whose test had just failed — the exact false "connected" the readiness
-    /// probe exists to prevent.
+    /// probe exists to prevent. It is the ONE value this probe reads as "no
+    /// traffic moved".
     #[test]
     fn a_zero_delay_is_not_a_measurement() {
         assert!(!delay_is_a_measurement(0, 5));
     }
 
-    /// The timeout sentinel: mihomo reports a *timed-out* test as the timeout
-    /// value itself (ms). A mere `> 0` check would count this as success, so the
-    /// probe would call a timed-out tunnel connected. This is the specific
-    /// disagreement with `classifyDelay` this function removes.
+    /// **The regression this probe shipped with.**
+    ///
+    /// A delay at or beyond the per-attempt budget was classified as a
+    /// non-measurement, because the rule was derived from the probe's OWN
+    /// timeout — so the engine's "this member hit the 5 s budget" answer was read
+    /// as "this member is dead".
+    ///
+    /// That is wrong, and it is the reported bug: a tunnel whose first packet
+    /// through a cold proxy takes longer than the budget is a tunnel that is
+    /// **carrying the student's traffic**, and the app pinned the button on
+    /// "connecting" while the traffic panel showed bytes moving. The engine
+    /// dialled the target and the request left the machine; the only thing that
+    /// ran out was a clock we chose. Nothing else in the answer says "no egress".
+    ///
+    /// A timeout must therefore count as egress. Note this is a deliberate
+    /// divergence from `classifyDelay` (`src/utils/delay.ts`), which keeps
+    /// reporting `'timeout'` — that function answers "how fast is this node?" for
+    /// a latency list, and a node that hit its budget should be *shown* as a
+    /// timeout. This one answers "did the tunnel carry a packet at all?". Same
+    /// value, two different questions, and conflating them is what stranded a
+    /// working connection.
     #[test]
-    fn a_timeout_sentinel_is_not_a_measurement() {
-        // 5 s budget -> a delay of 5000 ms is the timeout sentinel, not a result.
-        assert!(!delay_is_a_measurement(5000, 5));
-        // Anything at or beyond the budget is the same non-answer.
-        assert!(!delay_is_a_measurement(6000, 5));
+    fn a_delay_at_the_budget_is_still_egress() {
+        // The sentinel the engine emits when the member hits its budget.
+        assert!(delay_is_a_measurement(5000, 5));
+        assert!(delay_is_a_measurement(6000, 5));
+        // A slow-but-real round trip, the school-link case.
+        assert!(delay_is_a_measurement(7500, 5));
     }
 
     /// An implausible value is an error sentinel, not a round trip. It must not be
     /// allowed to outrank a real measurement, and it must not read as success.
+    /// This is the upper bound that keeps the classifier honest once the budget no
+    /// longer does — without it, `u32::MAX` would read as egress.
     #[test]
     fn an_implausible_delay_is_not_a_measurement() {
         assert!(!delay_is_a_measurement(100_001, 60));

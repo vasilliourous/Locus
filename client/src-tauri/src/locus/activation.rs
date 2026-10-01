@@ -264,8 +264,10 @@ fn classify(response: ActivateResponse) -> ActivationOutcome {
             // Bound and suspended are BOTH 403, distinguished only by the
             // hub's wording. That is fragile, and it is the existing contract
             // with deployed clients: the hub must not reword these messages
-            // without shipping a matching client. `activation_contract_test`
-            // pins the exact strings against the live hook.
+            // without shipping a matching client.
+            // `tests/activation_contract.rs` now pins the hub's exact strings
+            // against this classifier — before 2026-10-01 nothing did, and this
+            // comment cited a test that did not exist.
             if response.message.to_ascii_lowercase().contains("suspended") {
                 ActivationOutcome::Suspended
             } else {

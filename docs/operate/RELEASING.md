@@ -19,24 +19,29 @@ verified-against: docs/STATE.md
 >   `client/src-tauri/tauri.conf.json` must agree, enforced by
 >   `client/src-tauri/tests/version_consistency.rs`). There is no root `VERSION`.
 >
-> **A bump is FIVE sites, not three.** `pnpm release-version X` (from `client/`)
-> writes four: `package.json`, `src-tauri/Cargo.toml`, `src-tauri/tauri.conf.json`
-> **and `client/Cargo.lock`**. The fifth is `docs/state.toml`'s
-> `[client.version]`, which records the client version as a **derived** fact with
-> `provenance = "derived"` and is checked against `client/package.json` by
-> `check-consistency.sh` §7 — so a bump that skips it fails the `verify` job with
-> `BAD client.version`. `cargo fetch --locked` separately catches a stale
-> `Cargo.lock` in each build job.
+> **A bump is one command.** `pnpm release-version X` (from `client/`) writes
+> **all five** version sites: `package.json`, `src-tauri/Cargo.toml`,
+> `src-tauri/tauri.conf.json`, `client/Cargo.lock`, **and `docs/state.toml`'s
+> `[client.version]`**. The data file is the one that is easy to miss — it is not
+> a manifest, it records the client version as a **derived** fact with
+> `provenance = "derived"`, and `check-consistency.sh` §7 checks it against
+> `client/package.json`, failing the `verify` job with `BAD client.version`.
+> The script handles it so a release cannot forget it; if a sixth site ever
+> appears, add it to `client/scripts/release-version.mjs`. `cargo fetch --locked`
+> separately catches a stale `Cargo.lock` in each build job.
 >
 > **Read `UPDATE-SYSTEM.md` for the full pipeline**, and `client/docs/SIGNING.md`
 > for key custody. The short version:
 
 ```
-1. Bump the version in every site, so they agree:
-       cd client && pnpm release-version X.Y.Z     # the four manifest sites
-       # then docs/state.toml `[client.version]` — the fifth (see below)
-2. git tag -a vX.Y.Z && git push origin vX.Y.Z
-     → CI builds + signs all four platforms, creates the GitHub Release
+1. Bump every version site, from client/:
+       pnpm release-version X.Y.Z
+2. Commit, then tag, then push both:
+       git add -A && git commit -m "chore(release): X.Y.Z"
+       git tag -a vX.Y.Z -m "Locus client vX.Y.Z"
+       git push origin main && git push origin vX.Y.Z
+     → the TAG triggers CI to build + sign all four platforms and create the
+       GitHub Release. Pushing main alone does not.
 3. Fetch:  console Releases → "Fetch & publish",  or
            POST /api/admin/fetch-release {"version":"X.Y.Z"}
      → the hub pulls from GitHub, verifies format + SHA-256 + signature
@@ -62,6 +67,10 @@ verified-against: docs/STATE.md
 >
 > **There is no rollout percentage.** Publishing IS offering; `active` is the only
 > off switch, and there is no server-driven downgrade.
+>
+> **Windows clients cannot update at all right now?** That is a different
+> situation from a normal release — see
+> [`RECOVER-WINDOWS-UPDATE.md`](RECOVER-WINDOWS-UPDATE.md).
 
 ### Before the *first* tag in a repository: set the signing secret
 

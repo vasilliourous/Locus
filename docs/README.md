@@ -42,6 +42,7 @@ Retired material is separated into [`archive/`](archive/) (the Wails client) and
 
 | Document | What it is |
 |---|---|
+| [`../AGENTS.md`](../AGENTS.md) | **Agents read this first.** Repo map, the fact rules, and the release procedure (bump → commit → tag). |
 | [`STATE.md`](STATE.md) | Where a fact goes, and the ownership map. **Not** a fact table — derived facts are in [`state.toml`](state.toml), world claims in [`operate/CLAIMS.md`](operate/CLAIMS.md). |
 | [`state.toml`](state.toml) | The derived facts (version, domain, console path, platform list) as **data**, with a `source` and `provenance` each. Guard-enforced by `check-consistency.sh` §9. |
 | [`operate/CLAIMS.md`](operate/CLAIMS.md) | **Read before writing any fact.** The two claim classes, the decision procedure, and the dated register of world claims (§5). |
@@ -57,7 +58,8 @@ Retired material is separated into [`archive/`](archive/) (the Wails client) and
 | [`operate/POCKETBASE-SETUP.md`](operate/POCKETBASE-SETUP.md) | PocketBase specifics, including the admin console at `/admin/`. |
 | [`operate/SECRETS-MANAGEMENT.md`](operate/SECRETS-MANAGEMENT.md) | age-encrypted secrets: what is plaintext, what must never be committed. |
 | [`operate/UPDATE-SYSTEM.md`](operate/UPDATE-SYSTEM.md) | How an update reaches a client, end to end, and what is verified vs not. |
-| [`operate/RELEASING.md`](operate/RELEASING.md) | Publishing a build to the hub. |
+| [`operate/RELEASING.md`](operate/RELEASING.md) | **Cutting a client release** (bump → commit → tag → CI) and publishing it to the hub. |
+| [`operate/RECOVER-WINDOWS-UPDATE.md`](operate/RECOVER-WINDOWS-UPDATE.md) | **When Windows clients cannot update** — the hub serving the raw PE instead of the installer, and the ordered recovery (sign → deploy → publish). |
 | [`operate/CI-CD.md`](operate/CI-CD.md) | The client CI pipeline (`.github/workflows/client.yml`). |
 | [`../server/scripts/README.md`](../server/scripts/README.md) | Index of every script in `server/scripts/` — what it does, and whether it is safe to re-run. |
 

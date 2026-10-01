@@ -63,12 +63,20 @@ alone is 518; the rest are integration tests and the plugin crates).
 |---|---|
 | `maps_the_one_code_per_device_refusal_to_its_own_outcome` | 409 → `DeviceAlreadyActivated`, and that the message does not contain "suspended" |
 | `the_active_wire_shape_is_camel_case` | `rename_all_fields` on `SubscriptionStatus` — removing it fails the test |
-| `activation_contract_test` | The 403 substring contract against the live hook |
+| `activation_contract_test` | The 403/409 substring contract against the live hook |
 | `version_consistency.rs` | The three manifests agree |
 | `user_facing_messages_have_no_collapsed_whitespace` | No run of 3+ spaces in a message a student sees |
 
 **Verified, not assumed:** the 409 test was checked by removing its `match` arm
 and watching it fail. A test that cannot fail is not a guard.
+
+**Correction (2026-10-01).** This table listed `activation_contract_test` as an
+existing guard, but no such test existed — the name was cited in six documents
+and two code comments and nothing enforced the contract. It now exists at
+`client/src-tauri/tests/activation_contract.rs`, with the same
+verified-by-failing discipline: the suspension wording was mutated in
+`activation.pb.js` and the test was watched to fail before the hook was restored
+byte-identical.
 
 ### The console build
 

@@ -33,7 +33,9 @@ twice in this project's history.
 and the client disambiguates **by substring** — it looks for the word
 `suspended` in the 403's message (the 403 classifier in `locus/activation.rs`). That is
 fragile, and the code says so: it is the existing contract with deployed
-clients, pinned by `activation_contract_test`.
+clients, pinned by `activation_contract_test`
+(`client/src-tauri/tests/activation_contract.rs`; added 2026-10-01 — the claim
+preceded the test).
 
 Adding a third meaning to 403 would have made an old client report the wrong
 account state. So the new refusal is:

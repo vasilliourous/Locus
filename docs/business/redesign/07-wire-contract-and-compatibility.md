@@ -89,7 +89,12 @@ device*, and the client disambiguates **by substring**
 ```
 
 The code names this as fragile and as an existing contract with deployed
-clients, pinned by `activation_contract_test`.
+clients, pinned by `activation_contract_test`
+(`client/src-tauri/tests/activation_contract.rs`).
+
+> **Correction (2026-10-01).** That test did not exist when this file was
+> written — see the note in [`03-device-binding.md`](03-device-binding.md) §3.3.
+> It was added on 2026-10-01 by the durable-device-identity work.
 
 **Rules for the new `DeviceAlreadyActivated` refusal** ([`03-device-binding.md`](03-device-binding.md) §3.1)
 — **all four followed** in `9a91da1`:
@@ -101,7 +106,7 @@ clients, pinned by `activation_contract_test`.
 3. **Write the message for a student**, because the oldest clients render it
    verbatim through the `ServerError` arm.
 4. **Update `activation_contract_test` in the same commit.** That test exists
-   to catch exactly this.
+   to catch exactly this — and as of 2026-10-01 it actually does.
 
 ## 7.5 What the redesign adds to the wire — the complete list
 
@@ -131,7 +136,7 @@ not weaken any of them.
 | PocketBase hook traps | `check-consistency.sh` group 6 | File-scope helpers, `findRecordsByFilter`, non-constant-time token compare, headers read from the wrong place |
 | Version agreement | `client/src-tauri/tests/version_consistency.rs` | The three manifests agreeing |
 | The wire shape | `the_active_wire_shape_is_camel_case` | `rename_all_fields` on `SubscriptionStatus` |
-| Activation messages | `activation_contract_test` | The 403 substring contract against the live hook |
+| Activation messages | `activation_contract_test` (`tests/activation_contract.rs`) | The 403/409 substring contract against the live hook |
 
 **New requirement this redesign introduces:** `term_days` will be written by
 hooks, so it must be in `seed-pb.py` **in the same commit** or group 3 fails.

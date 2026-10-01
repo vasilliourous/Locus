@@ -197,7 +197,7 @@ update signal and a refreshed tier config.
   "update_url": "https://networkingguides.duckdns.org/updates/2.1.0/locus-linux-amd64",
   "update_sha256": "abc123...",
   "update_linux": "https://.../updates/2.1.0/locus-linux-amd64",
-  "update_windows": "https://.../updates/2.1.0/locus-windows-amd64.exe",
+  "update_windows": "https://.../updates/2.1.0/installer-Locus_2.1.0_x64-setup.exe",
   "update_macos_intel": "https://.../updates/2.1.0/locus-darwin-amd64",
   "update_macos_arm": "https://.../updates/2.1.0/locus-darwin-arm64",
   "update_sha256_linux": "abc123...",
@@ -316,7 +316,7 @@ device, and guessing is how a Windows client is handed a Linux binary.
 ```json
 {
   "version": "2.4.0",
-  "url": "https://<domain>/updates/2.4.0/locus-windows-amd64.exe",
+  "url": "https://<domain>/updates/2.4.0/installer-Locus_2.4.0_x64-setup.exe",
   "signature": "<base64 minisign signature>",
   "sha256": "abc123…"
 }
@@ -360,7 +360,7 @@ served openly from `/updates/*`.
   "version": "2.4.0",
   "platforms": {
     "linux":       { "url": "https://<domain>/updates/2.4.0/locus-linux-amd64",       "sha256": "abc123…", "signature": "…" },
-    "windows":     { "url": "https://<domain>/updates/2.4.0/locus-windows-amd64.exe", "sha256": "def456…", "signature": "…" },
+    "windows":     { "url": "https://<domain>/updates/2.4.0/installer-Locus_2.4.0_x64-setup.exe", "sha256": "def456…", "signature": "…" },
     "macos_intel": { "url": "https://<domain>/updates/2.4.0/locus-darwin-amd64",      "sha256": "ghi789…", "signature": "…" },
     "macos_arm":   { "url": "https://<domain>/updates/2.4.0/locus-darwin-arm64",      "sha256": "jkl012…", "signature": "…" }
   }

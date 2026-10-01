@@ -997,6 +997,72 @@ jobs:
             exit 1
           fi
 
+      # ── Sign the Windows installer ──
+      #
+      # WHY THE INSTALLER NEEDS ITS OWN SIGNATURE
+      #
+      # Since v3.2.12 CI has advertised `installer-Locus_<v>_x64-setup.exe` as
+      # the artifact a Windows client installs from itself, and the hub now
+      # serves exactly that. But `tauri_plugin_updater` verifies a minisign
+      # signature **mandatorily and unconditionally** — `RemoteReleaseInner`
+      # refuses to deserialize without a `signature` field, and `install_inner`
+      # calls `verify_signature()` over the whole buffer with no bypass. So an
+      # installer without a `.sig` is not installable by anybody, however correct
+      # its name is.
+      #
+      # The signature over the installer is NOT interchangeable with the one over
+      # `locus-windows-amd64.exe`: minisign signs the exact bytes, so the raw
+      # binary's signature verifies only the raw binary. A fresh one is required.
+      #
+      # Only Windows: the other platforms' updater payloads are still the raw
+      # binaries (they reach a package manager or a `.app`, not a ShellExecute of
+      # an unvetted PE), and those are already signed above.
+      - name: Sign the Windows installer
+        if: matrix.os == 'windows-latest'
+        shell: bash
+        env:
+          LOCUS_UPDATE_KEY: ${{ secrets.LOCUS_UPDATE_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -z "${LOCUS_UPDATE_KEY:-}" ]; then
+            echo "::error::LOCUS_UPDATE_KEY is not set. An unsigned installer cannot be installed by any client — see client/docs/SIGNING.md."
+            exit 1
+          fi
+          printf '%s' "$LOCUS_UPDATE_KEY" > "$RUNNER_TEMP/locus.key"
+          chmod 600 "$RUNNER_TEMP/locus.key"
+
+          # Exactly one NSIS setup, found by the same glob the manifest step uses.
+          # A glob rather than a literal path because the version is baked into
+          # the filename by Tauri; `nullglob` off means an unmatched glob stays
+          # literal, so the -f test below is what catches "none found".
+          setup=""
+          for f in installer/installer-Locus_*_x64-setup.exe; do
+            [ -f "$f" ] || continue
+            if [ -n "$setup" ]; then
+              echo "::error::more than one NSIS installer staged: '$setup' and '$f'"
+              exit 1
+            fi
+            setup="$f"
+          done
+          if [ -z "$setup" ]; then
+            echo "::error::no installer-Locus_*_x64-setup.exe to sign in installer/"
+            ls -la installer/ || true
+            exit 1
+          fi
+
+          MS="$RUNNER_TEMP/minisign/minisign.exe"
+          KEY="$RUNNER_TEMP/locus.key"
+          # Windows paths for minisign's file arguments, a bash path to exec it —
+          # the split documented in "Sign the artifact" above.
+          "$MS" -S -s "$(cygpath -w "$KEY")" \
+            -m "$(cygpath -w "$setup")" \
+            -x "$(cygpath -w "${setup}.sig")" \
+            -t "Locus_windows-installer"
+
+          rm -f "$RUNNER_TEMP/locus.key"
+          echo "Signed ${setup}:"
+          cat "${setup}.sig"
+
       - uses: actions/upload-artifact@v4
         with:
           name: installer-${{ matrix.label }}
@@ -1161,14 +1227,21 @@ jobs:
               # The signature is read back and embedded, so the manifest is a
               # complete description of what the hub should serve.
               #
-              # Installer assets carry no `.sig` — they are not updater payloads
-              # and the signature requirement applies only to the raw binaries
-              # the retired portable client consumes.
+              # The WINDOWS entry is an installer, and it DOES need a signature.
+              # `tauri_plugin_updater` verifies one mandatorily and offers no
+              # bypass, and the hub serves this exact file to a Windows client
+              # that executes it — so the signature is as required here as it is
+              # for the raw binaries. It is produced by the "Sign the Windows
+              # installer" step above (minisign signs exact bytes, so the raw
+              # binary's signature cannot stand in for the installer's).
+              #
+              # `locus-*` covers the raw updater payloads; the `installer-` entry
+              # is the one non-`locus-` name that is genuinely an updater payload.
               sig_path = path + ".sig"
               entry = {"file": filename, "sha256": digest}
               if os.path.isfile(sig_path):
                   entry["signature"] = open(sig_path).read().strip()
-              elif filename.startswith("locus-"):
+              elif filename.startswith("locus-") or key == "windows":
                   missing.append(filename + ".sig")
                   continue
               out["platforms"][key] = entry
@@ -1204,6 +1277,18 @@ jobs:
               missing=1
             fi
           done
+          # The Windows installer is an updater payload too (the hub serves it to
+          # a client that executes it), so it must carry its own signature. This
+          # loop covers it explicitly: `release/locus-*` would never match a name
+          # beginning `installer-`, so without this the one artifact that was
+          # actually broken for three releases would be the one unchecked.
+          for f in release/installer-Locus_*_x64-setup.exe; do
+            [ -f "$f" ] || continue
+            if [ ! -f "$f.sig" ]; then
+              echo "::error::no signature for $(basename "$f") — a Windows client cannot install it"
+              missing=1
+            fi
+          done
           [ "$missing" -eq 0 ] || exit 1
           echo "All artifacts are signed."
 
@@ -1216,12 +1301,22 @@ jobs:
           # updater downloads and replaces itself with. fetch-release.py resolves
           # exactly these names from an allowlist, so they must not be renamed.
           #
-          # `installer-*` are the HUMAN payloads: the NSIS setup .exe, .dmg,
-          # .deb and .rpm a person downloads and runs to install Locus. They are
-          # the ones that register the system service on Windows (see the
-          # `StartVergeService` macros in packages/windows/installer.nsi), which
-          # is what makes TUN reachable there. They are never fetched by
-          # fetch-release.py, so their names cannot collide with an update.
+          # `installer-*` are the NSIS setup .exe, .dmg, .deb and .rpm a person
+          # downloads and runs to install Locus. They are the ones that register
+          # the system service on Windows (see the `StartVergeService` macros in
+          # packages/windows/installer.nsi), which is what makes TUN reachable
+          # there.
+          #
+          # The WINDOWS installer is ALSO an updater payload: `manifest.json`
+          # names it for the `windows` platform and the hub serves it to a client
+          # that installs from itself. That is why it carries a `.sig` (produced
+          # by "Sign the Windows installer") and why `installer-*` is a glob
+          # rather than a list — a renamed or added installer must bring its
+          # signature with it, and a missing `.sig` is exactly the failure the
+          # "Verify every artifact is signed" step above refuses.
+          #
+          # The OTHER platforms' installers are human-only and remain unfetched
+          # by `fetch-release.py`.
           files: |
             release/locus-linux-amd64
             release/locus-linux-amd64.sig

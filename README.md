@@ -378,8 +378,9 @@ the first time (the build is unsigned).
 > `locus-linux-amd64`, `locus-windows-amd64.exe`, `locus-darwin-*` are the
 > **updater payloads** — the files the in-app updater downloads and swaps itself
 > with. They are published on every release because the hub requires them, and
-> they are **not** a way to install Locus. Running one fails, and it fails
-> confusingly:
+> they are **not** a way to install Locus. (On Windows the updater is instead
+> handed the NSIS installer, for the reason below.) Running one fails, and it
+> fails confusingly:
 >
 > ```
 > failed to run validation core "verge-mihomo" ...

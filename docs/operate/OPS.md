@@ -510,11 +510,15 @@ Tiers → edit → Save. Clients pick it up on their next heartbeat (≤5 min).
    with all four raw binaries attached. The console **fetches from GitHub**; it
    never asks you to pick a file.
 2. Releases → enter the version (e.g. `2.2.1`) → **Fetch & publish**.
-   The hub downloads `locus-linux-amd64`, `locus-windows-amd64.exe`,
-   `locus-darwin-amd64`, `locus-darwin-arm64` and `manifest.json` **from the
+   The hub downloads `locus-linux-amd64`, the Windows installer
+   `installer-Locus_<version>_x64-setup.exe`, `locus-darwin-amd64`,
+   `locus-darwin-arm64` and `manifest.json` **from the
    GitHub Release tagged `v2.2.1` itself**, verifies each file's format against
    the platform slot it belongs in (a Windows `.exe` in the Linux slot is
-   refused) and records the hashes it computed. The page then shows exactly what
+   refused; a raw PE in the Windows slot is refused too — the slot needs an
+   installer) and records the hashes it computed. It also checks each filename
+   against `manifest.json`, so the hub and CI cannot disagree about what is being
+   served. The page then shows exactly what
    was verified — filename, size, detected format, SHA-256, and its signature.
    Do **not** use the `.zip` bundles: the updater replaces the app binary
    directly and cannot unpack a zip.
@@ -583,17 +587,29 @@ Releasing an update is: **tag → wait for CI → Releases → Fetch & publish.*
    (see `CI-CD.md`).
 
    For the auto-updater it must produce:
-   - **raw** `locus-linux-amd64`, `locus-windows-amd64.exe`,
-     `locus-darwin-amd64`, `locus-darwin-arm64`.
+   - **raw** `locus-linux-amd64`, `locus-darwin-amd64`, `locus-darwin-arm64`
+     (and `locus-windows-amd64.exe` for the retired portable client).
    - a **`.sig` minisign signature for each** of those four.
-   - `manifest.json` — version, per-platform filename + SHA256.
+   - the **Windows** NSIS installer, `installer-Locus_<version>_x64-setup.exe`,
+     **with its own `.sig`**.
+   - `manifest.json` — version, per-platform filename + SHA256 (+ signature).
 
-   It additionally produces the **installers** (`installer-*`: NSIS `.exe`,
-   `.dmg`, `.deb`, `.rpm`) — the only download a person should run, and the only
-   one that registers the Windows service. `fetch-release.py` resolves assets by
-   name from an allowlist, so the installers are ignored by the update pipeline:
-   adding a packaging artefact neither breaks the all-or-nothing check nor risks
-   an installer being handed to the updater as a payload.
+   It additionally produces the other **installers** (`installer-*`: `.dmg`,
+   `.deb`, `.rpm`) — the download a person runs, and the ones that register the
+   Windows service.
+
+   > **The Windows entry is the INSTALLER, not the raw binary.** A Windows client
+   > does not run the payload it downloads; `tauri_plugin_updater` ShellExecutes
+   > it, and it accepts any PE. Serving `locus-windows-amd64.exe` made an
+   > installed client relaunch a copy of itself outside its install directory —
+   > see `FIXES.md`, "THE APP RE-EXECUTED ITSELF". So `fetch-release.py` and
+   > `publish-release.sh` resolve the setup executable for the `windows` slot,
+   > and it carries its own signature because minisign signs exact bytes.
+   >
+   > This drifted: CI corrected `manifest.json` at v3.2.12 and the hub's fetcher
+   > did not follow, so the raw binary was served to every Windows client, which
+   > correctly refused it. **No Windows client could update at all** until the
+   > hub was corrected. `check-consistency.sh` §1a now pins the filename.
 
 2. **Publishing** puts those bytes on the hub and points `update_config` at them.
    - **Console / GitHub fetch (normal)** — `scripts/fetch-release.py` downloads the
