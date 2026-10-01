@@ -24,6 +24,7 @@ import { useTrafficSummary } from '@/components/connection/use-traffic-summary'
 import { useSubscription } from '@/hooks/use-subscription'
 import { accentCardSx, cardSx } from '@/pages/_surfaces'
 import { connectNotice } from '@/pages/connect-notice'
+import { shouldToggleFromKey } from '@/pages/connection-keys'
 import { formatSpeed } from '@/utils/format-speed'
 
 /**
@@ -57,6 +58,53 @@ const ConnectionPage = () => {
   const busy = phase === 'connecting' || phase === 'disconnecting'
   const connected = phase === 'connected'
   const showSlowHint = useSlowTransition(phase === 'connecting')
+
+  /**
+   * Enter and Space toggle the tunnel, from anywhere on the screen.
+   *
+   * This is a one-button product: a student opens the window to do one thing, and
+   * reaching for the mouse is friction on the only interaction the app has. It is
+   * also the difference between "usable" and "usable with a keyboard" — before
+   * this, the only way to connect was to tab to a button a keyboard user cannot
+   * always see is focused.
+   *
+   * Deliberately skipped while focus is in a text field, or a code being typed on
+   * the activation screen would submit a connection instead. `isContentEditable`
+   * is included for the same reason: the app has no rich-text surface today, but
+   * a future one would silently break this.
+   *
+   * Only bound when the action is meaningful, so Enter on the Account screen
+   * cannot start a tunnel the student cannot see the state of. The listener is
+   * mounted here rather than globally for exactly that reason.
+   */
+  useEffect(() => {
+    if (phase === 'checking' || phase === 'unactivated') return
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      // The rule itself is a pure function so it can be tested; see
+      // `connection-keys.ts` for why each exclusion exists.
+      const target = event.target as HTMLElement | null
+      const shouldToggle = shouldToggleFromKey({
+        key: event.key,
+        repeat: event.repeat,
+        targetTagName: target?.tagName?.toUpperCase() ?? '',
+        targetIsContentEditable: target?.isContentEditable ?? false,
+      })
+
+      // `defaultPrevented` is checked here rather than in the rule because it is
+      // about the event's history, not its content: a button that already
+      // handled this press sets it, and acting again would toggle twice.
+      if (!shouldToggle || event.defaultPrevented) return
+
+      // Space scrolls the page by default. Suppressed only when we are actually
+      // acting, so the key still works normally everywhere else.
+      event.preventDefault()
+      void toggle()
+    }
+
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [phase, toggle])
 
   // While connecting, the button's job is to STAY AVAILABLE and offer a way out.
   // A disabled spinner is the retired client's failure: the tunnel never settled,
@@ -172,6 +220,12 @@ const ConnectionPage = () => {
           // nothing this button can do", and the notice below says why.
           disabled={phase === 'checking' || phase === 'unactivated'}
           onClick={() => void toggle()}
+          // The shortcut is advertised rather than hidden: a keyboard affordance
+          // nobody knows about is not an affordance. `title` carries it for the
+          // hover case, and the accessible name below says it for a screen
+          // reader, because a `title` attribute is not reliably announced.
+          title={t('home.components.connection.toggleHint')}
+          aria-keyshortcuts="Enter Space"
           sx={{ minWidth: 220, py: 1.6, fontSize: 16 }}
         >
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.25 }}>
@@ -321,87 +375,131 @@ const ConnectionPage = () => {
         )}
       </Paper>
 
-      {/* Live speed, and the session/engine figures beside it. Shown whenever a
-          core is running rather than only when the screen has settled on
-          "connected": the panel appearing the instant a connect starts is how the
-          student sees the tunnel is doing something, and the figures it carries
-          (core usage, active connections) are readable while the tunnel is still
-          establishing. A zero here means "no traffic yet", which the speed
-          readout already renders as "idle" rather than as a broken 0 KB/s.
+      {/* Live speed, and the session/engine figures beside it.
+
+          # Why this is always rendered (changed 2026-09-30)
+
+          It used to appear only once `connected || connecting`. Two things were
+          wrong with that, and both are the "feels off" kind rather than the
+          broken kind:
+
+            1. **The screen changed height on every state change.** Pressing
+               Connect grew the page by a whole card; disconnecting collapsed it
+               again. That reflow is felt as the UI jumping under the cursor, and
+               on a 700px-tall window it moved the button the student was about to
+               press.
+            2. **The disconnected screen was mostly empty**, which reads as "this
+               app is missing something" rather than "nothing is running yet".
+
+          It is now always present, in a visibly inert state when there is nothing
+          to report. The figures are still honest: `summary` reports zeros for a
+          dead core, and the speed readouts say "Idle" rather than showing a bare
+          `0`. What changed is only that the layout no longer moves.
 
           Four metrics, the ones the original dashboard had: up/down *speed*
           (live), up/down *totals* (this session), core usage, and active
           connections. The retired client showed all four together; the rework
           had reduced it to two speeds, which answers "is it moving?" but not
           "what has it moved?" or "is the engine healthy?". */}
-      {(connected || phase === 'connecting') && (
-        <Paper elevation={0} sx={{ p: 1.75, ...cardSx(theme) }}>
-          <Box
-            sx={{ display: 'flex', justifyContent: 'space-around', mb: 1.5 }}
-          >
-            <SpeedReadout
-              label={t('home.components.traffic.metrics.downloadSpeed')}
-              bytesPerSecond={summary.downSpeedBytes}
-              color={theme.palette.primary.main}
-            />
-            <SpeedReadout
-              label={t('home.components.traffic.metrics.uploadSpeed')}
-              bytesPerSecond={summary.upSpeedBytes}
-              color={theme.palette.secondary.main}
-            />
-          </Box>
-
-          <TrafficGraph />
-
-          {/* The four figures the original dashboard carried, as a grid of
-              icon + label + value. Totals are labelled "this session" because
-              mihomo's counters are per-process — a disconnect resets them, and
-              presenting them as lifetime figures would be a lie a student can
-              catch. */}
-          <Box
+      {(() => {
+        // A core is running, or coming up. Outside that the readings are all
+        // zero by definition and the panel is shown inert rather than absent.
+        const live = connected || phase === 'connecting'
+        return (
+          <Paper
+            elevation={0}
             sx={{
-              display: 'grid',
-              gridTemplateColumns: '1fr 1fr',
-              gap: 1.25,
-              mt: 1.75,
-              pt: 1.75,
-              borderTop: `1px solid ${alpha(theme.palette.divider, 0.4)}`,
+              p: 1.75,
+              ...cardSx(theme),
+              // Dimmed rather than hidden, so the shape is constant and the
+              // change reads as "nothing to report" instead of "gone".
+              opacity: live ? 1 : 0.55,
+              transition: 'opacity 0.2s',
             }}
+            aria-busy={!live}
           >
-            <MetricTile
-              icon={<CloudUploadRounded fontSize="small" />}
-              label={t('home.components.connection.sessionUpload')}
-              value={summary.uploaded}
-              unit={summary.uploadedUnit}
-              color={theme.palette.secondary.main}
-            />
-            <MetricTile
-              icon={<CloudDownloadRounded fontSize="small" />}
-              label={t('home.components.connection.sessionDownload')}
-              value={summary.downloaded}
-              unit={summary.downloadedUnit}
-              color={theme.palette.primary.main}
-            />
-            <MetricTile
-              icon={<MemoryRounded fontSize="small" />}
-              label={t('home.components.traffic.metrics.memoryUsage')}
-              value={summary.memory}
-              unit={summary.memoryUnit}
-              color={theme.palette.info.main}
-            />
-            <MetricTile
-              icon={<SwapVertRounded fontSize="small" />}
-              label={t('home.components.connection.activeConnections')}
-              value={
-                summary.activeConnections === undefined
-                  ? undefined
-                  : String(summary.activeConnections)
-              }
-              color={theme.palette.success.main}
-            />
-          </Box>
-        </Paper>
-      )}
+            {!live && (
+              <Typography
+                variant="caption"
+                color="text.secondary"
+                sx={{ display: 'block', textAlign: 'center', mb: 1 }}
+              >
+                {t('home.components.connection.metricsWhenConnected')}
+              </Typography>
+            )}
+            <Box
+              sx={{ display: 'flex', justifyContent: 'space-around', mb: 1.5 }}
+            >
+              <SpeedReadout
+                label={t('home.components.traffic.metrics.downloadSpeed')}
+                bytesPerSecond={live ? summary.downSpeedBytes : 0}
+                color={theme.palette.primary.main}
+              />
+              <SpeedReadout
+                label={t('home.components.traffic.metrics.uploadSpeed')}
+                bytesPerSecond={live ? summary.upSpeedBytes : 0}
+                color={theme.palette.secondary.main}
+              />
+            </Box>
+
+            {/* The graph is only meaningful with a running core, and it is the
+                one part of this card that costs CPU, so it stays conditional —
+                but the space it occupies is reserved, so its arrival does not
+                move the grid below it. */}
+            <Box sx={{ minHeight: live ? undefined : 0 }}>
+              {live && <TrafficGraph />}
+            </Box>
+
+            {/* The four figures the original dashboard carried, as a grid of
+                icon + label + value. Totals are labelled "this session" because
+                mihomo's counters are per-process — a disconnect resets them, and
+                presenting them as lifetime figures would be a lie a student can
+                catch. */}
+            <Box
+              sx={{
+                display: 'grid',
+                gridTemplateColumns: '1fr 1fr',
+                gap: 1.25,
+                mt: 1.75,
+                pt: 1.75,
+                borderTop: `1px solid ${alpha(theme.palette.divider, 0.4)}`,
+              }}
+            >
+              <MetricTile
+                icon={<CloudUploadRounded fontSize="small" />}
+                label={t('home.components.connection.sessionUpload')}
+                value={live ? summary.uploaded : '0'}
+                unit={live ? summary.uploadedUnit : 'B'}
+                color={theme.palette.secondary.main}
+              />
+              <MetricTile
+                icon={<CloudDownloadRounded fontSize="small" />}
+                label={t('home.components.connection.sessionDownload')}
+                value={live ? summary.downloaded : '0'}
+                unit={live ? summary.downloadedUnit : 'B'}
+                color={theme.palette.primary.main}
+              />
+              <MetricTile
+                icon={<MemoryRounded fontSize="small" />}
+                label={t('home.components.traffic.metrics.memoryUsage')}
+                value={live ? summary.memory : undefined}
+                unit={live ? summary.memoryUnit : undefined}
+                color={theme.palette.info.main}
+              />
+              <MetricTile
+                icon={<SwapVertRounded fontSize="small" />}
+                label={t('home.components.connection.activeConnections')}
+                value={
+                  !live || summary.activeConnections === undefined
+                    ? undefined
+                    : String(summary.activeConnections)
+                }
+                color={theme.palette.success.main}
+              />
+            </Box>
+          </Paper>
+        )
+      })()}
     </Box>
   )
 }
@@ -412,6 +510,15 @@ const ConnectionPage = () => {
  * Takes the raw bytes-per-second and formats it here, so the friendlier
  * presentation (sub-KB speeds shown as KB/s, zero shown as idle) lives in one
  * place — `formatSpeed` — rather than being re-derived per call site.
+ *
+ * # The idle case used to render as a bare `0`
+ *
+ * `formatSpeed` deliberately computes `idle` so a zero speed reads as "idle"
+ * rather than as a fault. This component set the unit to an empty string for it
+ * and emitted only the value — so the student saw a lone grey `0` with no unit,
+ * which is the one thing the formatter was written to avoid: it looks like a
+ * value that failed to load, not like a quiet connection. The intent was in the
+ * comment and the flag, and the rendering dropped it.
  */
 const SpeedReadout = ({
   label,
@@ -422,8 +529,8 @@ const SpeedReadout = ({
   bytesPerSecond: number
   color: string
 }) => {
+  const { t } = useTranslation()
   const speed = formatSpeed(bytesPerSecond)
-  const unit = speed.idle ? '' : `${speed.unit}/s`
 
   return (
     <Box sx={{ textAlign: 'center' }}>
@@ -434,19 +541,35 @@ const SpeedReadout = ({
       >
         {label}
       </Typography>
-      <Typography
-        variant="h6"
-        sx={{ color, fontVariantNumeric: 'tabular-nums', fontWeight: 600 }}
-      >
-        {speed.value}
+      {speed.idle ? (
+        // Said in words, in the same visual weight as a reading, so the panel's
+        // shape does not jump between idle and active.
         <Typography
-          component="span"
-          variant="caption"
-          sx={{ ml: 0.5, color: 'text.secondary' }}
+          variant="h6"
+          color="text.secondary"
+          sx={{
+            fontVariantNumeric: 'tabular-nums',
+            fontWeight: 600,
+            opacity: 0.7,
+          }}
         >
-          {unit}
+          {t('home.components.traffic.idle')}
         </Typography>
-      </Typography>
+      ) : (
+        <Typography
+          variant="h6"
+          sx={{ color, fontVariantNumeric: 'tabular-nums', fontWeight: 600 }}
+        >
+          {speed.value}
+          <Typography
+            component="span"
+            variant="caption"
+            sx={{ ml: 0.5, color: 'text.secondary' }}
+          >
+            {speed.unit}/s
+          </Typography>
+        </Typography>
+      )}
     </Box>
   )
 }

@@ -115,6 +115,7 @@ export interface TranslationResources {
           disconnect: string
           disconnecting: string
           metricPending: string
+          metricsWhenConnected: string
           needsActivation: string
           notConnected: string
           requiresSetup: string
@@ -125,6 +126,7 @@ export interface TranslationResources {
           subscriptionExpiresToday: string
           subscriptionLapsed: string
           takingLonger: string
+          toggleHint: string
         }
         currentProxy: {
           actions: {
@@ -210,6 +212,7 @@ export interface TranslationResources {
             smooth: string
           }
           diagnostics: string
+          idle: string
           legends: {
             download: string
             upload: string

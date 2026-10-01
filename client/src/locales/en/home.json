@@ -130,11 +130,12 @@
         "minutes": "{{time}} Minutes"
       },
       "unknownTime": "Unknown time",
+      "idle": "Idle",
       "chartStyles": {
         "smooth": "Smooth",
         "linear": "Linear"
       },
-      "diagnostics": "Points: {{points}} | Compressed: {{compressed}} | FPS: {{fps}}"
+      "diagnostics": "Points: {{points}} | Compressed: {{compressed}}"
     },
     "clashMode": {
       "errors": {
@@ -162,6 +163,7 @@
       "sessionUpload": "Uploaded this session",
       "sessionDownload": "Downloaded this session",
       "activeConnections": "Active connections",
+      "metricsWhenConnected": "Traffic figures appear once the VPN is on.",
       "metricPending": "Not reported yet",
       "speed": "Speed",
       "needsActivation": "This device needs an activation code before it can connect.",
@@ -211,6 +213,7 @@
         "notActivatedToCheck": "Activate a code first — there is nothing to confirm yet."
       },
       "cancel": "Cancel",
+      "toggleHint": "Press Enter to turn the VPN on or off",
       "takingLonger": "Still connecting. This can take a few seconds on a school network — you can cancel and try again."
     }
   }

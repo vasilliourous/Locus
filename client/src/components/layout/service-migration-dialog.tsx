@@ -4,7 +4,6 @@ import { useTranslation } from 'react-i18next'
 
 import { BaseDialog } from '@/components/base'
 import { runStateQueryKey } from '@/hooks/use-system-state'
-import { useVisibility } from '@/hooks/use-visibility'
 import {
   getRuntimeState,
   installService,
@@ -18,7 +17,6 @@ import { setCacheData, useQuery } from '@/services/query-client'
 
 export const ServiceMigrationDialog = () => {
   const { t } = useTranslation()
-  const pageVisible = useVisibility()
   const [loading, setLoading] = useState(false)
   const [stateRefreshFailed, setStateRefreshFailed] = useState(false)
   const [workflowIncomplete, setWorkflowIncomplete] = useState(false)
@@ -27,7 +25,18 @@ export const ServiceMigrationDialog = () => {
     queryFn: getRuntimeState,
     enabled: true,
     retry: 1,
-    refetchInterval: pageVisible ? 30000 : false,
+    // No `refetchInterval` here, deliberately.
+    //
+    // This ran its own 30 s poll on the same cache key as `useSystemState` —
+    // a second poller of one key, on a screen the student is not looking at,
+    // for a value that already arrives by event (`verge://run-state-changed`
+    // carries a full snapshot and `use-layout-events` writes it into this entry).
+    // `useSystemState` owns the read path for this key; a dialog that also polls
+    // it doubles the IPC for no extra information and makes the two disagree
+    // about when the state is fresh.
+    //
+    // The dialog still re-reads on its own terms: `refreshRunState` below is
+    // called after every remedy, which is the moment the value actually changes.
   })
   // Whether the service needs a decision is derived once, in Rust, and travels with the
   // snapshot; a failed refresh is treated as needing one, since we cannot tell otherwise.
