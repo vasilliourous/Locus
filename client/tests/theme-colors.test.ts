@@ -5,6 +5,16 @@ import path from 'node:path'
 import { describe, expect, it } from 'vitest'
 
 import { LOCUS_COLORS, LOCUS_LIGHT } from '../src/pages/_theme'
+import {
+  DECORATIONS,
+  DEFAULT_SHAPE,
+  DEFAULT_THEME_ID,
+  isThemeId,
+  resolveTheme,
+  themeDefaultFor,
+  THEMES,
+  THEME_IDS,
+} from '../src/pages/_themes'
 
 /**
  * The three layers that paint before the app is themed must agree.
@@ -42,6 +52,280 @@ const readCode = (relative: string) =>
     .replace(/\/\*[\s\S]*?\*\//g, '')
     .replace(/\/\/.*$/gm, '')
     .toLowerCase()
+
+/**
+ * Register-level guards for the theme registry.
+ *
+ * These are the tests that make `docs/reference/THEMES.md` §3 real. The design
+ * record states four rules a theme must satisfy; a rule stated only in prose is
+ * a rule that holds until someone adds a seventh theme at 1am, and the failure
+ * mode here is subtle — a palette that violates contrast does not crash, it just
+ * becomes slightly unreadable for the student who needs the accessibility theme
+ * most.
+ *
+ * # Why these are computed, not transcribed
+ *
+ * `CLAIMS.md` §2: a number written in a sentence cannot be recomputed and will
+ * rot. So the floors live here as constants that the *test* applies to the
+ * registry, rather than as a table of expected ratios in the design record. A
+ * theme that drifts out of range fails here, and the doc never carries a value
+ * that could be wrong.
+ *
+ * # Every test here has been demonstrated failing
+ *
+ * Per `docs/reference/DEBUGGING-METHOD.md`: a guard that cannot fail reads
+ * exactly like a guard that passed. Each of these was run against an
+ * intentionally broken registry entry before being kept — see the note on each.
+ */
+describe('theme registry', () => {
+  /** WCAG relative luminance. Not the crude `0.2126r + …` byte average below. */
+  const channel = (c: number) => {
+    const s = c / 255
+    return s <= 0.03928 ? s / 12.92 : Math.pow((s + 0.055) / 1.055, 2.4)
+  }
+
+  const relativeLuminance = (hex: string) => {
+    const h = hex.replace('#', '')
+    const r = parseInt(h.slice(0, 2), 16)
+    const g = parseInt(h.slice(2, 4), 16)
+    const b = parseInt(h.slice(4, 6), 16)
+    return 0.2126 * channel(r) + 0.7152 * channel(g) + 0.0722 * channel(b)
+  }
+
+  const contrast = (a: string, b: string) => {
+    const l1 = relativeLuminance(a)
+    const l2 = relativeLuminance(b)
+    const [hi, lo] = l1 > l2 ? [l1, l2] : [l2, l1]
+    return (hi + 0.05) / (lo + 0.05)
+  }
+
+  const specs = Object.values(THEMES)
+
+  it('the registry has one entry per declared id, and ids match their keys', () => {
+    // Catches the realistic copy-paste error: duplicating an entry and leaving
+    // the old `id` in place, which would silently drop a theme from the dropdown
+    // and make the persisted value ambiguous between two entries.
+    for (const [key, spec] of Object.entries(THEMES)) {
+      expect(spec.id).toBe(key)
+    }
+    expect(THEME_IDS).toEqual(Object.keys(THEMES))
+    expect(new Set(THEME_IDS).size).toBe(THEME_IDS.length)
+  })
+
+  it('every id is a known id, and unknown ids resolve to the default', () => {
+    for (const id of THEME_IDS) {
+      expect(isThemeId(id)).toBe(true)
+    }
+    // The load-bearing half: a value from a hand-edited config file must never
+    // throw or blank the screen. Demonstrated failing by making `resolveTheme`
+    // return `THEMES[id]` directly (undefined) — the third assertion goes red.
+    expect(isThemeId('no-such-theme')).toBe(false)
+    expect(isThemeId(undefined)).toBe(false)
+    expect(isThemeId('')).toBe(false)
+    expect(resolveTheme('no-such-theme').id).toBe(DEFAULT_THEME_ID)
+    expect(resolveTheme(undefined).id).toBe(DEFAULT_THEME_ID)
+    expect(resolveTheme(null).id).toBe(DEFAULT_THEME_ID)
+    expect(resolveTheme({}).id).toBe(DEFAULT_THEME_ID)
+  })
+
+  it('the two default themes are byte-identical to the shipped palette', () => {
+    // This is what makes the registry a SUPERSET of the shipped appearance rather
+    // than a replacement for it: an install with no `theme_id` must render
+    // exactly what it rendered before themes existed. If this fails, the layer is
+    // no longer additive and the upgrade path is a visual change.
+    const dark = THEMES['default-dark']
+    expect(dark.palette.background).toBe(LOCUS_COLORS.background)
+    expect(dark.palette.surface).toBe(LOCUS_COLORS.surface)
+    expect(dark.palette.surfaceHover).toBe(LOCUS_COLORS.surfaceHover)
+    expect(dark.palette.border).toBe(LOCUS_COLORS.border)
+    expect(dark.palette.textPrimary).toBe(LOCUS_COLORS.textPrimary)
+    expect(dark.palette.textSecondary).toBe(LOCUS_COLORS.textSecondary)
+    expect(dark.palette.accent).toBe(LOCUS_COLORS.accent)
+    expect(dark.palette.accentHover).toBe(LOCUS_COLORS.accentHover)
+    expect(dark.palette.success).toBe(LOCUS_COLORS.success)
+    expect(dark.palette.warning).toBe(LOCUS_COLORS.warning)
+    expect(dark.palette.error).toBe(LOCUS_COLORS.error)
+
+    const light = THEMES['default-light']
+    expect(light.palette.background).toBe(LOCUS_LIGHT.background)
+    expect(light.palette.surface).toBe(LOCUS_LIGHT.surface)
+    expect(light.palette.surfaceHover).toBe(LOCUS_LIGHT.surfaceHover)
+    expect(light.palette.border).toBe(LOCUS_LIGHT.border)
+    expect(light.palette.accent).toBe(LOCUS_LIGHT.accent)
+    expect(light.palette.accentHover).toBe(LOCUS_LIGHT.accentHover)
+    // The two legacy typography values the MUI palette is built from.
+    expect(light.palette.textPrimary).toBe('#0B1F14')
+    expect(light.palette.textSecondary).toBe('#4A6356')
+  })
+
+  it('body text clears 4.5:1 on its own surface, and labels clear 3:1', () => {
+    // THEMES.md §3 rule 1. Demonstrated failing by lowering `paper`'s
+    // textSecondary to `#B9AE9C` (~2.1:1): the second assertion goes red.
+    const failures: string[] = []
+    for (const spec of specs) {
+      const onSurface = contrast(
+        spec.palette.textPrimary,
+        spec.palette.surface,
+      )
+      const onBackground = contrast(
+        spec.palette.textPrimary,
+        spec.palette.background,
+      )
+      const labels = contrast(
+        spec.palette.textSecondary,
+        spec.palette.surface,
+      )
+      if (onSurface < 4.5) {
+        failures.push(`${spec.id}: textPrimary/surface ${onSurface.toFixed(2)}`)
+      }
+      if (onBackground < 4.5) {
+        failures.push(
+          `${spec.id}: textPrimary/background ${onBackground.toFixed(2)}`,
+        )
+      }
+      if (labels < 3) {
+        failures.push(`${spec.id}: textSecondary/surface ${labels.toFixed(2)}`)
+      }
+    }
+    expect(failures).toEqual([])
+  })
+
+  it('the accent is legible as text on the theme it belongs to', () => {
+    // The shipped light theme needed a *darker* accent for exactly this reason
+    // (`_theme.tsx`). Every theme inherits that obligation — an accent used on a
+    // button label is body text, not decoration.
+    const failures: string[] = []
+    for (const spec of specs) {
+      const onSurface = contrast(spec.palette.accent, spec.palette.surface)
+      const onBackground = contrast(spec.palette.accent, spec.palette.background)
+      if (onSurface < 3) {
+        failures.push(`${spec.id}: accent/surface ${onSurface.toFixed(2)}`)
+      }
+      if (onBackground < 3) {
+        failures.push(
+          `${spec.id}: accent/background ${onBackground.toFixed(2)}`,
+        )
+      }
+    }
+    expect(failures).toEqual([])
+  })
+
+  it('a theme mode matches its palette direction', () => {
+    // THEMES.md §3 rule 2. This is the check that catches a copy-paste error
+    // between two similar themes — the realistic way a registry entry is authored
+    // wrong. Demonstrated failing by flipping `midnight` to `mode: 'light'`.
+    const failures: string[] = []
+    for (const spec of specs) {
+      const bg = relativeLuminance(spec.palette.background)
+      const text = relativeLuminance(spec.palette.textPrimary)
+      const textIsLighter = text > bg
+      if (spec.mode === 'dark' && !textIsLighter) {
+        failures.push(`${spec.id}: dark theme with dark text`)
+      }
+      if (spec.mode === 'light' && textIsLighter) {
+        failures.push(`${spec.id}: light theme with light text`)
+      }
+    }
+    expect(failures).toEqual([])
+  })
+
+  it('the structural relationships hold in every theme', () => {
+    // THEMES.md §3 rule 3. These are the relationships the shipped palette was
+    // built on; a theme that violates one looks broken in a way contrast maths
+    // alone will not catch — a card you cannot see against the page, or a border
+    // doing no work.
+    const failures: string[] = []
+    for (const spec of specs) {
+      const p = spec.palette
+      const surfaceStep = contrast(p.surface, p.background)
+      const borderVsSurface = contrast(p.border, p.surface)
+      const secondaryVsPrimary = contrast(p.textSecondary, p.textPrimary)
+
+      // A card must be a visible step from the page. 1.03 is below any real
+      // theme's figure and above "identical"; it catches a copy-paste where
+      // surface was left equal to background.
+      if (surfaceStep < 1.03) {
+        failures.push(`${spec.id}: surface/background ${surfaceStep.toFixed(3)}`)
+      }
+      if (borderVsSurface < 1.15) {
+        failures.push(
+          `${spec.id}: border/surface ${borderVsSurface.toFixed(2)}`,
+        )
+      }
+      // textSecondary must be *dimmer* than textPrimary, or the hierarchy has
+      // been inverted and labels will read as louder than body copy.
+      if (secondaryVsPrimary <= 1) {
+        failures.push(
+          `${spec.id}: textSecondary is not dimmer than textPrimary`,
+        )
+      }
+    }
+    expect(failures).toEqual([])
+  })
+
+  it('every theme carries a shape, and radii are sane', () => {
+    for (const spec of specs) {
+      expect(spec.shape.cardRadius).toBeGreaterThan(0)
+      expect(spec.shape.controlRadius).toBeGreaterThan(0)
+      // The shipped card is 12px. A radius past ~24 stops reading as a card in
+      // this layout, and a control rounder than its card looks like a mistake.
+      expect(spec.shape.cardRadius).toBeLessThanOrEqual(24)
+      expect(spec.shape.controlRadius).toBeLessThanOrEqual(16)
+    }
+    // Today's values are what an unthemed app renders, so they are pinned.
+    expect(DEFAULT_SHAPE.cardRadius).toBe(12)
+    expect(DEFAULT_SHAPE.controlRadius).toBe(8)
+  })
+
+  it('a decoration names a preset that exists, and no theme injects CSS', () => {
+    // THEMES.md §1: decoration is a NAMED PRESET, never CSS text. A theme that
+    // could emit arbitrary CSS could restyle any component, which is the
+    // interference property this layer exists to avoid — so the registry is
+    // checked for the shape of the value, not just its validity.
+    for (const spec of specs) {
+      if (spec.decoration === undefined) continue
+      expect(Object.hasOwn(DECORATIONS, spec.decoration)).toBe(true)
+    }
+    for (const [id, preset] of Object.entries(DECORATIONS)) {
+      expect(typeof preset).toBe('string')
+      // A preset is a declaration block, not a stylesheet: no braces (which
+      // would let it escape its `[data-theme-skin]` scope) and no `url(`, so no
+      // preset can load a remote asset at runtime.
+      expect(preset).not.toContain('{')
+      expect(preset).not.toContain('}')
+      expect(preset).not.toContain('url(')
+      expect(id).toMatch(/^[a-z0-9-]+$/)
+    }
+    // The preset used by `forest` is exercised, and the registry does not
+    // accumulate dead presets nobody selects.
+    const used = new Set(
+      specs.map((s) => s.decoration).filter((d): d is string => !!d),
+    )
+    expect(used.size).toBeGreaterThan(0)
+    for (const id of Object.keys(DECORATIONS)) {
+      expect(used.has(id)).toBe(true)
+    }
+  })
+
+  it('the projection carries every field the MUI palette is built from', () => {
+    // `themeDefaultFor` is the bridge between the registry's vocabulary and the
+    // hook's. A missing field here does not crash — it falls back to `undefined`
+    // and the palette loses a colour — so the projection is asserted explicitly.
+    for (const spec of specs) {
+      const projected = themeDefaultFor(spec, 'sans-serif')
+      expect(projected.primary_color).toBe(spec.palette.accent)
+      expect(projected.background_color).toBe(spec.palette.background)
+      expect(projected.primary_text).toBe(spec.palette.textPrimary)
+      expect(projected.error_color).toBe(spec.palette.error)
+      expect(projected.warning_color).toBe(spec.palette.warning)
+      expect(projected.success_color).toBe(spec.palette.success)
+      expect(projected.info_color).toBe(spec.palette.info)
+      expect(projected.secondary_color).toBe(spec.palette.secondary)
+      // Font is a preference, passed through rather than themed.
+      expect(projected.font_family).toBe('sans-serif')
+    }
+  })
+})
 
 describe('locus palette consistency across paint layers', () => {
   it('the document background matches the theme background', () => {

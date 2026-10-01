@@ -4,6 +4,7 @@ import {
   ErrorOutlineRounded,
   LanguageOutlined,
   MemoryOutlined,
+  PaletteOutlined,
   PowerSettingsNewOutlined,
   RefreshOutlined,
   ScheduleOutlined,
@@ -31,6 +32,7 @@ import { useI18n } from '@/hooks/use-i18n'
 import { useSubscription } from '@/hooks/use-subscription'
 import { useVerge } from '@/hooks/use-verge'
 import { cardSx } from '@/pages/_surfaces'
+import { isThemeId as isValidThemeId, THEMES, THEME_IDS } from '@/pages/_themes'
 import { supportedLanguages } from '@/services/i18n'
 import { showNotice } from '@/services/notice-service'
 
@@ -355,6 +357,53 @@ const AccountPage = () => {
             </MenuItem>
           </Select>
         </Box>
+
+        {/* The theme picker.
+            A *second* control next to Appearance rather than a replacement for
+            it, deliberately. `theme_mode` above is the stored light/dark/system
+            preference and still governs the app when no theme is selected; a
+            theme carries its own mode and supersedes it while one is set. The two
+            are kept separate because merging them is a migration question (what
+            does an existing "Dark" choice become?) and not a prerequisite for
+            themes to work — see `docs/reference/THEMES.md` §2 and §7.
+
+            Writes `theme_id`, which is a string not a union: an id this build
+            does not know has to survive a round-trip, so it is narrowed at the
+            point of use by `resolveTheme`, never here. */}
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, py: 1 }}>
+          <PaletteOutlined fontSize="small" sx={{ color: 'text.secondary' }} />
+          <Typography variant="body2" sx={{ flexGrow: 1 }}>
+            {t('home.components.connection.account.theme')}
+          </Typography>
+          <Select
+            size="small"
+            value={
+              // An unset or unknown stored id shows as the theme that will
+              // actually render, so the control never claims a look the app is
+              // not showing. The empty string is NOT used as the "none" value,
+              // because that is indistinguishable from "not chosen yet".
+              isValidThemeId(verge?.theme_id) ? verge!.theme_id! : THEME_IDS[0]
+            }
+            onChange={(e) =>
+              void patchVerge({ theme_id: e.target.value }).catch(onError)
+            }
+            sx={{ minWidth: 140 }}
+          >
+            {THEME_IDS.map((id) => (
+              <MenuItem key={id} value={id}>
+                {t(THEMES[id].labelKey)}
+              </MenuItem>
+            ))}
+          </Select>
+        </Box>
+
+        <Typography
+          variant="caption"
+          color="text.secondary"
+          sx={{ display: 'block', mt: 0.5 }}
+        >
+          {t('home.components.connection.account.themeHint')}
+        </Typography>
 
         {/* "Check for updates automatically".
             Wired to `auto_check_update` — NOT `enable_auto_launch`. The row was

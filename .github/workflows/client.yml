@@ -276,6 +276,32 @@ jobs:
       - name: Lint
         run: pnpm run lint
 
+      # ── The frontend test suite ──
+      #
+      # WHY THIS EXISTS: the frontend suite existed in `client/src/**/*.test.ts`
+      # and `client/tests/` and NOTHING in this workflow invoked it. A tag could
+      # build, sign and publish with the whole frontend suite red, while the run
+      # was green — the same failure shape as the Rust tests before 2026-09-29
+      # (`build (linux)` now runs those), and the same shape as the two-sided
+      # filename contract in `AGENTS.md`.
+      #
+      # No count is written here on purpose: it decays the moment anyone adds a
+      # test, and a stale number in a comment is a claim nobody re-checks
+      # (`docs/operate/CLAIMS.md` §2). `vitest` prints the real one.
+      #
+      # It runs here rather than in a build job because the whole suite passes in
+      # under three seconds, so it costs this 15-minute gate essentially nothing.
+      # The suite is not decorative: it carries the theme registry guards
+      # (contrast, mode direction, structural relationships, the no-injected-CSS
+      # rule), the connection keyboard rules, and the delay/speed formatting
+      # rules. Each of those guards was demonstrated failing before being kept,
+      # per `docs/reference/DEBUGGING-METHOD.md`.
+      #
+      # `pnpm test` is `vitest run` — it does NOT watch, so it cannot hang the
+      # job waiting for input.
+      - name: Frontend tests
+        run: pnpm test
+
       # ── Rust tests and lints have MOVED to the `linux` build job ──
       #
       # They were NOT run by CI until 2026-09-29, which is why the updater's

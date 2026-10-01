@@ -27,6 +27,239 @@ corrections are marked. For what is *still* broken, read `STILL-OPEN.md`.
 
 ---
 
+## THEME SUPPORT — AND THE FRONTEND TEST SUITE THAT NOTHING WAS RUNNING (2026-10-01)
+
+*Client-side only. Not a defect fix: a feature, plus the guard gap it exposed.*
+
+### The gap this exposed, which matters more than the feature
+
+`client/src/**/*.test.ts` and `client/tests/` held **69 passing tests, and no job
+in `.github/workflows/client.yml` invoked them.** `verify` ran
+`check-consistency.sh`, the tag check, `pnpm run web:build` (which includes
+`tsc --noEmit`) and `pnpm run lint` — and stopped. `pnpm test` was never called,
+in any job, on any trigger.
+
+That is the same failure shape as the Rust suite before 2026-09-29 (530 tests
+existed and passed locally while a tag could build, sign and publish with the
+suite red) and the same shape as the two-sided filename contract in `AGENTS.md`.
+A test suite that nothing runs is not a guard; it is a comment with a `describe`
+around it.
+
+**Fixed in the same change:** a `Frontend tests` step (`pnpm test`) in the
+`verify` job. It is placed there rather than in a build job because the whole
+suite finishes in under three seconds, so it costs a 15-minute gate essentially
+nothing. `pnpm test` is `vitest run` and does not watch, so it cannot hang the
+job waiting for input.
+
+### The feature: six named themes, as a layer that can be removed
+
+A student can now pick one of six appearances from a dropdown on **Account**:
+`default-dark`, `default-light`, `midnight` (OLED), `paper` (warm light),
+`high-contrast`, and `forest` (decorated, larger radii). The design record is
+[`THEMES.md`](THEMES.md); this entry records only what a reader of the log needs.
+
+The three properties that were the whole design constraint, each with its guard:
+
+1. **Additive.** `verge.theme_id` is a new `Option<String>`; when it is unset —
+   every existing install — the hook resolves through `theme_mode` exactly as
+   before. `default-dark` and `default-light` are built *from* `LOCUS_COLORS` and
+   `LOCUS_LIGHT` rather than restating their hex values, so the shipped appearance
+   is a member of the registry. Pinned by the byte-identity test, because relaxing
+   it silently converts this into a visual change for every existing install.
+2. **`setting.X || dt.X` is unchanged.** The legacy custom-colour fields keep
+   their precedence and still win. Only *which base* they fall back to changed —
+   from a fixed light/dark pair to the resolved theme. No stored value is
+   reinterpreted, so there is no migration.
+3. **Shape and decoration cannot reach a component.** Radii travel as CSS
+   variables (`cardSx` reads `var(--card-radius, 12px)`), and decoration is one
+   **named preset**, never injected CSS. The registry test asserts no preset
+   contains `{`, `}` or `url(`, which is what stops a preset escaping its
+   `[data-theme-skin]` scope.
+
+### What went wrong while building it, for the record
+
+**`themeDefaultFor` was briefly written without `font_family`.** The hook reads
+`dt.font_family` in four places, so `tsc` caught it immediately — noted only
+because it shows the projection function is load-bearing for behaviour, not just
+for colour.
+
+**`pnpm test` was assumed to be wired into CI.** It was not. The claim "the tests
+pass" was true and irrelevant, which is `DEBUGGING-METHOD.md` §1.3 exactly.
+
+**`knip` flagged `ThemePalette` as an unused export.** It is not part of any
+pipeline (there is no `knip` step in CI), but it was un-exported rather than left:
+a second name for the theme shape invites a consumer to type against it instead of
+against the registry, which is the thing that is actually guarded.
+
+### The guards, and the evidence they can fail
+
+Five registry guards in `client/tests/theme-colors.test.ts`, plus one in
+`check-consistency.sh` §9. **Every one was run against deliberately broken code
+before being kept** (`DEBUGGING-METHOD.md` §3):
+
+| Guard | Broken deliberately by | Observed failure |
+|---|---|---|
+| Contrast floors | `paper.textSecondary` → `#B9AE9C` | `paper: textSecondary/surface 2.19` |
+| Mode matches palette | `midnight` set to `mode: 'light'` | `[ Array(1) ] to deeply equal []` |
+| Structural relationships | `forest.surface` = its background | `forest: surface/background 1.000` |
+| Preset cannot escape scope | preset containing `body { … }` and `url(…)` | `expected '…' not to contain '{'` |
+| Unknown id falls back | `resolveTheme` returning `THEMES[id]` directly | `Cannot read properties of undefined` |
+| Registry vs `state.toml` | state trimmed to 3 themes / 7th theme added to registry only | `BAD client.theme_ids`, exit 1, **both directions** |
+
+The last one is two-sided on purpose: it catches the registry drifting from
+`state.toml` *and* `state.toml` drifting from the registry, which is the
+`AGENTS.md` rule that when two things must agree, assert the agreement.
+
+### Verified / not verified
+
+**Verified locally:** 79/79 vitest; `tsc --noEmit` clean; eslint clean on all five
+touched files; `cargo check --all-targets` clean; `pnpm run web:build` succeeds;
+`knip` clean for the new files; `bash server/scripts/check-consistency.sh` exits 0
+with `client.theme_ids … agrees`.
+
+**Not verified:** that any theme *looks* good; that `forest-glow` renders as
+intended on all four platforms; that the §5 cold-start transition (every theme
+starts as the default dark, then resolves) is imperceptible in practice. These are
+visual checks and are stated as unverified, not as passing.
+
+**Pre-existing and untouched:** `eslint src/main.tsx` reports an unused
+`recognised` binding, committed in `039bb41` and explicitly left alone by
+`09a985f`. It is not from this change, but the `pnpm run lint` step in `verify`
+fails on it independently, so the CI gate is red until someone decides about it.
+
+### Open follow-ups
+
+See [`THEMES.md`](THEMES.md) §10. The one needing a **product decision, not a code
+change**: there is no UI control that clears `theme_id`, so once a theme is chosen
+`theme_mode` — and with it "follow the system" — is unreachable from the UI.
+
+--- — "CONNECTING" ON A WORKING TUNNEL, STILL (2026-10-01)
+
+*Client-side fix; ships in the next version tagged. Not a hub change.*
+
+> **This corrects the entry further down, "THE BUTTON SAT ON 'CONNECTING' WHILE
+> THE TUNNEL WAS CARRYING TRAFFIC (2026-10-01)".** That entry's diagnosis was
+> right and its retry/caching work still stands, but **the classifier it
+> introduced is the cause of this recurrence.** Read this one first; then read
+> that one for the parts that are still true.
+
+The same report came back after v3.2.14: the traffic panel showed bytes moving and
+`whatsmyip` showed the exit node, while the button pulsed amber on **connecting**
+indefinitely. The previous fix did not remove it, because the previous fix
+introduced it.
+
+### The defect, in one line
+
+`probe.rs::delay_is_a_measurement` rejected a delay **at or above the probe's own
+per-attempt budget**:
+
+```rust
+// wrong — the budget decides what counts as egress
+let timeout_ms = timeout_secs.saturating_mul(1000);
+delay > 0 && delay < timeout_ms && delay <= IMPLAUSIBLE_DELAY
+```
+
+With `EGRESS_ATTEMPT_TIMEOUT = 5`, the acceptance window was `0 < delay < 5000`.
+mihomo reports a member that **hit its budget** as the timeout value itself
+(`5000`), so the probe read *"this was slow"* as *"this is dead"* — and because the
+rule was derived from the same constant the engine was given, raising the budget
+from 3 s to 5 s **did not widen tolerance, it moved the rejection threshold**. The
+fix for the first report made the check more likely to fail on a slow link, which
+is precisely the link it was meant to tolerate.
+
+The comment above `EGRESS_ATTEMPT_TIMEOUT` had already predicted the outcome while
+the code did the opposite:
+
+> on a slow school link the first packet can take several seconds to get through,
+> and calling that "no egress" is the **single most likely way to strand a working
+> tunnel on "connecting" forever**.
+
+### Why it presents as "stuck", not as "failed"
+
+The chain, unchanged by the previous fix:
+
+```text
+delay map has no value below 5000
+  -> egress_attempt_once() -> false, twice, inside the 12 s deadline
+  -> probe_egress() -> EgressOutcome::Failing
+  -> decide(ProbeOutcome::Serving, Failing, latch) -> Readiness::NoEgress
+  -> locus_status.ready = false   (core_up = true)
+  -> phaseFromStatus: connected && !ready -> 'connecting'
+```
+
+`Readiness::NoEgress` and "the tunnel is not up" **render identically** —
+`phaseFromStatus` derives solely from `ready`, and `NoEgress` is not `ready`. So
+"stuck on connecting" cannot be distinguished from "not connected" on screen. That
+ambiguity is why this took two rounds.
+
+### The fix
+
+`delay_is_a_measurement` now rejects only the two values that are unambiguously
+*not* a measurement:
+
+```rust
+// correct — only the sentinels are non-measurements
+delay > 0 && delay <= IMPLAUSIBLE_DELAY
+```
+
+The engine dialled the target and the request left the machine; the only thing that
+ran out was a clock **we chose**. That is evidence of egress, not of failure. The
+`0` sentinel remains the one value read as "no traffic moved", and `> 1e5` still
+guards against an error sentinel being read as a latency.
+
+`timeout_secs` is kept in the signature (now unused) so the coupling is visible at
+the call site rather than hidden — the same budget is still passed to the engine.
+
+### The deliberate divergence from `classifyDelay`
+
+The previous entry's stated goal was "one classifier for delay values" mirroring
+`client/src/utils/delay.ts`. **That goal was wrong, and the divergence is now
+intentional and documented in both files.**
+
+| | `classifyDelay` (frontend) | `delay_is_a_measurement` (probe) |
+|---|---|---|
+| Question | *how fast is this node?* | *did the tunnel carry a packet at all?* |
+| Consumer | a latency list | the readiness gate |
+| `5000` means | `'timeout'` — show a timeout badge | **egress observed** — slow is still working |
+| Sentinels agreed | `0`, `> 1e5` | `0`, `> 1e5` |
+
+The two must agree on the **sentinel set**; they must not agree on what a slow node
+means for their own callers. Conflating them is the bug: the probe adopted a
+display classifier's verdict and inherited its "slow = bad" bias.
+
+### The test that guarded the bug
+
+`a_timeout_sentinel_is_not_a_measurement` asserted the defective behaviour, and its
+own comment described the fix backwards — *"the specific disagreement with
+`classifyDelay` this function removes."* A test pinning the wrong contract made the
+defect look deliberate. It is replaced by `a_delay_at_the_budget_is_still_egress`,
+which asserts `5000`, `6000` and `7500` all count as egress.
+
+**Verified to fail against the old rule** (per `DEBUGGING-METHOD.md` §"a check that
+cannot fail reads like one that passed"):
+
+```text
+thread ... panicked at probe.rs:583:
+assertion failed: delay_is_a_measurement(5000, 5)
+```
+
+### What this does NOT fix
+
+- **A group where *every* member times out** still returns mihomo's
+  `504 "get delay: all proxies timeout"`, which the plugin raises as `Err`, which
+  `egress_attempt_once` collapses to `false`. Reachable on Strike, where the group
+  holds both `Locus-UoT` and `Locus` and the probe tests the group's *selected*
+  member — not necessarily the one carrying the student's traffic. **Still open.**
+- **The integration test's blind spot.** `tests/egress_probe_engine.rs` SKIPs when
+  the runner has no network, and its positive case uses a `direct` outbound to a
+  public host. It has never exercised *slow-but-working* through a real tunnel —
+  the case that broke. The blind spot is unchanged; see `STILL-OPEN.md`.
+
+For the full diagnostic walk-through, see
+[`EGRESS-READINESS.md`](EGRESS-READINESS.md).
+
+---
+
 ## DEVICE IDENTITY WAS NOT DURABLE — CODES "STOPPED BEING RECOGNISED", AND A REINSTALL LOST THEM (2026-10-01)
 
 *Ships in the client's 3.2.x line; the hub half is inert until `setup.sh` re-runs.*

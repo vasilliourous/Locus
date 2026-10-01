@@ -12,6 +12,44 @@ Ordered by whether I could have validated it here.
 
 ---
 
+## Open, and needs a decision rather than work
+
+### Nothing in the UI can clear a selected theme — `theme_mode` becomes unreachable
+
+**Added 2026-10-01.** From the theme work (2026-10-01 entry in `FIXES.md`; design
+record in [`THEMES.md`](THEMES.md)).
+
+A theme carries its own light/dark mode and **supersedes `theme_mode` while one is
+set** (`THEMES.md` §2). The dropdown on Account only ever *writes* a theme id —
+every option in it is a theme — and nothing clears the field. So after a student
+picks any theme, the Appearance control above it becomes inert: it still stores a
+value, and the value is no longer what the app honours. "Follow the system" is
+reachable only by editing `verge.yaml` by hand.
+
+**This is a decision, not a coding task.** The obvious shape is an explicit
+*Default (follow system)* entry that writes an empty/absent `theme_id`, but that
+changes what the dropdown means for an existing install (it would gain an option
+meaning "none of the above"), and it interacts with the 3rd gap below. Picking a
+shape is a product call, so it was not made silently.
+
+**Until it is made:** the two Appearance controls can visibly disagree, and the
+honest description of the second one is "overrides the first while set".
+
+### The theme dropdown and the `theme_mode` dropdown are separate and can disagree
+
+**Added 2026-10-01.** Same change.
+
+`account.tsx` now has two adjacent controls in Preferences: Appearance
+(`theme_mode`, 3 options) and Theme (`theme_id`, 6 options). When a theme is set,
+the first shows a value the app is not honouring. `THEMES.md` §7 records this as
+deliberately deferred rather than overlooked — merging them is a UI change with
+its own migration question (what does an existing "Dark" choice become?) and is
+not needed for themes to work. **The point where this becomes confusing to a
+student is the point to do it,** and that point is probably the same change as the
+entry above.
+
+---
+
 ## Open, and blocked in this environment
 
 ### The publish guard calls `atob`, which goja does not have — the fix is proven but not applied
@@ -688,6 +726,32 @@ definition — only the stated cause of the bug was wrong.
 
 Recording these so they are not re-investigated:
 
+- **Theme visuals — the whole appearance is unverified by machine.** **Added
+  2026-10-01.** The registry suite proves a theme's palette clears the contrast
+  floors, that its mode matches its palette direction, that the structural
+  relationships hold, and that a decoration preset cannot escape its scope. It
+  proves **nothing** about whether any theme *looks* right. Specifically
+  unverified: that `forest-glow`'s radial wash reads as intended on the four
+  platforms; that the §5 cold-start transition (every theme starts as
+  `default-dark`/`default-light`, then resolves) is imperceptible on a real
+  machine; and that `midnight`'s pure-black surfaces separate adequately on a real
+  OLED panel. These are eyes-only checks. Do not read a green suite as covering
+  them — see `THEMES.md` §8 and §9.
+- **`forest-glow` is only ever used against a dark palette, and nothing enforces
+  that.** **Added 2026-10-01.** The preset is a translucent green wash designed
+  against a dark background. A future light theme naming it would pass every
+  existing guard, because the preset test checks the decoration's *shape* (no
+  braces, no `url(`), not its contrast against the palette using it. See
+  `THEMES.md` §10 item 3.
+- **`eslint src/main.tsx` has an unused `recognised` binding, and it fails the CI
+  lint gate.** **Added 2026-10-01.** It is committed in-progress work from the
+  device-recognition branch (`039bb41`) and was explicitly left alone by
+  `09a985f`, which said so in its own commit message. **It is not from the theme
+  change** — but `pnpm run lint` runs with `--max-warnings=0`, so the `verify` job
+  is red until someone decides: finish the recognition wiring, mark it `_recognised`,
+  or remove it. Flagged rather than fixed because it belongs to that branch's
+  author, and silently deleting another agent's in-progress binding is worse than
+  a red lint.
 - **`shadowsocks-eco` WARN lines** — `decrypt length failed` from AWS-range IPs.
   Internet scanners probing open ports; they cannot complete the AEAD handshake.
   Benign, and the volume is low.

@@ -13,6 +13,11 @@ import {
   LOCUS_COLORS,
   LOCUS_LIGHT,
 } from '@/pages/_theme'
+import {
+  DECORATIONS,
+  resolveTheme,
+  themeDefaultFor,
+} from '@/pages/_themes'
 import { useSetThemeMode, useThemeMode } from '@/services/states'
 
 const CSS_INJECTION_SCOPE_ROOT = '[data-css-injection-root]'
@@ -73,11 +78,45 @@ ${css}
 export const useCustomTheme = () => {
   const appWindow: WebviewWindow = useMemo(() => getCurrentWebviewWindow(), [])
   const { verge } = useVerge()
-  const { theme_mode, theme_setting } = verge ?? {}
+  const { theme_mode, theme_setting, theme_id } = verge ?? {}
   const mode = useThemeMode()
   const setMode = useSetThemeMode()
   const userBackgroundImage = theme_setting?.background_image || ''
   const hasUserBackground = !!userBackgroundImage
+
+  /**
+   * The selected theme. `undefined`/empty/unknown all resolve to `default-dark`.
+   *
+   * `resolveTheme` never throws and never returns nothing, so every consumer
+   * below can treat `spec` as a real theme. That is the same "never invent a
+   * state" rule the subscription union follows -- see `docs/reference/THEMES.md`
+   * section 2.
+   */
+  const spec = useMemo(() => resolveTheme(theme_id), [theme_id])
+
+  /**
+   * Whether a named theme is selected.
+   *
+   * This is the single branch that makes the whole layer additive: when it is
+   * false, every effect below behaves exactly as it did before themes existed,
+   * because a device that never opened the theme dropdown has no `theme_id`.
+   *
+   * **If you are debugging a theme bug, start here.** `hasTheme` decides both
+   * the mode (`effectiveMode`) and which window-chrome branch runs, so a mistake
+   * in it presents as two unrelated symptoms at once. `THEMES.md` §9 has the
+   * symptom-to-cause table; `docs/reference/FIXES.md` (2026-10-01) records what
+   * was built and what was demonstrated to fail.
+   */
+  const hasTheme = typeof theme_id === 'string' && theme_id.length > 0
+
+  /**
+   * The effective mode.
+   *
+   * A theme carries its own mode (one mode per theme -- `THEMES.md` section 2), so
+   * selecting a theme supersedes `theme_mode`. With no theme selected, `mode` is
+   * the context value, which is the `theme_mode`/system resolution as before.
+   */
+  const effectiveMode: 'light' | 'dark' = hasTheme ? spec.mode : mode
 
   useEffect(() => {
     if (theme_mode === 'light' || theme_mode === 'dark') {
@@ -128,6 +167,16 @@ export const useCustomTheme = () => {
   }, [theme_mode, appWindow, setMode])
 
   useEffect(() => {
+    if (hasTheme) {
+      // The native window chrome follows the theme's mode, so a dark theme does
+      // not get light title-bar buttons. `setTheme` is the OS-level hint only;
+      // it does not paint the app.
+      appWindow.setTheme(spec.mode as TauriOsTheme).catch((err) => {
+        console.error(`Failed to set window theme to ${spec.mode}:`, err)
+      })
+      return
+    }
+
     if (theme_mode === undefined) {
       return
     }
@@ -144,11 +193,63 @@ export const useCustomTheme = () => {
         console.error(`Failed to set window theme to ${mode}:`, err)
       })
     }
-  }, [mode, appWindow, theme_mode])
+  }, [mode, appWindow, theme_mode, hasTheme, spec.mode])
+
+  /**
+   * The decoration and shape layer.
+   *
+   * Purely additive, and deliberately kept out of the MUI theme object: a theme's
+   * decoration is one named preset from `DECORATIONS` (never CSS text -- see
+   * `THEMES.md` section 1), written as a single `<style>` element scoped to
+   * `[data-theme-skin]`. Nothing here targets a component, a class or the
+   * document, so deleting this effect removes every trace of the layer and
+   * leaves the shipped appearance byte-identical.
+   *
+   * The radii go out as CSS variables *in addition to* being applied through MUI,
+   * because `_surfaces.ts` reads them for the shared card. A theme that sets no
+   * radius writes today's values, so an unthemed app is unchanged.
+   */
+  useEffect(() => {
+    const root = document.documentElement
+    if (!root) {
+      return
+    }
+
+    root.setAttribute('data-theme-id', spec.id)
+    root.style.setProperty('--card-radius', `${spec.shape.cardRadius}px`)
+    root.style.setProperty('--control-radius', `${spec.shape.controlRadius}px`)
+
+    const preset = spec.decoration ? DECORATIONS[spec.decoration] : null
+    if (preset) {
+      root.setAttribute('data-theme-skin', spec.decoration!)
+    } else {
+      root.removeAttribute('data-theme-skin')
+    }
+
+    let el = document.querySelector('style#locus-theme-decoration')
+    if (!preset) {
+      el?.remove()
+      return
+    }
+    if (!el) {
+      el = document.createElement('style')
+      el.id = 'locus-theme-decoration'
+      document.head.appendChild(el)
+    }
+    // Scoped to the skin attribute, so a preset cannot reach a component even by
+    // accident. `data-theme-skin` is only present while a decorated theme is
+    // active, which is why removing the attribute above also disarms the CSS.
+    el.textContent = `[data-theme-skin] { ${preset} }`
+  }, [spec])
 
   const theme = useMemo(() => {
     const setting = theme_setting || {}
-    const dt = mode === 'light' ? defaultTheme : defaultDarkTheme
+    // `font_family` is a preference rather than a theme field, so it is read from
+    // the same shipped defaults it always came from and handed to the projection.
+    // A theme supplies every other value; none supplies a font.
+    const legacyFont =
+      effectiveMode === 'light' ? defaultTheme : defaultDarkTheme
+    const dt = themeDefaultFor(spec, legacyFont.font_family)
     let muiTheme: MuiTheme
 
     try {
@@ -157,7 +258,7 @@ export const useCustomTheme = () => {
           values: { xs: 0, sm: 650, md: 900, lg: 1200, xl: 1536 },
         },
         palette: {
-          mode,
+          mode: effectiveMode,
           primary: { main: setting.primary_color || dt.primary_color },
           secondary: { main: setting.secondary_color || dt.secondary_color },
           info: { main: setting.info_color || dt.info_color },
@@ -174,6 +275,7 @@ export const useCustomTheme = () => {
           },
         },
         shadows: Array(25).fill('none') as Shadows,
+        shape: { borderRadius: spec.shape.controlRadius },
         typography: {
           fontFamily: setting.font_family
             ? `${setting.font_family}, ${dt.font_family}`
@@ -187,7 +289,7 @@ export const useCustomTheme = () => {
           values: { xs: 0, sm: 650, md: 900, lg: 1200, xl: 1536 },
         },
         palette: {
-          mode,
+          mode: effectiveMode,
           primary: { main: dt.primary_color },
           secondary: { main: dt.secondary_color },
           info: { main: dt.info_color },
@@ -325,7 +427,18 @@ export const useCustomTheme = () => {
     }
 
     return muiTheme
-  }, [mode, theme_setting, userBackgroundImage, hasUserBackground])
+  }, [
+    effectiveMode,
+    // `mode` is read only to pick the legacy font fallback, but it is a real
+    // input: a student on `theme_mode: system` who switches their OS from light
+    // to dark must re-create the theme. Omitting it is a stale-closure bug the
+    // linter caught, not a spurious warning.
+    mode,
+    theme_setting,
+    userBackgroundImage,
+    hasUserBackground,
+    spec,
+  ])
 
   useEffect(() => {
     const id = setTimeout(() => {

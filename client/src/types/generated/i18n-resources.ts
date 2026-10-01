@@ -99,8 +99,16 @@ export interface TranslationResources {
             refreshed: string
             refreshFailed: string
             subscription: string
+            theme: string
             themeDark: string
+            themeDefaultDark: string
+            themeDefaultLight: string
+            themeForest: string
+            themeHighContrast: string
+            themeHint: string
             themeLight: string
+            themeMidnight: string
+            themePaper: string
             themeSystem: string
             thisDevice: string
             title: string

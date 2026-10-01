@@ -862,6 +862,14 @@ interface IVergeConfig {
   start_page?: string
   clash_core?: string
   theme_mode?: 'light' | 'dark' | 'system'
+  /**
+   * The selected named theme. Typed as `string` rather than the `ThemeId` union
+   * on purpose: this value is read from a file a user can edit, so an id this
+   * build does not know is a real possibility that must parse. It is narrowed at
+   * the single point of use by `resolveTheme` (`src/pages/_themes.ts`), which
+   * falls back to the default theme for anything unusable.
+   */
+  theme_id?: string
   traffic_graph?: boolean
   enable_memory_usage?: boolean
   enable_group_icon?: boolean

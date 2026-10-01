@@ -26,6 +26,19 @@ pub struct IVerge {
     /// `light` or `dark` or `system`
     pub theme_mode: Option<String>,
 
+    /// The selected named theme, e.g. `default-dark` or `midnight`.
+    ///
+    /// Deliberately a plain `String` and NOT an enum with serde variants: an id
+    /// this build does not know must survive a round-trip rather than fail to
+    /// deserialise, because the registry is the client's and a file can be edited
+    /// by hand. An unknown or absent id is resolved to the default theme by
+    /// `resolveTheme` in `src/pages/_themes.ts` -- never an error.
+    ///
+    /// `None` means "no theme selected", which is every install upgrading from a
+    /// version before themes existed, and it behaves exactly as `theme_mode`
+    /// alone did. See `docs/reference/THEMES.md` section 2.
+    pub theme_id: Option<String>,
+
     pub tray_event: Option<String>,
 
     pub env_type: Option<String>,
@@ -480,6 +493,12 @@ impl IVerge {
             clash_core: Some("verge-mihomo".into()),
             language: Some(clash_verge_i18n::system_language().into()),
             theme_mode: Some("system".into()),
+            // No `theme_id` in the template on purpose: a fresh install uses
+            // `theme_mode`, and the resolver falls back to `default-dark` when no
+            // theme is selected. Writing a default here would make the field
+            // non-`None` on every install and blur the "unset means legacy
+            // behaviour" property the upgrade path depends on.
+
             #[cfg(not(target_os = "windows"))]
             env_type: Some("bash".into()),
             #[cfg(target_os = "windows")]
@@ -566,6 +585,7 @@ impl IVerge {
 
         patch!(language);
         patch!(theme_mode);
+        patch!(theme_id);
         patch!(tray_event);
         patch!(env_type);
         patch!(start_page);

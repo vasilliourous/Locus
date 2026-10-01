@@ -106,6 +106,21 @@ value      = "Ubuntu 22.04.5, 1 vCPU / 454 MB RAM + 1 GB swap"
 source     = "operator observation"
 provenance = "unverified"
 
+[client.theme_ids]
+# The named themes the client ships, in dropdown order.
+#
+# This is a fact of the same class as `client.version`: recomputable from the
+# tree, so it does not belong in a sentence. The registry
+# (`client/src/pages/_themes.ts`) is the authority; check-consistency.sh §9
+# recomputes this list from it and fails when the two disagree, so a theme cannot
+# be added in one place. See docs/reference/THEMES.md §6.
+#
+# Note the ordering is part of the value: it is the order the dropdown renders,
+# and the first entry is what the control shows when nothing is stored.
+value      = ["default-dark", "default-light", "midnight", "paper", "high-contrast", "forest"]
+source     = "client/src/pages/_themes.ts (the THEMES registry)"
+provenance = "derived"
+
 [platforms.keys]
 # The four update platforms. The keys say macos_*, the artifact filenames say
 # darwin-* — that asymmetry is frozen; see client/src-tauri/src/locus/contract.rs.

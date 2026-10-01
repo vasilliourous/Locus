@@ -175,7 +175,7 @@ and noted in `docs/reference/STILL-OPEN.md`.
 
 ---
 
-## 5. Appearance: the Locus palette
+## 5. Appearance: the Locus palette, and the theme layer on top
 
 `src/pages/_theme.tsx` holds `LOCUS_COLORS` (dark) and `LOCUS_LIGHT`, both
 exported and both **defaults, not overrides** — `use-custom-theme` reads each
@@ -197,6 +197,32 @@ field as `setting.X || dt.X`, so a student who customised a colour keeps it.
 - **Tier colours** (`TIER_COLORS`) are per-tier so the badge "sells itself";
   `TIER_FALLBACK` covers a tier this build does not know, so an unknown tier still
   renders.
+
+### The named themes are a layer over this, not a replacement for it
+
+`src/pages/_themes.ts` holds a registry of six named themes (`default-dark`,
+`default-light`, `midnight`, `paper`, `high-contrast`, `forest`) that a student
+picks from a dropdown on **Account**. The design record is
+[`../../docs/reference/THEMES.md`](../../docs/reference/THEMES.md) — read it before
+touching the registry.
+
+The three properties that make it safe to have alongside this section:
+
+- **It is additive.** `verge.theme_id` unset — every existing install — resolves
+  through `theme_mode` exactly as before. `default-dark` and `default-light` are
+  built from `LOCUS_COLORS`/`LOCUS_LIGHT` rather than restating them, so the
+  shipped appearance is a *member* of the registry, not a copy that can drift.
+- **`setting.X || dt.X` is unchanged.** A selected theme changes only which base
+  `dt` is; the custom-colour precedence above still applies field by field.
+- **Shape and decoration travel by CSS variables** (`--card-radius`,
+  `--control-radius`) and one `<style id="locus-theme-decoration">` element scoped
+  to `[data-theme-skin]`. `cardSx` reads `var(--card-radius, 12px)` — the explicit
+  fallback is what an unthemed app and the pre-hook startup window render.
+
+A theme **cannot** change structure, tier identity, or what a state says. A
+decoration is a **named preset**, never injected CSS: a theme that could emit
+arbitrary CSS could restyle any component, and the registry test asserts no preset
+contains `{`, `}` or `url(`.
 
 `src/pages/_surfaces.ts` defines the shared card styling, so every card is the
 same object. Note the app zeroes MUI's shadow scale app-wide and uses a 1px border
