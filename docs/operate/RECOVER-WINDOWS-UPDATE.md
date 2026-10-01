@@ -144,6 +144,69 @@ server/scripts/hooks-sync.sh --fetch-service
 server/scripts/hooks-sync.sh --fetch-service --check
 ```
 
+### The same deploy by hand
+
+If the script cannot be used, these are the six steps it performs. The **order is
+the point** — step 2 exists so a syntax error cannot take the service down, and
+step 5 exists so the swap cannot be masked by cached bytecode.
+
+```sh
+HOST=root@<host>
+
+# 0. Record what is there now, so the change is provable and reversible.
+ssh $HOST 'sha256sum /root/server/scripts/fetch-release.py; \
+           ls -1 /root/server/scripts/fetch-release.py.bak-* 2>/dev/null | tail -1'
+
+# 1. Upload to a TEMP name. The systemd unit execs this path, so never write in
+#    place: a partially transferred file would be executed on the next restart.
+scp server/scripts/fetch-release.py $HOST:/root/server/scripts/fetch-release.py.uploading
+
+# 2. Compile the UPLOADED copy on the host, BEFORE swapping. `systemctl
+#    is-active` would still say "active" with a broken file.
+ssh $HOST 'cd /root/server/scripts && python3 -m py_compile fetch-release.py.uploading'
+
+# 3. Keep a rollback point, then move atomically.
+ssh $HOST 'cd /root/server/scripts && \
+  cp fetch-release.py fetch-release.py.bak-$(date -u +%Y%m%d%H%M%S) && \
+  mv fetch-release.py.uploading fetch-release.py && \
+  chown root:root fetch-release.py && chmod 755 fetch-release.py'
+
+# 4. Drop stale bytecode — a cache can mask the swap.
+ssh $HOST 'rm -rf /root/server/scripts/__pycache__'
+
+# 5. Restart, then POLL health rather than sleeping a fixed amount.
+ssh $HOST 'systemctl restart locus-fetch; sleep 3; \
+  systemctl is-active locus-fetch; \
+  curl -s -o /dev/null -w "health=%{http_code}\n" http://127.0.0.1:8091/health; \
+  journalctl -u locus-fetch --since "-2 min" --no-pager -p err -q'
+```
+
+Then verify by **hash and behaviour**, which is the part that catches a deploy
+that "succeeded" without changing anything:
+
+```sh
+# The hash must equal the repo's.
+ssh $HOST 'sha256sum /root/server/scripts/fetch-release.py'
+sha256sum server/scripts/fetch-release.py
+
+# Ask the copy that RUNS which filename it resolves. `grep` would also match
+# explanatory comments, so it can read as fixed while the code is not.
+ssh $HOST 'cd /root/server/scripts && python3 -c "
+import importlib.util
+s = importlib.util.spec_from_file_location(\"fr\", \"fetch-release.py\")
+m = importlib.util.module_from_spec(s); s.loader.exec_module(m)
+print(m.resolve_platform_names(\"<version>\"))"'
+# windows -> installer-Locus_<version>_x64-setup.exe
+```
+
+**Rollback**, if the new fetcher misbehaves:
+
+```sh
+ssh $HOST 'cd /root/server/scripts && \
+  cp $(ls -1t fetch-release.py.bak-* | head -1) fetch-release.py && \
+  systemctl restart locus-fetch'
+```
+
 On a host with password-only access, supply a transport rather than editing the
 script — it does not invent credentials:
 
@@ -151,12 +214,32 @@ script — it does not invent credentials:
 VPS=root@<host> SSH="sshpass -e ssh" server/scripts/hooks-sync.sh --fetch-service
 ```
 
+> **`sshpass` is the script's documented transport, but it is not the only way,
+> and it should not be installed casually.** It pipes a password into `ssh`,
+> which puts the secret in the process environment and weakens credential
+> handling. If it is not already present, prefer either a real key — generate a
+> short-lived one, install its public half, use it, then **remove it and confirm
+> the removal** (`ssh` must refuse afterwards) — or run the six steps in
+> `FIXES.md` ("The hub deploy, and the evidence it took") by hand.
+>
+> Whichever route you take: **do not leave standing access behind.** The 2026-10-01
+> deploy used a temporary key that was removed and verified removed, and the
+> removal was checked before `authorized_keys` was emptied — it held only that
+> key, and that was confirmed rather than assumed.
+
 **Verify the deployed fetcher is the fixed one.** This is the check that catches
 a deploy that "succeeded" without changing anything:
 
 ```sh
 ssh root@<host> 'grep -c "installer-Locus" /root/server/scripts/fetch-release.py'
 # -> at least 1. 0 means the old file is still there.
+```
+
+Prefer the hash, which cannot be satisfied by a comment:
+
+```sh
+ssh root@<host> 'sha256sum /root/server/scripts/fetch-release.py'
+sha256sum server/scripts/fetch-release.py     # the two must be equal
 ```
 
 > **Order matters here too.** The corrected fetcher *requires* the installer

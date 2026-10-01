@@ -313,6 +313,21 @@ src-tauri/sidecar/verge-mihomo-x86_64-unknown-linux-gnu -t -f <generated>.yaml
 The mihomo check is how the proxy-group loop was found. Run it against
 `tier::build_profile` output whenever that module changes.
 
+### The readiness probe has its own manual
+
+`core/manager/probe.rs` and the `core/manager/mod.rs` around it are **upstream
+files Locus modified**, and the modification is load-bearing: the app's
+connected/connecting distinction is decided there, and a defect there reads on
+screen as "stuck on connecting" with no other symptom. Two shipped defects came
+from this one chain.
+
+Before changing any probe constant or the delay classifier, read
+[`../../docs/reference/EGRESS-READINESS.md`](../../docs/reference/EGRESS-READINESS.md).
+It carries the full chain, a four-command localisation procedure, and §4 — the
+trap that caused the recurrence: **do not derive the classifier's acceptance
+window from the timeout budget, and do not make it agree with the frontend's
+`classifyDelay`.** The probe asks "did a packet move?", not "how fast was it?".
+
 ---
 
 ## 10. Related
@@ -324,4 +339,6 @@ The mihomo check is how the proxy-group loop was found. Run it against
 - `SIGNING.md` — key custody and the signing pipeline
 - `IDENTITY-MIGRATION.md` — the app-id migration and what must not be renamed
 - `RESTRUCTURE.md` — repo layout history
+- `../../docs/reference/EGRESS-READINESS.md` — the readiness chain, and why the
+  button says "connecting"
 - `../../docs/operate/UPDATE-SYSTEM.md` — the hub side, end to end

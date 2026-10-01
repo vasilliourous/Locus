@@ -24,6 +24,23 @@ recomputed from this checkout is **data** and belongs in
 deployed system is a **world claim** with a date and a re-verify command. Neither
 belongs in a sentence. Never write an IP address or a count of live customers.
 
+## Before you diagnose a defect
+
+Read [`docs/reference/DEBUGGING-METHOD.md`](docs/reference/DEBUGGING-METHOD.md).
+Four defects have shipped here through fully green pipelines, so "the tests pass"
+is not evidence that something works. The short version:
+
+- **Reproduce against the live system** (`curl` the hub), not from the source.
+- **A guard firing is not a guard being broken** — find which side is wrong first.
+- **Two-sided contracts:** when CI and the hub must agree on a filename or wire
+  key, assert the **agreement**, not each side separately.
+- **Every new guard must be shown to fail** against the code it catches. A check
+  that cannot fail reads exactly like a check that passed.
+- **A repo fix is inert until the piece that runs it is redeployed.** The hub has
+  its own copy of `fetch-release.py`; `hooks-sync.sh --fetch-service` compares them.
+- **Say what you did not verify.** Verified / unverified / falsified / structural
+  argument are different claims.
+
 ## Cutting a release — read this before you tag anything
 
 **CI does not bump versions.** It labels the GitHub Release and its

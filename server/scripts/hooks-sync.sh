@@ -111,6 +111,32 @@ done
 if [ "$FETCH_SERVICE" = "1" ]; then
     [ -f "$FETCH_SRC" ] || fail "fetch service source not found: ${FETCH_SRC}"
 
+    # Can we reach the host at all?
+    #
+    # WHY THIS EXISTS: every `remote` call below ends in `|| true`, so a host
+    # that is down, firewalled or refusing the key produces an EMPTY answer —
+    # which the comparison then reports as "not deployed at all". An operator
+    # checking sync state against an unreachable box was told the file was
+    # missing, and the obvious next move is to deploy it. That is a destructive
+    # reading of a non-answer, and it is the same defect class this repository
+    # keeps paying for: "we could not ask" is not "the answer is no"
+    # (docs/reference/DEBUGGING-METHOD.md; client/AGENTS.md, the `checking` vs
+    # `unactivated` phase split).
+    #
+    # Deliberately a real round trip with a fixed sentinel rather than `ssh -o
+    # ConnectTimeout` alone: a key rejection exits non-zero in well under the
+    # timeout, so exit status distinguishes nothing. Prove the channel carries a
+    # known string instead.
+    assert_reachable() {
+        local probe
+        probe="$(remote 'printf %s locus-hooksync-probe' 2>/dev/null || true)"
+        if [ "$probe" != "locus-hooksync-probe" ]; then
+            fail "cannot reach ${VPS} over SSH (no usable key, or the host is down)" 1
+        fi
+    }
+
+    assert_reachable
+
     svc_verify() {
         local rc=0
         log "Verifying the fetch service…"

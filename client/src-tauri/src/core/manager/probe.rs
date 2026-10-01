@@ -373,6 +373,10 @@ async fn egress_attempt_once() -> bool {
 
 /// Whether a mihomo delay value is a real round-trip measurement.
 ///
+/// **Before changing this or any constant nearby, read
+/// `docs/reference/EGRESS-READINESS.md`.** Two defects shipped from this one rule,
+/// both presenting as "the button is stuck on connecting while traffic flows".
+///
 /// This mirrors the frontend's `classifyDelay` (`client/src/utils/delay.ts`),
 /// which is the app's single definition of what a delay value *is*. Keeping the
 /// two in step is the point: mihomo reports non-measurements inside the same

@@ -1463,12 +1463,61 @@ struct OwnerRecoveryPolicy {
     reset_system_proxy: bool,
 }
 
-const fn owner_recovery_policy(_reason: OwnerRecoveryReason, is_macos: bool) -> OwnerRecoveryPolicy {
+/// What recovery may do to the machine-wide proxy for a given reason.
+///
+/// # Why this cannot be `!is_macos`
+///
+/// It used to be, and that made the whole clear path below **unreachable on
+/// macOS and destructive on the platforms that did run it**.
+///
+/// The clear is issued through the Service (`clear_inner` -> `ProxyBackendRoute::Service`
+/// -> `set_system_proxy_by_service` -> `active_service_session()`), and
+/// `recover_after_owner_loss_while_locked` discards the active session a few
+/// lines above the call. So the clear could only ever have run while the session
+/// was still present, which is exactly the case where it is wrong to run:
+///
+///   * **`Displaced`** — another instance owns the Service now. We no longer hold
+///     the owner session, so the clear fails at `active_service_session()?`; and
+///     if it did not, we would be reaching across a service we have been evicted
+///     from to switch off the *new* owner's proxy, breaking the student's live
+///     tunnel.
+///   * **`SameOwnerFailure`** — still ours, but the Core has died. `Core::stop`
+///     and `Handle::restart_core` already call `proxy_control::clear()` on that
+///     path, so recovery doing it again can only turn the proxy back *off* after
+///     a restart has turned it back on.
+///   * **`TransportFailure`** — the Service cannot be reached at all, so the
+///     clear fails too. `proxy_control::stop_guard()` above is the part that
+///     bites here, and it runs locally and unconditionally.
+///
+/// Recovery therefore resets **no** system proxy. It stops the guard and drops
+/// readiness, which is the local state it can honestly act on, and leaves the
+/// machine-wide proxy to the Core's own stop/restart path where the session is
+/// still valid.
+///
+/// This was dead in practice: nothing covered it, and the branch was
+/// unreachable for the same reason the `mark_*` call beside it is unreachable —
+/// see the note on [`mark_service_unavailable_after_owner_loss`].
+const fn owner_recovery_policy(_reason: OwnerRecoveryReason, _is_macos: bool) -> OwnerRecoveryPolicy {
     OwnerRecoveryPolicy {
-        reset_system_proxy: !is_macos,
+        reset_system_proxy: false,
     }
 }
 
+/// Records that the Service is unreachable, so cached readiness stops claiming it.
+///
+/// # This is currently unreachable, and that is deliberate to note
+///
+/// The only production caller is `recover_after_owner_loss_while_locked`, which
+/// runs **after** it has already called `clear_active_service_session()` and
+/// `CoreManager::global().core_stopped()` a few lines above. `RUN_STATE` derives
+/// `service_usable()` from the Core's running mode (`RunStateStore` mirrors
+/// `RunState::mode`), so by the time this runs the store already reports the
+/// Service as unusable and the observation here changes nothing.
+///
+/// It is kept rather than deleted because the observation it makes is correct and
+/// the *ordering* is the bug: a future edit that moves this call above
+/// `core_stopped()` makes it load-bearing again, and deleting it would silently
+/// remove the only record of *why* the Service went away.
 fn mark_service_unavailable_after_owner_loss<E: RunStateEnv>(store: &RunStateStore<E>, reason: OwnerRecoveryReason) {
     if matches!(reason, OwnerRecoveryReason::TransportFailure) {
         store.observe(ServiceHealth::Unavailable(
@@ -2116,15 +2165,34 @@ mod tests {
         Ok(())
     }
 
+    /// Recovery must not reset the machine-wide proxy on ANY platform, for ANY
+    /// reason.
+    ///
+    /// This replaces a test that asserted the opposite for non-macOS
+    /// (`assert!(owner_recovery_policy(reason, false).reset_system_proxy)`),
+    /// which is what pinned the behaviour in place: on Windows and Linux the
+    /// recovery path reached across the Service to switch off a proxy it no
+    /// longer owned, while on macOS the same branch could not run at all because
+    /// the owner session had already been cleared a few lines above the call.
+    ///
+    /// The platform argument is still taken (and still varies) so the *shape* of
+    /// the decision stays visible at the call site; what changed is that the
+    /// answer no longer depends on it. Both OSes are asserted, because a fix
+    /// that only corrected the platform the author happened to run would leave
+    /// the other one destructive.
     #[test]
-    fn macos_recovery_never_resets_machine_wide_proxy() {
+    fn recovery_never_resets_the_machine_wide_proxy() {
         for reason in [
             OwnerRecoveryReason::Displaced,
             OwnerRecoveryReason::SameOwnerFailure,
             OwnerRecoveryReason::TransportFailure,
         ] {
-            assert!(!owner_recovery_policy(reason, true).reset_system_proxy);
-            assert!(owner_recovery_policy(reason, false).reset_system_proxy);
+            for is_macos in [true, false] {
+                assert!(
+                    !owner_recovery_policy(reason, is_macos).reset_system_proxy,
+                    "{reason:?} (macos={is_macos}) must not clear the system proxy"
+                );
+            }
         }
 
         let generation = AtomicU64::new(7);

@@ -14,6 +14,35 @@ Ordered by whether I could have validated it here.
 
 ## Open, and blocked in this environment
 
+### The service-recovery proxy clear was argued structurally, never observed
+
+**Added 2026-10-01.** The 2026-10-01 `FIXES.md` entry ("recovery from a lost
+service owner reset the wrong platform's proxy") changes
+`owner_recovery_policy` so recovery resets **no** machine-wide proxy on any
+reason or platform. The guard is real — it was demonstrated failing against the
+pre-fix rule — but what it guards is a *decision*, and the decision rests on a
+structural argument about ordering, not on a reproduction:
+
+- **Not observed:** a Windows or Linux recovery that actually switched off a live
+  system proxy. The claim is that the pre-fix `reset_system_proxy: true` arm
+  attempted it; it is not a report of it happening. Reaching it needs a displaced
+  or transport-lost Service owner on a machine with the system proxy enabled and
+  the tray app running.
+- **Not observed:** that the macOS arm really was unreachable. The argument is
+  that `clear_active_service_session()` runs three lines above the clear, so
+  `active_service_session()?` must fail. That reads correctly from the code and
+  the failure is logged rather than silent, so a log on a real macOS recovery
+  would settle it — nobody has looked at one.
+- **Unmeasured:** whether the macOS clear *failed* or the retry loop exhausted
+  its three attempts. Both are consistent with the code; which one occurs decides
+  whether the branch is dead or merely futile.
+
+Confirming any of these needs a machine where the privileged Service can be
+displaced while the Core is running. Until then the honest claim class is
+**structural argument**.
+
+---
+
 ### The recognition path has never been exercised against the live hub
 
 **Added 2026-10-01.** The wiring is complete (see the 2026-10-01 `FIXES.md`
@@ -349,10 +378,14 @@ Two specific unknowns:
 ### The readiness probes against a live Core (partly closed 2026-10-01)
 
 **Added 2026-09-28 (second round); extended 2026-09-29 for the egress check; the
-engine-side contract closed 2026-10-01.**
+engine-side contract closed 2026-10-01; the classifier corrected 2026-10-01
+(second pass).**
 
 Readiness asks **two** questions. `probe_core_api` asks the Core's control API;
 `probe_egress` makes a real request *through* the tunnel (`delay_group`).
+
+For the full chain and a localisation procedure, see
+[`EGRESS-READINESS.md`](EGRESS-READINESS.md).
 
 **Now verified against a real engine.** `cargo test --test egress_probe_engine`
 starts the real sidecar with the tier's own group name (`Locus Auto`) and pins the
@@ -366,6 +399,14 @@ three facts the probe depends on:
 - the sentinels mihomo reports in the same field a measurement uses — `0` for a
   failed test and the timeout value itself for a timed-out one — are classified as
   **not** measurements, so a tunnel that just timed out cannot read as connected.
+
+> **The third of those three now reads the other way.** mihomo's timeout value is
+> classified as a **measurement** (`EGRESS-READINESS.md` §4): the engine dialled the
+> target and the request left the machine, so a member that hit its budget is
+> evidence of egress. Only `0` and `> 1e5` are non-measurements. The test below
+> still pins what the *engine* returns; what changed is the probe's reading of it.
+> The integration test's positive case does not exercise the slow-but-working path,
+> so it does **not** cover this — see the gap below.
 
 That test also settled one behavioural fact that had been assumed: mihomo's
 `direct` outbound reports a delay of `0` for a **loopback** target (loopback
@@ -382,10 +423,37 @@ tunnel:
   config or the plugin transport is wrong in the live app, every connect would stall
   into "no egress" and the button would say **connecting** forever — the report this
   work started from. Fail-safe (it never says "connected" wrongly) but still wrong.
-- **Is the egress budget right on a school network?** Raised from 3 s to a 5 s
+- **Is the egress budget right on a school network?** ~~Raised from 3 s to a 5 s
   per-attempt budget within a 12 s overall deadline, with two attempts (see
-  FIXES.md). Still a judgement made without a live slow link — watch it on a
-  genuinely slow network before trusting it.
+  FIXES.md).~~ **Answered (2026-10-01, second pass): the budget was the bug.** A
+  5 s budget inside a plain `delay < 5000` acceptance rule rejected the very answer
+  the engine returned when a member hit that budget — so the probe read "slow" as
+  "dead" and pinned the button on **connecting** while traffic flowed. The rule now
+  accepts any measured value; the budget no longer decides what counts as egress.
+  **Still unmeasured on a real school network:** whether 5 s is the right budget at
+  all. It now only bounds *how long the engine waits*, not what counts as success,
+  so a too-small budget degrades to a slower answer rather than a false failure —
+  but nobody has watched it on a genuinely slow link. See
+  [`EGRESS-READINESS.md`](EGRESS-READINESS.md) §4 and §6.
+- **A group where EVERY member times out is indistinguishable from a transport
+  failure.** mihomo answers `504 "get delay: all proxies timeout"`, the plugin
+  raises it as `Err`, and `egress_attempt_once` collapses `Ok(Err(_))` and `Err(_)`
+  to the same `false`. The probe therefore cannot retry them differently, and a
+  slow group reads as a dead one. **Identified 2026-10-01 (second pass) and NOT
+  fixed** — the classifier was corrected, this path was left alone deliberately.
+  It is reachable on **Strike**, whose group holds both `Locus-UoT` and `Locus`:
+  the delay test dials the group's *selected* member, which is `Locus-UoT`, and if
+  that member times out the `504` is indistinguishable from no network. Fixing it
+  means distinguishing "the whole group timed out" from "we could not ask", which
+  needs a decision about what the probe should do differently. See
+  [`EGRESS-READINESS.md`](EGRESS-READINESS.md) §5 and §6.
+- **The engine test cannot exercise slow-but-working.** `tests/egress_probe_engine.rs`
+  SKIPs when the runner has no network, and its positive case uses a `direct`
+  outbound to a public host. The defect fixed on 2026-10-01 (second pass) was a
+  **slow round trip through a real tunnel** — and no test in the suite reproduces
+  that shape, which is why it shipped twice. A test that only proves the fast path
+  cannot fail on the slow one. Closing this needs a deliberately slow in-process
+  target or an injected delay map, not a network dependency.
 - **Does `get_version()` actually answer over the configured transport?** It goes
   through the plugin, so it should use the same channel as every other Core call —
   but that assumption is untested here. If the address/secret/socket path is wrong

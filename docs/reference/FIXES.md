@@ -27,6 +27,100 @@ corrections are marked. For what is *still* broken, read `STILL-OPEN.md`.
 
 ---
 
+## RECOVERY FROM A LOST SERVICE OWNER RESET THE WRONG PLATFORM'S PROXY, AND DID NOTHING ON THE RIGHT ONE (2026-10-01)
+
+*Client-side fix; ships in the next version tagged. Not a hub change.*
+
+Found while tracing the service-recovery path, not from a report. It is the
+`DEBUGGING-METHOD.md` §1.3 shape again — a rule that reads as a deliberate
+decision, is covered by a test that asserts the decision, and is wrong on both
+platforms at once.
+
+### The defect, in one line
+
+`service.rs::owner_recovery_policy` decided whether owner recovery may clear the
+machine-wide system proxy with `reset_system_proxy: !is_macos` — a hard `false`
+on macOS and a hard `true` everywhere else. It is the wrong answer on both sides,
+and the macOS setting was masked by an ordering bug that made the whole branch
+dead.
+
+### Why macOS was already inert, and why that was not luck
+
+`recover_after_owner_loss_while_locked` performs the clear through the Service:
+
+```text
+proxy_control::clear()
+  -> clear_inner() -> ProxyBackendRoute::Service
+  -> service::set_system_proxy_by_service(&Disabled)
+  -> active_service_session()?          // <- needs the owner session
+```
+
+and it calls `clear_active_service_session()` **before** it gets there, three
+lines above. The session is gone, so the clear returns
+`"service owner session is not active"` and the retry loop logs three failures.
+On macOS the branch could not work; `!is_macos` is what kept it from being
+*reached* with anything to do.
+
+### What it did on Windows and Linux
+
+`reset_system_proxy` was `true`, so recovery *ran* the clear — attempting to
+switch off the machine-wide proxy through a service we had been told we no longer
+own. That is the second half of the same ordering bug: on the platforms where the
+clear could execute, the reason it was running was one where it must not.
+
+Recovery is reached for three reasons, and the clear is wrong for all three:
+
+| Reason | Why clearing is wrong |
+|---|---|
+| `Displaced` | Another instance owns the Service now. We do not hold the session, and if we did, we would be switching off the *new* owner's proxy — the student's live tunnel. |
+| `SameOwnerFailure` | Still ours, but the Core died. `Core::stop` / `Handle::restart_core` already clear on that path, so recovery can only undo a restart's re-apply. |
+| `TransportFailure` | The Service is unreachable, so the clear fails anyway. |
+
+### The fix
+
+`reset_system_proxy` is now `false` for every reason on every platform. Recovery
+keeps the two things it can honestly do with local state — `stop_guard()` and
+dropping core readiness — and leaves the machine-wide proxy to the Core's own
+stop/restart path, where the owner session is still valid. The `reason` and
+`is_macos` parameters are retained so the decision stays visible at the call site
+and a future platform-specific rule has somewhere to go; the answer simply no
+longer depends on them.
+
+### The guard, and the evidence it can fail
+
+The existing test `macos_recovery_never_resets_machine_wide_proxy` **pinned the
+bug**: it asserted `!reset_system_proxy` for macOS *and*
+`reset_system_proxy` for everything else, so the Windows behaviour was written
+down as intended. A test that encodes the defect is worse than no test, because
+it converts the defect into a requirement.
+
+It is replaced by
+`recovery_never_resets_the_machine_wide_proxy`, which asserts the same rule for
+all three reasons **and both OSes**, so a fix applied to only the platform the
+author ran cannot pass.
+
+**Demonstrated failing against the pre-fix rule** (the new test kept, the
+production arm restored to `!is_macos`):
+
+```text
+test core::service::tests::recovery_never_resets_the_machine_wide_proxy ... FAILED
+Displaced (macos=false) must not clear the system proxy
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 553 filtered out
+```
+
+### Verified / not verified
+
+**Verified locally:** the new test fails against the pre-fix rule and passes
+after it; `cargo test --all-targets` — 554 lib tests plus the integration suites,
+0 failed.
+
+**Not verified, and stated as such:** that the Windows/Linux recovery path was
+ever *observed* switching off a live proxy. The argument above is structural —
+from the call order and the session guard in the code — and is the reason the
+change is safe rather than the reason it was urgent. `STILL-OPEN.md` records it.
+
+---
+
 ## DEVICE RECOGNITION WORKED, AND THE STUDENT WAS LEFT ON THE CODE PROMPT FOR FIVE MINUTES (2026-10-01)
 
 *Client-side fix; ships in the next version tagged. Not a hub change.*
@@ -137,11 +231,12 @@ in `.github/workflows/client.yml` invoked them.** `verify` ran
 `tsc --noEmit`) and `pnpm run lint` — and stopped. `pnpm test` was never called,
 in any job, on any trigger.
 
-That is the same failure shape as the Rust suite before 2026-09-29 (530 tests
-existed and passed locally while a tag could build, sign and publish with the
-suite red) and the same shape as the two-sided filename contract in `AGENTS.md`.
-A test suite that nothing runs is not a guard; it is a comment with a `describe`
-around it.
+That is the same failure shape as the Rust suite before 2026-09-29 (it existed
+and passed locally while a tag could build, sign and publish with the suite red
+— 530 cases then, 554 at the last count on 2026-10-01, which is why no count is
+quoted as current) and the same shape as the two-sided filename contract in
+`AGENTS.md`. A test suite that nothing runs is not a guard; it is a comment with a
+`describe` around it.
 
 **Fixed in the same change:** a `Frontend tests` step (`pnpm test`) in the
 `verify` job. It is placed there rather than in a build job because the whole
@@ -1610,18 +1705,27 @@ fix (the section below); the first item is the one that mattered.
 `pnpm run lint` — and nothing else. **There was no `cargo test`, no `cargo clippy`
 and no `pnpm test` anywhere in `.github/workflows/`.**
 
-So 530 Rust tests and 49 frontend tests existed and passed locally while being
-decorative from CI's perspective: a commit could break the expiry arithmetic, the
-no-downgrade gate or a wire-shape pin and still build, sign and publish on a `v*`
-tag. That is exactly the bug class `check-consistency.sh` was written for — the
-guard existed, it simply was not wired to the thing that ships.
+So the Rust and frontend suites (530 and 49 cases at the time — see the note
+below on counts) existed and passed locally while being decorative from CI's
+perspective: a commit could break the expiry arithmetic, the no-downgrade gate or
+a wire-shape pin and still build, sign and publish on a `v*` tag. That is exactly
+the bug class `check-consistency.sh` was written for — the guard existed, it
+simply was not wired to the thing that ships.
 
 **Fix:** `cargo test --all-targets` and `cargo clippy --all-targets --features
-clippy -- -D warnings` now run in `verify`, alongside `pnpm test`. They are in
-`verify`, not the build matrix, so a failure costs seconds rather than four
-cross-platform builds. The workflow's `paths:` filter also gained `server/**`,
-because the consistency guard it runs reads that tree and a server-only commit
-would otherwise skip the check entirely.
+clippy -- -D warnings` now run in the **build matrix job**, alongside the
+platform build; `pnpm test` runs in `verify`, because the frontend suite finishes
+in seconds and can ride the fast gate. The workflow's `paths:` filter also gained
+`server/**`, because the consistency guard it runs reads that tree and a
+server-only commit would otherwise skip the check entirely.
+
+> **Correction (2026-10-01).** This entry originally said the Rust suite runs in
+> `verify`, "not the build matrix, so a failure costs seconds rather than four
+> cross-platform builds". The workflow has never done that — the steps are in the
+> matrix job, so a Rust failure costs the four builds this sentence claimed it
+> avoided. The claim was wrong when written and is corrected here rather than
+> silently, because a reader deciding where to add a check will consult this
+> paragraph. See [`CI-CD.md`](../operate/CI-CD.md) for the current split.
 
 ### 2. The "or as `X-Admin-Token`" fallback had never run
 

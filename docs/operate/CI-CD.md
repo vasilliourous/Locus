@@ -56,14 +56,30 @@ to pick up this job", for every run, while the other three platforms finished, a
 nothing automated noticed). Pinning means a retirement fails loudly. **When you bump
 a label, update this note and the comment in `client.yml`.**
 
-### The verify gate runs the Rust suite
+### Which job runs which suite
 
-`verify` runs `pnpm run web:build`, `pnpm run lint`, **`cargo test --all-targets`**
-and **`cargo clippy --all-targets --features clippy -- -D warnings`**. The Rust
-half was added 2026-09-29 because 530 tests existed and passed locally while
-nothing in CI invoked them, which is how the updater's signature encoding mismatch
-reached a real install. A clippy error now fails the gate; `cargo fmt` is still not
-run.
+Two jobs, two suites, and they are not interchangeable:
+
+| Job | Runs | Notes |
+|---|---|---|
+| `verify` | `check-consistency.sh`, the tag/version check, `pnpm run web:build`, `pnpm run lint`, `pnpm test` | **Frontend and docs only.** No Rust is compiled here. |
+| `build` (matrix) | `cargo test --all-targets`, `cargo clippy --all-targets --features clippy -- -D warnings`, then the platform build | The Rust suite runs **once per platform**, inside the matrix. |
+
+The Rust half was added 2026-09-29 because it existed and passed locally while
+nothing in CI invoked it, which is how the updater's signature encoding mismatch
+reached a real install. A clippy error now fails the gate; `cargo fmt` is still
+not run.
+
+> **`cargo test` is in the matrix, not in `verify`.** This note previously said
+> the opposite, and gave a reason that the workflow contradicts: the claim was
+> that the Rust suite is in `verify` "so a failure costs seconds rather than four
+> cross-platform builds". It is in the matrix, so a Rust failure is found
+> **after** paying for four builds — which is the cost the sentence was written to
+> avoid. `verify` deliberately stays frontend-only so the fast gate is fast.
+>
+> Corrected 2026-10-01. Nothing behavioural changed; the document was wrong about
+> the pipeline it describes. The lesson is that *what CI runs* is a claim like any
+> other, and nothing recomputes it — see `../reference/DEBUGGING-METHOD.md` §1.3.
 
 **What it produces**, because the hub's publish path resolves these by name and
 requires every one of them:

@@ -118,9 +118,6 @@ PLATFORMS = [
 ]
 MANIFEST_NAME = "manifest.json"
 
-# A Wails bundle is ~15-30 MB. Below 1 MB it is a truncated download or a Git
-# LFS pointer, and must never be served as a binary.
-MIN_ASSET_BYTES = 1024 * 1024
 ## manifest.json is a few hundred bytes and is NOT a binary, so it must not be
 ## held to the executable floor below — doing so rejects a perfectly good
 ## release with "downloaded only 719 bytes". The floor applies to executables
@@ -129,7 +126,14 @@ MIN_BINARY_BYTES = 1024 * 1024
 MIN_MANIFEST_BYTES = 2
 MAX_ASSET_BYTES = int(os.environ.get("MAX_ASSET_BYTES", str(200 * 1024 * 1024)))
 
-DOWNLOAD_TIMEOUT = int(os.environ.get("FETCH_TIMEOUT", "600"))
+## Per-request socket timeouts, in seconds. Deliberately short and NOT the
+## artifact-size budget: these bound one HTTP round trip (an API call, or one
+## read from the download socket), while `MAX_ASSET_BYTES` bounds the payload.
+## A 200 MB artifact is read in chunks over a long-lived connection, so a
+## timeout measured in minutes would only ever mean "the socket stopped
+## answering and we waited too long to notice".
+API_TIMEOUT = int(os.environ.get("FETCH_API_TIMEOUT", "30"))
+DOWNLOAD_TIMEOUT = int(os.environ.get("FETCH_TIMEOUT", "60"))
 
 USER_AGENT = "locus-hub-fetch/1.0 (+https://github.com/%s)" % GITHUB_REPO
 
@@ -142,9 +146,10 @@ def resolve_platform_names(version):
     """The asset name carrying each platform, for a given version.
 
     One place decides what the hub fetches for each platform, so the names can
-    be checked against `manifest.json` (see `cross_check_manifest`) instead of
-    being trusted. The Windows entry is version-bearing because Tauri names its
-    NSIS bundle with the version.
+    be checked against `manifest.json` instead of being trusted — that check is
+    the filename comparison in `verify_and_stage`, and it is the one that catches
+    the hub and CI drifting apart on an asset name. The Windows entry is
+    version-bearing because Tauri names its NSIS bundle with the version.
     """
     names = []
     for key, name, column in PLATFORMS:
@@ -269,7 +274,7 @@ def _github_request(url):
     if GH_TOKEN:
         req.add_header("Authorization", "Bearer %s" % GH_TOKEN)
     try:
-        return urllib.request.urlopen(req, timeout=30)
+        return urllib.request.urlopen(req, timeout=API_TIMEOUT)
     except urllib.error.HTTPError as exc:
         if exc.code == 404:
             raise FetchError(
@@ -326,7 +331,7 @@ def _download(url, dest, expected_min, expected_max, what="binary"):
     digest = hashlib.sha256()
     total = 0
     try:
-        with urllib.request.urlopen(req, timeout=60) as resp, open(dest, "wb") as out:
+        with urllib.request.urlopen(req, timeout=DOWNLOAD_TIMEOUT) as resp, open(dest, "wb") as out:
             while True:
                 chunk = resp.read(262144)
                 if not chunk:
