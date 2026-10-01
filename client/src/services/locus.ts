@@ -127,6 +127,47 @@ export const locusValidateCode = (code: string) =>
 export const locusCheckCode = (code: string) =>
   invoke<CodeCheck>('locus_check_code', { code })
 
+/**
+ * What a first-launch device-recognition check concluded.
+ *
+ * Three cases, and the third is why this is not a boolean: a hub we could not
+ * reach is not the same as a hub that does not know this device. Both lead to
+ * the code prompt, but only the second is a statement about the student's
+ * account, and telling them "your device is not recognised" during an outage
+ * would be a false claim about their entitlement.
+ */
+export type RecognitionResult =
+  | {
+      kind: 'recognised'
+      tier: string
+      expiresAt: string | null
+      /**
+       * Whether this device's identity survives a reinstall.
+       *
+       * `false` means the identity lives only in the app config, so a future
+       * reinstall will lose it and need the card again. The UI must say so
+       * rather than claim the device is remembered — over-promising here is the
+       * support call this whole feature exists to remove.
+       */
+      durable: boolean
+    }
+  | { kind: 'unknownDevice' }
+  | { kind: 'unavailable' }
+
+/**
+ * Asks the hub whether this device already holds an entitlement.
+ *
+ * Called on first launch with nothing stored, so a reinstalling student can skip
+ * the code prompt. Never binds, never activates, and the hub's answer never
+ * contains the activation code — it authenticates on a value the device proves
+ * it holds, and reports only whether this device has a live tier.
+ *
+ * Every failure path resolves to something the caller can fall through to the
+ * code prompt for, so a student holding their card is never worse off.
+ */
+export const locusRecognise = () =>
+  invoke<RecognitionResult>('locus_recognise')
+
 export const locusActivate = (code: string) =>
   invoke<ActivationResult>('locus_activate', { code })
 

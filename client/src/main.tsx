@@ -23,7 +23,7 @@ import ActivationScreen from './pages/activation'
 import { AppDataProvider } from './providers/app-data-provider'
 import { WindowProvider } from './providers/window'
 import { FALLBACK_LANGUAGE, initializeLanguage } from './services/i18n'
-import { locusStatus } from './services/locus'
+import { locusRecognise, locusStatus, type RecognitionResult } from './services/locus'
 import {
   preloadAppData,
   resolveThemeMode,
@@ -107,6 +107,41 @@ const initializeApp = (initialThemeMode: 'light' | 'dark') => {
       return () => {
         cancelled = true
         window.clearInterval(timer)
+      }
+    }, [])
+
+    // ── Device recognition ──
+    //
+    // Before showing the code prompt, ask the hub whether it already knows this
+    // device. This is the fix for a reinstall losing the entitlement: the
+    // identity is durable now, so a returning student is recognised and never
+    // asked for a card they may have thrown away.
+    //
+    // Why this is safe to add: EVERY failure path ends at the code prompt, which
+    // is exactly the behaviour before this existed. A student with their card is
+    // never worse off. The only way it could hurt is by claiming a device is
+    // known when it is not — and only the hub can make that claim, so the
+    // decision is not made here.
+    //
+    // It runs once, and only when this device is not already activated (a device
+    // with a stored entitlement needs nothing). A slow or dead hub cannot leave
+    // a student staring at a spinner, because this does not gate the first
+    // paint: the code screen renders and is replaced if recognition succeeds.
+    const [recognised, setRecognised] = useState<RecognitionResult | null>(null)
+    useEffect(() => {
+      let cancelled = false
+
+      const attempt = async () => {
+        const result = await locusRecognise().catch(
+          () => ({ kind: 'unavailable' }) as RecognitionResult,
+        )
+        if (cancelled) return
+        setRecognised(result)
+      }
+
+      void attempt()
+      return () => {
+        cancelled = true
       }
     }, [])
 

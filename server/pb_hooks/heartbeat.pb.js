@@ -34,8 +34,50 @@ routerAdd("POST", "/api/heartbeat", function(e) {
         var data = $apis.requestInfo(e).data;
         var code = (data.code || "").trim();
         var fingerprint = (data.fingerprint || "").trim();
+        // A device that was restored by recognition has no code to send — the
+        // hub deliberately never re-sends the code, because it is a bearer
+        // credential for the ENTITLEMENT. Instead the device presents the
+        // session token recognition minted for it.
+        var token = (data.token || "").trim();
 
-        if (!code) return e.json(400, {code:400, message:"Missing code"});
+        if (!code && !token) return e.json(400, {code:400, message:"Missing code"});
+
+        // ── Resolve a token to its code ──
+        //
+        // Done FIRST, so every check below (expiry, suspension, update signal)
+        // runs on exactly the same `code` value regardless of how the device
+        // authenticated. That is the whole point of the token: it is an
+        // alternative way to NAME the entitlement, never a weaker one.
+        //
+        // Failure here falls through to the code path rather than refusing — a
+        // client that sent both is a client mid-upgrade, and the code is the
+        // stronger credential.
+        if (!code && token) {
+            var ident = null;
+            try {
+                ident = $app.dao().findFirstRecordByFilter("device_identities",
+                    "token_hash = '" + $security.sha256(token) + "'");
+            } catch (identErr) {
+                ident = null;
+            }
+            // No row, revoked, or expired: the token is not a valid credential
+            // and the answer is the same as any other unknown device. 401 with
+            // the existing "unknown" vocabulary, NOT a new status string — the
+            // client treats an unrecognised status as a transport failure and
+            // would keep retrying a token that will never work.
+            if (!ident || ident.getString("revoked_at")) {
+                return e.json(401, {code:401, message:"Device token is not valid"});
+            }
+            var tokenExpMs = parsePBDate(ident.get("token_expires_at"));
+            if (isNaN(tokenExpMs) || tokenExpMs <= 0 || tokenExpMs < Date.now()) {
+                return e.json(401, {code:401, message:"Device token has expired"});
+            }
+            // The identity names the code, and every rule below then applies to
+            // it unchanged — a suspended device stays suspended, an expired code
+            // stays expired, whichever credential the client used.
+            code = ident.getString("code");
+            if (!code) return e.json(401, {code:401, message:"Device token is not valid"});
+        }
 
         // Normalize the lookup code to the canonical hyphenated form
         // ("RQ-XXXX-XXXX-XXXX-C" — the form codes are seeded in). Clients

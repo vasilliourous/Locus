@@ -28,7 +28,7 @@
 //!     student's decision, and doing it silently mid-session would kill their
 //!     connection without asking.
 
-use crate::locus::heartbeat::{BeatOutcome, HeartbeatLoop};
+use crate::locus::heartbeat::{BeatOutcome, Credential, HeartbeatLoop};
 use crate::locus::{apply, store};
 use clash_verge_logging::{Type, logging};
 use std::sync::Mutex;
@@ -42,12 +42,52 @@ static RUNNING: Mutex<Option<HeartbeatLoop>> = Mutex::new(None);
 /// "beat for *this* activation", and the most likely reason a loop is already
 /// running is a re-activation that changed the code or tier. Silently keeping the
 /// old one would leave the device reporting a tier it no longer has.
-pub fn start(activation: store::Activation) {
-    // Stop the previous loop first, so its task cannot deliver one more
-    // outcome against the old activation.
+pub async fn start(activation: store::Activation) {
+    // Which credential this run authenticates with.
+    //
+    // A code is preferred when present: it is the original, non-expiring
+    // credential, and a device holding one should keep using it. A device
+    // restored by recognition has no code (the hub never re-sends it), so it
+    // presents the session token the hub minted instead. Both resolve to the
+    // same code hub-side, so enforcement is identical either way.
+    let credential = if !activation.code.trim().is_empty() {
+        Credential::Code(activation.code.clone())
+    } else {
+        match store::stored_device_token().await {
+            Some(token) => Credential::Token(token),
+            None => {
+                // No code AND no token: this run cannot authenticate at all.
+                // Refusing to start is the honest answer — a loop beating with
+                // an empty credential would hammer the hub with 400s and report
+                // nothing useful. The caller must ensure one of the two exists.
+                logging!(
+                    warn,
+                    Type::Config,
+                    "[locus] refusing to start a heartbeat with no credential (no code, no token)"
+                );
+                return;
+            }
+        }
+    };
+
+    start_with(credential, activation);
+}
+
+/// Starts (or replaces) the heartbeat loop with an already-resolved credential.
+///
+/// Split from [`start`] so the credential can be resolved by an async caller
+/// while the loop itself is started synchronously. That split is load-bearing:
+/// this function is called from inside a spawned task during credential renewal,
+/// and a `start` that both awaited a store read *and* spawned would make the
+/// spawned future non-`Send` — the compiler refuses it outright, and the deeper
+/// reason is that re-entering an async `start` from the loop's own callback is a
+/// recursion with no clear termination.
+pub fn start_with(credential: Credential, activation: store::Activation) {
+    // Stop any previous loop first, so its task cannot deliver one more outcome
+    // against the old activation. Doing this before the credential is resolved
+    // in `start` is fine — both orderings end with exactly one loop running.
     stop();
 
-    let code = activation.code.clone();
     let fingerprint = activation.fingerprint.clone();
 
     logging!(
@@ -57,7 +97,7 @@ pub fn start(activation: store::Activation) {
         activation.tier
     );
 
-    let loop_handle = HeartbeatLoop::start(code, fingerprint, move |outcome| {
+    let loop_handle = HeartbeatLoop::start(credential, fingerprint, move |outcome| {
         // The callback is synchronous and the work it triggers is async, so it
         // hands off to the runtime rather than blocking the loop's task. A
         // heartbeat that stalled on config application would look like a
@@ -186,6 +226,23 @@ async fn handle_outcome(outcome: BeatOutcome) {
     match outcome {
         BeatOutcome::Ok(response) => handle_success(&response).await,
         BeatOutcome::Refused { reason } => handle_refusal(&reason).await,
+        BeatOutcome::StaleCredential { reason } => {
+            // The hub rejected the CREDENTIAL, not the entitlement. The tunnel is
+            // still legitimate, so nothing is torn down here — this is the
+            // "you have not opened the app in a month and your session lapsed"
+            // case, and the student's access is not in question.
+            //
+            // What must happen is a fresh credential, which recognition mints.
+            // The loop has already stopped (a stale credential is not retried),
+            // so this re-runs the recognition path and restarts the loop if it
+            // succeeds.
+            logging!(
+                info,
+                Type::Config,
+                "[locus] heartbeat credential is stale, renewing: {reason}"
+            );
+            renew_credential().await;
+        }
         BeatOutcome::Unreachable { reason } => {
             // NOT necessarily an entitlement problem. The tunnel keeps working
             // through the grace period, and `locus_status` reports the remaining
@@ -208,6 +265,70 @@ async fn handle_outcome(outcome: BeatOutcome) {
             enforce_grace_period().await;
         }
     }
+}
+
+/// Obtains a fresh session token and restarts the loop.
+///
+/// Called only when the hub rejected the *credential*, which can arise only for a
+/// token-authenticated device — a code does not expire. The remedy is
+/// recognition, which re-mints a token and reports the tier the device is still
+/// entitled to; the loop then restarts with the new credential.
+///
+/// Nothing is torn down if this fails. The device's entitlement was never in
+/// question, only its credential, and dropping the tunnel for a student whose
+/// only problem is a lapsed session would be the wrong call. The grace period
+/// still bounds how long an unconfirmable device may run, applied on the next
+/// unreachable outcome.
+async fn renew_credential() {
+    let identity = crate::locus::identity::resolve_with_stores(
+        crate::locus::identity::read_machine_id(),
+        stored_identity().await,
+    );
+
+    let fingerprint = crate::locus::device::fingerprint();
+    match crate::locus::activation::recognise(&identity).await {
+        Ok(crate::locus::activation::Recognition::Recognised { token, tier, .. }) => {
+            if let Err(error) = store::store_device_token(&token, None).await {
+                logging!(
+                    warn,
+                    Type::Config,
+                    "[locus] renewed a token but could not store it: {error:#}"
+                );
+                return;
+            }
+            logging!(info, Type::Config, "[locus] credential renewed for tier {tier}");
+            // Restart with the fresh token. `start_with` is SYNCHRONOUS on
+            // purpose: this runs inside the loop's outcome callback, and an
+            // async start here would both recurse (start → spawn → callback →
+            // start) and make the spawned future non-`Send`. It stops whatever
+            // is held first, so two loops cannot run at once. The code is empty
+            // because this device has none — that is the point of the token.
+            start_with(
+                Credential::Token(token),
+                store::Activation {
+                    code: String::new(),
+                    tier,
+                    fingerprint,
+                },
+            );
+        }
+        Ok(crate::locus::activation::Recognition::NotRecognised) => logging!(
+            warn,
+            Type::Config,
+            "[locus] could not renew the credential: the hub no longer recognises this device"
+        ),
+        Err(error) => logging!(
+            warn,
+            Type::Config,
+            "[locus] could not renew the credential: {error:#}"
+        ),
+    }
+}
+
+/// The app-config half of this device's identity, if one is stored.
+async fn stored_identity() -> Option<crate::locus::identity::StoredIdentity> {
+    let verge = crate::config::Config::verge().await;
+    store::read_identity(&verge.latest_arc())
 }
 
 /// Stops the tunnel when the grace period since the last good beat is spent.

@@ -85,6 +85,97 @@ pub async fn store(activation: &Activation) -> Result<()> {
     verge.data_arc().save_file().await
 }
 
+/// Reads the stored device identity, if the app-config fallback holds one.
+///
+/// This is the *second* place an identity may live. [`crate::locus::identity`]
+/// keeps the real one in a machine-scoped file, which is what survives a
+/// reinstall; these fields exist for a device where that location is not
+/// writable without elevation.
+///
+/// Returns `None` when either half is missing, never a half-populated identity:
+/// a secret with no id cannot be presented, and an id with no secret cannot be
+/// proven, so neither is usable and pretending otherwise would produce a device
+/// that believes it is known to the hub and is not.
+#[must_use]
+pub fn read_identity(verge: &IVerge) -> Option<crate::locus::identity::StoredIdentity> {
+    let device_id = verge.locus_device_id.as_deref().unwrap_or_default().trim().to_owned();
+    let secret = verge.locus_device_secret.as_deref().unwrap_or_default().trim().to_owned();
+    if device_id.is_empty() || secret.is_empty() {
+        return None;
+    }
+    // The store label is read back rather than assumed. A device that recorded
+    // "app" must not be reported as "machine" on the next launch, or the UI
+    // would promise durability the install does not have.
+    let store = match verge.locus_identity_store.as_deref() {
+        Some("machine") => crate::locus::identity::Store::Machine,
+        _ => crate::locus::identity::Store::AppFallback,
+    };
+    Some(crate::locus::identity::StoredIdentity {
+        device_id,
+        secret,
+        store,
+    })
+}
+
+/// Persists the device identity into the app-config fallback.
+///
+/// Used only when the machine-scoped store is unwritable. The `store` label is
+/// written alongside so the next launch reports the same durability rather than
+/// guessing it — a device that is one reinstall away from losing its entitlement
+/// must keep saying so.
+pub async fn store_identity(identity: &crate::locus::identity::DeviceIdentity) -> Result<()> {
+    let label = match identity.store {
+        crate::locus::identity::Store::Machine => "machine",
+        crate::locus::identity::Store::AppFallback | crate::locus::identity::Store::Fresh => "app",
+    };
+    let verge = Config::verge().await;
+    verge.edit_draft(|draft| {
+        draft.locus_device_id = Some(SmartString::from(identity.device_id.as_str()));
+        draft.locus_device_secret = Some(SmartString::from(identity.secret.as_str()));
+        draft.locus_identity_store = Some(SmartString::from(label));
+    });
+    verge.data_arc().save_file().await
+}
+
+/// Stores the session token minted at recognition.
+///
+/// Written with the expiry, in one operation, so a crash cannot leave a token
+/// with no expiry — which the client could not reason about, and would have to
+/// treat as either "valid forever" or "expired now", both of them wrong.
+///
+/// This is a CREDENTIAL. It is stored in the same plaintext config as the
+/// activation code, for the same reason (it must survive restarts), and it is
+/// subject to the same rules: never logged, never exported.
+pub async fn store_device_token(token: &str, expires_at: Option<&str>) -> Result<()> {
+    let verge = Config::verge().await;
+    verge.edit_draft(|draft| {
+        draft.locus_device_token = Some(SmartString::from(token));
+        draft.locus_token_expires_at = expires_at.map(SmartString::from);
+    });
+    verge.data_arc().save_file().await
+}
+
+/// The stored session token, read from the live config.
+///
+/// Async because reading the config is. Kept separate from [`device_token`] so
+/// the pure accessor stays testable without a config singleton, matching how the
+/// rest of this module splits reading from resolving.
+pub async fn stored_device_token() -> Option<String> {
+    let verge = Config::verge().await;
+    device_token(&verge.latest_arc())
+}
+
+/// The stored session token, if one is held.
+#[must_use]
+pub fn device_token(verge: &IVerge) -> Option<String> {
+    verge
+        .locus_device_token
+        .as_deref()
+        .map(str::trim)
+        .filter(|t| !t.is_empty())
+        .map(str::to_owned)
+}
+
 /// Records a successful heartbeat.
 ///
 /// The failure count is reset at the same time, because the two are one fact:

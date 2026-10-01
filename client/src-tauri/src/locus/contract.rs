@@ -40,6 +40,113 @@ pub struct CodeRequest<'a> {
     pub fingerprint: &'a str,
 }
 
+/// Request body for `/api/heartbeat`.
+///
+/// Extends [`CodeRequest`] with the session token, because a device restored by
+/// recognition has no code to send. The hub accepts **either**: it resolves a
+/// token to the code it stands for, and every enforcement rule then runs on that
+/// code unchanged — so a token is an alternative way to name the entitlement,
+/// never a weaker one.
+///
+/// `token` is emitted (empty when absent) rather than omitted, matching how the
+/// hub reads it (`data.token || ""`), so an old hub that ignores the field
+/// behaves exactly as it does today.
+#[derive(Debug, Clone, Serialize)]
+pub struct HeartbeatRequest<'a> {
+    pub code: &'a str,
+    pub fingerprint: &'a str,
+    /// The session token, empty when the device authenticates with a code.
+    pub token: &'a str,
+}
+
+/// Request body for `/api/device-recognise`.
+///
+/// Note what is **absent**: there is no code field. Recognition exists precisely
+/// for the device that cannot produce its code any more, so the request is an
+/// identity claim and nothing else.
+///
+/// `verifier` is `sha256(secret)`, not the secret. The secret never crosses the
+/// wire; the hub stores only the verifier, so a hub compromise yields something
+/// that can confirm a guess rather than a credential that can be replayed.
+#[derive(Debug, Clone, Serialize)]
+pub struct RecogniseRequest<'a> {
+    pub verifier: &'a str,
+    /// The non-secret device name. Diagnostic only — the hub does not
+    /// authenticate on it, and it is safe to appear in logs.
+    pub device_id: &'a str,
+    /// Where the identity was persisted: `"machine"` or `"app"`.
+    ///
+    /// Sent so the hub can record why a device that believes it is remembered
+    /// still needed to be recognised. Not used in the decision.
+    pub store: &'a str,
+}
+
+/// Response body for `/api/device-recognise`.
+///
+/// The hub answers `recognised` with the facts needed to rebuild a working app,
+/// or `unknown` for **every** negative — no such device, revoked, malformed,
+/// nothing entitled. Collapsing the negatives into one arm is deliberate: it is
+/// what stops the endpoint being a confirmation oracle, and it means the client
+/// has exactly one fallback path instead of several that could disagree.
+///
+/// # There is no code field here, and there must never be one
+///
+/// The activation code is a bearer credential. If this response carried it, then
+/// anyone able to produce a matching identity could read the code out and walk
+/// away with the entitlement. The client does not need it: the tier config is
+/// stored locally and refreshed by the heartbeat. Adding such a field would
+/// reintroduce the exact IDOR this design exists to prevent, so a test asserts
+/// its absence rather than leaving it to a comment.
+#[derive(Debug, Clone, Deserialize)]
+pub struct RecogniseResponse {
+    /// `"recognised"` or `"unknown"`. Unknown deserializes to [`Recognised::Unknown`].
+    pub status: Recognised,
+    #[serde(default)]
+    pub tier: Option<String>,
+    #[serde(default)]
+    pub expires_at: Option<String>,
+    /// Echoed back so the client can confirm which store the hub saw.
+    #[serde(default)]
+    pub store: Option<String>,
+    #[serde(default)]
+    pub message: Option<String>,
+    /// The tier's connection parameters, same payload as `/api/activate`.
+    ///
+    /// Sent so a recognised device can build a tunnel rather than merely knowing
+    /// its tier's name. It carries the tunnel credentials — the same values every
+    /// activated client already holds — and **not** the activation code.
+    #[serde(default)]
+    pub server_config: Option<TierConfig>,
+    #[serde(default)]
+    pub udp_relay: bool,
+    /// The session credential the heartbeat accepts in place of a code.
+    ///
+    /// A recognised device has no code, but every enforcement rule runs on the
+    /// heartbeat. This token is the stand-in: device-scoped, revocable, and it
+    /// does **not** carry the activation code. Treat it as a credential — never
+    /// log it, never include it in a diagnostics export.
+    #[serde(default)]
+    pub token: Option<String>,
+    #[serde(default)]
+    pub token_expires_at: Option<String>,
+}
+
+/// The classification `/api/device-recognise` returns.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Recognised {
+    /// The identity is real and holds a live entitlement.
+    Recognised,
+    /// Every negative. The client falls back to the code prompt.
+    ///
+    /// `#[serde(other)]` so a hub that introduces a new status — a future
+    /// "pending", say — degrades to this safe default rather than failing to
+    /// deserialize. Guessing "recognised" would be the dangerous direction: it
+    /// would skip the code prompt for a device the hub did not actually accept.
+    #[serde(other)]
+    Unknown,
+}
+
 /// The tier's connection parameters, as the hub emits them.
 ///
 /// The hub passes the `tier_configs.config` JSON through **verbatim**, so the

@@ -300,3 +300,138 @@ fn the_claimed_contract_test_exists() {
          nothing. Update the docs in the same change or restore the description."
     );
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Device recognition — the code-free re-activation path
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// The recognition response must NEVER contain the activation code.
+///
+/// This is the security property the whole design rests on. The activation code
+/// is a bearer credential for the entitlement; if recognition returned it, then
+/// anyone able to present a matching identity could read the code out and walk
+/// away with it — an IDOR. The client does not need it (the tier config is what
+/// builds a tunnel), so it must never be sent.
+///
+/// Asserted against the HOOK SOURCE rather than a sample response, because a
+/// runtime test would only cover the inputs it happened to try. This scans every
+/// `response.<field> =` assignment, so a field added on any path is caught.
+#[test]
+fn recognition_never_returns_the_activation_code() {
+    let hook = read(&repo_root().join("server/pb_hooks/device_recognise.pb.js"));
+
+    // Every field the response is allowed to set. The list is deliberately
+    // explicit: adding to it should be a conscious act, because the one value
+    // that must never appear here is the activation code.
+    let allowed = [
+        "status",
+        "tier",
+        "expires_at",
+        "store",
+        "message",
+        "server_config",
+        "udp_relay",
+        "token",
+        "token_expires_at",
+    ];
+
+    for line in hook.lines() {
+        let trimmed = line.trim();
+        if let Some(rest) = trimmed.strip_prefix("response.") {
+            let field: String = rest
+                .chars()
+                .take_while(|c| c.is_ascii_alphanumeric() || *c == '_')
+                .collect();
+            if field.is_empty() {
+                continue;
+            }
+            assert!(
+                allowed.contains(&field.as_str()),
+                "the recognition response sets an unexpected field `{field}`. If \
+                 this is the activation code, STOP: the code is a bearer credential \
+                 and returning it here is the IDOR this design exists to avoid. If \
+                 it is a new legitimate field, add it to this allow-list deliberately."
+            );
+        }
+    }
+}
+
+/// A recognition miss must be indistinguishable from any other miss.
+///
+/// The uniform `unknown()` answer is what stops the endpoint being a
+/// confirmation oracle: a prober must not be able to tell "no such device" from
+/// "revoked" from "malformed" from "nothing entitled".
+#[test]
+fn recognition_answers_every_negative_identically() {
+    let hook = read(&repo_root().join("server/pb_hooks/device_recognise.pb.js"));
+
+    assert!(
+        hook.contains("function unknown()") && hook.contains(r#"status:"unknown""#),
+        "the recognition hook no longer funnels its negatives through one uniform \
+         answer. Distinct failure shapes let a caller learn which device ids or \
+         verifiers are real, which is exactly what the uniform response prevents."
+    );
+
+    // No negative path may leak a distinct status string.
+    for leak in ["not_found", "revoked", "expired"] {
+        assert!(
+            !hook.contains(&format!(r#"status:"{leak}""#)),
+            "the recognition hook answers with a distinct negative status \
+             `{leak}`. Every negative must be `unknown`, so the endpoint cannot be \
+             used to confirm a guessed credential."
+        );
+    }
+}
+
+/// The heartbeat must accept the token, or a recognised device can never check in.
+///
+/// Recognition exists so a reinstalling student skips the code prompt. But every
+/// enforcement rule — suspension, expiry, config refresh — runs on the
+/// heartbeat, and the heartbeat is code-keyed. If it did not also accept the
+/// token, a recognised device would connect and then never find out it had been
+/// suspended, which is worse than not recognising it at all.
+#[test]
+fn the_heartbeat_accepts_a_session_token() {
+    let hook = read(&repo_root().join("server/pb_hooks/heartbeat.pb.js"));
+
+    assert!(
+        hook.contains("data.token"),
+        "the heartbeat no longer reads a session token from the request body. A \
+         token-authenticated device (every recognised one) would be unable to \
+         check in, so it would never learn of a suspension or expiry."
+    );
+    assert!(
+        hook.contains("device_identities"),
+        "the heartbeat no longer resolves a token against device_identities, so \
+         the token path is dead."
+    );
+    assert!(
+        hook.contains("token_hash"),
+        "the heartbeat no longer looks the token up by hash. The stored value is \
+         a hash, so a plaintext lookup would never match and every recognised \
+         device would be refused."
+    );
+}
+
+/// The token must never be sent back to a client as part of a heartbeat log or
+/// written into the attempts table.
+///
+/// It is a credential. The attempts log records a device id prefix and nothing
+/// else; a token appearing there would put a usable credential in a table that
+/// exists to be read by operators.
+#[test]
+fn the_token_is_not_written_into_the_attempts_log() {
+    let hook = read(&repo_root().join("server/pb_hooks/device_recognise.pb.js"));
+
+    for line in hook.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with("att.set(") {
+            assert!(
+                !trimmed.contains("token"),
+                "the attempts log records the session token. That table is read by \
+                 operators; a token in it is a credential in a place nobody treats \
+                 as secret. Store a redacted device id instead."
+            );
+        }
+    }
+}

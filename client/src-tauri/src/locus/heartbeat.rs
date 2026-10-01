@@ -15,7 +15,7 @@
 //! 3. **The update signal.** Updates are advertised through the heartbeat, not
 //!    a separate poll, gated server-side by a per-device rollout percentage.
 
-use crate::locus::contract::{CodeRequest, HUB_URL, TierConfig};
+use crate::locus::contract::{HeartbeatRequest, HUB_URL, TierConfig};
 use serde::Deserialize;
 use std::sync::Arc;
 use std::time::Duration;
@@ -157,9 +157,58 @@ pub enum BeatOutcome {
     /// The hub refused: suspended, expired, or unknown. The device is no longer
     /// entitled, and the tunnel should come down.
     Refused { reason: String },
+    /// The hub did not accept the *credential*, but the entitlement is intact.
+    ///
+    /// Distinct from [`Self::Refused`] because the remedy is different: this
+    /// device is still entitled to a tunnel, and the fix is to obtain a fresh
+    /// credential (re-recognise) rather than to give up. Distinct from
+    /// [`Self::Unreachable`] because retrying the same dead credential forever
+    /// would never recover — which is exactly what the catch-all would have done
+    /// with the 401 this variant exists for.
+    ///
+    /// A student who has not opened the app in a month hits this: the tunnel is
+    /// fine, their session token simply lapsed.
+    StaleCredential { reason: String },
     /// A transport failure. The account is *not* known to be bad — the tunnel
     /// keeps working through the grace period.
     Unreachable { reason: String },
+}
+
+/// What a heartbeat authenticates with.
+///
+/// A device normally holds an activation code. A device restored by recognition
+/// holds a session token instead, because the hub deliberately never re-sends
+/// the code — it is a bearer credential for the entitlement, and handing it back
+/// would be the exposure this design avoids.
+///
+/// The two differ in lifetime (a token expires, a code does not) but not in
+/// authority: the hub resolves either to the same code and enforces identically.
+/// That equivalence is what makes it safe for the loop to treat them alike.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Credential {
+    /// The activation code, canonical hyphenated form.
+    Code(String),
+    /// A session token minted at recognition.
+    Token(String),
+}
+
+impl Credential {
+    /// The credential's value, whichever kind it is.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::Code(value) | Self::Token(value) => value,
+        }
+    }
+
+    /// A redacted form for logs — never the whole value.
+    ///
+    /// Both kinds are credentials, so neither is logged in full. Twelve
+    /// characters is enough to correlate two log lines and not enough to use.
+    #[must_use]
+    pub fn redacted(&self) -> String {
+        self.as_str().chars().take(12).collect()
+    }
 }
 
 /// How many consecutive failures have happened, and therefore how long to wait.
@@ -245,8 +294,26 @@ impl Default for Backoff {
 }
 
 /// Sends one heartbeat. Makes exactly one attempt.
-pub async fn beat(code: &str, fingerprint: &str) -> BeatOutcome {
-    let body = CodeRequest { code, fingerprint };
+///
+/// `credential` is whichever of a code or a session token this device holds.
+/// Both fields are sent (one of them empty) so the request has a single shape;
+/// the hub accepts either and resolves a token to its code before enforcing
+/// anything.
+pub async fn beat(credential: &Credential, fingerprint: &str) -> BeatOutcome {
+    let body = match credential {
+        Credential::Code(code) => HeartbeatRequest {
+            code,
+            fingerprint,
+            token: "",
+        },
+        // A token device sends no code — that is the point of recognition — so
+        // the code field is empty and the hub resolves the token instead.
+        Credential::Token(token) => HeartbeatRequest {
+            code: "",
+            fingerprint,
+            token,
+        },
+    };
 
     let client = match reqwest::Client::builder()
         .timeout(REQUEST_TIMEOUT)
@@ -297,6 +364,16 @@ pub async fn beat(code: &str, fingerprint: &str) -> BeatOutcome {
 /// Refusals are 403 (suspended / bound elsewhere), 404 (unknown code) and **410
 /// (expired)**. 410 was missing, so an expired code's refusal was retried as
 /// though it were a flaky network — half of why nothing ever expired.
+///
+/// **401 is deliberately its own arm, not a refusal.** A 401 from this endpoint
+/// means the *credential* is stale (a token past its 30-day life), not that the
+/// entitlement is gone — the code behind that token is untouched, and the device
+/// is still entitled to a tunnel. Filing it as `Refused` would tear down a
+/// working connection for a student whose only problem is that they had not
+/// opened the app in a month; filing it as `Unreachable` (which is what the
+/// catch-all below would do) would retry the same dead token forever and never
+/// recover. So it gets [`BeatOutcome::StaleCredential`], and the supervisor
+/// responds by re-recognising.
 #[must_use]
 fn classify_response(code: u16, text: &str) -> BeatOutcome {
     let message = || {
@@ -308,6 +385,13 @@ fn classify_response(code: u16, text: &str) -> BeatOutcome {
 
     if matches!(code, 403 | 404 | 410) {
         return BeatOutcome::Refused { reason: message() };
+    }
+
+    // 401: the hub did not accept the credential. For a code-authenticated
+    // client this cannot happen (the hub answers 404 for an unknown code), so it
+    // is the token path's signal that the token needs renewing.
+    if code == 401 {
+        return BeatOutcome::StaleCredential { reason: message() };
     }
 
     if !(200..300).contains(&code) {
@@ -378,7 +462,7 @@ impl HeartbeatLoop {
     /// refresh and the update signal, and decides what to apply. Keeping policy
     /// out of here is what stops this module from needing to know about the core
     /// manager.
-    pub fn start<F>(code: String, fingerprint: String, on_outcome: F) -> Self
+    pub fn start<F>(credential: Credential, fingerprint: String, on_outcome: F) -> Self
     where
         F: Fn(BeatOutcome) + Send + 'static,
     {
@@ -393,7 +477,7 @@ impl HeartbeatLoop {
             let mut backoff = Backoff::new();
 
             loop {
-                let outcome = beat(&code, &fingerprint).await;
+                let outcome = beat(&credential, &fingerprint).await;
 
                 match &outcome {
                     BeatOutcome::Ok(_) => backoff.reset(),
@@ -406,6 +490,17 @@ impl HeartbeatLoop {
                     // a refusal too, since that is an answer to the question it
                     // asked.
                     BeatOutcome::Refused { .. } => {
+                        on_outcome(outcome);
+                        wake_waiting_beat(&beat_done_signal);
+                        break;
+                    }
+                    // The credential lapsed, but the entitlement did not. Do NOT
+                    // treat this as a refusal — the tunnel is still legitimate —
+                    // and do NOT back off as though the network were flaky, which
+                    // would retry the same dead token on a doubling schedule
+                    // forever. Stop the loop and let the supervisor obtain a
+                    // fresh credential; the caller sees the outcome either way.
+                    BeatOutcome::StaleCredential { .. } => {
                         on_outcome(outcome);
                         wake_waiting_beat(&beat_done_signal);
                         break;

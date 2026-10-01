@@ -196,6 +196,7 @@ mod app_init {
             cmd::locus_status,
             cmd::locus_validate_code,
             cmd::locus_check_code,
+            cmd::locus_recognise,
             cmd::locus_activate,
             cmd::locus_connect,
             cmd::locus_cancel_connect,

@@ -171,7 +171,7 @@ async fn init_locus_heartbeat() {
         }
     };
 
-    crate::locus::runtime::start(activation);
+    crate::locus::runtime::start(activation).await;
 }
 
 pub(crate) fn init_signal() {

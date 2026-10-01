@@ -282,6 +282,80 @@ collections = [
         {"name":"released_at","type":"date"},
         {"name":"release_reason","type":"text"},
     ]),
+    # ── Durable device identity ──
+    #
+    # WHY THIS COLLECTION EXISTS
+    #
+    # `device_bindings` answers "which code does this fingerprint hold?", keyed
+    # on the *hardware fingerprint*. That key is not durable: it is derived from
+    # hardware on every launch and falls back to a random value held only in the
+    # app's own config, so an uninstall deleted it and the machine came back a
+    # stranger. Two symptoms, one cause — a code that "randomly" stopped being
+    # recognised after an update, and a code lost entirely by a reinstall, which
+    # is a support call when the card is gone.
+    #
+    # This collection keys on a value the device can PROVE it holds:
+    # `sha256(secret)`. The secret never leaves the device, so a hub compromise
+    # yields a verifier, not a reusable credential.
+    #
+    # WHY NOT A COLUMN ON device_bindings
+    #
+    # The two answer different questions. A binding is about a CODE and is
+    # created at activation; an identity is about a DEVICE and exists BEFORE any
+    # code is entered — which is the entire point, since it is what lets a
+    # returning device skip the code prompt. A device with no entitlement yet
+    # has an identity and no binding.
+    #
+    # `verifier` is UNIQUE: one identity per device, enforced by the schema
+    # rather than a hook, for the same reason as `device_bindings.fingerprint`.
+    ("device_identities", [
+        # sha256(secret), hex. The verifier the hub compares against.
+        {"name":"verifier","type":"text","required":True,"unique":True},
+        # The device's non-secret name. Deliberately NOT unique: two devices on
+        # a cloned image can share a machine id, and refusing the second would
+        # lock out a paying student over an operator's imaging choice. It is a
+        # display/lookup aid, never the authorisation key.
+        {"name":"device_id","type":"text"},
+        # The code this device currently holds, if any. A plain string, not a
+        # relation, for the same reason as device_bindings: a relation nulls out
+        # on delete and would silently free the device.
+        {"name":"code","type":"text"},
+        # Where the client could persist its secret: "machine" survives a
+        # reinstall, "app" does not. Recorded so support can see why a device
+        # that believes it is remembered still needed a code.
+        {"name":"store","type":"text"},
+        {"name":"first_seen_at","type":"date"},
+        {"name":"last_seen_at","type":"date"},
+        # ── The session token ──
+        #
+        # WHY A TOKEN
+        #
+        # A recognised device has no activation code — the hub deliberately
+        # never re-sends it, because the code is a bearer credential for the
+        # ENTITLEMENT and handing it back would be the IDOR this whole design
+        # avoids. But the heartbeat is code-keyed, and every enforcement rule
+        # (suspension, expiry, config refresh) runs there. So a recognised
+        # device that could not beat would be a device that can be suspended and
+        # never find out — worse than not recognising it at all.
+        #
+        # The token closes that gap: it is a device-scoped, revocable stand-in
+        # for the code, accepted by /api/heartbeat in the same field. The hub
+        # resolves it back to this identity row, and from there to the code, so
+        # enforcement is unchanged.
+        #
+        # Stored as sha256, not plaintext, for the same reason as the verifier:
+        # a database read must not hand out usable credentials. UNIQUE so a
+        # token cannot be shared between rows.
+        {"name":"token_hash","type":"text","unique":True},
+        # When the token stops being valid. A token with no expiry would be a
+        # permanent credential minted by a single recognition call.
+        {"name":"token_expires_at","type":"date"},
+        # Set when an operator revokes an identity outright (a sold laptop, a
+        # leaked secret). The row is kept, like device_bindings, so the history
+        # stays answerable.
+        {"name":"revoked_at","type":"date"},
+        {"name":"revoke_reason","type":"text"},
+    ]),
     # Append-only history of administrative and lifecycle actions, so the
     # console can show "what happened to this code" without guessing.
     ("code_events", [

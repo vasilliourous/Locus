@@ -5,7 +5,10 @@
 //! semantics are not negotiable — they are the existing agreement with the hub
 //! and with codes already printed on physical cards.
 
-use crate::locus::contract::{ActivateResponse, CodeRequest, HUB_URL, LookupResponse, LookupStatus};
+use crate::locus::contract::{
+    ActivateResponse, CodeRequest, HUB_URL, LookupResponse, LookupStatus, RecogniseRequest, RecogniseResponse,
+    Recognised,
+};
 use anyhow::{Context as _, Result, bail};
 use serde::Serialize;
 
@@ -426,6 +429,107 @@ pub async fn lookup_code(code: &str, fingerprint: &str) -> Result<CodeCheck> {
     let response: LookupResponse = post_json("/api/code-lookup", &body).await?;
 
     Ok(classify_lookup(&response))
+}
+
+/// What a recognition attempt settled on.
+#[derive(Debug, Clone)]
+pub enum Recognition {
+    /// The hub knows this device and it holds a live entitlement.
+    Recognised {
+        tier: String,
+        expires_at: Option<String>,
+        /// The store the hub recorded, echoed back. `None` when the hub did not
+        /// have one, which is not a failure.
+        store: Option<String>,
+        /// The tier's connection parameters.
+        ///
+        /// `None` when the hub has no config row for this tier — an operator
+        /// error. Carried rather than required so the caller can decide: a
+        /// recognised device with no config cannot connect, and must fall back
+        /// to the code prompt rather than present a working-looking app that
+        /// reaches nothing.
+        config: Option<crate::locus::contract::TierConfig>,
+        udp_relay: bool,
+        /// The session credential to send on heartbeats, in place of a code.
+        ///
+        /// Present whenever the hub recognised the device *and* minted a token.
+        /// A recognition without one is treated as a miss by the caller, because
+        /// a device that cannot heartbeat would never learn of a suspension —
+        /// see the token's own note in the recognition hook.
+        token: String,
+    },
+    /// The hub did not recognise this device — for **any** reason, because the
+    /// hub answers every negative identically on purpose.
+    ///
+    /// The caller must fall through to the code prompt. Not an error: a device
+    /// the hub has never seen is the normal first-launch case.
+    NotRecognised,
+}
+
+/// Asks the hub whether this device already holds an entitlement, so a
+/// reinstall does not force the student to find their card again.
+///
+/// Sends the **verifier** (`sha256(secret)`), never the secret itself, and never
+/// the activation code. The hub authenticates on the verifier because it is the
+/// only value a device actually holding the secret can produce — the device id
+/// is a name that appears in support logs, and treating a name as a credential
+/// would make a screenshot a takeover.
+///
+/// A transport failure is an `Err` rather than [`Recognition::NotRecognised`],
+/// so the caller can tell "the hub says no" from "we could not ask". Both end at
+/// the code prompt, but only the second should be logged as a problem — and
+/// conflating them is how a hub outage gets reported to a student as "your
+/// device is not recognised".
+pub async fn recognise(identity: &crate::locus::identity::DeviceIdentity) -> Result<Recognition> {
+    let verifier = identity.verifier();
+    let store = store_label(identity.store);
+
+    let body = RecogniseRequest {
+        verifier: &verifier,
+        device_id: &identity.device_id,
+        store,
+    };
+    let response: RecogniseResponse = post_json("/api/device-recognise", &body).await?;
+
+    match response.status {
+        Recognised::Recognised => {
+            // A `recognised` with no tier would leave the caller unable to build
+            // a config. Treat it as a miss rather than a success with an empty
+            // tier, which would store a device as activated onto nothing.
+            //
+            // The token is required for the same reason, and the failure is the
+            // same shape: without it the device could connect but never
+            // heartbeat, so it would never learn of a suspension or an expiry.
+            // That is not a state worth calling "recognised", and accepting it
+            // would silently produce exactly the device the enforcement design
+            // exists to prevent.
+            let token = response.token.filter(|t| !t.trim().is_empty());
+            match (response.tier.filter(|t| !t.trim().is_empty()), token) {
+                (Some(tier), Some(token)) => Ok(Recognition::Recognised {
+                    tier,
+                    expires_at: response.expires_at,
+                    store: response.store,
+                    config: response.server_config,
+                    udp_relay: response.udp_relay,
+                    token,
+                }),
+                _ => Ok(Recognition::NotRecognised),
+            }
+        }
+        Recognised::Unknown => Ok(Recognition::NotRecognised),
+    }
+}
+
+/// The wire label for a store, matching what the hub records.
+#[must_use]
+pub const fn store_label(store: crate::locus::identity::Store) -> &'static str {
+    match store {
+        crate::locus::identity::Store::Machine => "machine",
+        // The app fallback and a fresh identity are both "not durable yet" from
+        // the hub's point of view; the distinction that matters to support is
+        // whether it survives a reinstall, and neither of these does.
+        crate::locus::identity::Store::AppFallback | crate::locus::identity::Store::Fresh => "app",
+    }
 }
 
 #[cfg(test)]
