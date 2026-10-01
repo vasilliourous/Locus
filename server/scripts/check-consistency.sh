@@ -1596,7 +1596,87 @@ SITES
 fi
 
 echo
-echo "18. Every workflow step condition names a matrix value that exists"
+echo "18. The Windows installer is signed, under the name the release job prefixes"
+# The `installer-` prefix is added by the RELEASE job's "Prefix and stage the
+# installers" step. The SIGN step runs in the BUILD job, where the file still
+# carries Tauri's raw name. A glob written against the prefixed name in the build
+# job can never match — and because the step exits 1 in that case, the cost is a
+# ~30 minute four-platform build that ends in "no installer to sign".
+#
+# Two separate defects lived here and both shipped:
+#   1. the step was gated on `matrix.os == 'windows-latest'` while the matrix
+#      pins `windows-2022`, so it never ran at all (see §18's sibling check);
+#   2. once it did run, it globbed `installer-Locus_*` in a directory that only
+#      ever holds `Locus_*`.
+# Both are the same failure shape: a name asserted in one half and not the other.
+# This check asserts the AGREEMENT between the two jobs rather than either half
+# (AGENTS.md, "assert the agreement").
+wf_installer="$WORKFLOW"
+if [ -f "$wf_installer" ]; then
+    sign_glob="$(grep -oE 'for f in installer/[^;]+' "$wf_installer" | head -1 || true)"
+    prefix_src="$(grep -oE 'cp "\$f" "release/installer-\$base"' "$wf_installer" | head -1 || true)"
+    # The `if:` line follows the step name, but a comment block may sit between
+    # them (the file explains WHY at the point of contact). Scan forward from the
+    # name to the next `if:` or the next `- ` step boundary, whichever comes first.
+    sign_cond="$(python3 - "$wf_installer" <<'PY'
+import re, sys
+
+lines = open(sys.argv[1], encoding="utf-8", errors="replace").read().splitlines()
+cond = ""
+for i, line in enumerate(lines):
+    if line.strip().startswith("- name:") and "Sign the Windows installer" in line:
+        for follow in lines[i + 1:]:
+            s = follow.strip()
+            if s.startswith("- name:"):
+                break            # next step: no if: on this one
+            if s.startswith("if:"):
+                cond = s
+                break
+        break
+print(cond)
+PY
+)"
+
+    if [ -z "$sign_glob" ]; then
+        bad "the \"Sign the Windows installer\" step no longer globs a staged installer"
+        bad "  if that step was removed, the Windows installer ships unsigned and no"
+        bad "  Windows client can install the update (RECOVER-WINDOWS-UPDATE.md)"
+    else
+        # The glob must NOT carry the prefix: it runs before the rename.
+        case "$sign_glob" in
+            *installer/Locus_*)
+                ok "the sign step globs the pre-prefix name (installer/Locus_*)"
+                ;;
+            *)
+                bad "the sign step globs '${sign_glob#for f in }' in the BUILD job"
+                bad "  the 'installer-' prefix is added later by the release job, so this"
+                bad "  can never match and the step exits 1 after a full four-platform build"
+                ;;
+        esac
+    fi
+
+    if [ -n "$prefix_src" ]; then
+        ok "the release job prefixes the installer (release/installer-\$base)"
+    else
+        bad "the release job's installer-prefixing step is missing or renamed"
+        bad "  the hub, the manifest and fetch-release.py all resolve"
+        bad "  installer-Locus_<v>_x64-setup.exe, so without the prefix no"
+        bad "  Windows client is offered a file it can install"
+    fi
+
+    if [ -z "$sign_cond" ]; then
+        warn "could not read the sign step's if: condition; skipping its check"
+    elif printf '%s' "$sign_cond" | grep -q "matrix.label"; then
+        ok "the sign step is gated on matrix.label (${sign_cond#*if: })"
+    else
+        bad "the sign step is gated on ${sign_cond#*if: }, not matrix.label"
+        bad "  gate platform steps on matrix.label: matrix.os is a runner image that"
+        bad "  gets bumped (macos-13 -> macos-14) and silently detaches the condition"
+    fi
+fi
+
+echo
+echo "19. Every workflow step condition names a matrix value that exists"
 # A step gated on a matrix value that the matrix never produces is a step that
 # CANNOT RUN — and it skips silently, so the job still goes green.
 #

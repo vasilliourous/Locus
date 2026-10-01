@@ -1077,12 +1077,24 @@ jobs:
           printf '%s' "$LOCUS_UPDATE_KEY" > "$RUNNER_TEMP/locus.key"
           chmod 600 "$RUNNER_TEMP/locus.key"
 
-          # Exactly one NSIS setup, found by the same glob the manifest step uses.
-          # A glob rather than a literal path because the version is baked into
-          # the filename by Tauri; `nullglob` off means an unmatched glob stays
-          # literal, so the -f test below is what catches "none found".
+          # EXACTLY ONE NSIS setup, found by a glob.
+          #
+          # The glob is `Locus_*_x64-setup.exe` — with NO `installer-` prefix —
+          # because that is the name Tauri's bundler writes and the name "Stage
+          # the platform installer" above copies into `installer/`. The prefix is
+          # added LATER, by the `release` job's "Prefix and stage the installers"
+          # step, which renames it to `installer-Locus_<v>_x64-setup.exe` (the
+          # name the hub, the manifest and fetch-release.py all resolve).
+          #
+          # This step previously globbed for the PREFIXED name in the build job,
+          # where it can never exist, so it always exited 1 with "no
+          # installer-Locus_*_x64-setup.exe to sign". Signing the file here and
+          # letting the release job prefix both it and its `.sig` keeps the two
+          # in step: minisign signs exact bytes and the `.sig` is a sibling
+          # filename, so a rename applied to one but not the other would produce
+          # a signature that verifies nothing.
           setup=""
-          for f in installer/installer-Locus_*_x64-setup.exe; do
+          for f in installer/Locus_*_x64-setup.exe; do
             [ -f "$f" ] || continue
             if [ -n "$setup" ]; then
               echo "::error::more than one NSIS installer staged: '$setup' and '$f'"
@@ -1091,7 +1103,7 @@ jobs:
             setup="$f"
           done
           if [ -z "$setup" ]; then
-            echo "::error::no installer-Locus_*_x64-setup.exe to sign in installer/"
+            echo "::error::no Locus_*_x64-setup.exe to sign in installer/"
             ls -la installer/ || true
             exit 1
           fi
