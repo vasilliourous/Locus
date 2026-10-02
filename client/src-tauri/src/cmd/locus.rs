@@ -551,7 +551,20 @@ pub async fn locus_recognise() -> RecognitionResult {
 pub async fn locus_activate(code: String) -> CmdResult<ActivationResult> {
     let fingerprint = device::fingerprint();
 
-    let outcome = activation::activate(&code, &fingerprint)
+    // The durable identity, sent so the hub can REGISTER it in the same call that
+    // binds the code. Without this the hub writes no `device_identities` row, so
+    // recognition has nothing to find (auto-sign-in never fires) and a reinstall
+    // — which re-derives a different fingerprint — is told its own code belongs
+    // to another device. Best-effort: an identity that cannot be resolved still
+    // activates, it simply is not recognisable yet.
+    let identity = resolve_identity().await;
+    let identity_wire = activation::IdentityWire {
+        verifier: identity.verifier(),
+        device_id: identity.device_id.clone(),
+        store: activation::store_label(identity.store).to_owned(),
+    };
+
+    let outcome = activation::activate_with_identity(&code, &fingerprint, &identity_wire)
         .await
         .map_err(|error| super::coded_error("LOCUS_ACTIVATE_FAILED", format!("{error:#}")))?;
 

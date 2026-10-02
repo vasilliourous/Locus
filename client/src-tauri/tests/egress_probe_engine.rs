@@ -286,10 +286,16 @@ fn group_delay_path(test_url: &str, timeout_secs: u32) -> String {
 /// rule the probe applies. Borrowing the rule from the crate would make the test
 /// agree with the code by construction and hide exactly the drift it exists to
 /// catch, so it is restated and cross-checked against the real engine's output.
-const fn delay_is_a_measurement(delay: u32, timeout_secs: u32) -> bool {
+///
+/// **Restated does not mean free to drift.** This copy carried the pre-2026-10-01
+/// rule (`delay < timeout_ms`) for a full release *after* the shipped rule dropped
+/// that term, so the test pinned a contract the app no longer honoured — and it
+/// was the version that refuses `5000`, the case the previous fix existed to stop
+/// refusing. Keeping the two in step is the price of restating the rule; the
+/// shipped rule now points back here so the pair is findable.
+const fn delay_is_a_measurement(delay: u32, _timeout_secs: u32) -> bool {
     const IMPLAUSIBLE_DELAY: u32 = 100_000;
-    let timeout_ms = timeout_secs.saturating_mul(1000);
-    delay > 0 && delay < timeout_ms && delay <= IMPLAUSIBLE_DELAY
+    delay > 0 && delay <= IMPLAUSIBLE_DELAY
 }
 
 /// A working member must produce a 200 whose delay map has a usable value. This
@@ -415,19 +421,98 @@ fn an_unreachable_member_is_not_reported_as_success() {
     );
 }
 
-/// The engine's own failure sentinel must not classify as a measurement.
+/// The engine's failure sentinel must not classify as a measurement — and the
+/// timeout value must.
 ///
-/// This pins the specific bug the probe's classifier exists for: mihomo reports a
-/// timed-out test as the timeout value itself (and a failed one as `0`), in the
-/// same numeric field a real measurement uses. A bare `delay > 0` would accept a
-/// timeout, so a tunnel that had just timed out would read as connected.
+/// Two rules live here, and they were conflated for two releases:
+///
+///   * `0` and the `1e5`-and-above sentinel are **not** measurements. mihomo
+///     reports a failed test as `0` in the same numeric field a real measurement
+///     uses, so a bare `delay > 0` check would accept a number that means "the
+///     test failed".
+///   * the **timeout value itself IS egress** (2026-10-01, second round). The
+///     engine dialled the target, the request left the machine, and only our own
+///     clock ran out. The earlier rule here rejected `>= timeout * 1000`, which
+///     is why a working-but-slow school link read as `NoEgress` and stranded the
+///     button on "connecting" — the defect this file's own history records twice.
+///
+/// The assertion that the timeout counts as egress is the one that failed against
+/// the pre-fix rule, and it is the reason this file is not allowed to restate the
+/// classifier from memory.
 #[test]
 fn the_engine_sentinels_are_not_measurements() {
     let timeout_secs = 3;
-    // The timeout the plugin passes, echoed back as a would-be delay.
-    assert!(!delay_is_a_measurement(timeout_secs * 1000, timeout_secs));
-    // The zero sentinel mihomo uses for a failed single-proxy test.
+    // The zero sentinel mihomo uses for a failed single-proxy test: not a
+    // measurement.
     assert!(!delay_is_a_measurement(0, timeout_secs));
-    // A genuine round trip still counts.
+    // An implausible value is an error sentinel, not a latency.
+    assert!(!delay_is_a_measurement(100_001, timeout_secs));
+    // A genuine round trip counts.
     assert!(delay_is_a_measurement(120, timeout_secs));
+    // THE CASE THE OLD RULE GOT WRONG: the timeout value is egress. Slow is not
+    // dead, and treating it as dead is what stranded working tunnels.
+    assert!(
+        delay_is_a_measurement(timeout_secs * 1000, timeout_secs),
+        "a delay at the probe's own budget is egress, not failure — see \
+         docs/reference/EGRESS-READINESS.md"
+    );
+}
+
+/// A group whose members ALL fail returns **no delay map at all** — a `504` whose
+/// body is an error message, not an object of delays.
+///
+/// Measured against the real sidecar (v1.19.31, 2026-10-02) with a `select` group
+/// holding two unreachable members:
+///
+/// ```text
+/// GET /group/Locus%20Auto/delay?url=…&timeout=5
+///   -> 504 {"message":"get delay: all proxies timeout"}
+/// GET /proxies/Locus-Dead/delay?url=…&timeout=5
+///   -> 503 {"message":"An error occurred in the delay test"}
+/// ```
+///
+/// This is the shape that matters and that nothing pinned: the probe's `Ok(Ok(..))`
+/// arm is never reached, because the plugin turns a non-2xx into `Err` (`ret_failed_resp!`
+/// in `mihomo.rs`). So **no value of `delay_is_a_measurement` can rescue this case** —
+/// every member timing out is indistinguishable, at the client, from the tunnel being
+/// down. A group where the selected member is slow-but-working is the case the
+/// classifier fixes; a group where *every* member fails is a different defect and
+/// is tracked in `STILL-OPEN.md`.
+///
+/// The assertion is deliberately about the *contract* (no 2xx, no parseable
+/// measurements) rather than about the exact status, because 503/504 is the
+/// engine's choice and the client must not depend on which.
+#[test]
+fn a_group_whose_members_all_fail_returns_no_delay_map() {
+    let Some(engine) = sidecar() else {
+        eprintln!("SKIP: no mihomo sidecar fetched; run `node scripts/prebuild.mjs` first");
+        return;
+    };
+
+    let dir = std::env::temp_dir().join("locus-egress-probe-alldead");
+    let mut controller_res = PortReservation::bind();
+    let mut mixed_res = PortReservation::bind();
+    let controller_port = controller_res.port();
+    let mixed_port = mixed_res.port();
+    let controller = format!("127.0.0.1:{controller_port}");
+
+    // `write_config` builds a single-member select group pointing at a `direct`
+    // outbound. Reached through the group with a target nothing is listening on,
+    // that member cannot complete a round trip — the all-dead case.
+    let config = write_config(&dir, controller_port, mixed_port);
+    controller_res.release();
+    mixed_res.release();
+    let _guard = start_engine(&engine, &dir, &config, &controller);
+
+    let dead_url = format!("http://127.0.0.1:{}/generate_204", unused_port());
+    let (status, body) = http_get(&controller, &group_delay_path(&dead_url, 2));
+
+    assert_ne!(
+        status, 200,
+        "an all-dead group must not answer 200; body was {body:?}"
+    );
+    assert!(
+        parse_delay_map(&body).is_empty(),
+        "an all-dead group must return an error message, not a delay map; body was {body:?}"
+    );
 }

@@ -435,3 +435,110 @@ fn the_token_is_not_written_into_the_attempts_log() {
         }
     }
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Identity registration — the write whose absence broke auto-sign-in
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// `/api/activate` must write a `device_identities` row, or recognition can
+/// never find the device.
+///
+/// # The defect this pins
+///
+/// Until 2026-10-02 **nothing in the hook set created a `device_identities`
+/// row**. `/api/device-recognise` and `/api/heartbeat` only ever read that
+/// collection, so recognition looked up a row activation had never written and
+/// answered the uniform `unknown` for every device. Two reported symptoms, one
+/// cause: auto-sign-in never fired for anyone, and a reinstall — which
+/// re-derives a different fingerprint — was told its own code was "already in
+/// use on another device".
+///
+/// # Why a text check, and why THIS text
+///
+/// The hook is goja source that cannot be imported or called from Rust, so the
+/// assertion is on its text — the same trade-off the rest of this file makes.
+/// `registerIdentity(` is the call that performs the write; asserting the *call*
+/// rather than the function's definition is deliberate, and it is the mistake
+/// `check-consistency.sh` §15 made for `is_installer_payload`: matching the
+/// symbol passes even when the call site has been removed.
+#[test]
+fn activation_registers_the_device_identity() {
+    let hook = activation_hook();
+
+    assert!(
+        hook.contains("function registerIdentity("),
+        "activation.pb.js no longer defines `registerIdentity`. Without an \
+         identity write, `/api/device-recognise` has nothing to find and both \
+         auto-sign-in and reinstall-survival are dead."
+    );
+
+    // The call sites, not the definition. A hook that defines the helper and
+    // never calls it is exactly the shipped-broken shape this test exists for.
+    let calls = hook.matches("registerIdentity(").count();
+    assert!(
+        calls >= 3,
+        "activation.pb.js defines `registerIdentity` but calls it {calls} time(s) \
+         (the definition is 1). It must be called on BOTH success paths — the \
+         first-activation bind and the same-device re-activation — or a device \
+         that repairs its code never becomes recognisable."
+    );
+
+    assert!(
+        hook.contains(r#"row.set("verifier", verifier)"#),
+        "the identity write does not set `verifier`, which is the field \
+         `/api/device-recognise` looks the device up by. A row without it can \
+         never be found."
+    );
+}
+
+/// The client must SEND the verifier, or the hub has nothing to register.
+///
+/// This is the other half of the two-sided contract: the hub can only write an
+/// identity it is given. `CodeRequest` gained the field; this pins that the
+/// wire body actually carries it, and that an absent identity omits the keys
+/// rather than sending empty strings (which would fail the hub's shape check
+/// loudly instead of degrading).
+#[test]
+fn the_activation_request_carries_the_identity() {
+    let contract = read(&repo_root().join("client/src-tauri/src/locus/contract.rs"));
+
+    for field in ["verifier", "device_id", "store"] {
+        assert!(
+            contract.contains(&format!("pub {field}: &'a str")),
+            "`CodeRequest` no longer carries `{field}`. The hub cannot register an \
+             identity it is not sent, so auto-sign-in and reinstall-survival both \
+             go dead again."
+        );
+    }
+
+    assert!(
+        contract.contains(r#"#[serde(skip_serializing_if = "str::is_empty")]"#),
+        "the identity fields are no longer omitted when empty. An old client sends \
+         no identity at all, and the hub's shape check must see absent fields, not \
+         empty strings."
+    );
+}
+
+/// The activation command must pass the resolved identity, not a default.
+///
+/// A `CodeRequest` that carries the fields but is constructed with
+/// `IdentityWire::default()` would compile, pass the two checks above, and
+/// register nobody — the same "the field exists but the value never arrives"
+/// failure that made `recognised` dead state in `main.tsx`.
+#[test]
+fn the_activation_command_passes_the_resolved_identity() {
+    let cmd = read(&repo_root().join("client/src-tauri/src/cmd/locus.rs"));
+
+    assert!(
+        cmd.contains("activation::activate_with_identity("),
+        "`locus_activate` no longer calls `activate_with_identity`. Calling the \
+         plain `activate` compiles and behaves exactly as before the fix — no \
+         identity is registered and recognition stays dead."
+    );
+    assert!(
+        cmd.contains("identity.verifier()"),
+        "`locus_activate` builds an identity without the verifier. The hub's \
+         registration is keyed on `sha256(secret)`, so an identity sent without \
+         it cannot be stored."
+    );
+}

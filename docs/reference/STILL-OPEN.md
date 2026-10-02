@@ -14,6 +14,76 @@ Ordered by whether I could have validated it here.
 
 ## Open, and blocked in this environment
 
+### The egress probe judges the tunnel by the group's selected member, and a 504 is unreachable by the classifier
+
+**Added 2026-10-02.** The third "stuck on connecting" report. Measured against the
+real sidecar (mihomo v1.19.31): a `select` group whose members all fail returns
+
+```text
+504 {"message":"get delay: all proxies timeout"}
+```
+
+not a delay map. The plugin raises any non-2xx as `Err`, so
+`egress_attempt_once` returns `false` and `readiness` becomes `NoEgress` →
+`ready: false` → the button shows **connecting** — the same symptom as the two
+defects already fixed, while traffic flows.
+
+- **Not verified:** that this is what the reporter's machine is doing. It needs
+  `curl` to the Core's controller while connected (the commands are in the
+  2026-10-02 `FIXES.md` entry). The traffic bars and `whatsmyip` prove traffic
+  flows; they do not prove the group's *selected* member is delay-testable.
+- **Not decided:** what to do about it. Probing every member, probing the member
+  the traffic actually uses, and treating a 504 as inconclusive rather than
+  `NoEgress` each trade probe latency against false positives — and the wrong
+  choice recreates the "connected with no internet" lie. This needs a decision,
+  not a patch.
+
+### Activation never registers a device identity — FIXED, but inert until the hook is deployed
+
+**Added 2026-10-02. Fix applied the same day.** `grep -rln device_identities
+server/pb_hooks/` returned `heartbeat.pb.js` and `device_recognise.pb.js` — both
+readers. Nothing created the row. `/api/activate` now calls `registerIdentity` on
+both success paths, and the client sends the `verifier` it already computes.
+
+- **Verified:** the guards fail against the pre-fix code (both calls removed →
+  red; `locus_activate` reverted to plain `activate()` → red). `activation.pb.js`
+  parses; 584 Rust tests pass.
+- **Not verified:** that a device, a code and a reinstall now work end to end. No
+  live hub call has been made from here.
+- **Not yet true:** the hook is **inert until `setup.sh` re-runs on the host** —
+  `pb_hooks/` deploys from `/root/server/`, not from this repo. A device already
+  bound registers on its next activation or recognition attempt; one that never
+  calls `/api/activate` again still has no row.
+- **Do not "fix" it by clearing `bound_fingerprint` on reinstall.** That dissolves
+  the one-code-per-device guarantee. The hub is correctly asking who is calling.
+
+### Every installed 3.2.17 Windows client is stranded, and the fix cannot reach it
+
+**Added 2026-10-02.** The 2026-10-02 `FIXES.md` entry ("the update to 3.2.18 is
+not an installer") fixed the guard that refused a genuine NSIS installer. What is
+**not** verified is that any affected machine recovers by itself:
+
+- **Not verified, and not verifiable from here:** that a Windows client on 3.2.17
+  installs 3.2.18. It cannot: the fix lives in the payload 3.2.17 refuses, so the
+  bug is self-sustaining. Every client still on 3.2.17 needs a **manual** install
+  of the 3.2.18 setup executable before its updater works again. Whether that has
+  been done on the fleet is a world claim, not a repo fact.
+- **Unknown, and worth naming:** how many Windows clients are on 3.2.17. Comparing
+  `client.version` in `docs/state.toml` (3.2.18) against the installed base says
+  nothing about the base — the hub stores no version per device, deliberately.
+- **Not observed:** a 3.2.18 → 3.2.19 update. That is the first transition the
+  fixed guard makes possible, and it will not happen until 3.2.19 exists.
+- **Reconstructed, not measured:** the raw `locus-windows-amd64.exe` is no longer
+  published (404 under `/updates/3.2.18/`), so the fixture used to prove the
+  post-fix constant still refuses it carries the *documented* `NullsoftInstaller`
+  offset rather than a measured one. The refusal is a structural argument.
+
+If you are reading this because a student reported the same message on a build
+**other than** 3.2.17, stop: the fix did not ship in that build either, and the
+manual install is the only route.
+
+---
+
 ### The service-recovery proxy clear was argued structurally, never observed
 
 **Added 2026-10-01.** The 2026-10-01 `FIXES.md` entry ("recovery from a lost

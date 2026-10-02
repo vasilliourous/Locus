@@ -33,11 +33,26 @@ use serde::{Deserialize, Serialize};
 /// activate, heartbeat, or update.
 pub const HUB_URL: &str = "https://networkingguides.duckdns.org";
 
-/// Request body for `/api/activate` and `/api/heartbeat`.
+/// Request body for `/api/activate` and `/api/code-lookup`.
+///
+/// `verifier`, `device_id` and `store` are the device's **durable identity**,
+/// carried here so activation can REGISTER it — see `RegisterRequest` for why.
+/// They are omitted entirely when absent so an older client's body is
+/// byte-identical to what it sends today, and an older hub that ignores unknown
+/// fields is unaffected.
 #[derive(Debug, Clone, Serialize)]
 pub struct CodeRequest<'a> {
     pub code: &'a str,
     pub fingerprint: &'a str,
+    /// `sha256(secret)`, hex. Never the secret itself.
+    #[serde(skip_serializing_if = "str::is_empty")]
+    pub verifier: &'a str,
+    /// The device's non-secret name.
+    #[serde(skip_serializing_if = "str::is_empty")]
+    pub device_id: &'a str,
+    /// Where the client persisted its secret: `"machine"` or `"app"`.
+    #[serde(skip_serializing_if = "str::is_empty")]
+    pub store: &'a str,
 }
 
 /// Request body for `/api/heartbeat`.

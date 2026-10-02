@@ -591,17 +591,39 @@ def _sha256_file(path):
 
 
 def _is_nsis_installer(path):
-    """Whether a Windows PE carries the NSIS overlay header.
+    """Whether a Windows PE carries the NSIS firstheader.
 
-    The header sits near the start of the installer's overlay rather than at a
-    fixed offset, so this scans a bounded window — the same approach, and the
-    same 4 MiB bound, as the client's `is_installer_payload`. Scanning the whole
-    file would mean reading 58 MB to find a 17-byte marker in the first few.
+    The signature is the NSIS *firstheader*: the little-endian magic
+    `0xDEADBEEF` (`\\xef\\xbe\\xad\\xde`) immediately followed by the ASCII
+    `NullsoftInst`. makensis writes it into the overlay near the start of the
+    file, so this scans a bounded window — the same approach, and the same 4 MiB
+    bound, as the client's `is_installer_payload`. Scanning the whole file would
+    mean reading 58 MB to find a marker in the first few.
+
+    WHY THE MAGIC IS PART OF THE SIGNATURE, AND WHY THAT MATTERS
+    -----------------------------------------------------------
+    An earlier revision looked for the bare string `NullsoftInstaller`, which is
+    wrong in BOTH directions:
+
+      * A real NSIS installer does not contain it. The header is `NullsoftInst`
+        (12 bytes) followed by a 4-byte flags word, so `NullsoftInstaller` never
+        appears at the header — the real installer was REFUSED, and no Windows
+        client could ever be published to.
+      * The raw `locus-windows-amd64.exe` (the bare Tauri app, which embeds an
+        NSIS uninstaller stub) *does* contain the literal substring
+        `NullsoftInstaller`, far into the file. It was rejected only because that
+        occurrence sits past the scan window — by luck, not by design.
+
+    Requiring the `0xDEADBEEF` magic immediately before `NullsoftInst` is what
+    actually separates the two: the real installer has the firstheader at a low
+    offset; the raw app has neither the magic nor the 12-byte string, only an
+    unrelated `NullsoftInstaller` substring. Measured against the real v3.2.18
+    assets: firstheader at byte 68100 of the installer, absent from the raw app.
 
     Fail-closed on an unreadable file: a payload whose shape cannot be confirmed
     is not one to publish for execution.
     """
-    NSIS_SIGNATURE = b"NullsoftInstaller"
+    NSIS_SIGNATURE = b"\xef\xbe\xad\xdeNullsoftInst"
     NSIS_SCAN_LIMIT = 4 * 1024 * 1024
     try:
         with open(path, "rb") as f:
@@ -662,11 +684,11 @@ def verify_artifact_kind(path, platform_key):
         # the wrong one gets ShellExecuted by `tauri_plugin_updater`, which
         # accepts any PE as an NSIS installer.
         #
-        # What separates them is the NullsoftInstaller header makensis writes
-        # into the overlay. This mirrors `is_installer_payload` in
-        # client/src-tauri/src/locus/update/install.rs: the hub refuses the same
-        # payload the client would refuse, so a mistake is caught here at publish
-        # time rather than on a student's machine.
+        # What separates them is the NSIS firstheader makensis writes into the
+        # overlay: the 0xDEADBEEF magic followed by `NullsoftInst`. This mirrors
+        # `is_installer_payload` in client/src-tauri/src/locus/update/install.rs:
+        # the hub refuses the same payload the client would refuse, so a mistake
+        # is caught here at publish time rather than on a student's machine.
         if not _is_nsis_installer(path):
             return False, (
                 "a Windows PE without an NSIS header — this is the raw updater "

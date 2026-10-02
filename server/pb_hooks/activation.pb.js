@@ -76,6 +76,66 @@ routerAdd("POST", "/api/activate", function(e) {
         return new Date(fromMs + (days * 24 * 60 * 60 * 1000)).toISOString();
     }
 
+    // ── Register (or update) this device's durable identity ──
+    //
+    // THE MISSING WRITE. Until 2026-10-02 nothing in this hook set ever created a
+    // `device_identities` row: `/api/device-recognise` and `/api/heartbeat` only
+    // ever READ that collection, so recognition looked up a row that activation
+    // had never written and returned the uniform `unknown` for every device. Two
+    // reported symptoms, one cause:
+    //
+    //   * "auto-sign-in is broken" — it was never wired up. Recognition had
+    //     nothing to find, so the code prompt always showed.
+    //   * "my code is already in use on another device" right after a reinstall —
+    //     binding is decided by `bound_fingerprint` alone (see the 403 below), and
+    //     the durable identity built to survive a reinstall was not consulted on
+    //     the path that decides it.
+    //
+    // WHY THE VERIFIER, AND WHY THAT IS SAFE. The client sends `sha256(secret)`,
+    // never the secret, and the hub stores only that digest — the same discipline
+    // `/api/device-recognise` already relies on. A database read therefore yields
+    // nothing that can be replayed as a credential.
+    //
+    // WHY IT IS OPTIONAL. Older deployed clients do not send a verifier at all.
+    // Refusing them would break every install in the field, so a missing verifier
+    // simply skips this write and leaves the previous (working) behaviour intact:
+    // the device just is not recognisable yet.
+    //
+    // Idempotent by verifier: a device that re-activates — a new code, a renewal,
+    // a repair — UPDATES its row rather than creating a second one, because
+    // `verifier` is UNIQUE and a duplicate insert would throw.
+    function registerIdentity(verifier, deviceId, store, code, existingRow) {
+        if (!verifier) return null;
+        var row = existingRow || null;
+        if (!row) {
+            try {
+                row = $app.dao().findFirstRecordByFilter("device_identities",
+                    "verifier = '" + verifier + "'");
+            } catch (none) {
+                row = null;
+            }
+        }
+        var now = new Date().toISOString();
+        if (!row) {
+            row = new Record($app.dao().findCollectionByNameOrId("device_identities"));
+            row.set("verifier", verifier);
+            row.set("first_seen_at", now);
+        }
+        // `code` is a plain string copy, not a relation — see the schema note.
+        // The code ROW stays the authority on the code's own state; every reader
+        // re-reads it rather than trusting this copy.
+        row.set("code", code);
+        if (deviceId) row.set("device_id", deviceId);
+        if (store) row.set("store", store);
+        row.set("last_seen_at", now);
+        // A device that activates a code is not revoked. Clearing here means an
+        // operator who revoked an identity and then re-issued the student a code
+        // does not leave them permanently locked out by a stale tombstone.
+        row.set("revoked_at", "");
+        $app.dao().saveRecord(row);
+        return row;
+    }
+
     // Whether this device is already bound to a DIFFERENT code.
     //
     // ONE CODE PER DEVICE. Without this, a device could activate code after
@@ -180,6 +240,13 @@ routerAdd("POST", "/api/activate", function(e) {
         var data = $apis.requestInfo(e).data;
         var code = (data.code || "").trim();
         var fp = (data.fingerprint || "").trim();
+        // Optional: absent on clients older than the identity work. Validated by
+        // shape before use, because it is interpolated into a filter below — the
+        // same argument `device_recognise.pb.js` makes for its own lookup.
+        var verifier = (data.verifier || "").trim().toLowerCase();
+        if (!/^[0-9a-f]{64}$/.test(verifier)) verifier = "";
+        var deviceId = (data.device_id || "").trim();
+        var storeLabel = (data.store || "").trim();
         try { var addr = (e.request().remoteAddr || "").split(":"); var ip = addr[0] || ""; } catch(ex) { var ip = ""; }
 
         if (!code) return e.json(400, {code:400, message:"Missing code"});
@@ -294,6 +361,20 @@ routerAdd("POST", "/api/activate", function(e) {
             // hold an entitlement the index cannot see, and the device could
             // then bind a SECOND code through the check below. Repair on read.
             recordBinding(fp, rec.getString("code"), rec.getString("tier"));
+            // Register the durable identity on the re-activation path too. This
+            // is the branch a REPAIR lands on — the student whose code is bound to
+            // this device re-enters it — and it is the most likely place for a
+            // device to be missing a row, because it is the path an already-bound
+            // install takes. Best-effort: an identity-registration failure must
+            // not fail an activation that has already succeeded, or a student
+            // with a working code would be blocked by bookkeeping.
+            try {
+                registerIdentity(verifier, deviceId, storeLabel, rec.getString("code"), null);
+            } catch (identErr2) {
+                // Swallowed deliberately — see above. The device still holds its
+                // entitlement; it simply is not recognisable until a later call
+                // succeeds.
+            }
             var resp2 = {code:200, message:"Already activated", tier:rec.getString("tier"), device_fingerprint:boundFp};
             resp2.expires_at = expiryForWire(rec);
             if (cfgRec2) {
@@ -355,6 +436,23 @@ routerAdd("POST", "/api/activate", function(e) {
         rec.set("activated_at", new Date().toISOString());
         $app.dao().saveRecord(rec);
         recordBinding(boundFpNormalised, rec.getString("code"), rec.getString("tier"));
+
+        // ── Register the durable identity, in the same transaction as the bind ──
+        //
+        // This is the write whose absence produced BOTH reported symptoms (see
+        // `registerIdentity` above). It runs on the first-activation path, after
+        // the code row is committed, so a device that has just paid is
+        // immediately recognisable on its next launch and survives a reinstall.
+        //
+        // Best-effort by design: the student's entitlement is already bound and
+        // saved. Failing the whole activation because bookkeeping could not be
+        // written would trade a working code for a clean database, which is the
+        // wrong direction — the next activation or recognition repairs it.
+        try {
+            registerIdentity(verifier, deviceId, storeLabel, rec.getString("code"), null);
+        } catch (identErr) {
+            // Swallowed deliberately — see above.
+        }
 
         // Clean rate limiting
         $app.dao().db().newQuery("DELETE FROM activation_attempts WHERE rate_key={:key}").bind({key:rateKey}).execute();

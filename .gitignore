@@ -117,3 +117,10 @@ VPN-Service/
 # checkout itself lives here. Nothing in it is source; it is a build directory
 # that happens to be a git checkout.
 release-worktrees/
+.aider*
+# A plaintext root credential for the VPS, kept in the working tree because it
+# has to be usable from here. The pattern carries NO `./` prefix: gitignore
+# matches relative to the .gitignore's own directory, so `./vpspassword.txt`
+# matched nothing and `git add -A` staged the password (caught 2026-10-02, one
+# command short of committing a live credential to a public-looking repo).
+vpspassword.txt

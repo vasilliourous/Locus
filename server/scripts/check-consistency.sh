@@ -1410,14 +1410,51 @@ else
 fi
 
 # The client-side half must still exist, or the guard above is decorative.
+#
+# This checks the CALL SITE, not the symbol. `grep -q 'is_installer_payload'`
+# over the whole file is a check that cannot fail: the function's definition and
+# its fifteen unit tests all contain the name, so deleting the call from
+# `ReadyInstall::install` — the one line that actually protects a student's
+# machine — leaves eighteen matches behind and the check still prints OK.
+# Demonstrated 2026-10-02: with `if true /* was: if !is_installer_payload(&bytes) */`
+# in install(), this section passed. The pattern below is anchored to the
+# negated call over the downloaded bytes, so it fails when the call goes away.
 INSTALL_GUARD="$REPO/client/src-tauri/src/locus/update/install.rs"
 if [ ! -f "$INSTALL_GUARD" ]; then
     bad "client/src-tauri/src/locus/update/install.rs is missing — the payload guard cannot be checked"
-elif grep -q 'is_installer_payload' "$INSTALL_GUARD"; then
+elif grep -qE 'if[[:space:]]*![[:space:]]*is_installer_payload\(&bytes\)' "$INSTALL_GUARD"; then
     ok "the client refuses to execute a payload that is not an installer"
 else
-    bad "the client no longer calls is_installer_payload before install()"
+    bad "the client no longer calls is_installer_payload on the downloaded bytes"
     bad "  without it, any manifest edit can hand a raw executable to ShellExecute"
+fi
+
+# The constant itself is the other half of the two-sided contract: the hub's
+# fetch-release.py and the client must agree on the same bytes, or a payload is
+# publishable and not installable (or worse, installable and not publishable).
+# This is the 2026-10-02 defect — both sides looked for `NullsoftInstaller`,
+# which no real installer contains.
+# Single-quoted, so the backslashes are literal: the Rust/Python source carries
+# the escape sequence `\xef\xbe\xad\xde` as TEXT in the file, and that text is
+# what must agree. Reading the actual bytes here instead would check the compiled
+# meaning, not the source, and this script only ever greps source.
+NSIS_SIGNATURE='\xef\xbe\xad\xdeNullsoftInst'
+if grep -qF "b\"$NSIS_SIGNATURE\"" "$INSTALL_GUARD"; then
+    ok "the client looks for the NSIS firstheader (0xDEADBEEF + NullsoftInst)"
+else
+    bad "the client's NSIS signature is not the firstheader magic + NullsoftInst"
+    bad "  a bare 'NullsoftInstaller' string is not in any real installer: every"
+    bad "  genuine Windows update is refused before it is executed"
+fi
+
+FETCH_SERVICE="$REPO/server/scripts/fetch-release.py"
+if [ ! -f "$FETCH_SERVICE" ]; then
+    bad "server/scripts/fetch-release.py is missing — the hub's payload check cannot be verified"
+elif grep -qF "b\"$NSIS_SIGNATURE\"" "$FETCH_SERVICE"; then
+    ok "the hub looks for the same NSIS firstheader as the client"
+else
+    bad "the hub and the client disagree on the NSIS signature"
+    bad "  the hub would publish a payload the client refuses (or the reverse)"
 fi
 
 echo

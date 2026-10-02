@@ -394,6 +394,42 @@ where
 /// Transport retries are the caller's business; this function makes exactly one
 /// attempt so the behaviour is obvious.
 pub async fn activate(code: &str, fingerprint: &str) -> Result<ActivationOutcome> {
+    activate_with_identity(code, fingerprint, &IdentityWire::default()).await
+}
+
+/// Identity fields to carry on an activation request.
+///
+/// A struct rather than three positional arguments so call sites cannot silently
+/// transpose the verifier and the device id — both are opaque strings, and the
+/// compiler would accept either order.
+#[derive(Debug, Clone, Default)]
+pub struct IdentityWire {
+    /// `sha256(secret)`, hex. Empty on a device that has no identity yet.
+    pub verifier: String,
+    /// The device's non-secret name.
+    pub device_id: String,
+    /// `"machine"` or `"app"` — where the secret was persisted.
+    pub store: String,
+}
+
+/// Activation that also **registers the device's durable identity**.
+///
+/// # Why the verifier travels here
+///
+/// `/api/activate` bound a code to a fingerprint and stopped, writing no
+/// `device_identities` row. Recognition reads that collection, so it found
+/// nothing and every device looked unknown — which is why auto-sign-in never
+/// worked, and why a reinstall (a new fingerprint) was told its own code
+/// belonged to another device. The hub cannot register an identity it is not
+/// sent, and this is the call where the client has one.
+///
+/// Older hubs ignore the extra fields, and an empty identity omits them, so this
+/// is additive on the wire in both directions.
+pub async fn activate_with_identity(
+    code: &str,
+    fingerprint: &str,
+    identity: &IdentityWire,
+) -> Result<ActivationOutcome> {
     let canonical = validate_code(code).map_err(anyhow::Error::new)?;
 
     if fingerprint.len() < 16 {
@@ -403,6 +439,9 @@ pub async fn activate(code: &str, fingerprint: &str) -> Result<ActivationOutcome
     let body = CodeRequest {
         code: &canonical,
         fingerprint,
+        verifier: &identity.verifier,
+        device_id: &identity.device_id,
+        store: &identity.store,
     };
     let response: ActivateResponse = post_json("/api/activate", &body).await?;
 
@@ -425,6 +464,10 @@ pub async fn lookup_code(code: &str, fingerprint: &str) -> Result<CodeCheck> {
     let body = CodeRequest {
         code: &canonical,
         fingerprint,
+        // The lookup is read-only and binds nothing, so it carries no identity.
+        verifier: "",
+        device_id: "",
+        store: "",
     };
     let response: LookupResponse = post_json("/api/code-lookup", &body).await?;
 

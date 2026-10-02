@@ -27,6 +27,322 @@ corrections are marked. For what is *still* broken, read `STILL-OPEN.md`.
 
 ---
 
+## THE "CONNECTING" BUG CAME BACK A THIRD TIME, AND THE TEST PINNING IT WAS STALE (2026-10-02)
+
+| Severity | 🔴 A working tunnel still rendered as **connecting** |
+|----------|-------------------------------------------------------|
+| **Reported as** | *"the tunnel is obviously formed from both the download/upload bars reporting numbers, and whatsmyip reporting the vpns ip, however it's still stuck on connecting"* |
+| **File:** | `client/src-tauri/tests/egress_probe_engine.rs` (the stale pin), `client/src-tauri/src/core/manager/probe.rs` (the live rule) |
+| **Status:** | The *test* drift is fixed here. The live cause is **narrowed to one reachable case**, below — and it is not the case the last two fixes addressed. |
+
+### What is actually new here
+
+The previous two entries both fixed the *classifier* (`delay_is_a_measurement`).
+Both were verified only by unit tests and a struct-shape assertion. While
+re-checking against the real engine (mihomo v1.19.31) this time, two facts fell
+out that neither entry had measured.
+
+**1. The integration test was pinning a rule the app no longer had.** Its copy of
+the classifier still read:
+
+```rust
+delay > 0 && delay < timeout_ms && delay <= IMPLAUSIBLE_DELAY   // <-- withdrawn
+```
+
+while the shipped rule had dropped the `delay < timeout_ms` term in the
+2026-10-01 second-round fix. So the test that exists to keep the two in step was
+asserting the **exact behaviour that second-round fix removed** — and it stayed
+green, because nothing ran it against the shipped rule. Restored to the shipped
+rule here, and `the_engine_sentinels_are_not_measurements` was rewritten: it had
+been asserting `!delay_is_a_measurement(3000, 3)`, i.e. pinning the bug. It failed
+red before the rewrite, which is how it was found.
+
+**2. A group whose members all fail returns no delay map at all.** Measured
+against the real sidecar:
+
+```text
+GET /group/Locus%20Auto/delay?url=…&timeout=5     -> 504 {"message":"get delay: all proxies timeout"}
+GET /proxies/Locus-Dead/delay?url=…&timeout=5     -> 503 {"message":"An error occurred in the delay test"}
+```
+
+The plugin raises any non-2xx as `Err` (`ret_failed_resp!` in `mihomo.rs`), so
+`egress_attempt_once` collapses it to `false` and `decide()` returns
+`Readiness::NoEgress` → `ready: false` → `phaseFromStatus` → **`connecting`**,
+forever, while traffic flows. **This is the identical rendered symptom**, and it
+is a *different defect* from the two already fixed: no value of
+`delay_is_a_measurement` can reach it, because there is no delay value to
+classify.
+
+### Why this is the most likely live cause, and what is not proven
+
+`probe_egress` tests the **group** (`tier::GROUP_NAME`, `"Locus Auto"`), and the
+group is `type: select` whose default is its first member. On a UDP-enabled tier
+that first member is `Locus-UoT`; otherwise it is `Locus`. mihomo's group delay
+tests the group's **currently selected** member:
+
+- a slow-but-working selected member → the `> timeout` case the classifier now
+  tolerates (already fixed);
+- a selected member that cannot complete the test at all — while the student's
+  actual traffic is flowing over a **different** rule or member — → the 504 above,
+  which nothing tolerates.
+
+The reporter's evidence (both traffic bars moving, `whatsmyip` showing the exit
+node) proves traffic flows over `MATCH,Locus Auto`-style routing, but it does
+**not** prove the group's *selected* member is testable by mihomo's delay probe.
+That gap is exactly where a permanent amber button can hide.
+
+**Not verified:** which of the two above is happening on the reporter's machine.
+It needs `locus.log` plus one `curl` to the Core's own controller while connected:
+
+```sh
+# while the button says connecting — the group's selected member
+curl -s http://127.0.0.1:<controller>/proxies/Locus%20Auto | jq .now
+# the probe's own question, to the group
+curl -s "http://127.0.0.1:<controller>/group/Locus%20Auto/delay?url=$(python3 -c 'import urllib.parse;print(urllib.parse.quote("http://cp.cloudflare.com/generate_204",safe=""))')&timeout=5"
+```
+
+A `504` on the second line with a working tunnel is this defect confirmed. The
+controller port and secret are in the client's config.
+
+### The fix, and what it is not
+
+**Fixed here:** the stale pin. The test now restates the *shipped* rule, and the
+all-dead-group contract is pinned by
+`a_group_whose_members_all_fail_returns_no_delay_map` — so the next person
+changing the classifier finds out from a red test rather than a student.
+
+**Not yet fixed:** the probe still judges the tunnel by the group's selected
+member. Making `Readiness` honest for that case needs a decision, not a patch —
+the options are to probe every member, to fall back to the member the client's
+traffic actually uses, or to treat a 504 as *inconclusive* rather than
+`NoEgress` so it cannot override a `Ready` latch. Each has a cost in probe
+latency or in false positives, and the wrong one recreates the
+"connected with no internet" lie this file has already paid for twice. Recorded
+in `STILL-OPEN.md` rather than guessed at.
+
+---
+
+## THE CODE WAS "ALREADY IN USE ON ANOTHER DEVICE" AFTER A REINSTALL, AND AUTO-SIGN-IN NEVER FIRED (2026-10-02)
+
+| Severity | 🔴 A paying student was told their own code belonged to someone else |
+|----------|----------------------------------------------------------------------|
+| **Reported as** | *"the code I used is recognised as 'already in use on another device' right after uninstalling and updating, despite me binding the code just beforehand — so both the code binding and the auto-sign-in are broken"* |
+| **File:** | `server/pb_hooks/activation.pb.js`, `server/pb_hooks/device_recognise.pb.js`, `client/src-tauri/src/locus/activation.rs` |
+| **Status:** | Root cause located. Fix needs a `setup.sh` re-run to reach the host, and is **not** applied here. |
+
+### One defect produces both symptoms
+
+The two complaints are one missing write. **`/api/activate` never creates a row
+in `device_identities`.** Grepping the hook set is conclusive:
+
+```console
+$ grep -rln device_identities server/pb_hooks/
+server/pb_hooks/heartbeat.pb.js
+server/pb_hooks/device_recognise.pb.js
+```
+
+`activation.pb.js` is not in that list. It binds the code — it writes
+`bound_fingerprint`, `activated_at`, the binding index — and then **stops**. The
+only two hooks that touch `device_identities` only ever *read* it
+(`findFirstRecordByFilter`), except for clearing a dead `code` pointer. Nothing
+in the repository ever **creates** an identity row.
+
+So:
+
+- **Auto-sign-in cannot work for anyone.** Recognition (`/api/device-recognise`)
+  looks up `device_identities` by `verifier`; with no row for the device it
+  returns the uniform `unknown`, and the client shows the code prompt. The
+  feature has never had a wired write path. It is not "broken after an update" —
+  it was never enabled.
+- **The binding is a fingerprint, not an identity.** Because activation records
+  only `bound_fingerprint`, whether a reinstall is recognised as "the same
+  device" depends entirely on whether `device::fingerprint()` re-derives the same
+  value — not on the durable identity at all. The 2026-10-01 identity work made
+  `identity.rs` durable and reused-verbatim, but activation still asks for the
+  **fingerprint** (`cmd/locus.rs::locus_activate` → `device::fingerprint()`), and
+  `/api/activate` reads only `data.fingerprint`. The durable store that was built
+  to survive exactly this is not consulted on the path that decides it.
+
+Then the 403: `boundFp !== incomingFp` fires, and the student is told their code
+is in use elsewhere when the truth is that this machine presented a different
+value.
+
+### Why it presents right after uninstall/update, and why that is a red herring
+
+Uninstalling can delete the app-config store while the machine store survives (or
+the reverse, if the machine store was never writable and the identity fell back
+to app config — reported as `Store::AppFallback`, which *says* it does not survive
+a reinstall). Either way the device re-derives a *different* fingerprint and
+becomes a stranger to its own code. The timing is a coincidence of what the
+installer removes, which is why this reads as "the update broke my code".
+
+### The fix
+
+**Applied 2026-10-02.** Activation now registers the identity it already has:
+
+- `activation.pb.js` gained `registerIdentity(verifier, device_id, store, code)`,
+  called on **both** success paths — the first-activation bind and the same-device
+  re-activation (the branch a repair lands on). Idempotent by `verifier`, which is
+  `UNIQUE`, so a renewal updates the row instead of throwing on a duplicate
+  insert. Best-effort: a registration failure is swallowed, because the
+  entitlement is already bound and saved, and trading a working code for a clean
+  database is the wrong direction.
+- `CodeRequest` gained `verifier`, `device_id` and `store`, **omitted when empty**
+  so an older client's body is byte-identical to today's and an older hub ignores
+  unknown fields.
+- `locus_activate` resolves the durable identity and passes it through the new
+  `activate_with_identity`.
+
+The verifier is `sha256(secret)` — never the secret — the same digest discipline
+`/api/device-recognise` already relies on, so a database read yields nothing
+replayable.
+
+**Guards, each shown failing** (in `activation_contract.rs`, which reads the hook
+source because goja cannot be imported):
+
+- `activation_registers_the_device_identity` — asserts the **call sites**, not the
+  symbol, counting `registerIdentity(` occurrences. Pinning the symbol is the
+  mistake `check-consistency.sh` §15 made for `is_installer_payload`: matching the
+  definition passes with every call removed. Removing both calls → red.
+- `the_activation_request_carries_the_identity` — field presence and the
+  omit-when-empty attribute. Deleting `verifier` from `CodeRequest` fails at
+  **compile time** in the two call sites, which is stronger than the test.
+- `the_activation_command_passes_the_resolved_identity` — reverting
+  `locus_activate` to the plain `activate()` compiles and passes every other
+  check while registering nobody. That mutation → red.
+
+### What must happen for this to take effect
+
+**The hook is inert until `setup.sh` re-runs on the host** — `pb_hooks/` is
+deployed from `/root/server/`, not from this repo. A device already bound will
+register on its next activation or recognition attempt; a device that never calls
+`/api/activate` again still has no row until then. **Unverified:** that this
+closes it end to end. It needs a device, a code, and a reinstall, and it has not
+been exercised against the live hub from this environment.
+
+---
+
+## "THE UPDATE TO 3.2.18 IS NOT AN INSTALLER" — THE CLIENT REFUSED A GENUINE INSTALLER (2026-10-02)
+
+| Severity | 🔴 No Windows client on 3.2.17 could update, and the error blamed the payload |
+|----------|--------------------------------------------------------------------------------|
+| **Reported as** | *"On 3.2.17 attempting to update to 3.2.18, it gives the error message 'the update to 3.2.18 is not an installer (58631194 bytes); refusing to execute it'"* |
+| **File:** | `client/src-tauri/src/locus/update/install.rs` (`is_installer_payload`), `server/scripts/fetch-release.py` (`_is_nsis_installer`) |
+| **Fixed in:** | the 3.2.18 uncommitted work; ships to *other* clients from 3.2.19 |
+
+### The twenty-word version
+
+The guard looked for `b"NullsoftInstaller"`, which no real NSIS installer
+contains; the hub was serving the correct installer and the client refused it.
+
+### What was actually happening
+
+The byte count in the error is the whole diagnosis, because it identifies the
+artifact. Reproduced against the live hub:
+
+```sh
+curl -s 'https://networkingguides.duckdns.org/api/update?version=3.2.17&platform=windows'
+# url: .../updates/3.2.18/installer-Locus_3.2.18_x64-setup.exe
+# sha256: 3912658f…fc514
+```
+
+Downloaded, that file is **58,631,194 bytes** — exactly the number in the error —
+with SHA-256 matching the manifest, an `MZ` header, and the NSIS firstheader
+(`\xef\xbe\xad\xde` + `NullsoftInst`) at byte **68100**. It is a real installer.
+The client refused it anyway, and the message told the student the payload was at
+fault.
+
+The fault was the constant. `is_installer_payload` accepted a PE only if it
+contained `b"NullsoftInstaller"`:
+
+- **No real installer contains that string.** The header is the 4-byte magic
+  `0xDEADBEEF`, then the 12-byte ASCII `NullsoftInst`, then a 4-byte flags word —
+  so `NullsoftInst` is followed by flags, never by `aller`. Measured on this
+  artifact: `NullsoftInstaller` appears **nowhere in the file**.
+- **The raw `locus-windows-amd64.exe` *does* contain it** — a Tauri app embeds an
+  NSIS uninstaller stub — at offset ~36,700,169. It was excluded only because
+  that is past the 4 MiB scan window: luck, not design.
+
+So the constant was wrong in both directions at once, and the 4 MiB bound was
+concealing half of it.
+
+### The fix
+
+Require the magic *immediately before* the 12-byte string, on both sides:
+
+```rust
+const NSIS_SIGNATURE: &[u8] = b"\xef\xbe\xad\xdeNullsoftInst";
+```
+
+Verified against the real v3.2.18 asset (accept) and the documented raw-app shape
+(refuse). `fetch-release.py` carries the identical constant and the same 4 MiB
+bound, so the hub and the client agree on the bytes.
+
+### Why the tests did not catch it
+
+They fabricated the marker they were checking:
+
+```rust
+bytes.extend_from_slice(b"NullsoftInstaller");
+assert!(is_installer_payload(&bytes));   // self-referential
+```
+
+The fixture emitted the same string the constant held, so the pair moved together
+and the test could never fail. The negative fixture was no better —
+`bare_application()` had no `Nullsoft*` bytes at all, so it could not distinguish
+"refused because it is not an installer" from "refused because it is featureless".
+The rewrite emits the real firstheader bytes transcribed from a genuine installer
+and gives the raw-app fixture the real `NullsoftInstaller` substring. **With the
+old constant restored, the new test fails** — that is the proof it can fail.
+
+### A guard that could not fail, found while adding this one
+
+`check-consistency.sh` §15 verified the client half with:
+
+```sh
+grep -q 'is_installer_payload' "$INSTALL_GUARD"
+```
+
+That grep matches the *definition* and fifteen *unit tests*, so deleting the call
+from `ReadyInstall::install` — the one line that protects a student's machine —
+left eighteen matches and the check still printed OK. Demonstrated: rewriting the
+call as `if false {` passed §15. §15 now anchors to the negated call over the
+downloaded bytes (`if !is_installer_payload(&bytes)`), and the constant is checked
+for agreement across the two files in both directions. All three mutations
+(client constant reverted; hub constant reverted; call site removed) were observed
+failing before the check was kept.
+
+### Claim class
+
+- **Verified:** the hub serves an NSIS installer at the advertised URL for a
+  Windows 3.2.17 client (downloaded, hashed, firstheader located, 2026-10-02);
+  the pre-fix constant refuses those exact bytes; the post-fix constant accepts
+  them and still refuses the raw-app shape; the fixed guard fires on all three
+  mutations.
+- **Not verified:** that a Windows client on 3.2.17 successfully installs 3.2.18
+  after the fix — **3.2.17 cannot receive this fix**, because the fix lives in
+  the payload it refuses. Recovery is a manual install (below).
+- **Structural argument:** that the raw `locus-windows-amd64.exe` is refused by
+  the *post-fix* constant. The artifact is no longer published (404), so the
+  fixture is reconstructed from the documented offset rather than measured.
+
+### Recovery for the machine that reported it
+
+3.2.17 cannot bootstrap itself past this. On the affected Windows machine:
+
+1. Download `https://networkingguides.duckdns.org/updates/3.2.18/installer-Locus_3.2.18_x64-setup.exe`
+   in a browser and run it by hand (it is the same file the updater fetched).
+2. Confirm the app reports **3.2.18**.
+3. The in-app updater works from 3.2.18 onward — 3.2.19 is the first release the
+   fixed guard can install.
+
+Do **not** seed the hub's `windows` entry for 3.2.17 with the raw
+`locus-windows-amd64.exe` to force a same-version reinstall: that would hand the
+plugin a PE to `ShellExecute`, which is the *other* failure this guard exists to
+prevent (see the 2026-09-30 and 2026-10-01 entries).
+
+---
+
 ## RECOVERY FROM A LOST SERVICE OWNER RESET THE WRONG PLATFORM'S PROXY, AND DID NOTHING ON THE RIGHT ONE (2026-10-01)
 
 *Client-side fix; ships in the next version tagged. Not a hub change.*

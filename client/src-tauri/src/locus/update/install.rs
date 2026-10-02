@@ -268,10 +268,28 @@ impl PendingInstall {
 pub fn is_installer_payload(bytes: &[u8]) -> bool {
     // An NSIS installer is itself a PE executable, so "is a PE" cannot be the
     // test — it is true of the bare application too, which is the whole problem.
-    // What separates them is the NSIS signature: the NullsoftInstaller header
-    // that makensis writes into the overlay, and which an application does not
-    // carry. This is the same marker `file(1)` reports as "Nullsoft Installer".
-    const NSIS_SIGNATURE: &[u8] = b"NullsoftInstaller";
+    //
+    // What separates them is the NSIS *firstheader*: the little-endian magic
+    // `0xDEADBEEF` (`\xef\xbe\xad\xde`) immediately followed by the ASCII
+    // `NullsoftInst`. That is what makensis writes into the overlay and what a
+    // bare application does not carry.
+    //
+    // WHY THE MAGIC IS PART OF THE SIGNATURE. An earlier revision looked for the
+    // bare string `b"NullsoftInstaller"`, which is wrong in BOTH directions:
+    //
+    //   * A real NSIS installer does not contain it — the header is
+    //     `NullsoftInst` (12 bytes) followed by a 4-byte flags word — so every
+    //     genuine installer was REFUSED and no Windows client could ever update.
+    //   * The raw `locus-windows-amd64.exe` (a Tauri app embedding an NSIS
+    //     uninstaller stub) DOES contain the literal substring
+    //     `NullsoftInstaller`, so the marker did not even exclude the thing it
+    //     existed to exclude; only the scan window kept it out.
+    //
+    // Requiring the `0xDEADBEEF` magic immediately before `NullsoftInst` fixes
+    // both: verified against the real v3.2.18 assets, the installer carries the
+    // firstheader at byte 68100 and the raw app carries neither the magic nor
+    // the 12-byte string.
+    const NSIS_SIGNATURE: &[u8] = b"\xef\xbe\xad\xdeNullsoftInst";
 
     // A PE (or ELF) is accepted ONLY on positive evidence that it is an NSIS
     // installer, never on the absence of evidence that it is a program. The
@@ -558,15 +576,21 @@ mod tests {
 
     /// A minimal but structurally honest NSIS installer.
     ///
-    /// Built as a real PE (`MZ`) with the NSIS signature in the overlay, because
-    /// the guard's whole discriminator is "PE **and** NSIS" — a fixture that was
-    /// only one of the two would pass for the wrong reason.
+    /// Built as a real PE (`MZ`) with the NSIS *firstheader* in the overlay —
+    /// the `0xDEADBEEF` magic immediately followed by `NullsoftInst` — because
+    /// the guard's whole discriminator is "PE **and** NSIS firstheader". A
+    /// fixture that emitted only one of the two would pass for the wrong reason,
+    /// which is exactly how the previous revision's tests stayed green while
+    /// the guard rejected every real installer.
     fn nsis_installer(overlay_padding: usize) -> Vec<u8> {
         let mut bytes = Vec::with_capacity(overlay_padding + 64);
         bytes.extend_from_slice(b"MZ\x90\x00");
         bytes.resize(overlay_padding, 0);
-        bytes.extend_from_slice(b"NullsoftInstaller");
-        bytes.extend_from_slice(b"\x00\x00\x00\x00");
+        // The real header: magic, then the 12-byte string, then the flags word.
+        // Transcribed from a genuine installer, not from the constant under
+        // test — that is the difference between a fixture and a tautology.
+        bytes.extend_from_slice(b"\xef\xbe\xad\xde");
+        bytes.extend_from_slice(b"NullsoftInst@O\x01\x00");
         bytes
     }
 
@@ -579,15 +603,31 @@ mod tests {
         bytes
     }
 
-    /// THE BUG. The artifact published as `locus-windows-amd64.exe` is a PE with
-    /// no NSIS overlay, and it must be refused.
+    /// THE BUG, in its real shape. The shipped `locus-windows-amd64.exe` is a
+    /// Tauri app that embeds an NSIS *uninstaller* stub, so it contains the
+    /// literal substring `NullsoftInstaller` well inside the file — but never
+    /// the `0xDEADBEEF` magic before `NullsoftInst`. It must be refused.
+    ///
+    /// This is the case the old fixture missed entirely: `bare_application` had
+    /// no `Nullsoft*` bytes at all, so it could not tell whether the guard
+    /// rejected the payload for the right reason or merely for being featureless.
     #[test]
     fn the_raw_windows_binary_is_not_an_installer() {
+        // The raw-app shape: a PE carrying an unrelated `NullsoftInstaller`
+        // substring (as the real artifact does, from its embedded uninstaller
+        // stub), but no firstheader magic.
+        let mut raw_app = bare_application();
+        raw_app.extend_from_slice(b"...\\NSIS\\NullsoftInstaller.exe...\x00");
+
         assert!(
-            !is_installer_payload(&bare_application()),
+            !is_installer_payload(&raw_app),
             "the raw updater executable must never be accepted as an installer — \
              the plugin would ShellExecute it, it would run standalone, find no \
              bundled assets, and show ERR_FILE_NOT_FOUND"
+        );
+        assert!(
+            !is_installer_payload(&bare_application()),
+            "a featureless PE must also be refused"
         );
     }
 
@@ -604,6 +644,46 @@ mod tests {
         assert!(
             is_installer_payload(&nsis_installer(512 * 1024)),
             "the NSIS header is not always at the same offset"
+        );
+    }
+
+    /// THE INVERSE FAILURE, and the one that actually shipped: a guard can be
+    /// too strict. Before 2026-10-02 the constant was the bare string
+    /// `NullsoftInstaller`, which no real installer contains — so every genuine
+    /// Windows update was refused, and the message a student saw blamed the
+    /// payload ("not an installer") rather than the check.
+    ///
+    /// The fixture above is generated from the same header bytes the guard looks
+    /// for, so it cannot catch that. This one is transcribed from the **real**
+    /// v3.2.18 artifact the hub serves: a PE whose firstheader sits at byte
+    /// 68100, with the 4-byte flags word (`@O\x01\x00`) immediately after
+    /// `NullsoftInst` and no `NullsoftInstaller` anywhere in the file.
+    ///
+    /// It is the shape, not the whole 58 MB: header at a non-constant offset,
+    /// flags word present, `N`-prefix present. Restoring the old constant makes
+    /// this test fail, which is the property that gives it value.
+    #[test]
+    fn the_real_shipped_installer_is_an_installer() {
+        // Byte-for-byte from `installer-Locus_3.2.18_x64-setup.exe` at the
+        // firstheader (offset 68100): de ad be ef "NullsoftInst" 40 4f 01 00.
+        let installers_header = b"\xef\xbe\xad\xdeNullsoftInst@O\x01\x00";
+        let mut real = Vec::with_capacity(69 * 1024);
+        real.extend_from_slice(b"MZ\x90\x00");
+        real.resize(68_100, 0x00); // the header does not sit at a round offset
+        real.extend_from_slice(installers_header);
+        real.resize(90 * 1024, 0x00); // overlay continues past the header
+
+        assert!(
+            !real
+                .windows(b"NullsoftInstaller".len())
+                .any(|w| w == b"NullsoftInstaller"),
+            "the real installer must not contain `NullsoftInstaller` — that \
+             absence is exactly what the old constant tripped on"
+        );
+        assert!(
+            is_installer_payload(&real),
+            "the installer the hub actually serves was refused — the signature \
+             constant is too strict, and no Windows client can update"
         );
     }
 
@@ -666,7 +746,8 @@ mod tests {
     fn the_signature_scan_is_bounded() {
         let mut far = bare_application();
         far.resize(NSIS_SCAN_LIMIT + 1024, 0x00);
-        far.extend_from_slice(b"NullsoftInstaller");
+        far.extend_from_slice(b"\xef\xbe\xad\xde");
+        far.extend_from_slice(b"NullsoftInst@O\x01\x00");
         assert!(
             !is_installer_payload(&far),
             "a marker beyond the scan window must not count as an installer"
