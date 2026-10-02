@@ -42,7 +42,7 @@ static RUNNING: Mutex<Option<HeartbeatLoop>> = Mutex::new(None);
 /// "beat for *this* activation", and the most likely reason a loop is already
 /// running is a re-activation that changed the code or tier. Silently keeping the
 /// old one would leave the device reporting a tier it no longer has.
-pub async fn start(activation: store::Activation) {
+pub fn start(activation: store::Activation) {
     // A device always authenticates with its activation code now. This used to
     // fall back to a session token minted at device recognition, for a device
     // that had no code because recognition had restored it; recognition and the
@@ -65,13 +65,13 @@ pub async fn start(activation: store::Activation) {
 
 /// Starts (or replaces) the heartbeat loop with an already-resolved credential.
 ///
-/// Split from [`start`] so the credential can be resolved by an async caller
-/// while the loop itself is started synchronously. That split is load-bearing:
-/// this function is called from inside a spawned task during credential renewal,
-/// and a `start` that both awaited a store read *and* spawned would make the
-/// spawned future non-`Send` — the compiler refuses it outright, and the deeper
-/// reason is that re-entering an async `start` from the loop's own callback is a
-/// recursion with no clear termination.
+/// Synchronous, and called from an async context only via a plain call:
+/// starting the loop is `spawn` + a mutex write, neither of which awaits. It was
+/// split from [`start`] when `start` still had to read a stored session token
+/// (a device restored by recognition); with tokens gone, `start` has nothing to
+/// await either, and both are synchronous. Keeping them separate still holds —
+/// `start` validates the credential, `start_with` does the work — so a caller
+/// that has already resolved a credential cannot accidentally re-derive one.
 pub fn start_with(credential: Credential, activation: store::Activation) {
     // Stop any previous loop first, so its task cannot deliver one more outcome
     // against the old activation. Doing this before the credential is resolved

@@ -491,8 +491,7 @@ pub async fn locus_activate(code: String) -> CmdResult<ActivationResult> {
                 code: code.clone(),
                 tier: tier.clone(),
                 fingerprint: fingerprint.clone(),
-            })
-            .await;
+            });
 
             Ok(ActivationResult {
                 code,
