@@ -27,6 +27,182 @@ corrections are marked. For what is *still* broken, read `STILL-OPEN.md`.
 
 ---
 
+## THE TUNNEL PROVED ITSELF ONLY BY A DELAY TEST IT COULD FAIL FOR THE WRONG REASON, SO THE BUTTON STAYED ON "CONNECTING" WHILE TRAFFIC FLOWED (2026-10-02)
+
+| Severity | 🔴 The recurring "stuck on connecting" report, fourth occurrence |
+|----------|------------------------------------------------------------------|
+| **Reported as** | *"the tunnel can form, my ip can properly change, and data can flow properly, however it still shows 'connecting' without ever changing to connected … this has been recurring across several fixes where the agent claimed to fix it however failed"* |
+| **Files:** | `core/manager/traffic_probe.rs` (new), `core/manager/probe.rs`, `core/manager/mod.rs`, `core/tray/speed_task.rs`, `core/tray/mod.rs`, `cmd/locus.rs`, `src/services/locus.ts` |
+| **Fixed in:** | next tag |
+
+### The defect, in one line
+
+`Readiness::Ready` had exactly one route — a mihomo **delay test** — and a delay test
+is a question we put to the Core, so it can be answered "no" about a tunnel that is
+carrying the student's traffic perfectly well.
+
+### Why the two previous fixes could not have worked
+
+The 2026-10-01 fix tuned `delay_is_a_measurement` (how a *returned* delay is
+classified); the 2026-10-02 fix moved the question from the `select` group to each
+outbound by name (which member is *asked*). Both are repairs to the same load-bearing
+assumption: **that asking the Core to dial something is how we find out whether the
+tunnel works.** Three symptoms in three days with the same remaining shape is the
+signature of a wrong premise, not a wrong constant. The student's own screenshot —
+download and upload numbers moving on the same screen that says "connecting" — was
+the disproof sitting in the report the whole time.
+
+### The fix: a second proof that is not a question
+
+The Core pushes `/traffic` once a second with `{up, down, upTotal, downTotal}`. A
+sample with `up > 0 || down > 0`, **arriving recently**, is a byte the Core moved on
+the student's behalf — observed, not inferred, and impossible to be a false positive.
+
+`decide` is now a disjunction: **proven egress OR observed traffic**. Either is
+enough. A false negative in one half is exactly what the other covers — the delay
+test misses when the machine is idle or the tier's outbound is not the one carrying
+traffic; the traffic stream is silent when the student is reading a document.
+
+### The trap, stated because it is the obvious way to get this wrong
+
+mihomo reports `up`/`down` (this sample's **rate**) *and* `upTotal`/`downTotal` (the
+Core's **lifetime** totals). "Show connected if the numbers are non-zero" reads
+correctly and is wrong: a total is a latch with a counter in front of it, true for a
+tunnel that moved one byte and then died, and true for bytes moved *before* the
+student pressed Connect. Only the current sample's rate counts, and only while
+samples keep arriving.
+
+### Guards, each observed failing
+
+- `observed_traffic_alone_is_ready` — **red** under the previous one-condition rule.
+- `traffic_that_stops_ends_readiness` — **red** under the same revert; pins that a
+  counter is a measurement and not a latch.
+- `a_quiet_sample_after_traffic_stops_being_evidence`,
+  `traffic_older_than_the_window_is_not_active` — **red** against a
+  `return true`-on-total implementation.
+- `a_serving_core_carrying_nothing_is_not_connected` — the school-wifi rule, still
+  green: the disjunction did not weaken it, only added a second honest route.
+
+One subscription, two readers: the macOS tray rate task already reads `/traffic`, so
+`traffic_probe` starts its own stream **only** when that task is not running
+(`Tray::speed_task_running`) and the tray publishes into the same sink. The stream
+starts lazily from `observe_readiness`, so a machine that never reads readiness never
+opens the socket.
+
+### Not verified
+
+That this was the reporter's cause, and that a real tunnel now reports ready — no run
+on a real school link. The delay test's false-negative mechanism is argued from the
+plugin source and from the report's own screenshot; the traffic route is pinned by
+unit tests over a pure rule, not against a live Core. See `STILL-OPEN.md`.
+
+---
+
+## A CODE WAS BOUND TO A RE-DERIVED HARDWARE HASH, SO AN UPDATE COULD TELL A STUDENT THEIR OWN CODE BELONGED TO SOMEONE ELSE (2026-10-02)
+
+| Severity | 🔴 A student's own code refused after an update, with no self-service recovery |
+|----------|--------------------------------------------------------------------------------|
+| **Reported as** | *"codes keep becoming invalid for the very devices they were originally bound to after updates … sometimes it gives the message 'Welcome back — this device is already registered, so no code is needed', but on the same page it asks for an activation code"* |
+| **Files:** | `locus/device.rs`, `locus/identity.rs`, `cmd/locus.rs`, `locus/runtime.rs`, `server/pb_hooks/activation.pb.js`, `src/main.tsx`, `src/pages/recognition-notice.ts` |
+| **Fixed in:** | next tag (client + hook) |
+
+### The defect, in one line
+
+Two device identifiers existed and disagreed, and codes were bound to the **unstable
+one**.
+
+| | Identifier | Persisted? | Used for |
+|---|---|---|---|
+| A | `device::fingerprint()` — `MAC + disk serial + board UUID`, hashed | **No** — `OnceLock` for the process only | **binding** (`codes.bound_fingerprint`, `device_bindings`) |
+| B | `identity::DeviceIdentity::device_id` / `verifier` | **Yes** — machine store, then app-config fallback | recognition (`device_identities`) |
+
+A is re-derived on **every launch**. A NIC enumerating in a different order, a disk
+serial becoming unreadable, or the `combine` rung degrading (`mac+disk+board` →
+`mac+board` → `mac+host`) all produce a *different* digest — and the hub refuses the
+code with `403 "Code bound to another device"` (`activation.pb.js`). The identity
+work (commit `59c632a`) had already recognised this exact hazard for recognition —
+its resolver says *"**A stored identity wins.** … Re-deriving on every launch is the
+bug being fixed."* — but binding was left on the re-derived hash. The fix finishes
+that decision rather than inventing a third scheme.
+
+The same-page contradiction is the same divergence seen from the UI: recognition
+(B) succeeds and says "no code is needed" while the gate is still up, because
+whether the app is `activated` is `locus_status`'s answer and that value came from
+the **stored activation keyed to A**.
+
+### The fix
+
+1. **Binding uses the durable identity.** `locus_activate` sends
+   `identity.binding_id()` (the persisted `device_id`) as the binding value instead
+   of `device::fingerprint()`. `locus_check_code`, `locus_status` and the heartbeat
+   credential path (`runtime.rs`) do the same, so every site that names the device
+   now names the same one. `DeviceIdentity::binding_id` is the single definition.
+2. **The hub migrates a pre-existing binding.** A device bound *before* this change
+   has the old fingerprint on its code row, so its first post-update activation
+   presents the new id and would 403 — turning an intermittent per-update failure
+   into a guaranteed one for **every already-bound device**. `migrateBindingIfSameDevice`
+   runs when the fingerprint mismatches and rebinds the row only when the incoming
+   `verifier` proves the caller holds a secret `device_identities` already names as
+   belonging to **that very code**. It cannot move a code to a device that was not
+   already entitled to it, and it fails closed on any uncertainty (→ the ordinary
+   403).
+3. **The gate no longer makes a promise it cannot keep.** `noticeForGate` suppresses
+   the durable `restoring` notice ("no code is needed") while the gate is still
+   rendered; if the entitlement really landed, the gate clears and the screen
+   unmounts, so that notice is only ever visible when it would be false. The
+   durability *warning* and the `unavailable` caution pass through unchanged.
+
+### The decisions, and why
+
+**`bound_fingerprint` and `device_bindings` keep their names.** They are read by
+`admin_console.pb.js`, `admin_unbind.pb.js` and `code_lookup.pb.js`, and are frozen
+wire contracts. Only the *value's provenance* changed.
+
+**The binding value is the `device_id`, not the `verifier`.** The `device_id` is
+non-secret and already the string the hub stores in `device_identities.device_id`;
+the `verifier` is the credential and must not become a durable, displayed binding
+key.
+
+**`device::fingerprint()` is retired from every activation and heartbeat path, but
+not deleted.** It still seeds a first-run identity (`identity::resolve`) and serves
+diagnostics. Its module doc now says so, and why it is unfit to be a binding key.
+
+### Verified / not verified
+
+**Verified locally:** `cargo test` — 557 lib + 17 contract + 5 + 3 + 4 + 3
+integration, 0 failed; `check-consistency.sh` exits 0; vitest 93/93; `tsc --noEmit`
+and `eslint src --max-warnings=0` clean.
+
+**Demonstrated failing (three guards, each shown red against the code it catches,
+then restored):**
+- `a_code_binds_to_the_durable_identity_not_the_hardware_fingerprint` — reverting
+  `locus_activate` to `device::fingerprint()` fails it with the drift message;
+- `the_activation_request_carries_both_the_binding_value_and_the_verifier` —
+  removing the migration **call site** fails it. (An earlier version of this guard
+  checked only that the helper was *defined*, and passed with the migration inert —
+  the "a check that cannot fail" trap, caught and tightened.)
+- `locus::identity::tests::a_stored_identity_wins_over_changed_hardware` — disabling
+  the stored-wins rule fails it.
+
+**Observed live against the hub (2026-10-02):** `/api/device-recognise` answers an
+identical uniform miss for a malformed and a well-formed-unknown verifier;
+`/api/activate` returns 400 (bad checksum / missing fingerprint) and 404 (unknown
+code) as documented.
+
+**Not verified, and stated as such:**
+- The `403 → migrate → 200` path has **not** been exercised end to end. It needs a
+  real code bound to an old fingerprint plus a device presenting the identity; no
+  live code was touched (it is production data), so this is a **structural**
+  argument from `activation.pb.js`, not an observed behaviour.
+- That a real Windows/macOS update-and-reinstall now keeps its code keeps needs the
+  hardware; this environment cannot show it. See `STILL-OPEN.md`.
+- **The hook is inert until `setup.sh` re-runs on the host** — `pb_hooks/` deploys
+  from `/root/server/`, not this repo. The client half is active on install; the
+  migration half is not, and without it an already-bound device would 403. This
+  ordering matters: **deploy the hook before or with the client.**
+
+---
+
 ## THE "CONNECTING" BUG, THIRD TIME: THE PROBE ASKED THE GROUP, WHICH ANSWERS FOR ONE MEMBER (2026-10-02)
 
 | Severity | 🔴 A working tunnel rendered as **connecting** for the third report running |

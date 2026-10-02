@@ -62,6 +62,20 @@ export interface LocusStatus {
    * and the two are shown differently.
    */
   lastConfirmedAt: number | null
+
+  /**
+   * Whether the core is observed to be moving bytes right now.
+   *
+   * The second, independent route to `ready`, reported separately so a support
+   * report can say which one answered — the two fail for different reasons, and
+   * only one of them can be wrong in the direction that produced the recurring
+   * "connecting while traffic flows" report.
+   *
+   * Note this is the *current rate*, not the core's lifetime total: a tunnel that
+   * stops carrying bytes stops reporting `true` on the next poll. See
+   * `src-tauri/src/core/manager/traffic_probe.rs`.
+   */
+  trafficFlowing: boolean
 }
 
 /**

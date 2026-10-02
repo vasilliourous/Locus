@@ -36,6 +36,9 @@ const status = (
   version: '3.2.0',
   subscription: { state: 'unknown' },
   lastConfirmedAt: null,
+  // Not read by `phaseFromStatus`; required by the type. `false` is the honest
+  // default for a helper describing a settled backend status.
+  trafficFlowing: false,
 })
 
 describe('connection phase from backend status', () => {

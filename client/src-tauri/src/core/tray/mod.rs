@@ -29,7 +29,9 @@ use tauri::{
 };
 
 mod menu_def;
-#[cfg(target_os = "macos")]
+// Not macOS-only any more: the tray's rate task feeds the connection screen's
+// traffic measurement (`core::manager::traffic_probe`), and `Tray::speed_task_running`
+// must exist on every platform to be asked whether that feed is already live.
 mod speed_task;
 use menu_def::{MenuIds, MenuTexts};
 
@@ -57,7 +59,12 @@ enum IconKind {
 
 pub struct Tray {
     limiter: SystemLimiter,
-    #[cfg(target_os = "macos")]
+    /// Everything the tray needs to render the live rate into its own title.
+    ///
+    /// Kept on every platform rather than behind `cfg` so the value the
+    /// connection screen depends on — "is something already measuring traffic?"
+    /// — is a real answer everywhere instead of a `cfg` the caller has to mirror.
+    /// Only macOS ever starts it; see `update_speed_task`.
     speed_controller: speed_task::TraySpeedController,
 }
 
@@ -130,7 +137,6 @@ impl Default for Tray {
     fn default() -> Self {
         Self {
             limiter: Limiter::new(Duration::from_millis(TRAY_CLICK_DEBOUNCE_MS), SystemClock),
-            #[cfg(target_os = "macos")]
             speed_controller: speed_task::TraySpeedController::new(),
         }
     }
@@ -139,6 +145,8 @@ impl Default for Tray {
 singleton!(Tray, TRAY);
 
 impl Tray {
+
+
     fn new() -> Self {
         Self::default()
     }
@@ -417,6 +425,17 @@ impl Tray {
     #[cfg(target_os = "macos")]
     pub fn update_speed_task(&self, enable_tray_speed: bool) {
         self.speed_controller.update_task(enable_tray_speed);
+    }
+
+    /// Whether the tray rate task already holds a subscription to the Core's
+    /// `/traffic` stream.
+    ///
+    /// `false` everywhere the tray cannot help — no tray, the option off, or a
+    /// platform with no rate display — and that is exactly the signal for the
+    /// connection screen to subscribe itself rather than open a second websocket
+    /// for numbers nothing is producing. See `core::manager::traffic_probe`.
+    pub fn speed_task_running() -> bool {
+        Self::global().speed_controller.is_traffic_task_running()
     }
 }
 

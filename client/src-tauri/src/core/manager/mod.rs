@@ -2,6 +2,7 @@ mod config;
 mod lifecycle;
 pub mod probe;
 mod state;
+pub mod traffic_probe;
 
 use anyhow::Result;
 use arc_swap::ArcSwapOption;
@@ -170,6 +171,9 @@ impl CoreManager {
         // result from a previous Core would let a just-starting tunnel read as
         // connected on the strength of a round trip it never made.
         self.clear_egress();
+        // Same rule for the observed traffic: a byte count is evidence about the
+        // process that moved it, and this is a different process.
+        traffic_probe::clear();
         self.run_state.core_started(mode);
     }
 
@@ -184,6 +188,10 @@ impl CoreManager {
         }
         self.invalidate_core_readiness();
         self.clear_egress();
+        // The last Core's traffic is not this Core's traffic, and unlike the
+        // egress cache this one is populated by a stream rather than by the status
+        // path — nothing else would clear it before the next Core's first sample.
+        traffic_probe::clear();
         self.run_state.core_stopped();
     }
 
@@ -274,11 +282,11 @@ impl CoreManager {
             self.invalidate_core_readiness();
         }
 
-        // The through-tunnel packet that decides everything. It probes each
-        // outbound the tier defines rather than the select group, because the
-        // group's delay test only ever answers for its *currently selected*
-        // member — which may not be the one carrying the student's traffic. See
-        // `probe::egress_attempt_once` for the defect that caused.
+        // The through-tunnel packet that decides everything, asked first. It
+        // probes each outbound the tier defines rather than the select group,
+        // because the group's delay test only ever answers for its *currently
+        // selected* member — which may not be the one carrying the student's
+        // traffic. See `probe::egress_attempt_once` for the defect that caused.
         //
         // The local probe above is now only a gate on whether asking is worth it:
         // a Core that is not answering cannot run a delay test, and asking would
@@ -287,7 +295,20 @@ impl CoreManager {
             .observe_egress(outcome == probe::ProbeOutcome::Serving)
             .await;
 
-        probe::decide(outcome, egress, latch_active)
+        // The second proof, and the one that cannot fail for a reason that is not
+        // the tunnel's fault: what the Core reports it actually moved, rather than
+        // what a delay test we asked it to run answered. Read *after* the egress
+        // check so the stream has had every chance to be fed by the time a verdict
+        // is reached, and read with no request in the loop — the stream is pushed
+        // by the Core, so this costs a load once it is running.
+        //
+        // Started here rather than at Core start on purpose: this is the only
+        // reader, so a Core whose readiness is never observed (a headless run, a
+        // machine that never opens the app) never opens the socket.
+        traffic_probe::ensure_stream();
+        let traffic = traffic_probe::outcome();
+
+        probe::decide(outcome, egress, traffic, latch_active)
     }
 
     /// The through-tunnel egress answer, coalesced and briefly cached.

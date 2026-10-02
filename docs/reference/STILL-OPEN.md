@@ -20,6 +20,114 @@ Ordered by whether I could have validated it here.
 instead of the group. Kept here because the *verification* is what is still missing;
 see the section above.
 
+### The traffic proof is tested as a rule, never against a live Core (2026-10-02)
+
+**Added 2026-10-02. The fix is applied; this is what is NOT proven about it.**
+
+`Readiness::Ready` now accepts **either** a measured delay-test round trip **or** the
+Core reporting bytes moving on its own `/traffic` stream
+(`core/manager/traffic_probe.rs`). The motivation is in `FIXES.md`; the map is
+`EGRESS-READINESS.md` §6.
+
+**Verified:**
+
+- The rule. `observed_traffic_alone_is_ready`, `traffic_that_stops_ends_readiness`,
+  `a_serving_core_carrying_nothing_is_not_connected`, and the sink's own window/total
+  guards all pass, and each was **observed failing** against the code it catches
+  (a one-condition `decide`, and a `return true`-on-lifetime-total sink).
+- `cargo clippy --lib` and `cargo build --lib` are warning-free; 564 lib tests pass;
+  `check-consistency.sh` exits 0; the phase unit tests pass.
+- The wiring is read, not run: `observe_readiness` → `traffic_probe::ensure_stream`
+  → `outcome()` → `decide`, and `locus_status` → `trafficFlowing` → the TS type.
+
+**NOT verified:**
+
+- **That a real `/traffic` stream ever feeds the sink on a real machine.** No live
+  Core was run here, so the claim "the Core reports bytes and the app says connected"
+  is a structural argument from the plugin source (`ws_traffic` → `/traffic`, the
+  same socket the on-screen graph uses), not a measurement. This is the gap that
+  matters: the whole fix rests on that stream delivering.
+- **That this was the reporter's cause.** The delay test's false-negative mechanism
+  is argued from the report's own screenshot (traffic numbers moving on a screen that
+  says "connecting"); the reporter's machine has not been instrumented.
+- **macOS tray coexistence.** That the tray rate task and the app's own stream never
+  both connect — `ensure_stream` asks `Tray::speed_task_running` first, but the two
+  writers were never exercised together on macOS hardware.
+- **The stream's reconnect loop.** `TRAFFIC_STALE_TIMEOUT` is copied from the tray
+  task's own choice rather than measured, and the reconnect path has not been run
+  against a Core that dies mid-stream.
+
+**What to do with a live machine:** connect, confirm `trafficFlowing` is `true` in
+`locusStatus()` while the graph moves, then kill the Core and confirm it goes `false`
+within `TRAFFIC_ACTIVE_WINDOW` (3 s) rather than staying green on the last sample.
+
+### Two engine tests read `ok` while never running, and there was no way to tell (2026-10-02)
+
+**Found while pre-emptively testing the traffic-readiness change. This is a
+*verification* defect, not a product one — and it is the reason the previous three
+"stuck on connecting" fixes could ship with the engine suite green.**
+
+`tests/egress_probe_engine.rs` and `tests/tier_profile_engine.rs` report a
+situation they could not test by printing `SKIP: …` to stderr and returning. A
+returning test is a **passing** test, so `cargo test` prints `ok` either way.
+
+**Reproduced, not theorised.** With `a_reachable_member_yields_a_usable_delay`'s
+assertion changed from `last.0 == 200` to the impossible `last.0 == 59999`, the
+test still reports:
+
+```
+SKIP: no network egress from this runner; the sidecar could not complete a round trip …
+test a_reachable_member_yields_a_usable_delay ... ok
+test result: ok. 1 passed; 0 failed
+```
+
+That is a green tick guarding nothing. On this runner the case that matters — a
+**completed** round trip through the engine — has never executed, and the same is
+true of every CI runner without egress. The four cases that do run here all assert
+*failure* shapes (a dead member, an all-fail group), so the suite currently proves
+only that a broken tunnel reads as broken, never that a working one reads as
+working. **That is precisely the direction the three shipped defects failed in.**
+
+**What changed:** both files now skip through a `skip(reason)` helper that honours
+`LOCUS_REQUIRE_LIVE_ENGINE=1`, turning every skip into a failure. Verified: with
+the variable set, `a_reachable_member_yields_a_usable_delay` FAILS on this runner
+instead of passing. On a machine with a real engine and egress, that is the run
+worth trusting; without the variable, behaviour is unchanged.
+
+**Still open:**
+
+- **Nothing sets `LOCUS_REQUIRE_LIVE_ENGINE` in CI.** The mechanism exists and is
+  proven, but no workflow uses it, so the default `cargo test` is still skip-silent.
+  Decide where it belongs — a job with egress, or a required release-time check.
+- **No egress on this runner**, so the positive case is still unrun here. Whatever
+  machine closes `docs/reference/STILL-OPEN.md` §"the per-member egress probe" needs
+  to run it with the variable set.
+- The same `eprintln!("SKIP")` pattern may exist in other suites; only these two
+  engine files were swept.
+
+### Binding-key migration: the hook must ship before (or with) the client, or already-bound devices 403
+
+**Added 2026-10-02.** Codes no longer bind to the re-derived hardware fingerprint;
+they bind to the device's durable `device_id` (see the `FIXES.md` entry above). A
+device bound *before* the change still has the old fingerprint on its code row, and
+`activation.pb.js` now migrates that row when the incoming request proves the same
+device via its `verifier`.
+
+- **Not verified:** the `403 → migrate → 200` path end to end. It needs a real code
+  bound to an old fingerprint plus a device presenting the matching identity. No
+  live code was touched — it is production data — so this is a **structural**
+  argument from the hook source.
+- **Not verified:** that a real Windows/macOS update-and-reinstall now keeps its
+  code. This environment has no such hardware.
+- **The deployment-order hazard.** The client half is active the moment the new
+  version installs. The hub half is **inert until `setup.sh` re-runs** (`pb_hooks/`
+  deploys from `/root/server/`, not this repo). If the client reaches a device
+  *before* the hook is deployed, that device presents its new `device_id` to a hub
+  that still only knows the old fingerprint — and 403s with its own code. **Deploy
+  the hook before or with the client.** A hub without the migration is not merely
+  "not yet improved"; it is the failure mode reintroduced for every already-bound
+  device.
+
 ### Activation never registers a device identity — FIXED, but inert until the hook is deployed
 
 **Added 2026-10-02. Fix applied the same day.** `grep -rln device_identities

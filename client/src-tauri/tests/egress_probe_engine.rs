@@ -39,6 +39,29 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
+/// Report that this test could not run, and fail when the environment asked for
+/// completeness.
+///
+/// A bare `eprintln!("SKIP: …")` is how a test that never ran came to read exactly
+/// like a test that passed. `cargo test` prints `ok` either way, so the only way
+/// to tell them apart was to scroll for a line the harness does not treat as
+/// meaningful. Two tests in this suite are *supposed* to skip on a machine with no
+/// network egress (`a_reachable_member_yields_a_usable_delay` and its UoT twin),
+/// which means the one signal that distinguished "verified" from "not run" was
+/// prose on stderr.
+///
+/// `LOCUS_REQUIRE_LIVE_ENGINE=1` turns every skip into a failure, so a green run
+/// on a machine that *should* have exercised the engine proves it did. Set it
+/// wherever a real engine and egress exist — that is the run worth trusting.
+fn skip(reason: &str) {
+    if std::env::var_os("LOCUS_REQUIRE_LIVE_ENGINE").is_some() {
+        panic!(
+            "SKIP was requested to be a failure (LOCUS_REQUIRE_LIVE_ENGINE is set): {reason}"
+        );
+    }
+    eprintln!("SKIP: {reason}");
+}
+
 /// The URL the egress probe fetches through the tunnel.
 ///
 /// Restated here rather than imported because `core` is a private module of the
@@ -329,7 +352,7 @@ const fn delay_is_a_measurement(delay: u32, _timeout_secs: u32) -> bool {
 #[test]
 fn a_reachable_member_yields_a_usable_delay() {
     let Some(engine) = sidecar() else {
-        eprintln!("SKIP: no mihomo sidecar fetched; run `node scripts/prebuild.mjs` first");
+        skip("no mihomo sidecar fetched; run `node scripts/prebuild.mjs` first");
         return;
     };
 
@@ -385,10 +408,10 @@ fn a_reachable_member_yields_a_usable_delay() {
     }
 
     if !usable && last.0 != 200 {
-        eprintln!(
-            "SKIP: no network egress from this runner; the sidecar could not complete a round \
-             trip to {test_url} (last answer: {last:?})"
-        );
+        skip(&format!(
+            "no network egress from this runner; the sidecar could not complete a round trip \
+             to {test_url} (last answer: {last:?})"
+        ));
         return;
     }
 
@@ -414,7 +437,7 @@ fn a_reachable_member_yields_a_usable_delay() {
 #[test]
 fn an_unreachable_member_is_not_reported_as_success() {
     let Some(engine) = sidecar() else {
-        eprintln!("SKIP: no mihomo sidecar fetched; run `node scripts/prebuild.mjs` first");
+        skip("no mihomo sidecar fetched; run `node scripts/prebuild.mjs` first");
         return;
     };
 
@@ -476,7 +499,7 @@ fn an_unreachable_member_is_not_reported_as_success() {
 #[test]
 fn a_dead_member_answers_with_a_non_measurement_not_an_error() {
     let Some(engine) = sidecar() else {
-        eprintln!("SKIP: no mihomo sidecar fetched; run `node scripts/prebuild.mjs` first");
+        skip("no mihomo sidecar fetched; run `node scripts/prebuild.mjs` first");
         return;
     };
 
@@ -581,7 +604,7 @@ fn the_engine_sentinels_are_not_measurements() {
 #[test]
 fn a_group_whose_members_all_fail_returns_no_delay_map() {
     let Some(engine) = sidecar() else {
-        eprintln!("SKIP: no mihomo sidecar fetched; run `node scripts/prebuild.mjs` first");
+        skip("no mihomo sidecar fetched; run `node scripts/prebuild.mjs` first");
         return;
     };
 

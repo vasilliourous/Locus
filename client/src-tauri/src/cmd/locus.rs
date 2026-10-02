@@ -14,6 +14,7 @@
 use super::CmdResult;
 use crate::config::Config;
 use crate::core::CoreManager;
+use crate::core::manager::traffic_probe;
 use crate::locus::{activation, apply, contract, store};
 use crate::utils::dirs;
 use clash_verge_logging::{Type, logging};
@@ -137,6 +138,20 @@ pub struct LocusStatus {
     /// tell a fresh install its status was just verified.
     pub last_confirmed_at: Option<i64>,
 
+    /// Whether the Core is observed to be moving bytes right now.
+    ///
+    /// The second route to `ready`, reported alongside it rather than folded into
+    /// it, for the same reason `ready` is separate from `connected`: the two
+    /// routes fail for different reasons and a support report has to say which
+    /// one answered. `ready: true, traffic: false` is a tunnel proven by a delay
+    /// test on an idle machine; `ready: true, traffic: true` is the student's own
+    /// bytes moving. Both are connected, and only one of them can be wrong in the
+    /// direction that produced the recurring report — so this field is what lets
+    /// the next investigation tell them apart without a debug build.
+    ///
+    /// It is a *rate*, not the Core's lifetime total: see
+    /// `core::manager::traffic_probe`.
+    pub traffic_flowing: bool,
 }
 
 /// What the Account screen should say about the subscription.
@@ -277,6 +292,11 @@ pub async fn locus_status() -> LocusStatus {
     // command the UI polls at 750 ms while a connect settles.
     let readiness = CoreManager::global().observe_readiness().await;
 
+    // Read for the report, after readiness has been decided: `observe_readiness`
+    // is what starts and feeds the stream, so reading it here means the field
+    // describes the same observation the verdict above was reached from.
+    let traffic_flowing = traffic_probe::is_active();
+
     LocusStatus {
         activated: activation.is_some(),
         tier: activation.as_ref().map(|a| a.tier.clone()),
@@ -288,6 +308,7 @@ pub async fn locus_status() -> LocusStatus {
         core_up: readiness.is_core_up(),
         subscription,
         last_confirmed_at: verge_data.last_heartbeat_ok,
+        traffic_flowing,
     }
 }
 /// Whether the tunnel's core is running, from the run state's running mode.
@@ -974,6 +995,12 @@ pub async fn locus_connect() -> CmdResult<ConnectionResult> {
     // "connected with no wifi" report. `observe_readiness` asks the Core's
     // control API and only answers Ready when it replies, so the loop below waits
     // for evidence rather than for an intention.
+    //
+    // Since 2026-10-02 that evidence can also be the Core reporting bytes moving
+    // on the student's own traffic (see `core::manager::traffic_probe`). That
+    // matters most here, in the one place a student is watching a spinner: a
+    // tunnel that is already carrying their traffic is ready by definition, and
+    // this loop no longer waits for a delay test to agree before saying so.
     //
     // Bounded, deliberately: an unbounded wait is the retired client's forever
     // spinner. On timeout this is a RESULT, not an error, so the screen can say

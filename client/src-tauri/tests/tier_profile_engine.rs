@@ -23,6 +23,21 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+/// Report that this test could not run, and fail when the environment asked for
+/// completeness.
+///
+/// A bare `eprintln!("SKIP: …")` reads exactly like a passing test in `cargo test`
+/// output, so "the engine accepted the profile" and "no engine was present" were
+/// indistinguishable without reading stderr. `LOCUS_REQUIRE_LIVE_ENGINE=1` turns
+/// every skip into a failure, so a green run on a machine that *should* have run
+/// the engine proves it did.
+fn skip(reason: &str) {
+    if std::env::var_os("LOCUS_REQUIRE_LIVE_ENGINE").is_some() {
+        panic!("SKIP was requested to be a failure (LOCUS_REQUIRE_LIVE_ENGINE is set): {reason}");
+    }
+    eprintln!("SKIP: {reason}");
+}
+
 /// The repository's `client/` directory, found from this test's manifest dir.
 fn client_dir() -> PathBuf {
     let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
@@ -112,7 +127,7 @@ fn eco_profile_yaml() -> String {
 #[test]
 fn the_engine_accepts_a_strike_profile() {
     let Some(engine) = sidecar() else {
-        eprintln!("SKIP: no mihomo sidecar fetched; run `node scripts/prebuild.mjs` first");
+        skip("no mihomo sidecar fetched; run `node scripts/prebuild.mjs` first");
         return;
     };
 
@@ -133,7 +148,7 @@ fn the_engine_accepts_a_strike_profile() {
 #[test]
 fn the_engine_accepts_an_eco_profile() {
     let Some(engine) = sidecar() else {
-        eprintln!("SKIP: no mihomo sidecar fetched; run `node scripts/prebuild.mjs` first");
+        skip("no mihomo sidecar fetched; run `node scripts/prebuild.mjs` first");
         return;
     };
 
@@ -155,7 +170,7 @@ fn the_engine_accepts_an_eco_profile() {
 #[test]
 fn the_engine_accepts_the_pinned_uot_protocol_version() {
     let Some(engine) = sidecar() else {
-        eprintln!("SKIP: no mihomo sidecar fetched; run `node scripts/prebuild.mjs` first");
+        skip("no mihomo sidecar fetched; run `node scripts/prebuild.mjs` first");
         return;
     };
 

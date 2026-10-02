@@ -35,11 +35,27 @@
 //!
 //!   1. is the Core up?            → [`probe_core_api`] (a local `/version`)
 //!   2. can it carry a packet?     → [`probe_egress`] (a real request THROUGH the
-//!      tunnel, via mihomo's own delay test for the tier's proxy group)
+//!      tunnel, via mihomo's own delay test for each outbound the tier defines)
 //!
-//! Both must hold for [`Readiness::Ready`]. A Core that is up but whose egress
-//! check fails is [`Readiness::NoEgress`]: the UI shows "connecting / no
-//! service" rather than claiming a tunnel that cannot carry traffic.
+//! # The third report: the counters the student is already watching
+//!
+//! Question 2 was then the *only* route to `Ready`, and it kept stranding working
+//! tunnels on "connecting". Three repairs to it shipped in as many days — the
+//! acceptance window, then the group-versus-member choice — and the symptom
+//! outlived all of them, because the premise was wrong: a delay test is a
+//! *request we make to the Core*, and anything we ask can be answered "no" about
+//! a tunnel that is carrying the student's traffic perfectly well.
+//!
+//! The fix is not a third repair to the question. It is a second, independent
+//! observation that cannot be a false negative, because it is not a question: the
+//! Core pushes what it actually moved on the student's behalf, once a second, on
+//! its `/traffic` stream (`traffic_probe`). Bytes moving is a tunnel working, and
+//! it is *observed* rather than *inferred* — the same standard the previous three
+//! fixes were trying to reach by asking a proxy node to time itself.
+//!
+//! So [`Readiness::Ready`] is now the disjunction: proven egress **or** observed
+//! traffic. A Core that is up with neither is [`Readiness::Connecting`], which is
+//! the honest report for a tunnel with nothing proven through it yet.
 //!
 //! # The shape, and why the decision is separate from the request
 //!
@@ -134,6 +150,10 @@ pub enum ProbeOutcome {
 }
 
 /// What the through-tunnel egress check observed.
+///
+/// Before changing anything here, read `docs/reference/EGRESS-READINESS.md`. This
+/// is the fourth shape of this rule and the previous three all presented as the
+/// same symptom — "connecting while traffic flows" — from three different hops.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum EgressOutcome {
     /// A real request completed **through** the tunnel. Traffic can move.
@@ -149,11 +169,29 @@ pub enum EgressOutcome {
     NotAttempted,
 }
 
-/// The readiness decision, given the last probes.
+/// Whether the Core is observed to be moving bytes on the student's behalf.
 ///
-/// # Three states, and why the previous five were two too many
-///
-/// This used to be `Ready | NotReady | NoEgress | Stopped`, and the middle two
+/// The second, independent proof of a tunnel, and the one that cannot be a
+/// false negative: it is not a question we ask the Core, it is the Core telling
+/// us what it already did, and a byte that moved is a byte that moved. See
+/// `traffic_probe` for why this is the *rate* and never the Core's lifetime
+/// totals — a total is a latch with a counter in front of it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TrafficOutcome {
+    /// The Core reported bytes moving within the last few samples.
+    Flowing,
+    /// No bytes are moving right now: nothing to send, or a tunnel that is not
+    /// carrying anything. The two are one outcome because one observation cannot
+    /// tell them apart, and the honest report is that no traffic is proven —
+    /// which is not the same as disproven.
+    Silent,
+}
+
+    /// The readiness decision, given the last observations.
+    ///
+    /// # Three states, and why the previous five were two too many
+    ///
+    /// This used to be `Ready | NotReady | NoEgress | Stopped`, and the middle two
 /// were the over-engineering: `NoEgress` ("the Core is up but cannot move a
 /// packet") and `NotReady` ("the Core is not answering") are **different
 /// diagnoses of the same user-visible fact**. Nothing in the client branches on
@@ -206,40 +244,53 @@ impl Readiness {
     }
 }
 
-/// Turns the two probes into the readiness the rest of the app should report.
+/// Turns the observations into the readiness the rest of the app should report.
 ///
-/// # One question
+/// # Two proofs of one fact, either sufficient
 ///
-/// [`Readiness::Ready`] requires exactly one thing: **a packet completed through
-/// the tunnel** (`egress == Ok`). Everything else is *connecting* or *stopped*.
+/// [`Readiness::Ready`] means one thing — **the tunnel is carrying traffic right
+/// now** — and there are two independent observations that establish it:
 ///
-/// That is a deliberate reduction from the previous rule, which required three
-/// separate conditions and produced four states. The removed condition was
-/// `ProbeOutcome::Serving`: the Core answering its own control API was treated as
-/// a prerequisite for `Ready`, on the reasoning that a tunnel which cannot answer
-/// locally is not up. But the egress probe already proves more than that — it
-/// asks the Core to move a real packet, which it cannot do without answering —
-/// and the extra condition only created a state where the Core was carrying
-/// traffic while the app refused to say so.
+///   1. `egress == Ok`: the Core answered a delay test by dialling a target
+///      through the tunnel and returning a measurement.
+///   2. `traffic == Flowing`: the Core reported bytes moving on the student's own
+///      traffic, off its `/traffic` stream, with no request from us in the loop.
 ///
-/// `outcome` is still a parameter because it decides *whether asking is even
-/// worth it* (see [`IsRunning`]): a Core that is not running produces
-/// `NotAttempted` egress, and that is the difference between *stopped* and
-/// *connecting*. It is a gate on the question, never a second vote on the answer.
+/// Either one is enough, and that is the change from the previous rule, which
+/// admitted only the first. A disjunction is the right shape here because of the
+/// kind of error each half makes. Both can say *no* about a tunnel that works —
+/// the delay test when the tier's outbound is not the one carrying traffic, is
+/// mid-dial, or answers slowly; the traffic stream when the student is simply
+/// idle — and neither can say *yes* about a tunnel that does not: a measurement
+/// means a round trip completed, and a byte count means a byte moved. A false
+/// negative in one half is exactly what the other half covers, which is why the
+/// earlier single-condition rule kept stranding a working tunnel on "connecting"
+/// while the numbers on the student's own screen moved.
 ///
-/// # Claiming less than the old code, on purpose
+/// # What this does not relax
 ///
-/// The old `NoEgress` state claimed to distinguish "the Core is up but your wifi
-/// is down" from "the Core is still coming up". It could not: both are "no packet
-/// got through", and the client rendered them identically. The honest report is
-/// that one: no packet has been proven, so the app is not connected yet. Anything
-/// finer belongs in the log, where it does not have to be a lie to be useful.
+/// It is not "connected if anything looks alive". The Core answering its own
+/// control API is still **not** evidence and never becomes evidence: mihomo
+/// binds that port and answers `/version` with no uplink at all, which is the
+/// school-wifi lie. Nor is the readiness latch evidence. Nor is a Core lifetime
+/// total — see `traffic_probe`; only the current sample's rate counts, so a
+/// tunnel that stops carrying bytes stops being `Ready` on the next poll.
+///
+/// `outcome` is a parameter because it decides *whether asking is even worth it*:
+/// a Core that is not running produces no egress and no traffic, and that is the
+/// difference between *stopped* and *connecting*. It is a gate on the question,
+/// never a third vote on the answer.
 #[must_use]
-pub const fn decide(outcome: ProbeOutcome, egress: EgressOutcome, latch_active: bool) -> Readiness {
-    // A payload left the machine and came back through the tunnel. This is the
-    // whole test, and it needs no corroboration: a Core that moved a packet is
-    // up, and a machine that moved one has a usable uplink.
-    if matches!(egress, EgressOutcome::Ok) {
+pub const fn decide(
+    outcome: ProbeOutcome,
+    egress: EgressOutcome,
+    traffic: TrafficOutcome,
+    latch_active: bool,
+) -> Readiness {
+    // A payload left the machine and came back through the tunnel, or the Core is
+    // reporting bytes moving as we speak. Either is the fact; neither needs
+    // corroboration.
+    if matches!(egress, EgressOutcome::Ok) || matches!(traffic, TrafficOutcome::Flowing) {
         return Readiness::Ready;
     }
 
@@ -485,15 +536,29 @@ const fn delay_is_a_measurement(delay: u32, _timeout_secs: u32) -> bool {
 mod tests {
     use super::*;
 
-    /// The load-bearing rule: without proven egress there is no Ready —
-    /// regardless of how confidently the latch claims a Core was started.
+    /// The load-bearing rule: without proven egress **and** without observed
+    /// traffic there is no Ready — regardless of how confidently the latch claims
+    /// a Core was started.
     #[test]
     fn an_unresponsive_core_is_never_ready() {
         assert_eq!(
-            decide(ProbeOutcome::Unresponsive, EgressOutcome::NotAttempted, true),
+            decide(
+                ProbeOutcome::Unresponsive,
+                EgressOutcome::NotAttempted,
+                TrafficOutcome::Silent,
+                true
+            ),
             Readiness::Connecting
         );
-        assert!(!decide(ProbeOutcome::Unresponsive, EgressOutcome::NotAttempted, true).is_ready());
+        assert!(
+            !decide(
+                ProbeOutcome::Unresponsive,
+                EgressOutcome::NotAttempted,
+                TrafficOutcome::Silent,
+                true
+            )
+            .is_ready()
+        );
     }
 
     /// The exact state the old latch produced: a start was recorded, nothing was
@@ -504,61 +569,113 @@ mod tests {
     fn a_latch_alone_can_no_longer_report_connected() {
         for outcome in [ProbeOutcome::Unresponsive, ProbeOutcome::NotRunning] {
             assert!(
-                !decide(outcome, EgressOutcome::NotAttempted, true).is_ready(),
+                !decide(outcome, EgressOutcome::NotAttempted, TrafficOutcome::Silent, true).is_ready(),
                 "{outcome:?} with an active latch must not be Ready"
             );
         }
     }
 
-    /// Ready needs proven egress and nothing else. This is the whole rule, so if
-    /// it ever grows a second condition a false "connected" or a false
-    /// "connecting" comes straight back.
+    /// Proven egress is sufficient, whatever the local probe said and whether or
+    /// not the latch is still active.
     ///
-    /// The `Serving` case is the one that changed: it used to be required, so a
-    /// Core that had moved a real packet but failed its local `/version` call
-    /// could not report Ready. A packet through the tunnel already implies the
-    /// Core is answering, so requiring both was a second vote on a settled
-    /// question.
+    /// The `Serving` case is the one that changed historically: it used to be a
+    /// *required* condition, so a Core that had moved a real packet but failed
+    /// its local `/version` call could not report Ready. A packet through the
+    /// tunnel already implies the Core is answering, so requiring both was a
+    /// second vote on a settled question.
     #[test]
-    fn only_proven_egress_is_ready() {
-        // Egress proven is Ready, whatever the local probe said, and whether or
-        // not the latch is still active.
+    fn proven_egress_alone_is_ready() {
         for outcome in [
             ProbeOutcome::Serving,
             ProbeOutcome::Unresponsive,
             ProbeOutcome::NotRunning,
         ] {
             assert!(
-                decide(outcome, EgressOutcome::Ok, true).is_ready(),
+                decide(outcome, EgressOutcome::Ok, TrafficOutcome::Silent, true).is_ready(),
                 "{outcome:?} with proven egress must be Ready"
             );
         }
-        assert!(decide(ProbeOutcome::Serving, EgressOutcome::Ok, false).is_ready());
-        // No egress proven is never Ready — the whole bug this guards.
-        assert!(!decide(ProbeOutcome::Serving, EgressOutcome::Failing, true).is_ready());
+        assert!(decide(ProbeOutcome::Serving, EgressOutcome::Ok, TrafficOutcome::Silent, false).is_ready());
     }
 
-    /// THE headline rule: a Core that is up and answering locally but cannot
-    /// carry a packet must never render as connected.
+    /// THE headline rule of this change, and the reason it exists: **observed
+    /// traffic is Ready on its own.**
     ///
-    /// This is the school-wifi case: mihomo binds its control port and answers
-    /// `/version` with no uplink at all, so the local probe alone reported
-    /// Connected while every packet died. It must never be `Ready`.
+    /// This is the recurring report — the student's own download and upload
+    /// numbers are moving on screen while the button sits on "connecting" —
+    /// and it is the failure mode a delay test keeps producing. Bytes the Core
+    /// reports having moved cannot be a false positive, so they must not need a
+    /// second, weaker observation's permission to mean connected.
     #[test]
-    fn a_serving_core_without_egress_is_not_connected() {
-        let readiness = decide(ProbeOutcome::Serving, EgressOutcome::Failing, true);
-        assert!(!readiness.is_ready(), "no egress must never be Ready");
+    fn observed_traffic_alone_is_ready() {
+        for outcome in [
+            ProbeOutcome::Serving,
+            ProbeOutcome::Unresponsive,
+            ProbeOutcome::NotRunning,
+        ] {
+            for egress in [
+                EgressOutcome::Failing,
+                EgressOutcome::NotAttempted,
+                EgressOutcome::Ok,
+            ] {
+                assert!(
+                    decide(outcome, egress, TrafficOutcome::Flowing, true).is_ready(),
+                    "{outcome:?} + {egress:?} with traffic flowing must be Ready"
+                );
+            }
+        }
+    }
+
+    /// The counter is a measurement, not a latch. A Core that stops moving bytes
+    /// must stop being Ready on the next poll even while the readiness latch is
+    /// still set — otherwise "connected" becomes sticky, which is the lie the
+    /// original latch told.
+    #[test]
+    fn traffic_that_stops_ends_readiness() {
+        assert!(decide(ProbeOutcome::Serving, EgressOutcome::Failing, TrafficOutcome::Flowing, true).is_ready());
+        assert_eq!(
+            decide(ProbeOutcome::Serving, EgressOutcome::Failing, TrafficOutcome::Silent, true),
+            Readiness::Connecting
+        );
+    }
+
+    /// THE school-wifi rule: a Core that is up and answering locally but is
+    /// carrying nothing must never render as connected.
+    ///
+    /// This is the case that produced the original complaint: mihomo binds its
+    /// control port and answers `/version` with no uplink at all, so a local
+    /// check alone reported Connected while every packet died. It must never be
+    /// `Ready` — and this is the guard that the disjunction above did **not**
+    /// weaken the rule, only added a second honest way to satisfy it.
+    #[test]
+    fn a_serving_core_carrying_nothing_is_not_connected() {
+        let readiness = decide(
+            ProbeOutcome::Serving,
+            EgressOutcome::Failing,
+            TrafficOutcome::Silent,
+            true,
+        );
+        assert!(!readiness.is_ready(), "neither proof must never be Ready");
         // And it is still "core up", so the UI shows connecting rather than
         // flashing disconnected at a Core that is running.
         assert!(readiness.is_core_up());
         assert_eq!(readiness, Readiness::Connecting);
     }
 
-    /// `NotAttempted` for a serving Core is treated as no egress: if we did not
-    /// prove traffic moves, we must not claim it does.
+    /// `NotAttempted` egress for a serving Core with nothing moving is treated as
+    /// no proof: if we did not establish that traffic moves, we must not claim it
+    /// does.
     #[test]
     fn unproven_egress_is_not_ready() {
-        assert!(!decide(ProbeOutcome::Serving, EgressOutcome::NotAttempted, true).is_ready());
+        assert!(
+            !decide(
+                ProbeOutcome::Serving,
+                EgressOutcome::NotAttempted,
+                TrafficOutcome::Silent,
+                true
+            )
+            .is_ready()
+        );
     }
 
     /// A failing start must read as *connecting*, not as *disconnected*: the
@@ -567,7 +684,12 @@ mod tests {
     #[test]
     fn a_failing_start_reads_as_connecting_not_stopped() {
         assert_eq!(
-            decide(ProbeOutcome::Unresponsive, EgressOutcome::NotAttempted, true),
+            decide(
+                ProbeOutcome::Unresponsive,
+                EgressOutcome::NotAttempted,
+                TrafficOutcome::Silent,
+                true
+            ),
             Readiness::Connecting
         );
     }
@@ -586,7 +708,7 @@ mod tests {
         for egress in [EgressOutcome::Failing, EgressOutcome::NotAttempted] {
             for outcome in [ProbeOutcome::Serving, ProbeOutcome::Unresponsive] {
                 assert_eq!(
-                    decide(outcome, egress, true),
+                    decide(outcome, egress, TrafficOutcome::Silent, true),
                     Readiness::Connecting,
                     "{outcome:?} + {egress:?} must not invent a state the UI cannot use"
                 );
@@ -599,11 +721,21 @@ mod tests {
     #[test]
     fn nothing_started_is_stopped() {
         assert_eq!(
-            decide(ProbeOutcome::Unresponsive, EgressOutcome::NotAttempted, false),
+            decide(
+                ProbeOutcome::Unresponsive,
+                EgressOutcome::NotAttempted,
+                TrafficOutcome::Silent,
+                false
+            ),
             Readiness::Stopped
         );
         assert_eq!(
-            decide(ProbeOutcome::NotRunning, EgressOutcome::NotAttempted, true),
+            decide(
+                ProbeOutcome::NotRunning,
+                EgressOutcome::NotAttempted,
+                TrafficOutcome::Silent,
+                true
+            ),
             Readiness::Stopped
         );
     }

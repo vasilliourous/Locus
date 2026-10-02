@@ -1,4 +1,6 @@
-#[cfg(target_os = "macos")]
+// Not macOS-only any more: the connection screen's traffic measurement reads the
+// Core's `/traffic` stream on every platform, and the tray rate task (macOS-only)
+// is now just one of its two writers. See `core::manager::traffic_probe`.
 pub mod connections_stream;
 pub mod dirs;
 pub mod help;
