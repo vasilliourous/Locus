@@ -1,6 +1,6 @@
 [package]
 name = "locus"
-version = "3.2.21"
+version = "3.2.22"
 description = "Locus VPN client"
 authors = ["Locus"]
 # GPL-3.0-only, not the root CC BY-NC-ND 4.0: client/ is a fork of Clash Verge
