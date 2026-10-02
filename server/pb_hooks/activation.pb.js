@@ -236,6 +236,74 @@ routerAdd("POST", "/api/activate", function(e) {
         }
     }
 
+    // ── Migrate a pre-existing binding onto the device's durable identity ──
+    //
+    // Called ONLY when a code is already bound and the incoming fingerprint does
+    // not match it. Answers: "is the caller the same device this code is already
+    // bound to, just presenting a new binding key?".
+    //
+    // The proof is the verifier. `device_identities.verifier` is
+    // `sha256(secret)` for a secret that never leaves the device, so it cannot be
+    // forged by anyone who merely knows the code. The identity row must ALSO
+    // already name this exact code — so this rebinds the key on a device that was
+    // already entitled, and can never hand a code to a device that was not.
+    //
+    // On success the code row's `bound_fingerprint` and the `device_bindings`
+    // index are both rewritten to the new (identity-derived) value, in the same
+    // form the normal bind path uses, so the two halves of "one code per device"
+    // keep naming the same device. Returns true when the migration happened.
+    //
+    // Returns false on every uncertainty — a missing verifier, no matching
+    // identity, an identity that names a different code. The caller then returns
+    // the ordinary 403. Failing closed here is correct: the worst case is the
+    // pre-existing behaviour (a student contacts their middleman), whereas
+    // failing open would silently move codes between devices.
+    function migrateBindingIfSameDevice(codeRec, verifier, incomingFp) {
+        if (!verifier || !/^[0-9a-f]{64}$/.test(verifier)) return false;
+        var ident = null;
+        try {
+            ident = $app.dao().findFirstRecordByFilter("device_identities",
+                "verifier = '" + verifier + "'");
+        } catch (none) {
+            ident = null;
+        }
+        if (!ident) return false;
+        // The identity must already name THIS code. Without this the endpoint
+        // would let any registered device graft any code onto itself.
+        if (ident.getString("code") !== codeRec.getString("code")) return false;
+        if (ident.getString("revoked_at")) return false;
+
+        // Rebind to the value the client now presents — for a migrated client
+        // that is its persisted `device_id`, carried in `fingerprint`.
+        //
+        // Named `safeNewFp` (not `newFp`) for the same reason `recordBinding`
+        // names its value `safeFp`: it holds the STRIPPED form, and the name has
+        // to say so. Writing the raw incoming value here would put the code's
+        // binding under a key the index lookup — which normalises — could never
+        // find, so the one-code-per-device rule would silently stop applying to
+        // this row. `check-consistency.sh` §(direct-fingerprint-write) flags any
+        // `set("bound_fingerprint", fp|newFp|fingerprint)` for exactly this.
+        var safeNewFp = String(incomingFp).replace(/[^a-zA-Z0-9]/g, "");
+        if (!safeNewFp) return false;
+
+        codeRec.set("bound_fingerprint", safeNewFp);
+        $app.dao().saveRecord(codeRec);
+        // Keep the index in step. `recordBinding` revives the existing row keyed
+        // on the OLD fingerprint only if given it, so release the old key first
+        // and write the new one — otherwise the stale row holds the code against
+        // the new value and the uniqueness rule fights the migration.
+        try {
+            $app.dao().db().newQuery(
+                "UPDATE device_bindings SET released_at = {:now}, release_reason = 'identity-migration' " +
+                "WHERE code = {:code} AND released_at IS NULL"
+            ).bind({ now: new Date().toISOString(), code: codeRec.getString("code") }).execute();
+        } catch (releaseErr) {
+            // Non-fatal: `recordBinding` below revives/reinserts on the new key.
+        }
+        recordBinding(safeNewFp, codeRec.getString("code"), codeRec.getString("tier"));
+        return true;
+    }
+
     try {
         var data = $apis.requestInfo(e).data;
         var code = (data.code || "").trim();
@@ -347,7 +415,40 @@ routerAdd("POST", "/api/activate", function(e) {
             // else and sends them to a middleman. Normalising both sides makes
             // the comparison mean what it says: "is this the same device?".
             var incomingFp = String(fp).replace(/[^a-zA-Z0-9]/g, "");
-            if (boundFp !== incomingFp) return e.json(403, {code:403, message:"Code bound to another device"});
+            if (boundFp !== incomingFp) {
+                // ── Binding-key migration (2026-10-02) ──
+                //
+                // Before this returns 403, ask a stronger question than "does
+                // the fingerprint match": "does this request prove it is the
+                // device this code was bound to?".
+                //
+                // Codes used to bind to a hardware fingerprint that the client
+                // RE-DERIVED on every launch (MAC + disk serial + board UUID),
+                // so an update could hand the hub a different digest for the
+                // same laptop — and its own code came back "bound to another
+                // device". The client now binds to its persisted `device_id`
+                // instead, which is stable. But a device bound BEFORE this
+                // change still has the old fingerprint on its code row, so its
+                // first post-update activation presents the new id and would
+                // 403 — turning an intermittent per-update failure into a
+                // guaranteed one for every already-bound device. This branch is
+                // what stops that.
+                //
+                // The proof is the `verifier`: `sha256(secret)` for a secret
+                // only this device holds. An attacker who merely knows a code
+                // cannot produce it, and the hub only accepts it when the
+                // identity row ALREADY names this very code — so this can never
+                // move a code to a device that was not already entitled to it.
+                // It rebinds the key on the same device, not to a new one.
+                if (migrateBindingIfSameDevice(rec, verifier, fp)) {
+                    // The row was updated in place; fall through as a
+                    // same-device re-activation with the new key.
+                    boundFp = String(rec.getString("bound_fingerprint")).replace(/[^a-zA-Z0-9]/g, "");
+                    incomingFp = boundFp;
+                } else {
+                    return e.json(403, {code:403, message:"Code bound to another device"});
+                }
+            }
             if (suspended) return e.json(403, {code:403, message:"Code suspended"});
             // Same-device re-activation: return the current tier config too, so
             // clients can refresh stale connection parameters (see FIXES.md).

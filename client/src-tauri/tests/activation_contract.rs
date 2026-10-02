@@ -542,3 +542,119 @@ fn the_activation_command_passes_the_resolved_identity() {
          it cannot be stored."
     );
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// The binding key: what a code is bound to must be stable, and the same on
+// both sides
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// A code is bound to the device's **durable identity**, not the hardware
+/// fingerprint.
+///
+/// This is the "codes become invalid for the very devices they were bound to"
+/// bug, pinned. The hub refuses a code with `403 "Code bound to another device"`
+/// whenever the value it is sent differs from the one it bound
+/// (`activation.pb.js`). So the binding value MUST be stable across launches,
+/// and the hardware fingerprint is not — `device::fingerprint()` re-derives on
+/// every launch from MAC, disk serial and board UUID.
+///
+/// The guard is two-sided on purpose: it asserts that the client sends the
+/// identity's id AND that the identity resolver reuses a stored identity
+/// verbatim. Asserting either alone would pass with the other half reverted —
+/// the client could send a stable value that the resolver still re-derives, or
+/// resolve durably and then send the volatile fingerprint.
+#[test]
+fn a_code_binds_to_the_durable_identity_not_the_hardware_fingerprint() {
+    let cmd = read(&repo_root().join("client/src-tauri/src/cmd/locus.rs"));
+    let identity = read(&repo_root().join("client/src-tauri/src/locus/identity.rs"));
+    let runtime = read(&repo_root().join("client/src-tauri/src/locus/runtime.rs"));
+
+    // (1) The client half: the activation command binds to the identity's id.
+    assert!(
+        cmd.contains("identity.binding_id()"),
+        "`locus_activate` no longer derives the binding value from the identity. \
+         If it sends `device::fingerprint()` again, the value is re-derived from \
+         hardware on every launch and the student's own code comes back 403 the \
+         moment that hardware reports differently."
+    );
+    assert!(
+        !cmd.contains("let fingerprint = device::fingerprint()"),
+        "`locus_activate` (or a sibling command) computes the binding value from \
+         `device::fingerprint()`. That is the re-derived hardware hash the whole \
+         change removed — a code bound to it drifts with the hardware."
+    );
+
+    // The other binding sites must agree, or one of them re-introduces the drift.
+    assert!(
+        runtime.contains("identity.binding_id()"),
+        "the heartbeat credential path still uses the hardware fingerprint for \
+         the binding value, so a device can bind with the identity and then \
+         re-present the fingerprint — which is the drift, moved rather than fixed."
+    );
+
+    // (2) The resolver half: a stored identity wins over changed hardware.
+    assert!(
+        identity.contains("pub fn binding_id(&self) -> String"),
+        "`DeviceIdentity::binding_id` is gone. It is the single definition of \
+         what a code binds to; without it each call site re-decides, which is how \
+         the two identifiers diverged in the first place."
+    );
+    assert!(
+        identity.contains("**A stored identity wins.**"),
+        "the resolver's \"a stored identity wins\" rule is no longer documented. \
+         That rule IS the durability guarantee — re-deriving on a launch where a \
+         stored identity exists is the original bug."
+    );
+}
+
+/// The binding value the client sends for a device must be the value the hub
+/// recognises that device by.
+///
+/// A weaker, still-useful agreement: activation sends `fingerprint` (the binding
+/// value) AND the `verifier` that `device_identities` is keyed on, in the same
+/// request. The migration path on the hub matches them to rebind a code whose
+/// fingerprint predates this change — so if the client stops sending both, that
+/// path silently stops firing and every already-bound device 403s on update.
+#[test]
+fn the_activation_request_carries_both_the_binding_value_and_the_verifier() {
+    let activation = read(&repo_root().join("client/src-tauri/src/locus/activation.rs"));
+    let hook = activation_hook();
+
+    assert!(
+        activation.contains("fingerprint,") && activation.contains("verifier: &identity.verifier"),
+        "`CodeRequest` must carry the binding `fingerprint` and the `verifier` in \
+         the same call. The hub's binding-key migration proves \"same device\" with \
+         the verifier when the fingerprint has changed; drop either and the \
+         migration cannot fire."
+    );
+
+    // The hub half of the same agreement.
+    //
+    // Assert the CALL SITE, not merely that the helper is defined. An earlier
+    // version of this guard checked `contains("migrateBindingIfSameDevice")`,
+    // which a *definition* satisfies even when the call is removed — so the
+    // guard passed with the migration inert, which is exactly the "a check that
+    // cannot fail reads like a check that passed" trap. The call takes the
+    // incoming fingerprint (`fp`), so match the full expression.
+    assert!(
+        hook.contains("if (migrateBindingIfSameDevice(rec, verifier, fp)) {"),
+        "the hub no longer CALLS the binding-key migration. A device bound \
+         before this change presents the new id on its first post-update \
+         activation and would 403 with its own code — the fix would break every \
+         already-bound device at once. (Defining the helper is not enough: it \
+         must be called where the fingerprint mismatches.)"
+    );
+    assert!(
+        hook.contains("migrateBindingIfSameDevice(rec, verifier, fp)")
+            && hook.contains("return e.json(403, {code:403, message:\"Code bound to another device\"})"),
+        "the migration is not positioned before the 403. It must be consulted \
+         when the fingerprint does not match and only fall through to the refusal \
+         when it proves nothing — otherwise the migration is dead code."
+    );
+    assert!(
+        hook.contains("ident.getString(\"code\") !== codeRec.getString(\"code\")"),
+        "the migration no longer checks that the identity ALREADY names this \
+         code. Without that check the endpoint would let any registered device \
+         graft any code onto itself."
+    );
+}

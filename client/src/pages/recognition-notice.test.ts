@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 
 import type { RecognitionResult } from '@/services/locus'
 
-import { recognitionNotice } from './recognition-notice'
+import { noticeForGate, recognitionNotice } from './recognition-notice'
 
 /**
  * The device-recognition notice on the activation screen.
@@ -122,6 +122,80 @@ describe('the recognition notice', () => {
       // Must not throw, and must return either a notice or an explicit null.
       const notice = recognitionNotice(result)
       expect(notice === null || typeof notice.messageKey === 'string').toBe(true)
+    }
+  })
+})
+
+/**
+ * The gate view of the recognition result.
+ *
+ * This is the fix for the screen that said "no code is needed" while asking for
+ * a code. The rule is narrow and worth pinning exactly: suppress ONLY the
+ * durable `restoring` promise, because it is the only one that contradicts the
+ * prompt. Everything else must pass through, or the suppression becomes a
+ * regression of its own.
+ */
+describe('the notice handed to the still-open gate', () => {
+  it('suppresses the "no code is needed" promise', () => {
+    // THE test this function exists for. A durable `recognised` maps to
+    // "Welcome back — this device is already registered, so no code is needed",
+    // which cannot be shown on a screen that is still requesting a code. It is
+    // dropped; if the entitlement landed, the gate clears and this is moot.
+    expect(
+      noticeForGate({
+        kind: 'recognised',
+        tier: 'eco',
+        expiresAt: null,
+        durable: true,
+      }),
+    ).toBeNull()
+  })
+
+  it('keeps the durability warning', () => {
+    // "Registered, but a reinstall would need the card" is TRUE on the gate and
+    // is the caveat the feature exists to give. Suppressing it would trade a
+    // false reassurance for a missing warning.
+    const result: RecognitionResult = {
+      kind: 'recognised',
+      tier: 'eco',
+      expiresAt: null,
+      durable: false,
+    }
+    expect(noticeForGate(result)).toEqual(result)
+  })
+
+  it('keeps the unreachable-hub caution', () => {
+    // `unavailable` explains why the easy path did not happen and is not a claim
+    // about the entitlement. It must survive.
+    expect(noticeForGate({ kind: 'unavailable' })).toEqual({
+      kind: 'unavailable',
+    })
+  })
+
+  it('keeps the unknown-device silence as silence', () => {
+    expect(noticeForGate({ kind: 'unknownDevice' })).toEqual({
+      kind: 'unknownDevice',
+    })
+  })
+
+  it('passes a not-yet-checked null straight through', () => {
+    expect(noticeForGate(null)).toBeNull()
+  })
+
+  it('never leaves a suppressed result that would render the false promise', () => {
+    // Belt and braces, stated as the property that matters rather than as the
+    // mechanism: for ANY result, the notice derived at the gate must not be the
+    // durable "restoring" one.
+    const cases: RecognitionResult[] = [
+      { kind: 'recognised', tier: 'eco', expiresAt: null, durable: true },
+      { kind: 'recognised', tier: 'eco', expiresAt: null, durable: false },
+      { kind: 'recognised', tier: 'eco', expiresAt: '2026-12-01', durable: true },
+      { kind: 'unknownDevice' },
+      { kind: 'unavailable' },
+    ]
+    for (const result of cases) {
+      const notice = recognitionNotice(noticeForGate(result))
+      expect(notice?.kind).not.toBe('restoring')
     }
   })
 })

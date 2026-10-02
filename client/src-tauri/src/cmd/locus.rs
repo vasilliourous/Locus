@@ -14,7 +14,7 @@
 use super::CmdResult;
 use crate::config::Config;
 use crate::core::CoreManager;
-use crate::locus::{activation, apply, contract, device, store};
+use crate::locus::{activation, apply, contract, store};
 use crate::utils::dirs;
 use clash_verge_logging::{Type, logging};
 use serde::Serialize;
@@ -136,6 +136,7 @@ pub struct LocusStatus {
     /// from "confirmed zero seconds ago", and rendering one as the other would
     /// tell a fresh install its status was just verified.
     pub last_confirmed_at: Option<i64>,
+
 }
 
 /// What the Account screen should say about the subscription.
@@ -242,11 +243,21 @@ pub async fn locus_status() -> LocusStatus {
     let verge = Config::verge().await;
     let verge_data = verge.latest_arc();
 
-    // The fingerprint is reported from the DEVICE, not from storage: it is
-    // derived, stable, and available before activation. Reporting the stored one
-    // would blank it on a fresh install, which is exactly when support asks for
-    // it.
-    let fingerprint = device::fingerprint();
+    // The device id reported for support is the value the code is BOUND to
+    // (`identity.device_id`), not the hardware fingerprint.
+    //
+    // It used to be `device::fingerprint()`, on the reasoning that a derived
+    // value is available before activation and would not "blank on a fresh
+    // install". But support correlates this against `bound_fingerprint` on the
+    // code, and the two disagreed the moment the hardware hash drifted — the
+    // operator saw a fingerprint the hub had never bound, and the student was
+    // told their code belonged to another device. Reporting the binding id makes
+    // this column, the hub's column and the recognition row name one device.
+    //
+    // It is resolved from the identity stores, so it is available before
+    // activation too: a fresh device resolves a `Fresh`/`AppFallback` identity
+    // and gets an id, exactly as it got a hardware fingerprint before.
+    let fingerprint = resolve_identity().await.binding_id();
     let activation = store::read(&verge_data);
 
     let subscription = classify_subscription(
@@ -330,7 +341,10 @@ pub struct ValidateCodeResult {
 /// situations and only one of them is the student's fault.
 #[tauri::command]
 pub async fn locus_check_code(code: String) -> CmdResult<activation::CodeCheck> {
-    let fingerprint = device::fingerprint();
+    // The lookup is advisory and binds nothing, but it must ask about the SAME
+    // device the activation will bind — otherwise a code that is this device's
+    // own binding would be reported as held by another. Use the binding id.
+    let fingerprint = resolve_identity().await.binding_id();
     activation::lookup_code(&code, &fingerprint)
         .await
         .map_err(|error| super::coded_error("LOCUS_LOOKUP_FAILED", format!("{error:#}")))
@@ -549,15 +563,21 @@ pub async fn locus_recognise() -> RecognitionResult {
 /// A failure at any step leaves the previous state untouched.
 #[tauri::command]
 pub async fn locus_activate(code: String) -> CmdResult<ActivationResult> {
-    let fingerprint = device::fingerprint();
-
-    // The durable identity, sent so the hub can REGISTER it in the same call that
-    // binds the code. Without this the hub writes no `device_identities` row, so
-    // recognition has nothing to find (auto-sign-in never fires) and a reinstall
-    // — which re-derives a different fingerprint — is told its own code belongs
-    // to another device. Best-effort: an identity that cannot be resolved still
-    // activates, it simply is not recognisable yet.
+    // The durable identity, resolved FIRST, because it is also what the code is
+    // bound to. `identity.binding_id()` is the `device_id`, which is persisted —
+    // so the value the hub binds is stable across launches and updates.
+    //
+    // This used to send `device::fingerprint()` (a hardware hash re-derived on
+    // every launch) as the binding value *and* register the identity separately.
+    // Those are two different keys, so the hub bound the code to one and stored
+    // recognition against the other: a hardware change moved the fingerprint
+    // without moving `device_id`, and the student's own code came back
+    // `403 "Code bound to another device"`. Binding to the identity is the fix —
+    // the binding and the recognition row now name the same device.
+    //
+    // See `DeviceIdentity::binding_id` for the full argument.
     let identity = resolve_identity().await;
+    let fingerprint = identity.binding_id();
     let identity_wire = activation::IdentityWire {
         verifier: identity.verifier(),
         device_id: identity.device_id.clone(),
@@ -1376,13 +1396,25 @@ mod tests {
         );
     }
 
-    /// The fingerprint shown in the UI must be truncated. It is a stable device
-    /// identifier, and a full one in a screenshot is a shareable one.
+    /// The device id shown in the UI must be truncated. It is a stable device
+    /// identifier (the value a code is bound to), and a full one in a screenshot
+    /// is a shareable one.
+    ///
+    /// This used to truncate `device::fingerprint()`. That value is no longer the
+    /// binding id — the identity's `device_id` is — so the test now pins the
+    /// redaction of the value the status command actually reports, which is what
+    /// the UI renders. Testing a helper against a value the product no longer
+    /// uses would read green while the rendered id was unredacted.
     #[test]
     fn status_reports_a_redacted_device_id() {
-        let full = device::fingerprint();
-        let redacted = device::redact(&full);
-        assert_ne!(redacted, full, "the device id must not be the full fingerprint");
+        let full = crate::locus::identity::DeviceIdentity {
+            device_id: "0123456789abcdef0123456789abcdef".to_owned(),
+            secret: String::new(),
+            store: crate::locus::identity::Store::Machine,
+        }
+        .binding_id();
+        let redacted = store::redact(&full);
+        assert_ne!(redacted, full, "the device id must not be the full binding id");
         assert_eq!(redacted.len(), 12);
         assert!(full.starts_with(&redacted));
     }

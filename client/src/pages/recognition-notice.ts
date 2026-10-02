@@ -69,6 +69,52 @@ const MESSAGE_KEYS = {
   unavailable: 'home.components.connection.activation.recognitionUnavailable',
 } as const
 
+/**
+ * The recognition result to hand the activation screen **while it is still
+ * rendering**, i.e. while the entitlement has not yet cleared the gate.
+ *
+ * # The bug this exists for
+ *
+ * A student saw, on one screen: *"Welcome back — this device is already
+ * registered, so no code is needed"* **and** an activation-code prompt. Two
+ * contradictory instructions, and the reassuring one was the false one.
+ *
+ * The two sentences come from two independent facts that can disagree:
+ *
+ *   * `locus_recognise` — the hub knows this device, so the durable identity is
+ *     good. It STORES the entitlement as a side effect (`cmd/locus.rs`) but its
+ *     return value does not carry "the app is now activated".
+ *   * `locusStatus.activated` — what actually clears the gate, read by a
+ *     separate round trip in `main.tsx`.
+ *
+ * So there is a window — a slow re-read, a failed one, or a recognition that
+ * returned no usable config — where recognition says `recognised` and the gate is
+ * still up. `recognitionNotice` maps `recognised` to "no code is needed"; rendered
+ * on the still-open gate, that is a claim about the student's account that the
+ * app cannot yet honour.
+ *
+ * # The rule
+ *
+ * A `recognised` result means the gate is about to clear, and when it clears the
+ * screen unmounts — so the *only* moment a `restoring` notice can be seen is
+ * exactly the moment it would be premature. Drop it. The durability warning is
+ * different: "registered, but a reinstall would need the card" is true now and
+ * useful now, so it passes through unchanged. `unavailable` and `unknownDevice`
+ * are statements about the check, not the entitlement, and also pass through.
+ *
+ * The alternative — keeping `restoring` and relying on the re-read to be fast —
+ * is what produced the contradiction. Once recognition has *fully* landed and the
+ * gate is gone, this function is not consulted at all.
+ */
+export const noticeForGate = (
+  result: RecognitionResult | null,
+): RecognitionResult | null => {
+  // The promise "no code is needed" is only made when the identity is durable —
+  // the non-durable case is already the truthful caveat and stays.
+  if (result?.kind === 'recognised' && result.durable) return null
+  return result
+}
+
 export const recognitionNotice = (
   result: RecognitionResult | null,
 ): RecognitionNotice | null => {

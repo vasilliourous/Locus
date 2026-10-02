@@ -23,6 +23,14 @@ node_modules/
 # these; repeated here so a root-level `git add -A` cannot pick them up.
 client/target/
 client/src-tauri/sidecar/
+
+# Signed release binaries and their manifest, staged here by publish-release.sh
+# before upload. ~330 MB per release, reproducible from the tag, and never
+# something a checkout needs — but git did not know that, and it showed up as
+# untracked in every `git status`, one `git add -A` away from a permanent place
+# in the history. Found 2026-10-02 while preparing a release; the same one-line
+# mistake the vpspassword entry above records.
+release-artifacts/
 client/src-tauri/resources/
 client/src-tauri/gen/schemas/
 

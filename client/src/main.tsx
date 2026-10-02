@@ -20,6 +20,7 @@ import { SUBSCRIPTION_POLL_MS as ENTITLEMENT_POLL_MS } from './hooks/use-subscri
 import { hideInitialOverlay } from './pages/_layout/utils/initial-loading-overlay'
 import { router } from './pages/_routers'
 import ActivationScreen from './pages/activation'
+import { noticeForGate } from './pages/recognition-notice'
 import { AppDataProvider } from './providers/app-data-provider'
 import { WindowProvider } from './providers/window'
 import { FALLBACK_LANGUAGE, initializeLanguage } from './services/i18n'
@@ -200,7 +201,10 @@ const initializeApp = (initialThemeMode: 'light' | 'dark') => {
     if (!activated) {
       return (
         <ActivationScreen
-          recognition={recognised}
+          // The gate is still up, so the entitlement has NOT landed yet. Pass
+          // that through so the screen cannot promise "no code is needed" while
+          // it is asking for one — see `noticeForGate`.
+          recognition={noticeForGate(recognised)}
           onActivated={() => setActivated(true)}
         />
       )

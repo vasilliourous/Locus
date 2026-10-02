@@ -285,7 +285,12 @@ async fn renew_credential() {
         stored_identity().await,
     );
 
-    let fingerprint = crate::locus::device::fingerprint();
+    // The binding id, not the hardware fingerprint — this value is stored into
+    // `store::Activation.fingerprint` and compared against the hub's
+    // `bound_fingerprint` on the next activation. Using the re-derived hardware
+    // hash here would reintroduce the drift this change removes. See
+    // `DeviceIdentity::binding_id`.
+    let fingerprint = identity.binding_id();
     match crate::locus::activation::recognise(&identity).await {
         Ok(crate::locus::activation::Recognition::Recognised { token, tier, .. }) => {
             if let Err(error) = store::store_device_token(&token, None).await {

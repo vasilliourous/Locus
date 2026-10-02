@@ -136,6 +136,37 @@ impl DeviceIdentity {
     pub fn redacted_id(&self) -> String {
         self.device_id.chars().take(12).collect()
     }
+
+    /// The value an activation code is **bound to**: this identity's `device_id`.
+    ///
+    /// # Why this is the identity and not `device::fingerprint()`
+    ///
+    /// The hub binds a code to whatever value arrives as `fingerprint` and later
+    /// refuses the code with `403 "Code bound to another device"` when a
+    /// different one arrives (see `activation.pb.js`). That comparison is only
+    /// meaningful if the value is **the same on every launch of the same
+    /// device**.
+    ///
+    /// The hardware fingerprint is not: `device::fingerprint()` re-derives from
+    /// MAC, disk serial and board UUID on every launch, so a NIC enumerating in
+    /// a different order, a disk serial becoming unreadable, or the `combine`
+    /// chain degrading to a weaker rung all produce a *different* digest — and
+    /// the student is told their own code belongs to someone else. That is the
+    /// reported bug this module exists for; the durable identity is the fix.
+    ///
+    /// `device_id` is persisted (machine store first, app config fallback), so a
+    /// stored identity yields the same binding value on every launch and across
+    /// an update, and a reinstall finds it again. It is also the value the hub
+    /// already stores in `device_identities.device_id`, so binding and
+    /// recognition finally name the same device.
+    ///
+    /// The hardware fingerprint is still used, but only to **seed** a brand-new
+    /// identity on first launch ([`crate::locus::device::fingerprint`]); once an
+    /// identity exists it is never re-derived.
+    #[must_use]
+    pub fn binding_id(&self) -> String {
+        self.device_id.clone()
+    }
 }
 
 /// Hex-encodes a SHA-256 digest, matching the rest of this tree.

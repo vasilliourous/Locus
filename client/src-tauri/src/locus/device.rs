@@ -1,20 +1,39 @@
-//! Device fingerprint: the per-machine key an activation code is bound to.
+//! Hardware fingerprint: a hash of whatever machine identifiers this OS exposes.
 //!
 //! Ports `legacy/wails-client/internal/activation/fingerprint_*.go`.
 //!
-//! Three properties matter, and they pull against each other:
+//! # This is NOT the value an activation code is bound to
 //!
-//! * **Stable** across app restarts, updates and reinstalls. A fingerprint that
-//!   changes turns a student's own laptop into a "different device", and there
-//!   is no self-service recovery — an operator has to unbind the code.
+//! It used to be, and that was the bug. This fingerprint is **re-derived on every
+//! launch** from MAC address, disk serial and board UUID, so a NIC enumerating in
+//! a different order, a disk serial becoming unreadable, or the `combine` chain
+//! below degrading to a weaker rung all produce a *different* digest. Binding a
+//! code to it meant a student's own laptop presented a different device after an
+//! update, and the hub refused the code with `403 "Code bound to another
+//! device"`.
+//!
+//! A code is bound to a device's **durable identity** — the persisted
+//! `device_id` from [`crate::locus::identity`], which is written to a
+//! machine-scoped store on first launch and reused verbatim thereafter. See
+//! [`crate::locus::identity::DeviceIdentity::binding_id`] for the full argument.
+//!
+//! # What this value is still for
+//!
+//! * **Seeding a first-run identity** where the OS exposes no `machine-id`
+//!   (see [`crate::locus::identity::resolve`]).
+//! * **Diagnostics** — a one-shot "what does this machine report" probe.
+//!
+//! It is deliberately no longer on any activation or heartbeat path. The hash is
+//! still cached for the process lifetime so that a *seeding* read is consistent
+//! within a run, but it is neither persisted nor sent anywhere.
+//!
+//! Three properties were said to matter here, and they pull against each other:
+//!
+//! * **Stable** across app restarts, updates and reinstalls — which this value
+//!   is *not*, and why it was retired as a binding key.
 //! * **Distinct per machine**, or one code would work on the whole class.
 //! * **Not trivially shareable**, but also **not PII** — diagnostics deliberately
 //!   truncate it, and it must never be logged in full.
-//!
-//! The hash is cached for the process lifetime. That matters on the fallback
-//! path: if hardware sources are unavailable the value is random, and an
-//! uncached random value would differ between the activation and the first
-//! heartbeat, immediately unbinding the device from itself.
 
 use sha2::{Digest as _, Sha256};
 use std::sync::OnceLock;
