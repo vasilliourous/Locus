@@ -249,10 +249,14 @@ fn write_config(dir: &Path, controller_port: u16, mixed_port: u16) -> PathBuf {
          \x20 - name: \"Locus\"\n\
          \x20   type: direct\n\
          \x20   udp: false\n\
+         \x20 - name: \"Locus-UoT\"\n\
+         \x20   type: direct\n\
+         \x20   udp: false\n\
          proxy-groups:\n\
          \x20 - name: \"Locus Auto\"\n\
          \x20   type: select\n\
          \x20   proxies:\n\
+         \x20     - \"Locus-UoT\"\n\
          \x20     - \"Locus\"\n\
          rules:\n\
          \x20 - \"MATCH,Locus Auto\"\n"
@@ -263,11 +267,33 @@ fn write_config(dir: &Path, controller_port: u16, mixed_port: u16) -> PathBuf {
 
 /// The path the egress probe asks for, with the tier group name.
 ///
-/// Mirrors `probe::probe_egress`: the group name is `Locus Auto`, and the URL is
-/// passed as the `url` query parameter. The name is percent-encoded the way the
-/// plugin encodes it, so this test exercises the same route the app reaches.
+/// Mirrors `probe::probe_egress`: the URL is passed as the `url` query
+/// parameter, percent-encoded the way the plugin encodes it, so this test
+/// exercises the same route the app reaches.
 fn group_delay_path(test_url: &str, timeout_secs: u32) -> String {
-    let encoded: String = test_url
+    format!(
+        "/group/Locus%20Auto/delay?url={}&timeout={timeout_secs}",
+        encode(test_url)
+    )
+}
+
+/// The path for a **single outbound**, which is what the probe now uses.
+///
+/// This is the route that matters since 2026-10-02. The group route above tests
+/// only the group's currently selected member; the shipped probe asks about each
+/// outbound in turn so a tunnel cannot be reported dead because mihomo happened
+/// to have a different member selected.
+fn member_delay_path(member: &str, test_url: &str, timeout_secs: u32) -> String {
+    format!(
+        "/proxies/{}/delay?url={}&timeout={timeout_secs}",
+        encode(member),
+        encode(test_url)
+    )
+}
+
+/// Percent-encodes a query value exactly as the plugin does.
+fn encode(value: &str) -> String {
+    value
         .bytes()
         .map(|byte| {
             if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.' | b'~') {
@@ -276,8 +302,7 @@ fn group_delay_path(test_url: &str, timeout_secs: u32) -> String {
                 format!("%{byte:02X}")
             }
         })
-        .collect();
-    format!("/group/Locus%20Auto/delay?url={encoded}&timeout={timeout_secs}")
+        .collect()
 }
 
 /// The probe's own classification rule, duplicated here on purpose.
@@ -334,7 +359,11 @@ fn a_reachable_member_yields_a_usable_delay() {
     // proves is about how mihomo answers a *completed* round trip, and no network
     // means no round trip, not a broken probe.
     let test_url = EGRESS_TEST_URL;
-    let path = group_delay_path(test_url, 5);
+    // The route the shipped probe now takes: one outbound by name, not the
+    // group. Keeping this test on the group route would leave it pinning a call
+    // the app no longer makes — the exact staleness that let the previous
+    // classifier drift go unnoticed for a release.
+    let path = member_delay_path("Locus", test_url, 5);
 
     let deadline = Instant::now() + Duration::from_secs(10);
     let mut last = (0u16, String::new());
@@ -342,11 +371,12 @@ fn a_reachable_member_yields_a_usable_delay() {
     while Instant::now() < deadline {
         last = http_get(&controller, &path);
         if last.0 == 200 {
+            // A single-proxy reply is `{"delay": N}`; the group reply is a map.
+            // Accept either shape so this stays about the *engine's* answer
+            // rather than about which endpoint happened to be called.
             let delays = parse_delay_map(&last.1);
-            if delays
-                .iter()
-                .any(|(_, delay)| delay_is_a_measurement(*delay, 5))
-            {
+            let single = parse_single_delay(&last.1);
+            if delays.iter().any(|(_, delay)| delay_is_a_measurement(*delay, 5)) || delay_is_a_measurement(single, 5) {
                 usable = true;
                 break;
             }
@@ -419,6 +449,72 @@ fn an_unreachable_member_is_not_reported_as_success() {
             .all(|(_, delay)| !delay_is_a_measurement(*delay, 2)),
         "a failed test must not yield a usable measurement, got {delays:?}"
     );
+}
+
+/// A dead member must answer **`200` with a zero delay** on the per-member
+/// route — not an error.
+///
+/// This is the asymmetry the whole per-member fix rests on, and it is why the
+/// group route could strand a working tunnel while the member route cannot:
+///
+///   * `/group/Locus%20Auto/delay` turns ANY non-2xx into a hard `Err` in the
+///     plugin (`ret_failed_resp!`), so "every member failed" arrives at the probe
+///     as an indistinguishable transport error — there is no delay map to read.
+///   * `/proxies/<name>/delay` turns a non-2xx into `Ok(ProxyDelay { delay: 0 })`
+///     instead (it logs the engine's message and returns the zero sentinel), so a
+///     dead member is an ordinary `Ok(0)` the classifier already rejects and a
+///     live one is an ordinary `Ok(millis)`.
+///
+/// So asking per member converts "unmeasurable" from an error the caller cannot
+/// interpret into a value it can: the sentinel that meant "this whole group is
+/// unusable" now means exactly "this one member failed", which is what lets the
+/// probe try the next member instead of giving up on the tier.
+///
+/// The assertion is on the *shape* the caller depends on — a non-measurement
+/// rather than an unusable error — rather than on the exact status code, because
+/// the client must not care whether the engine chose 503 or 504.
+#[test]
+fn a_dead_member_answers_with_a_non_measurement_not_an_error() {
+    let Some(engine) = sidecar() else {
+        eprintln!("SKIP: no mihomo sidecar fetched; run `node scripts/prebuild.mjs` first");
+        return;
+    };
+
+    let dir = std::env::temp_dir().join("locus-egress-probe-deadmember");
+    let mut controller_res = PortReservation::bind();
+    let mut mixed_res = PortReservation::bind();
+    let controller_port = controller_res.port();
+    let mixed_port = mixed_res.port();
+    let controller = format!("127.0.0.1:{controller_port}");
+
+    let config = write_config(&dir, controller_port, mixed_port);
+    controller_res.release();
+    mixed_res.release();
+    let _guard = start_engine(&engine, &dir, &config, &controller);
+
+    // A target nothing is listening on, so the member cannot complete a round trip.
+    let dead_url = format!("http://127.0.0.1:{}/generate_204", unused_port());
+    let (status, body) = http_get(&controller, &member_delay_path("Locus-UoT", &dead_url, 2));
+
+    // The plugin maps a non-2xx here to `Ok(ProxyDelay { delay: 0 })`, so the
+    // probe receives a value it can classify rather than an `Err` it cannot
+    // inspect. What must never happen is a *usable measurement* coming back.
+    let delay = parse_single_delay(&body);
+    assert!(
+        !delay_is_a_measurement(delay, 2),
+        "a dead member must not yield a usable measurement (status {status}, body {body:?})"
+    );
+}
+
+/// Pulls the `delay` field out of a single-proxy delay reply, or `0` when the
+/// body carries no numeric delay — which is exactly what the plugin's zero
+/// sentinel amounts to for the caller.
+fn parse_single_delay(body: &str) -> u32 {
+    body.split("\"delay\"")
+        .nth(1)
+        .and_then(|rest| rest.split(|c: char| !c.is_ascii_digit()).find(|s| !s.is_empty()))
+        .and_then(|digits| digits.parse().ok())
+        .unwrap_or(0)
 }
 
 /// The engine's failure sentinel must not classify as a measurement — and the

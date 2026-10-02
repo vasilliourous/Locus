@@ -40,10 +40,16 @@ export interface LocusStatus {
   /**
    * Whether the core is up, whether or not traffic is flowing.
    *
-   * The middle state: `connected && coreUp && !ready` means the tunnel exists
-   * but the internet is not reachable through it (no uplink, dead server,
-   * captive portal). Lets the screen say "connected, but no traffic" instead of
-   * claiming success or claiming the app is off. `false` when the core is not up.
+   * `connected && coreUp && !ready` is the connecting window: the tunnel exists
+   * but no packet has been proven through it yet (still dialling, no uplink, a
+   * dead server, a captive portal). Lets the screen say "connecting" instead of
+   * flashing "disconnected" at a core that is coming up. `false` when the core
+   * is not running at all.
+   *
+   * Note the backend does **not** distinguish the causes. They differ in remedy,
+   * not in what the student should do — wait, and tell support if it persists —
+   * and the client renders them identically, so reporting one state is the
+   * honest answer rather than a finer one the UI would discard.
    */
   coreUp: boolean
   subscription: SubscriptionStatus

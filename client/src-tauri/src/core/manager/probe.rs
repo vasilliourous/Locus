@@ -63,7 +63,8 @@ pub const PROBE_TIMEOUT: Duration = Duration::from_millis(400);
 /// How long a **single** through-tunnel egress attempt may take, as reported to
 /// mihomo's own delay test.
 ///
-/// This is the per-attempt budget handed to `delay_group`, not a cap on the
+/// This is the per-attempt budget handed to mihomo's delay test, not a cap on
+/// the
 /// whole check — see [`EGRESS_DEADLINE`]. It is longer than the local probe
 /// because it is a *real* request that leaves the machine, crosses the tunnel
 /// and returns, and the first request through a freshly-dialled tunnel pays a
@@ -149,86 +150,122 @@ pub enum EgressOutcome {
 }
 
 /// The readiness decision, given the last probes.
+///
+/// # Three states, and why the previous five were two too many
+///
+/// This used to be `Ready | NotReady | NoEgress | Stopped`, and the middle two
+/// were the over-engineering: `NoEgress` ("the Core is up but cannot move a
+/// packet") and `NotReady` ("the Core is not answering") are **different
+/// diagnoses of the same user-visible fact**. Nothing in the client branches on
+/// the difference — the UI derives its phase from `ready` and `core_up`
+/// (`phaseFromStatus`), and both states render *connecting*.
+///
+/// Carrying both meant two ways to be "not connected while the Core is starting",
+/// which is how a defect hid in one of them for two releases: the honest answer
+/// to "why is the button amber" had three candidates and no way to tell them
+/// apart from the outside. `decide` now answers one question — **did a packet
+/// get through?** — and reports the state that follows from it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Readiness {
-    /// The Core is up, answering, **and** a real request completed through the
-    /// tunnel. Only this state may be shown as "connected".
+    /// A real request completed **through** the tunnel. The only state the UI
+    /// may render as "connected".
+    ///
+    /// This is deliberately the *only* thing that produces `Ready`: not the Core
+    /// answering, not the latch, not a traffic counter moving. A tunnel is
+    /// proven by carrying a packet, and by nothing else.
     Ready,
-    /// The Core should be up but is not answering: still dialling, or broken.
-    /// Either way the UI must not claim the tunnel is up.
-    NotReady,
-    /// The Core is up and answering locally, but no traffic is getting through:
-    /// the machine has no usable uplink, the chosen server is unreachable, or a
-    /// captive portal is intercepting. This is the "connected with no wifi" case
-    /// and it must NOT render as connected.
-    NoEgress,
+    /// The Core is meant to be up but a packet has not been proven through it —
+    /// still dialling, not answering, or answering but unable to reach anything.
+    /// The UI renders this as *connecting*.
+    ///
+    /// The three causes are one state on purpose. They differ in remedy, not in
+    /// what the student should do next (wait, and tell support if it persists),
+    /// and the log line — not the button — is where they are distinguished.
+    Connecting,
     /// Nothing is meant to be running.
     Stopped,
 }
 
 impl Readiness {
-    /// Whether the Core can carry a packet right now.
+    /// Whether the tunnel can carry a packet right now.
+    ///
+    /// This is the single value the UI derives "is it connected" from.
     #[must_use]
     pub const fn is_ready(self) -> bool {
         matches!(self, Self::Ready)
     }
 
-    /// Whether the Core is up (even if traffic is not yet flowing). The UI uses
-    /// this to keep showing *connecting* rather than flashing *disconnected*
-    /// while a Core that has started fails to get traffic through.
+    /// Whether the Core is up (even if traffic is not yet proven through it).
+    ///
+    /// The UI uses this to keep showing *connecting* rather than flashing
+    /// *disconnected* while a Core that has started settles — see
+    /// `phaseFromStatus`.
     #[must_use]
     pub const fn is_core_up(self) -> bool {
-        matches!(self, Self::Ready | Self::NoEgress)
+        matches!(self, Self::Ready | Self::Connecting)
     }
 }
 
 /// Turns the two probes into the readiness the rest of the app should report.
 ///
-/// Everything here is a *precondition for claiming a tunnel*, and [`Readiness::Ready`]
-/// requires **all** of them:
+/// # One question
 ///
-///   * `outcome`       — the Core answered its control API (it is up);
-///   * `egress`        — a real request completed through the tunnel;
-///   * `latch_active`  — a Core was started and not declared stopped.
+/// [`Readiness::Ready`] requires exactly one thing: **a packet completed through
+/// the tunnel** (`egress == Ok`). Everything else is *connecting* or *stopped*.
 ///
-/// `latch_active` is the old signal that used to be sufficient by itself. It is
-/// retained because it still distinguishes *stopped* from *failing to start*,
-/// but it can no longer produce [`Readiness::Ready`] alone. That is the whole
-/// point of this function — the latch is necessary and no longer sufficient.
+/// That is a deliberate reduction from the previous rule, which required three
+/// separate conditions and produced four states. The removed condition was
+/// `ProbeOutcome::Serving`: the Core answering its own control API was treated as
+/// a prerequisite for `Ready`, on the reasoning that a tunnel which cannot answer
+/// locally is not up. But the egress probe already proves more than that — it
+/// asks the Core to move a real packet, which it cannot do without answering —
+/// and the extra condition only created a state where the Core was carrying
+/// traffic while the app refused to say so.
 ///
-/// The two questions stay separate because their *failures* differ and the UI
-/// must render them differently: a Core that is not answering is *connecting*,
-/// while a Core that is up but cannot move a packet is *connected but no
-/// service* — the school-wifi case, and the one this function exists to stop
-/// rendering as "Connected".
+/// `outcome` is still a parameter because it decides *whether asking is even
+/// worth it* (see [`IsRunning`]): a Core that is not running produces
+/// `NotAttempted` egress, and that is the difference between *stopped* and
+/// *connecting*. It is a gate on the question, never a second vote on the answer.
+///
+/// # Claiming less than the old code, on purpose
+///
+/// The old `NoEgress` state claimed to distinguish "the Core is up but your wifi
+/// is down" from "the Core is still coming up". It could not: both are "no packet
+/// got through", and the client rendered them identically. The honest report is
+/// that one: no packet has been proven, so the app is not connected yet. Anything
+/// finer belongs in the log, where it does not have to be a lie to be useful.
 #[must_use]
 pub const fn decide(outcome: ProbeOutcome, egress: EgressOutcome, latch_active: bool) -> Readiness {
-    match outcome {
-        // The API answered AND a real request went through the tunnel. This is
-        // the only path to Ready: a Core that cannot prove it is serving, or
-        // that is serving but cannot carry a packet, can never be reported as
-        // connected.
-        ProbeOutcome::Serving if matches!(egress, EgressOutcome::Ok) => Readiness::Ready,
-        // The Core is up but nothing is getting through. The tunnel exists and
-        // the machine cannot use it — no wifi, a dead server, a captive portal.
-        // This is the "connected with no internet" lie; it must not be Ready.
-        ProbeOutcome::Serving => Readiness::NoEgress,
-        // It should be up (the latch says a start was attempted and not
-        // undone) but it is not answering. Report NotReady rather than Stopped
-        // so the UI keeps saying "connecting" instead of flashing
-        // "disconnected" at a Core that is still coming up.
-        ProbeOutcome::Unresponsive if latch_active => Readiness::NotReady,
-        // Either nothing was asked (no Core) or nothing has started. Stopped.
-        ProbeOutcome::Unresponsive | ProbeOutcome::NotRunning => Readiness::Stopped,
+    // A payload left the machine and came back through the tunnel. This is the
+    // whole test, and it needs no corroboration: a Core that moved a packet is
+    // up, and a machine that moved one has a usable uplink.
+    if matches!(egress, EgressOutcome::Ok) {
+        return Readiness::Ready;
     }
+
+    // No egress proven. Nothing is supposed to be running, so there is nothing
+    // to be waiting for.
+    if matches!(outcome, ProbeOutcome::NotRunning) || !latch_active {
+        return Readiness::Stopped;
+    }
+
+    // Something is meant to be up and no packet has been proven through it yet.
+    // This is the connecting window, and the UI must not flash "disconnected" at
+    // a Core that is still coming up.
+    Readiness::Connecting
 }
 
 /// Whether a probe outcome should revoke an already-active readiness latch.
 ///
-/// This is the fix for "it said connected with no wifi": once we have evidence
-/// the Core is not answering, the latch must be dropped, or the next
-/// `is_core_ready()` reads the stale `true` and the lie survives the probe that
-/// disproved it.
+/// The latch reports "we asked the Core to start and have not declared it
+/// stopped". A Core that has *never answered* is evidence that the start did not
+/// take — a crashed process, a port already held, a config the engine refused —
+/// so the latch must be dropped or the app would go on claiming work is in flight
+/// that is not.
+///
+/// Note what this does **not** do: it does not revoke on a Core that answers but
+/// cannot move a packet. That is the normal connecting window, and revoking there
+/// is what made a slow tunnel flash "disconnected" mid-connect.
 #[must_use]
 pub const fn revokes_latch(outcome: ProbeOutcome, latch_active: bool) -> bool {
     latch_active && matches!(outcome, ProbeOutcome::Unresponsive)
@@ -287,8 +324,8 @@ pub async fn probe_core_api(running: bool) -> ProbeOutcome {
 ///
 /// # Why mihomo's own delay test, rather than a request from this process
 ///
-/// mihomo's `delay_group` makes the *Core* dial the test URL through the
-/// selected proxy and reports the round-trip. That exercises the real path
+/// mihomo's per-outbound delay test makes the *Core* dial the test URL through
+/// that proxy and reports the round-trip. That exercises the real path
 /// (outbound, proxy, DNS resolution, the return route) rather than re-deriving
 /// the proxy address, port and secret here and running a second HTTP client that
 /// could disagree with the Core about how traffic leaves. It also needs no
@@ -303,13 +340,12 @@ pub async fn probe_core_api(running: bool) -> ProbeOutcome {
 ///
 /// # Interpreting the result
 ///
-/// `delay_group` returns a map of proxy-name -> delay for the group's members.
-/// mihomo only inserts an entry for a member whose test *succeeded*, so a
-/// non-empty map already means at least one member completed a round trip. The
-/// values are still classified — see [`delay_is_a_measurement`] — rather than
-/// merely checked for `> 0`, so this probe and the delay UI agree about what a
-/// real measurement is. An error (no uplink, dead server, DNS failure), a
-/// timeout, or a map with no usable value is [`EgressOutcome::Failing`].
+/// Each outbound is asked in turn (see [`egress_attempt_once`]); the first that
+/// yields a real measurement is egress. Values are classified — see
+/// [`delay_is_a_measurement`] — rather than merely checked for `> 0`, so this
+/// probe and the delay UI agree about what a real measurement is. A dead member,
+/// a refusal, or a Core that never answers leaves the next member to be tried;
+/// only "none of them could" is [`EgressOutcome::Failing`].
 ///
 /// # Why it tries more than once
 ///
@@ -349,26 +385,57 @@ pub async fn probe_egress(core_serving: bool) -> EgressOutcome {
 
 /// One through-tunnel attempt. `true` when a real round trip completed.
 ///
-/// Split out so the retry loop above reads as policy (how many tries, how long)
-/// while the single attempt stays the one place that talks to the Core.
+/// # Why this asks about each MEMBER rather than the group
+///
+/// Until 2026-10-02 this called `delay_group(GROUP_NAME, ..)`, and that one
+/// choice is the third "stuck on connecting" report. mihomo's group delay tests
+/// the group's **currently selected** member and nothing else, and the tier's
+/// group is `type: select` whose default is its FIRST member. On a UDP tier that
+/// first member is `Locus-UoT` — a different outbound from the `Locus` proxy the
+/// student's ordinary TCP traffic falls through to.
+///
+/// So the probe could ask a question the tunnel did not have to answer: the
+/// selected member fails its test, mihomo answers
+/// `504 "get delay: all proxies timeout"`, the plugin raises that as `Err`
+/// (`ret_failed_resp!` in `mihomo.rs`), and the loop below reads every one of
+/// those as "no egress" — while the student's actual traffic, taking a different
+/// path, flows. The button said connecting forever over a working tunnel.
+///
+/// Asking each member in turn cannot fail that way. A tier whose *any* member
+/// can carry a packet proves egress, which is the fact the UI needs: the student
+/// has a working tunnel, whatever mihomo currently has selected.
+///
+/// # Why a per-member call cannot fail the way the group call did
+///
+/// These are not symmetric, and the asymmetry is the whole fix. `delay_group`
+/// turns any non-2xx into `Err`, so an all-members-failed answer is
+/// indistinguishable from a transport error — there is no delay map to inspect.
+/// `delay_proxy_by_name` turns a non-2xx into `Ok(ProxyDelay { delay: 0 })`
+/// instead (it logs and returns the zero sentinel), so a dead member is an
+/// ordinary `Ok(0)` that [`delay_is_a_measurement`] already rejects, and a live
+/// one is an ordinary `Ok(millis)`. The sentinel that meant "unmeasurable" for
+/// the group now means "this member failed", which is exactly what we want to
+/// distinguish per member.
 async fn egress_attempt_once() -> bool {
     let timeout_secs = u32::try_from(EGRESS_ATTEMPT_TIMEOUT.as_secs()).unwrap_or(5);
-    let probe = crate::core::handle::Handle::mihomo().delay_group(
-        crate::locus::tier::GROUP_NAME,
-        EGRESS_TEST_URL,
-        timeout_secs,
-    );
 
-    // The plugin's delay call has its own timeout (passed above), but wrap it
-    // too: a Core that accepts the request and then never answers must not hang
-    // the status path. The wrapper is slightly longer than the inner timeout so
-    // the Core's own answer wins in the normal case.
-    match tokio::time::timeout(EGRESS_ATTEMPT_TIMEOUT + PROBE_TIMEOUT, probe).await {
-        Ok(Ok(delays)) => delays
-            .values()
-            .any(|&delay| delay_is_a_measurement(delay, timeout_secs)),
-        Ok(Err(_)) | Err(_) => false,
+    for member in crate::locus::tier::OUTBOUND_NAMES {
+        let probe = crate::core::handle::Handle::mihomo().delay_proxy_by_name(member, EGRESS_TEST_URL, timeout_secs);
+
+        // The plugin's delay call has its own timeout (passed above), but wrap it
+        // too: a Core that accepts the request and then never answers must not
+        // hang the status path. The wrapper is slightly longer than the inner
+        // timeout so the Core's own answer wins in the normal case.
+        match tokio::time::timeout(EGRESS_ATTEMPT_TIMEOUT + PROBE_TIMEOUT, probe).await {
+            Ok(Ok(result)) if delay_is_a_measurement(result.delay, timeout_secs) => return true,
+            // A dead member, a refusal, or a Core that stalled: try the next one.
+            // Only "none of them could" is a failure, and that is the loop's
+            // answer rather than any single member's.
+            Ok(Ok(_)) | Ok(Err(_)) | Err(_) => {}
+        }
     }
+
+    false
 }
 
 /// Whether a mihomo delay value is a real round-trip measurement.
@@ -418,20 +485,20 @@ const fn delay_is_a_measurement(delay: u32, _timeout_secs: u32) -> bool {
 mod tests {
     use super::*;
 
-    /// The load-bearing rule: without the API answering, there is no Ready —
+    /// The load-bearing rule: without proven egress there is no Ready —
     /// regardless of how confidently the latch claims a Core was started.
     #[test]
     fn an_unresponsive_core_is_never_ready() {
         assert_eq!(
             decide(ProbeOutcome::Unresponsive, EgressOutcome::NotAttempted, true),
-            Readiness::NotReady
+            Readiness::Connecting
         );
         assert!(!decide(ProbeOutcome::Unresponsive, EgressOutcome::NotAttempted, true).is_ready());
     }
 
     /// The exact state the old latch produced: a start was recorded, nothing was
     /// ever verified, and the app called it connected. This must now be
-    /// NotReady, because the two inputs are identical and the only new fact is
+    /// Connecting, because the two inputs are identical and the only new fact is
     /// that we asked.
     #[test]
     fn a_latch_alone_can_no_longer_report_connected() {
@@ -443,13 +510,31 @@ mod tests {
         }
     }
 
-    /// Ready needs BOTH a serving Core and proven egress. If either half ever
-    /// stops being required, a false "connected" comes straight back.
+    /// Ready needs proven egress and nothing else. This is the whole rule, so if
+    /// it ever grows a second condition a false "connected" or a false
+    /// "connecting" comes straight back.
+    ///
+    /// The `Serving` case is the one that changed: it used to be required, so a
+    /// Core that had moved a real packet but failed its local `/version` call
+    /// could not report Ready. A packet through the tunnel already implies the
+    /// Core is answering, so requiring both was a second vote on a settled
+    /// question.
     #[test]
-    fn only_a_serving_core_with_egress_is_ready() {
-        assert!(decide(ProbeOutcome::Serving, EgressOutcome::Ok, true).is_ready());
+    fn only_proven_egress_is_ready() {
+        // Egress proven is Ready, whatever the local probe said, and whether or
+        // not the latch is still active.
+        for outcome in [
+            ProbeOutcome::Serving,
+            ProbeOutcome::Unresponsive,
+            ProbeOutcome::NotRunning,
+        ] {
+            assert!(
+                decide(outcome, EgressOutcome::Ok, true).is_ready(),
+                "{outcome:?} with proven egress must be Ready"
+            );
+        }
         assert!(decide(ProbeOutcome::Serving, EgressOutcome::Ok, false).is_ready());
-        // Serving but no egress is NOT ready — the whole bug this guards.
+        // No egress proven is never Ready — the whole bug this guards.
         assert!(!decide(ProbeOutcome::Serving, EgressOutcome::Failing, true).is_ready());
     }
 
@@ -458,26 +543,22 @@ mod tests {
     ///
     /// This is the school-wifi case: mihomo binds its control port and answers
     /// `/version` with no uplink at all, so the local probe alone reported
-    /// Connected while every packet died. It must now be `NoEgress`, never
-    /// `Ready`.
+    /// Connected while every packet died. It must never be `Ready`.
     #[test]
     fn a_serving_core_without_egress_is_not_connected() {
         let readiness = decide(ProbeOutcome::Serving, EgressOutcome::Failing, true);
-        assert_eq!(readiness, Readiness::NoEgress);
         assert!(!readiness.is_ready(), "no egress must never be Ready");
-        // But it is still "core up", so the UI shows connecting / no service
-        // rather than flashing disconnected.
+        // And it is still "core up", so the UI shows connecting rather than
+        // flashing disconnected at a Core that is running.
         assert!(readiness.is_core_up());
+        assert_eq!(readiness, Readiness::Connecting);
     }
 
     /// `NotAttempted` for a serving Core is treated as no egress: if we did not
     /// prove traffic moves, we must not claim it does.
     #[test]
     fn unproven_egress_is_not_ready() {
-        assert_eq!(
-            decide(ProbeOutcome::Serving, EgressOutcome::NotAttempted, true),
-            Readiness::NoEgress
-        );
+        assert!(!decide(ProbeOutcome::Serving, EgressOutcome::NotAttempted, true).is_ready());
     }
 
     /// A failing start must read as *connecting*, not as *disconnected*: the
@@ -487,8 +568,30 @@ mod tests {
     fn a_failing_start_reads_as_connecting_not_stopped() {
         assert_eq!(
             decide(ProbeOutcome::Unresponsive, EgressOutcome::NotAttempted, true),
-            Readiness::NotReady
+            Readiness::Connecting
         );
+    }
+
+    /// The reason `Connecting` and `Stopped` are the only two non-Ready states:
+    /// the *cause* of no-egress must not change the state the UI sees.
+    ///
+    /// The removed `NoEgress` existed to say "the Core is up but the network is
+    /// not". Nothing consumed that distinction — `phaseFromStatus` renders it
+    /// exactly as it rendered `NotReady` — so carrying two states bought no
+    /// behaviour and cost a defect that hid in the untested one for two
+    /// releases. This pins that every no-egress cause maps to one state while
+    /// something is meant to be up.
+    #[test]
+    fn every_no_egress_cause_is_the_same_state() {
+        for egress in [EgressOutcome::Failing, EgressOutcome::NotAttempted] {
+            for outcome in [ProbeOutcome::Serving, ProbeOutcome::Unresponsive] {
+                assert_eq!(
+                    decide(outcome, egress, true),
+                    Readiness::Connecting,
+                    "{outcome:?} + {egress:?} must not invent a state the UI cannot use"
+                );
+            }
+        }
     }
 
     /// With nothing started there is nothing to be unresponsive, so it is

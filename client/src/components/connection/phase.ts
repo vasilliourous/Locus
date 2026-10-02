@@ -73,6 +73,14 @@ export const phaseFromStatus = (status: LocusStatus): ConnectionPhase => {
   if (!status.activated) return 'unactivated'
   // Running but not yet able to carry a packet: this is the connecting window,
   // and it is a backend fact rather than a UI guess.
+  //
+  // `ready` is the ONLY thing that means connected, on both sides of the wire —
+  // the backend sets it solely from a packet proven through the tunnel, and this
+  // is the only place that reads it as "connected". A backend that reported
+  // readiness from anything cheaper (the Core answering, the process existing)
+  // would make this line lie, and the reverse — deriving more states here than
+  // `ready` expresses — is what the old `NoEgress`/`NotReady` split did before it
+  // was collapsed. One fact, one place.
   if (status.connected && !status.ready) return 'connecting'
   return status.ready ? 'connected' : 'disconnected'
 }

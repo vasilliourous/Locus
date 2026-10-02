@@ -65,6 +65,30 @@ pub const GROUP_NAME: &str = "Locus Auto";
 /// The name of the UDP-over-TCP outbound, when a tier has one.
 pub const UOT_PROXY_NAME: &str = "Locus-UoT";
 
+/// Every outbound a tier profile can define, in the order
+/// [`proxy_group`] lists them.
+///
+/// This exists so the egress probe can ask about each member **individually**
+/// instead of about the group. mihomo's group delay tests only the group's
+/// currently selected member, and the default selection is the first entry — so a
+/// probe that asked the group could be answered by an outbound the student's
+/// traffic never uses, and report a working tunnel as dead (see
+/// `core/manager/probe.rs`).
+///
+/// It is deliberately the same two names the profile builder uses rather than a
+/// hand-written list: a name here that the profile never defines would make the
+/// probe ask about a proxy mihomo does not have, and the compiler cannot catch
+/// that for a string key. `every_outbound_the_probe_asks_about_is_one_the_profile_defines`
+/// pins the agreement against both tier shapes.
+///
+/// A TCP-only tier defines only [`PROXY_NAME`]; asking about [`UOT_PROXY_NAME`]
+/// there is harmless — mihomo answers a non-2xx for an unknown proxy, which the
+/// per-member route returns as the zero sentinel, so it reads as "this member
+/// failed" and the probe moves on to one that exists. It is *not* harmless in the
+/// other direction, which is why the test checks every name is defined rather
+/// than checking only that some are.
+pub const OUTBOUND_NAMES: &[&str] = &[PROXY_NAME, UOT_PROXY_NAME];
+
 /// Builds the mihomo document for a tier.
 ///
 /// `udp_relay` comes from the activation/heartbeat payload rather than the tier
@@ -508,6 +532,85 @@ mod tests {
                 !members.into_iter().any(|member| member == group_name),
                 "group {group_name:?} lists itself, which mihomo rejects as a loop"
             );
+        }
+    }
+
+    /// Every name the egress probe asks about must be either an outbound the
+    /// profile defines, or one the probe can safely be told does not exist.
+    ///
+    /// The probe queries mihomo by proxy name (`/proxies/<name>/delay`), so a
+    /// name in [`OUTBOUND_NAMES`] that `build_profile` never writes is a request
+    /// for a proxy that does not exist. That is *safe* on the per-member route —
+    /// mihomo answers a non-2xx, the plugin maps it to the zero sentinel, the
+    /// probe reads it as "this member failed" and tries the next one — but it is
+    /// only safe because the probe treats an unusable answer as a *member*
+    /// failure rather than a verdict on the tunnel.
+    ///
+    /// So this test pins both halves of that reasoning:
+    ///
+    ///  1. the tier's own outbound ([`PROXY_NAME`]) is always defined **and**
+    ///     listed in the group — if the probe's first candidate did not exist,
+    ///     every check would pay a wasted round trip before finding a real one;
+    ///  2. the optional outbound is defined exactly when the tier enables UoT, so
+    ///     the two lists cannot drift apart.
+    ///
+    /// A string key gives the compiler nothing to check, which is why it is
+    /// checked here.
+    #[test]
+    fn every_outbound_the_probe_asks_about_is_one_the_profile_defines() {
+        assert!(
+            OUTBOUND_NAMES.contains(&PROXY_NAME),
+            "the probe must ask about the tier's own outbound first, or every \
+             check wastes a round trip on a proxy that may not exist"
+        );
+        assert!(
+            OUTBOUND_NAMES.contains(&UOT_PROXY_NAME),
+            "the probe must ask about the UoT outbound, or a tier whose traffic \
+             goes over UoT could read as having no egress"
+        );
+
+        for udp_relay in [false, true] {
+            let config = if udp_relay { strike_tier() } else { tcp_only_tier() };
+            let profile = build_profile(&config, udp_relay);
+            let parsed: Value = serde_yaml_ng::from_str(&profile.yaml).expect("valid YAML");
+
+            let defined: Vec<&str> = parsed["proxies"]
+                .as_sequence()
+                .expect("proxies list")
+                .iter()
+                .filter_map(|p| p["name"].as_str())
+                .collect();
+
+            // The tier's own proxy is unconditional.
+            assert!(
+                defined.contains(&PROXY_NAME),
+                "every tier defines {PROXY_NAME:?}; got {defined:?}"
+            );
+            // UoT is defined exactly when the tier enables it, so this pair
+            // cannot silently disagree with `uot_enabled`.
+            let expected_uot = config.uot_enabled(udp_relay);
+            assert_eq!(
+                defined.contains(&UOT_PROXY_NAME),
+                expected_uot,
+                "the profile's UoT outbound presence must match `uot_enabled` \
+                 (udp_relay={udp_relay}, defined={defined:?})"
+            );
+
+            // Everything defined is reachable: a member outside the group is a
+            // proxy the student's traffic can never use, which would make an
+            // "egress proven" answer misleading.
+            let members: Vec<&str> = parsed["proxy-groups"][0]["proxies"]
+                .as_sequence()
+                .expect("group members")
+                .iter()
+                .filter_map(|v| v.as_str())
+                .collect();
+            for name in &defined {
+                assert!(
+                    members.contains(name),
+                    "outbound {name:?} is defined but not listed in the group"
+                );
+            }
         }
     }
 

@@ -16,27 +16,9 @@ Ordered by whether I could have validated it here.
 
 ### The egress probe judges the tunnel by the group's selected member, and a 504 is unreachable by the classifier
 
-**Added 2026-10-02.** The third "stuck on connecting" report. Measured against the
-real sidecar (mihomo v1.19.31): a `select` group whose members all fail returns
-
-```text
-504 {"message":"get delay: all proxies timeout"}
-```
-
-not a delay map. The plugin raises any non-2xx as `Err`, so
-`egress_attempt_once` returns `false` and `readiness` becomes `NoEgress` →
-`ready: false` → the button shows **connecting** — the same symptom as the two
-defects already fixed, while traffic flows.
-
-- **Not verified:** that this is what the reporter's machine is doing. It needs
-  `curl` to the Core's controller while connected (the commands are in the
-  2026-10-02 `FIXES.md` entry). The traffic bars and `whatsmyip` prove traffic
-  flows; they do not prove the group's *selected* member is delay-testable.
-- **Not decided:** what to do about it. Probing every member, probing the member
-  the traffic actually uses, and treating a 504 as inconclusive rather than
-  `NoEgress` each trade probe latency against false positives — and the wrong
-  choice recreates the "connected with no internet" lie. This needs a decision,
-  not a patch.
+**Added 2026-10-02. FIXED the same day** — the probe now asks each outbound by name
+instead of the group. Kept here because the *verification* is what is still missing;
+see the section above.
 
 ### Activation never registers a device identity — FIXED, but inert until the hook is deployed
 
@@ -56,6 +38,38 @@ both success paths, and the client sends the `verifier` it already computes.
   calls `/api/activate` again still has no row.
 - **Do not "fix" it by clearing `bound_fingerprint` on reinstall.** That dissolves
   the one-code-per-device guarantee. The hub is correctly asking who is calling.
+
+### The per-member egress probe is verified structurally, never through a real tunnel
+
+**Added 2026-10-02. Fix applied the same day — this is what is NOT proven about it.**
+
+The probe no longer asks the `select` group (which answers only for its *currently
+selected* member) and instead asks each outbound in `OUTBOUND_NAMES` by name. The
+reasoning is sound and the asymmetry it rests on is read from the plugin source:
+
+- `delay_group` raises any non-2xx as `Err` — "every member failed" arrives as an
+  indistinguishable transport error with no map to inspect;
+- `delay_proxy_by_name` maps a non-2xx to `Ok(ProxyDelay { delay: 0 })`, so a dead
+  member is an ordinary value the classifier rejects and the loop moves on.
+
+**Not proven:**
+
+- **That this was the reporter's cause.** The symptom (bars moving, `whatsmyip` on
+  the exit node, button amber) is consistent with it, and the mechanism reproduces
+  against a local sidecar — but no Locus tunnel on a school link has been measured.
+  The commands to confirm are in `EGRESS-READINESS.md` §3.
+- **That a real tunnel now reports ready.** Confirming needs a device on a working
+  tier, which this environment does not have.
+- **That the per-member route is faster or slower.** It can now cost up to
+  `len(OUTBOUND_NAMES)` round trips per attempt instead of one. On a healthy tunnel
+  the first member answers, so the cost is unchanged; on a dead one the check is
+  bounded by `EGRESS_DEADLINE` as before, but the *distribution* of latency has not
+  been measured on a real link.
+
+**A trap for whoever verifies this:** `tests/egress_probe_engine.rs`'s positive case
+**SKIPs green** when the runner cannot complete a round trip — on the machine this
+was written on, it does. "The engine test passed" there means it did not run its
+assertion. Check for the `SKIP:` line, not the green tick.
 
 ### Every installed 3.2.17 Windows client is stranded, and the fix cannot reach it
 

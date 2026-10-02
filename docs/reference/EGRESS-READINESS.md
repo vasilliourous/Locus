@@ -40,7 +40,7 @@ each hop is named beside it.
             ▲
   client/src-tauri/src/cmd/locus.rs  locus_status()
     ready:   readiness.is_ready()      // Readiness::Ready
-    core_up: readiness.is_core_up()    // Ready | NoEgress
+    core_up: readiness.is_core_up()    // Ready | Connecting
             ▲
   core/manager/mod.rs  observe_readiness()
     outcome = probe::probe_core_api(running)          // control API /version
@@ -48,24 +48,32 @@ each hop is named beside it.
     decide(outcome, egress, latch_active)
             ▲
   core/manager/probe.rs  decide(outcome, egress, latch_active)
-    (Serving,    Ok)          -> Ready      <- the ONLY route to connected
-    (Serving,    _)           -> NoEgress   ◄── renders as 'connecting'
-    (Unresponsive, latch)     -> NotReady   ◄── renders as 'connecting'
-    (Unresponsive|NotRunning) -> Stopped    -> 'disconnected'
+    (_,            Ok)                  -> Ready       <- the ONLY route to connected
+    (NotRunning | any, latch inactive)  -> Stopped     -> 'disconnected'
+    (otherwise)                         -> Connecting  ◄── renders as 'connecting'
             ▲
   core/manager/probe.rs  probe_egress(core_serving)
-    egress_attempt_once()  -> delay_group("Locus Auto", EGRESS_TEST_URL, 5)
-    .any(|delay| delay_is_a_measurement(delay, 5))
+    egress_attempt_once() -> for each name in tier::OUTBOUND_NAMES:
+        delay_proxy_by_name(name, EGRESS_TEST_URL, 5)
+        -> Ok(ProxyDelay { delay }) ; accept if delay_is_a_measurement(delay, 5)
     up to EGRESS_ATTEMPTS (2) inside EGRESS_DEADLINE (12 s)
             ▲
-  mihomo  GET /group/Locus%20Auto/delay?url=…&timeout=5
-    -> Ok(HashMap<member, delay_ms>)   or an Err (non-2xx, e.g. 504)
+  mihomo  GET /proxies/<name>/delay?url=…&timeout=5
+    -> Ok({"delay": N})   (also on failure, as N = 0 — see §4)
 ```
 
-**The load-bearing fact.** Two different failures — *the Core is not answering*
-and *the Core answered but the egress proof failed* — both render as **connecting**.
-The screen cannot tell them apart. Any diagnosis must therefore start by asking
-*which* hop failed, not by reading the screen.
+**The load-bearing fact.** *The Core is not answering* and *the Core answered but
+no packet got through* both render as **connecting** — and since 2026-10-02 they
+are also the *same backend state* (`Readiness::Connecting`). The screen cannot
+tell them apart, and neither can the client: they differ in remedy, not in what
+the student should do next. Any diagnosis must therefore start from the **log
+line** and the Core's own answer, not from the screen.
+
+**The second load-bearing fact.** `ready` is produced by exactly one thing: a
+packet that completed **through** an outbound. Not the Core answering, not the
+latch, not a traffic counter. If a change makes `ready` derivable from anything
+cheaper, the button starts lying in the "connected with no internet" direction
+this file has already paid for twice.
 
 ---
 
@@ -154,12 +162,29 @@ Use this to map a live symptom onto a hop without a debugger.
 
 | Symptom | Most likely hop | Check |
 |---|---|---|
-| Stuck connecting **forever**, traffic flowing | egress classifier (`delay_is_a_measurement`) | Hop 4 |
+| Stuck connecting **forever**, traffic flowing | which outbound is probed, then the classifier | Hops 3, 4 |
 | Stuck connecting, **no** traffic | Core control API or the tunnel itself | Hop 2 |
 | Connecting then settling to **disconnected** | `ProbeOutcome::Unresponsive` with a dead latch | Hop 2 |
 | Reverts to connecting **intermittently** after working | one transient miss; retries exhausted inside the deadline | Hops 2, 4 |
-| Connected, but the app claims **no service** on a working link | `NoEgress` — the honest no-egress case | Hop 2 |
-| Wrong member probed on Strike | group selection | Hop 3 |
+
+**Hop 3 first, when traffic is flowing.** If the bars move and `whatsmyip` shows the
+exit node, the tunnel works — so the question is not "is it up" but "which outbound
+did the probe ask about, and what did that one answer". Confirm the selected member
+and ask the probe's own question by hand:
+
+```sh
+# which member the group is currently using (may not be the one carrying traffic)
+curl -s "http://127.0.0.1:<controller>/proxies/Locus%20Auto" | jq .now
+
+# the probe's question, per outbound — note 200-with-delay:0 means "member failed"
+curl -s "http://127.0.0.1:<controller>/proxies/Locus/delay?url=<enc(EGRESS_TEST_URL)>&timeout=5"
+curl -s "http://127.0.0.1:<controller>/proxies/Locus-UoT/delay?url=<enc(EGRESS_TEST_URL)>&timeout=5"
+```
+
+A `200` carrying a usable `delay` on **either** outbound means the probe should be
+reporting ready; if it is not, the fault is in the client's classification, not the
+tunnel. If both answer `delay: 0`, no outbound can carry a packet and *connecting* is
+the honest answer.
 
 ---
 
@@ -198,24 +223,42 @@ yourself making the two identical, stop — that is the bug being reintroduced.
 
 ## 5. Facts that are easy to get wrong
 
-- **Probe the group, not the proxy.** The name is `Locus Auto` (the group). `Locus`
-  is the proxy *inside* it, and mihomo refuses a group whose name matches a member
-  (see `client/AGENTS.md`). Probing the wrong one changes what is tested.
+- **Probe each OUTBOUND, not the group.** Since 2026-10-02 the probe asks
+  `/proxies/<name>/delay` for every name in `tier::OUTBOUND_NAMES`, and never the
+  group. The group route tests only the group's *currently selected* member, and
+  the tier's group is a `select` whose default is its **first** member — on a UDP
+  tier that is `Locus-UoT`, a different outbound from the `Locus` proxy ordinary
+  TCP traffic uses. Asking the group therefore lets the app decide the tunnel is
+  dead by consulting an outbound the student's traffic never touches.
+- **The name is `Locus Auto` (the group); `Locus` and `Locus-UoT` are the proxies
+  inside it.** mihomo refuses a group whose name matches a member (see
+  `client/AGENTS.md`), so the group and its members can never share a name. If you
+  add a third outbound, add it to `OUTBOUND_NAMES` **and** to the group —
+  `every_outbound_the_probe_asks_about_is_one_the_profile_defines` pins the pair.
 - **The probe tests general egress, not the hub.** `EGRESS_TEST_URL` is a
   Cloudflare 204 on purpose: a tunnel that reaches only the Locus hub has not
   proven it can carry the student's traffic.
-- **A non-2xx from `delay_group` is raised as an `Err`.** `egress_attempt_once`
-  collapses `Ok(Err(_))` and `Err(_)` to the same `false`. mihomo's
-  `504 "get delay: all proxies timeout"` therefore looks identical to a transport
-  failure. This is a known blind spot — see §6.
+- **The group route and the member route fail *differently*, and the difference is
+  the fix.** `delay_group` raises any non-2xx as an `Err` (`ret_failed_resp!` in
+  the plugin), so "every member failed" reaches the caller as an indistinguishable
+  transport error with no delay map to inspect. `delay_proxy_by_name` instead maps
+  a non-2xx to `Ok(ProxyDelay { delay: 0 })` — the zero sentinel — so a dead member
+  is an ordinary `Ok(0)` the classifier already rejects. That is what lets the loop
+  tell "this member failed" from "the tunnel is down", and therefore try the next
+  member instead of giving up on the tier. Verified in the plugin source
+  (`mihomo.rs`) and against the real sidecar; pinned by
+  `a_dead_member_answers_with_a_non_measurement_not_an_error`.
 - **The egress result is cached for 1.5 s.** `observe_egress` serialises the check
   behind a lock and reuses the result, so the 750 ms status poll and the 250 ms
   connect loop collapse onto one round trip. A reading can therefore be up to
   1.5 s old; do not read a single poll as instantaneous truth.
-- **`NoEgress` is still not `connected`.** `is_core_up()` is true for `NoEgress`,
-  but `phaseFromStatus` uses `ready` alone. Do not "fix" a stall by making
-  `NoEgress` render as connected without checking *why* egress failed — that would
-  re-open the school-wifi false-positive the two-question design closed.
+- **`Connecting` and `Stopped` are the only non-Ready states, on purpose.** The
+  removed `NoEgress`/`NotReady` split claimed to distinguish "the Core is up but
+  your network is not" from "the Core is still starting". Nothing consumed the
+  difference — `phaseFromStatus` rendered both as *connecting* — so carrying two
+  states bought no behaviour and cost a defect that hid in the untested one for two
+  releases. Do not reintroduce a state the UI cannot use; if a diagnosis genuinely
+  needs distinguishing, log it.
 
 ---
 
@@ -224,12 +267,15 @@ yourself making the two identical, stop — that is the bug being reintroduced.
 Read [`STILL-OPEN.md`](STILL-OPEN.md) §"The readiness probes against a live Core"
 for the current list. The load-bearing gaps, as of the last edit:
 
-- **Every-member-timeout is indistinguishable from a transport failure.** A `504`
-  and an `Err` both become `false`; the probe cannot retry them differently.
 - **The engine test cannot exercise slow-but-working.** `tests/egress_probe_engine.rs`
   SKIPs without network and uses a `direct` outbound to a public host. The case that
   broke — a slow round trip through a *real* tunnel — has never been reproduced in
-  the suite.
+  the suite. **On the machine this document was last edited on, the positive test
+  SKIPs**, so "it passes" there means only that it did not run the assertion.
+- **The per-member fix is verified structurally, not end to end.** The
+  group/member error asymmetry above is read from the plugin source and measured
+  against a local sidecar; it has never been exercised through a real Locus tunnel
+  on a school link. See `STILL-OPEN.md`.
 - **No run on a real school network.** The budget is a judgement, not a measurement.
 
 **If you change any constant in this chain** (`EGRESS_ATTEMPT_TIMEOUT`,
@@ -243,9 +289,8 @@ for the current list. The load-bearing gaps, as of the last edit:
 
 | Thing | Value | Where |
 |---|---|---|
-| Group probed | `Locus Auto` | `locus/tier.rs::GROUP_NAME` |
-| Proxy inside it | `Locus` | `locus/tier.rs::PROXY_NAME` |
-| UoT outbound | `Locus-UoT` | `locus/tier.rs::UOT_PROXY_NAME` |
+| Outbounds probed, in order | `Locus`, `Locus-UoT` | `locus/tier.rs::OUTBOUND_NAMES` |
+| Group (never probed directly) | `Locus Auto` | `locus/tier.rs::GROUP_NAME` |
 | Egress URL | `http://cp.cloudflare.com/generate_204` | `core/manager/probe.rs::EGRESS_TEST_URL` |
 | Per-attempt budget | 5 s | `EGRESS_ATTEMPT_TIMEOUT` |
 | Whole-check deadline | 12 s | `EGRESS_DEADLINE` |
@@ -255,4 +300,4 @@ for the current list. The load-bearing gaps, as of the last edit:
 | Egress cache TTL | 1.5 s | `core/manager/mod.rs::EGRESS_CACHE_TTL` |
 | Status poll while settling | 750 ms | `components/connection/use-connection.ts` |
 | Status poll idle | 15 s | `components/connection/use-connection.ts` |
-| The only route to `connected` | `(Serving, Ok, latch)` | `probe.rs::decide` |
+| The only route to `connected` | `egress == Ok` | `probe.rs::decide` |

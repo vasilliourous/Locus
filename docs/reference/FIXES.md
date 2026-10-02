@@ -27,6 +27,127 @@ corrections are marked. For what is *still* broken, read `STILL-OPEN.md`.
 
 ---
 
+## THE "CONNECTING" BUG, THIRD TIME: THE PROBE ASKED THE GROUP, WHICH ANSWERS FOR ONE MEMBER (2026-10-02)
+
+| Severity | 🔴 A working tunnel rendered as **connecting** for the third report running |
+|----------|-----------------------------------------------------------------------------|
+| **Reported as** | *"the logic for the 'connecting' state is still broken, the tunnel is obviously formed … however it's still stuck on connecting"* |
+| **File:** | `core/manager/probe.rs` (`egress_attempt_once`, `decide`), `locus/tier.rs` (`OUTBOUND_NAMES`) |
+| **Fixed in:** | 3.2.20 |
+
+### The defect, in one line
+
+The probe asked mihomo about the **proxy group**, and a group delay test answers
+for the group's **currently selected member** — not for the outbound the student's
+traffic uses.
+
+### Why the two earlier fixes could not have caught it
+
+Both previous entries worked on `delay_is_a_measurement` — *how a returned delay is
+classified*. This defect happens one hop earlier: the probe never receives a
+classifiable value at all. `delay_group` raises any non-2xx as `Err`
+(`ret_failed_resp!` in `tauri-plugin-mihomo`'s `mihomo.rs`), so when the selected
+member fails, the engine's `504 {"message":"get delay: all proxies timeout"}`
+reaches the client as an opaque transport error with no delay map to inspect. No
+value of the classifier can rescue it. A third round of tuning that function, which
+is what the first two reports produced, could not have fixed this.
+
+### Why the group's selected member is the wrong thing to ask
+
+`tier::proxy_group` builds a `type: select` group whose members are
+`["Locus-UoT", "Locus"]` on a UDP tier and `["Locus"]` otherwise. A `select` group
+with no explicit choice uses its **first** member, so a Strike tier defaults to
+`Locus-UoT` — while ordinary TCP traffic falls through `MATCH,Locus Auto` to
+whatever the group has selected, and the two are different outbounds with different
+server ports. The probe could therefore ask a question the tunnel did not have to
+answer: `Locus-UoT` fails its test, mihomo reports "all proxies timeout", and the
+client concludes the tunnel is dead while the student's traffic, taking the other
+path, flows.
+
+Measured against the real sidecar (v1.19.31) with a two-member group whose first
+member is unreachable:
+
+```text
+GET /group/Locus%20Auto/delay?url=…&timeout=5   -> 504 {"message":"get delay: all proxies timeout"}
+```
+
+### The fix, and the asymmetry it rests on
+
+The probe now asks each outbound **by name**, trying the next when one fails:
+
+```rust
+for member in crate::locus::tier::OUTBOUND_NAMES {
+    let probe = …delay_proxy_by_name(member, EGRESS_TEST_URL, timeout_secs);
+    match … { Ok(Ok(r)) if delay_is_a_measurement(r.delay, ..) => return true, _ => {} }
+}
+```
+
+This works because the two plugin calls fail **differently**, and that difference is
+the whole fix:
+
+| Route | A non-2xx becomes | What the caller can do |
+|---|---|---|
+| `/group/<g>/delay` | `Err` (`ret_failed_resp!`) | nothing — no map to inspect |
+| `/proxies/<n>/delay` | `Ok(ProxyDelay { delay: 0 })` | classify it: `0` is not a measurement, so this member failed |
+
+So a dead member is an ordinary rejected value and the loop moves on; only "none of
+the members could" is `EgressOutcome::Failing`.
+
+### The simplification the same report asked for
+
+The reporter's own diagnosis — *"I believe the current logic is over engineered"* —
+was correct, and it was load-bearing rather than cosmetic. `Readiness` had four
+states, and two of them were the same fact:
+
+- `NotReady` — "the Core is not answering";
+- `NoEgress` — "the Core is answering but no packet got through".
+
+**Nothing consumed the difference.** `phaseFromStatus` derives the phase from `ready`
+alone, so both rendered *connecting*. Carrying two states bought no behaviour, and it
+cost a defect: the 2026-10-01 second-round bug lived in the untested one of the pair.
+
+`Readiness` is now `Ready | Connecting | Stopped`, and `decide` answers one question:
+
+```rust
+if matches!(egress, EgressOutcome::Ok) { return Readiness::Ready; }
+if matches!(outcome, ProbeOutcome::NotRunning) || !latch_active { return Readiness::Stopped; }
+Readiness::Connecting
+```
+
+`ProbeOutcome::Serving` was also dropped as a *prerequisite* for `Ready`. It was
+treating "the Core can answer its own control API" as a condition on top of "a
+packet completed through the tunnel" — but the second implies the first (a Core that
+moved a packet is answering), so requiring both was a second vote on a settled
+question, and one that could refuse to say *connected* while carrying traffic. The
+local probe is now only a gate on whether asking is worth it.
+
+### Guards, each observed failing
+
+- `only_proven_egress_is_ready` — passing egress with a non-`Serving` outcome. Under
+  the old rule (`Ready` also requires `Serving`) this is red; **observed failing**
+  before being kept.
+- `every_no_egress_cause_is_the_same_state` — pins that no-egress causes collapse to
+  one state, so a future split has to argue for itself.
+- `a_dead_member_answers_with_a_non_measurement_not_an_error` (engine test) — pins
+  the member-route contract the loop depends on.
+- `every_outbound_the_probe_asks_about_is_one_the_profile_defines` — pins that
+  `OUTBOUND_NAMES` and `build_profile` agree. **This caught a genuine bug in the
+  fix itself**: the first draft asked about `Locus-UoT` on a TCP-only tier, where the
+  profile defines only `Locus`. Harmless (the probe falls through) but it wasted a
+  round trip on every check, and the test's stricter first form failed loudly.
+
+### Claim class
+
+- **Verified:** the group-vs-member error asymmetry, read from the plugin source and
+  reproduced against a local sidecar; the tier's group defaults to its first member;
+  the full suite (587 Rust, 87 vitest) and `check-consistency.sh`.
+- **Not verified:** that this was the reporter's cause, and that a real tunnel now
+  reports ready — no Locus tunnel on a school link was measured. **The engine test's
+  positive case SKIPs green on this machine** (the runner cannot complete a round
+  trip), so its green tick is not evidence. See `STILL-OPEN.md`.
+
+---
+
 ## THE "CONNECTING" BUG CAME BACK A THIRD TIME, AND THE TEST PINNING IT WAS STALE (2026-10-02)
 
 | Severity | 🔴 A working tunnel still rendered as **connecting** |

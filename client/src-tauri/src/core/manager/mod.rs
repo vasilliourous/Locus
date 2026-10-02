@@ -255,7 +255,7 @@ impl CoreManager {
     /// seeing the latched `true` and the app would go on claiming a tunnel that
     /// the probe had just disproved.
     ///
-    /// A Core that is still starting reports [`Readiness::NotReady`], which the
+    /// A Core that is still starting reports [`Readiness::Connecting`], which the
     /// UI renders as "connecting" — not "disconnected", because work is in
     /// flight, and not "connected", because nothing has been proven.
     pub async fn observe_readiness(&self) -> probe::Readiness {
@@ -274,13 +274,15 @@ impl CoreManager {
             self.invalidate_core_readiness();
         }
 
-        // The second half of "is the tunnel working": a real packet through the
-        // proxy. Only attempted when the local probe already proved the Core is
-        // serving — a stopped Core has nothing to carry traffic with, and asking
-        // it to run a delay test would be a request guaranteed to fail. A Core
-        // that is up but cannot move a packet reports NoEgress, which the UI
-        // renders as "connected but no service" rather than "connected" — the
-        // fix for the machine with no wifi that still claimed a tunnel.
+        // The through-tunnel packet that decides everything. It probes each
+        // outbound the tier defines rather than the select group, because the
+        // group's delay test only ever answers for its *currently selected*
+        // member — which may not be the one carrying the student's traffic. See
+        // `probe::egress_attempt_once` for the defect that caused.
+        //
+        // The local probe above is now only a gate on whether asking is worth it:
+        // a Core that is not answering cannot run a delay test, and asking would
+        // be a request guaranteed to fail.
         let egress = self
             .observe_egress(outcome == probe::ProbeOutcome::Serving)
             .await;
