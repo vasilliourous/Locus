@@ -147,8 +147,16 @@ const ActivationScreen = ({ onActivated }: Props) => {
         setPhase('idle')
         return
       }
-      if (check.tier)
-        setNotice(`Ready — this code gives you the ${check.tier} tier`)
+      // A code the student has already used is still activatable — doing so
+      // restores their access — and the hub's own sentence says so. Show that
+      // rather than the generic tier line: "already activated, entering it
+      // again will restore your access" is the reassurance a returning student
+      // needs, and it is the whole point of the single-use model.
+      setNotice(
+        check.tier
+          ? `Ready — this code gives you the ${check.tier} tier`
+          : check.message,
+      )
     } catch {
       // The lookup is advisory. If it cannot be reached we still try to
       // activate, because the hub will make the same call anyway and refusing
