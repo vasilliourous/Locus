@@ -42,7 +42,7 @@ onMounted(() => {
 const pages: { id: Page; label: string }[] = [
   { id: 'dashboard', label: 'Dashboard' },
   { id: 'codes', label: 'Codes & Clients' },
-  { id: 'devices', label: 'Devices' },
+  { id: 'devices', label: 'Used codes' },
   { id: 'releases', label: 'Releases' },
   { id: 'tiers', label: 'Tiers' },
 ]

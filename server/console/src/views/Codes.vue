@@ -7,9 +7,12 @@ interface CodeRow {
   id: string
   code: string
   tier: string
-  status: 'available' | 'bound' | 'suspended' | 'expired'
-  bound: boolean
-  fingerprint: string
+  status: 'available' | 'redeemed' | 'suspended' | 'expired'
+  /**
+   * Whether this code has been redeemed. A code is single-use and is not tied
+   * to a device, so this replaces the old `bound` flag.
+   */
+  redeemed: boolean
   suspended: boolean
   expires_at: string
   activated_at: string
@@ -21,27 +24,6 @@ interface CodeRow {
   term_kind?: string
   /** Whole days until expiry (rounded up), or null when there is no expiry. */
   days_remaining?: number | null
-  /** True when the code holds a fingerprint the binding index cannot see. */
-  binding_unindexed?: boolean
-  /** The untruncated fingerprint, for `device.get`. Never shown in the UI. */
-  fingerprint_full?: string
-}
-
-/** What a machine is bound to, as returned by `device.get`. */
-interface BindingInfo {
-  found: boolean
-  fingerprint?: string
-  code?: string
-  tier?: string
-  bound_at?: string
-  released?: boolean
-  released_at?: string
-  release_reason?: string
-  /** A live binding whose code no longer exists. Needs clearing. */
-  code_missing?: boolean
-  label?: string
-  expires_at?: string
-  suspended?: boolean
 }
 
 const codes = ref<CodeRow[]>([])
@@ -96,8 +78,6 @@ const generated = ref<string[]>([])
 const detail = ref<CodeRow | null>(null)
 const history = ref<{ event: string; detail: string; created: string }[]>([])
 const historyLoading = ref(false)
-/** What the bound DEVICE holds, per the binding index. Null until looked up. */
-const binding = ref<BindingInfo | null>(null)
 
 // A filter change invalidates any ticked rows: the operator can no longer see
 // what they selected, and "delete N selected" where N counts rows that scrolled
@@ -207,17 +187,21 @@ async function setSuspended(row: CodeRow, suspend: boolean) {
 
 async function unbind(row: CodeRow) {
   const reason = window.prompt(
-    `Unbind ${row.code} from this device?\n\nThe student can activate again on the same or a new device.`,
-    'Student changed device',
+    `Release ${row.code}?\n\n` +
+      `A code is single-use and is NOT tied to a device. Releasing it clears the ` +
+      `used stamp so a DIFFERENT student can activate it.\n\n` +
+      `You do not need this to move a student to a new laptop — they simply enter ` +
+      `the same code again and it restores their access.`,
+    'Re-issued to a different student',
   )
   if (reason === null) return
   const res = await call('codes.unbind', { code: row.code, reason })
   if (res.ok) {
-    toast.ok(`Unbound ${row.code} — it can be activated again`)
+    toast.ok(`Released ${row.code} — it is available again`)
     await load()
     if (detail.value?.code === row.code) await openDetail(row)
   } else {
-    toast.err(res.message || res.transportError || 'Unbind failed')
+    toast.err(res.message || res.transportError || 'Release failed')
   }
 }
 
@@ -291,55 +275,6 @@ async function renew(row: CodeRow) {
 }
 
 /**
- * Move a code to a different device, deliberately.
- *
- * Separate from Unbind because a laptop replacement is routine, and because
- * Unbind clears `activated_at` — which the term model uses as the basis for an
- * expiry. Moving a device must never reset the time a student has already paid
- * for, so this action changes the binding and nothing else.
- *
- * WARNING, and the reason for the second prompt: the fingerprint is the
- * machine's identity. Rebinding to a typo'd or stale value locks the student
- * out, so the operator is asked to confirm it a second time.
- */
-async function rebind(row: CodeRow) {
-  const fingerprint = window.prompt(
-    `Move ${row.code} to a different device.\n\n` +
-      `Paste the fingerprint reported by the NEW machine. The student gets this ` +
-      `from the app's diagnostics; it is also shown truncated in this table.\n\n` +
-      `This does NOT change the expiry.`,
-  )
-  if (fingerprint === null) return
-  const fp = fingerprint.trim()
-  if (!fp) {
-    toast.err('A fingerprint is required')
-    return
-  }
-  const reason = window.prompt(
-    `Why is ${row.code} moving? (required — this is recorded in the audit trail)`,
-    'Student replaced device',
-  )
-  if (reason === null) return
-  if (!reason.trim()) {
-    toast.err('A reason is required')
-    return
-  }
-  const res = await call('codes.rebind', {
-    code: row.code,
-    fingerprint: fp,
-    reason,
-    expected_fingerprint: row.bound ? undefined : '',
-  })
-  if (res.ok) {
-    toast.ok(`Moved ${row.code} — expiry unchanged`)
-    await load()
-    if (detail.value?.code === row.code) await openDetail(row)
-  } else {
-    toast.err(res.message || res.transportError || 'Rebind failed')
-  }
-}
-
-/**
  * Set a code's TERM (how long one purchase lasts), without touching its expiry.
  *
  * Distinct from Renew, which extends an expiry. This changes what future
@@ -385,8 +320,8 @@ async function setTerm(row: CodeRow) {
  * wrong row is caught by reading, not by luck.
  */
 async function deleteCode(row: CodeRow) {
-  if (row.bound) {
-    toast.err(`${row.code} is bound to a device — unbind it first`)
+  if (row.redeemed) {
+    toast.err(`${row.code} has been used by a student — release it first`)
     return
   }
   const what = [row.tier, row.middleman].filter(Boolean).join(' / ')
@@ -409,17 +344,17 @@ async function deleteCode(row: CodeRow) {
 /**
  * Bulk-delete the codes ticked in the table.
  *
- * Bound codes are always skipped by the hook (there is no force flag on the
+ * Redeemed codes are always skipped by the hook (there is no force flag on the
  * batch path), and the result reports what was skipped and why — a bulk delete
  * that silently left three rows behind would be worse than one that failed.
  */
 async function deleteSelected() {
   const chosen = codes.value.filter((r) => selected.value.has(r.code)).map((r) => r.code)
   if (!chosen.length) return
-  const bound = codes.value.filter((r) => selected.value.has(r.code) && r.bound).length
+  const used = codes.value.filter((r) => selected.value.has(r.code) && r.redeemed).length
   const sure = window.confirm(
     `Permanently DELETE ${chosen.length} code(s)?\n\n` +
-      (bound ? `${bound} of them are bound to a device and will be SKIPPED.\n\n` : '') +
+      (used ? `${used} of them have been used by a student and will be SKIPPED.\n\n` : '') +
       `Cannot be undone. An audit entry is kept for each.`,
   )
   if (!sure) return
@@ -488,7 +423,6 @@ async function openDetail(row: CodeRow) {
   detail.value = row
   historyLoading.value = true
   history.value = []
-  binding.value = null
 
   const res = await call<{ events: { event: string; detail: string; created: string }[] }>(
     'codes.history',
@@ -496,20 +430,6 @@ async function openDetail(row: CodeRow) {
   )
   if (res.ok && res.data) history.value = res.data.events
   historyLoading.value = false
-
-  // Look up what this DEVICE holds, not just what this code is bound to.
-  //
-  // The two can disagree, and that disagreement is the whole point: a code
-  // holding a fingerprint the binding index cannot see means the
-  // one-code-per-device rule cannot enforce against it. Fetching only for a
-  // bound code keeps it to one call, since masking a full fingerprint is all
-  // the console ever shows.
-  if (row.bound && row.fingerprint_full) {
-    const dev = await call<BindingInfo>('device.get', {
-      fingerprint: row.fingerprint_full,
-    })
-    if (dev.ok && dev.data) binding.value = dev.data
-  }
 }
 
 async function saveDetail() {
@@ -689,7 +609,7 @@ watch(
         <select v-model="statusFilter" @change="load">
           <option value="">All</option>
           <option value="available">Available</option>
-          <option value="bound">Activated</option>
+          <option value="redeemed">Used</option>
           <option value="suspended">Suspended</option>
           <option value="expired">Expired</option>
         </select>
@@ -764,24 +684,14 @@ watch(
                    the money, so extend the term. Placed first among the
                    mutating actions because it is the one performed routinely. -->
               <button class="tiny primary" @click="renew(row)">Renew</button>
-              <!-- The code holds a fingerprint the binding index cannot see, so
-                   the one-code-per-device rule cannot enforce against it. Shown
-                   rather than hidden: it is a real integrity state an operator
-                   should clear, and it is how a pre-index binding would look. -->
-              <span
-                v-if="row.binding_unindexed"
-                class="muted"
-                style="font-size: 11px"
-                :title="'This code is bound to a device the binding index does not know about — re-activate the device, or use Move to another device, to bring the two into agreement.'"
-              >⚠ unindexed</span>
-              <button v-if="row.bound" class="tiny" @click="unbind(row)">Unbind</button>
+              <button v-if="row.redeemed" class="tiny" @click="unbind(row)">Release</button>
               <button class="tiny" @click="editExpiry(row)">Expiry</button>
               <button v-if="!row.suspended" class="tiny danger" @click="setSuspended(row, true)">Suspend</button>
               <button v-else class="tiny" @click="setSuspended(row, false)">Reactivate</button>
               <button
                 class="tiny danger"
-                :disabled="row.bound"
-                :title="row.bound ? 'Unbind the device first' : 'Permanently delete this code'"
+                :disabled="row.redeemed"
+                :title="row.redeemed ? 'Release it first' : 'Permanently delete this code'"
                 @click="deleteCode(row)"
               >Delete</button>
             </div>
@@ -798,7 +708,7 @@ watch(
       <p class="muted" style="margin-top: 0">
         Tier <strong>{{ detail.tier }}</strong> ·
         status <strong>{{ detail.status }}</strong>
-        <span v-if="detail.fingerprint"> · device <code>{{ detail.fingerprint }}</code></span>
+        <span v-if="detail.activated_at"> · first used {{ detail.activated_at.slice(0, 10) }}</span>
       </p>
 
       <label class="field">
@@ -833,8 +743,9 @@ watch(
         <button @click="setTerm(detail)">
           Set term{{ detail.term_days ? ` (${detail.term_days}d)` : ' (none)' }}
         </button>
-        <button v-if="detail.bound" @click="unbind(detail)">Unbind device</button>
-        <button v-if="detail.bound" @click="rebind(detail)">Move to another device</button>
+        <!-- Release is for handing the code to a DIFFERENT student. A student
+             moving to a new laptop just enters the code again. -->
+        <button v-if="detail.redeemed" @click="unbind(detail)">Release code</button>
         <button
           v-if="!detail.suspended"
           class="danger"
@@ -843,8 +754,8 @@ watch(
         <button v-else @click="setSuspended(detail, false); detail = null">Reactivate</button>
         <button
           class="danger"
-          :disabled="detail.bound"
-          :title="detail.bound ? 'Unbind the device first' : 'Permanently delete this code'"
+          :disabled="detail.redeemed"
+          :title="detail.redeemed ? 'Release it first' : 'Permanently delete this code'"
           @click="deleteCode(detail)"
         >Delete code</button>
         <button @click="detail = null">Close</button>
@@ -857,41 +768,23 @@ watch(
         Term:
         <strong>{{ detail.term_days ? `${detail.term_days} days from activation` : 'none (never expires)' }}</strong>
         · Renewing adds the purchased days to the current expiry, so paying early
-        never loses days · Renew does not change the tier or the device.
+        never loses days · Renew does not change the tier or whether the code is in use.
       </p>
 
-      <!-- What the DEVICE holds.
-           Shown because "one code per device" is enforced by the binding index,
-           and the only way an operator can see that enforcement working — or
-           see it failing — is to compare the code's fingerprint against the
-           index. The disagreement cases are the ones that matter. -->
-      <div v-if="detail.bound" class="muted" style="font-size: 12px; margin-top: 6px">
-        <template v-if="binding && binding.found">
-          Device index:
-          <template v-if="binding.code_missing">
-            <strong class="badge suspended">code missing</strong>
-            — this device is bound through a code that no longer exists. The
-            uniqueness check will still refuse a new activation, so unbind and
-            re-activate to clear it.
-          </template>
-          <template v-else-if="binding.released">
-            <strong>released</strong>
-            — the device is free to activate another code.
-            <span v-if="binding.release_reason">({{ binding.release_reason }})</span>
-          </template>
-          <template v-else>
-            <strong>live</strong>
-            — this device holds this code, and the one-code-per-device rule is
-            enforced against it.
-          </template>
+      <!-- A code is single-use and is not tied to a device. This states the
+           rule where the operator acts on a code, so "Release" is not mistaken
+           for "move this student to a new laptop". -->
+      <div class="muted" style="font-size: 12px; margin-top: 6px">
+        <template v-if="detail.redeemed">
+          <strong>Used</strong> — first activated
+          {{ detail.activated_at ? detail.activated_at.slice(0, 16).replace('T', ' ') : '' }}.
+          The student can enter this code again on any machine and it restores
+          their access; use <strong>Release</strong> only to hand it to a
+          different student.
         </template>
-        <template v-else-if="binding && !binding.found">
-          <strong class="urgent">⚠ not in the binding index</strong> — this code
-          holds a fingerprint the index does not know about, so the
-          one-code-per-device rule cannot enforce against it. Re-activate the
-          device, or use Move to another device, to bring them into agreement.
+        <template v-else>
+          <strong>Not used yet</strong> — available for a student to activate.
         </template>
-        <template v-else>Device index: looking up…</template>
       </div>
 
       <h3 style="font-size: 13px; margin-bottom: 6px">History</h3>

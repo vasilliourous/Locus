@@ -1,66 +1,74 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, computed } from 'vue'
 import { call } from '../api'
 import { toast } from '../toast'
 
 /**
- * Devices — every code/device binding on the hub.
+ * Used codes — the single-use record.
  *
  * # Why this page exists
  *
- * "One code per device" is enforced by a UNIQUE index on the binding table, so
- * the rule cannot be violated by an ordinary write path. This page is the
- * EVIDENCE that it holds, and the place to see the states the index cannot
- * express:
+ * A code is single-use and is **not** tied to a device. The whole record of
+ * "this code is in use" is `codes.activated_at`, so this page is that record:
+ * which codes have been redeemed, when, and by whom (the middleman/label).
  *
- *   * a binding whose code no longer exists (`code_missing`) — the uniqueness
- *     check would still refuse a new activation on that device, so it is a
- *     state an operator must see and clear rather than a silent oddity;
- *   * a code that holds a fingerprint the index does not know about — reported
- *     on the Codes page as `unindexed`.
+ * It replaced a "Devices" page that listed device bindings. Device binding was
+ * removed — a code is not tied to a machine — so there is no per-device view to
+ * show. What an operator still needs is the answer to two questions:
  *
- * It is deliberately read-only. Every mutation lives on the Codes page, where
- * it already has an audit trail; adding write actions here would give an
+ *   * "is this code in use?" — status `redeemed` below;
+ *   * "has this student's code been handed to someone else?" — the Release
+ *     history, per code, on the Codes page.
+ *
+ * It is deliberately read-only: every mutation lives on the Codes page, where
+ * it already has an audit trail. Adding write actions here would give an
  * operator two routes to the same change and only one of them familiar.
  */
 
-interface Binding {
-  fingerprint: string
+interface CodeRow {
   code: string
   tier: string
-  bound_at: string
-  released: boolean
-  released_at: string
-  release_reason: string
-  /** A live binding whose code row is gone. Needs clearing. */
-  code_missing: boolean
-  label: string
+  status: 'available' | 'redeemed' | 'suspended' | 'expired'
+  redeemed: boolean
+  activated_at: string
   expires_at: string
+  label: string
+  middleman: string
+  days_remaining?: number | null
 }
 
-interface DevicesResponse {
-  total: number
-  live_count: number
-  /** Should always be empty — the unique index is what prevents it. */
-  duplicate_live_fingerprints: string[]
-  bindings: Binding[]
+interface CodesResponse {
+  codes: CodeRow[]
 }
 
-const data = ref<DevicesResponse | null>(null)
+const rows = ref<CodeRow[]>([])
 const loading = ref(true)
-/** Hide history by default: released rows accumulate and are rarely the point. */
-const showReleased = ref(false)
+/**
+ * Show only codes that have been used. The default hides the ones that have
+ * not, because "who is using their code" is the question this page answers —
+ * an available code is not yet anyone's.
+ */
+const usedOnly = ref(true)
 
 async function load() {
   loading.value = true
-  const res = await call<DevicesResponse>('devices.list')
+  // No `status` filter is sent: the page needs the totals for both states, and
+  // filtering client-side keeps the two counts honest against one snapshot.
+  const res = await call<CodesResponse>('codes.list', {})
   if (res.ok && res.data) {
-    data.value = res.data
+    rows.value = res.data.codes || []
   } else {
-    toast.err(res.message || res.transportError || 'Could not load device bindings')
+    toast.err(res.message || res.transportError || 'Could not load codes')
   }
   loading.value = false
 }
+
+const used = computed(() => rows.value.filter((r) => r.redeemed))
+const available = computed(() => rows.value.filter((r) => !r.redeemed))
+/** Suspended codes that were also used — worth surfacing, they are not "in use". */
+const suspended = computed(() => rows.value.filter((r) => r.suspended))
+
+const shown = computed(() => (usedOnly.value ? used.value : used.value.concat(available.value)))
 
 function when(iso: string): string {
   if (!iso) return '—'
@@ -68,99 +76,101 @@ function when(iso: string): string {
   return isNaN(d.getTime()) ? iso : d.toLocaleString()
 }
 
+function expiry(row: CodeRow): string {
+  if (!row.expires_at) return '—'
+  const days = row.days_remaining
+  const date = row.expires_at.slice(0, 10)
+  return days === null || days === undefined ? date : `${date} (${days}d)`
+}
+
 onMounted(load)
 </script>
 
 <template>
-  <h1 class="page-title">Devices</h1>
+  <h1 class="page-title">Used codes</h1>
   <p class="page-sub">
-    Every device binding on the hub. One device holds one code — this is the
-    evidence, not the control.
+    Codes that a student has activated. A code is single-use, and a student can
+    enter it again on any machine to restore their access — it is not tied to a
+    device, so there is nothing per-device to show.
   </p>
 
   <div v-if="loading" class="muted">Loading…</div>
 
-  <template v-else-if="data">
-    <!-- An integrity failure: the unique index should make this impossible.
-         Reported loudly rather than assumed away. -->
-    <div v-if="data.duplicate_live_fingerprints.length" class="msg err">
-      <strong>Binding index inconsistency:</strong>
-      {{ data.duplicate_live_fingerprints.length }} fingerprint(s) appear more than once as live
-      ({{ data.duplicate_live_fingerprints.join(', ') }}). The unique index should prevent this —
-      investigate before trusting the one-code-per-device rule.
-    </div>
-
+  <template v-else>
     <div class="cards">
       <div class="card">
-        <div class="n">{{ data.live_count }}</div>
-        <div class="l">Live bindings</div>
+        <div class="n">{{ used.length }}</div>
+        <div class="l">Used</div>
       </div>
       <div class="card">
-        <div class="n">{{ data.total }}</div>
-        <div class="l">Including released history</div>
+        <div class="n">{{ available.length }}</div>
+        <div class="l">Available</div>
       </div>
-      <div class="card" :class="data.bindings.some((b) => b.code_missing) ? 'bad' : 'good'">
-        <div class="n">{{ data.bindings.filter((b) => b.code_missing).length }}</div>
-        <div class="l">Bindings whose code is missing</div>
+      <div class="card" :class="suspended.length ? 'bad' : 'good'">
+        <div class="n">{{ suspended.length }}</div>
+        <div class="l">Suspended</div>
       </div>
     </div>
 
     <div class="panel">
       <div class="actions" style="margin-bottom: 10px">
-        <button class="tiny" :class="{ primary: !showReleased }" @click="showReleased = false">
-          Live only
+        <button class="tiny" :class="{ primary: usedOnly }" @click="usedOnly = true">
+          Used only
         </button>
-        <button class="tiny" :class="{ primary: showReleased }" @click="showReleased = true">
-          Include released
+        <button class="tiny" :class="{ primary: !usedOnly }" @click="usedOnly = false">
+          Include available
         </button>
         <button class="tiny" @click="load">Refresh</button>
       </div>
 
-      <div v-if="data.bindings.length === 0" class="muted">
-        No device bindings yet. A binding is created the first time a code is activated.
+      <div v-if="shown.length === 0" class="muted">
+        <template v-if="usedOnly">
+          No code has been used yet. A code becomes "used" the first time a
+          student activates it.
+        </template>
+        <template v-else> No codes yet. Create some on the Codes page. </template>
       </div>
 
       <table v-else>
         <thead>
           <tr>
-            <th>Device</th>
             <th>Code</th>
             <th>Name</th>
             <th>Tier</th>
-            <th>Bound</th>
+            <th>First used</th>
             <th>Expires</th>
+            <th>Middleman</th>
             <th>State</th>
           </tr>
         </thead>
         <tbody>
-          <tr
-            v-for="(b, i) in data.bindings.filter((x) => showReleased || !x.released)"
-            :key="b.fingerprint + i"
-            :class="{ dim: b.released }"
-          >
-            <td class="mono muted">{{ b.fingerprint || '—' }}</td>
-            <td class="mono">{{ b.code }}</td>
-            <td class="muted">{{ b.label || '—' }}</td>
-            <td>{{ b.tier || '—' }}</td>
-            <td class="muted">{{ when(b.bound_at) }}</td>
-            <td class="muted">{{ b.expires_at ? b.expires_at.slice(0, 10) : '—' }}</td>
+          <tr v-for="row in shown" :key="row.code" :class="{ dim: !row.redeemed }">
+            <td class="mono">{{ row.code }}</td>
+            <td class="muted">{{ row.label || '—' }}</td>
+            <td>{{ row.tier || '—' }}</td>
+            <td class="muted">{{ when(row.activated_at) }}</td>
+            <td class="muted">{{ expiry(row) }}</td>
+            <td class="muted">{{ row.middleman || '—' }}</td>
             <td>
-              <span v-if="b.code_missing" class="badge suspended" title="The code this device is bound through no longer exists. The uniqueness check will still refuse a new activation, so unbind and re-activate the device to clear it.">
-                code missing
+              <span v-if="row.suspended" class="badge suspended" title="An operator suspended this code; it is refused on activation and on heartbeat.">
+                suspended
               </span>
-              <span v-else-if="b.released" class="badge" title="Released — the device is free to activate another code.">
-                released
+              <span v-else-if="row.redeemed" class="badge bound" title="Used. The student can re-enter it on any machine to restore access.">
+                used
               </span>
-              <span v-else class="badge bound">live</span>
+              <span v-else class="badge" title="Not used yet — available for a student to activate.">
+                available
+              </span>
             </td>
           </tr>
         </tbody>
       </table>
 
-      <p v-if="showReleased" class="muted" style="font-size: 12px; margin-top: 10px">
-        Released rows are kept rather than deleted, so "has this device ever been
-        bound, and to what" stays answerable. A release reason is recorded when an
-        operator unbinds or moves a code.
+      <p class="muted" style="font-size: 12px; margin-top: 10px">
+        To hand a code to a different student, use <strong>Release</strong> on
+        the Codes page — it clears the used stamp and the release is recorded in
+        that code's history. You do <strong>not</strong> need it to move a
+        student to a new laptop: they simply enter the same code again.
       </p>
     </div>
   </template>
