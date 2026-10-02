@@ -322,54 +322,33 @@ pub struct IVerge {
     /// hub may simply not have been reached yet.
     pub locus_update_offered: Option<String>,
 
-    // ── Durable device identity ──────────────────────────────────────────────
+    // ── Retired: device identity and the recognition token ───────────────────
     //
-    // These are the app-config half of [`crate::locus::identity`]. The identity
-    // is normally kept in a MACHINE-SCOPED file, which is what survives a
-    // reinstall; these fields exist for the case where that location is not
-    // writable without elevation, so a device still has an identity even when it
-    // cannot have a durable one.
+    // These five fields belonged to device recognition — a durable device
+    // identity the hub matched on to skip the code prompt, and the session token
+    // it minted for such a device. Both are gone (see `server/pb_hooks/`), and
+    // nothing reads or writes these any more.
     //
-    // The distinction matters and is recorded, not inferred: a device whose
-    // identity lives only here does NOT survive an uninstall, and the UI must
-    // say so rather than promise a student something the install cannot deliver.
+    // They are KEPT as `Option<T>` fields rather than deleted, because a
+    // deserializer that meets an unknown key in an existing `verge.yaml` must not
+    // fail: removing the fields would make an upgrade from a build that wrote
+    // them either error or silently discard the rest of the config. They are
+    // inert, and a later cleanup can drop them once no shipped build writes them.
 
-    /// The device's non-secret identifier. Safe to log (truncated) and display.
+    /// Retired. The device's non-secret identifier.
     pub locus_device_id: Option<String>,
 
-    /// The device's SECRET — the actual credential, hex-encoded.
-    ///
-    /// **Never log this, never include it in a diagnostics export, and never
-    /// send the full value to the frontend.** It is the thing a device proves it
-    /// holds; publishing it is equivalent to publishing the activation code.
-    /// The hub stores only `sha256` of it, so this value is the only copy.
+    /// Retired. The device's secret. Never read; if a build ever did, the
+    /// never-log/never-export rules would still apply.
     pub locus_device_secret: Option<String>,
 
-    /// Where the identity was found: `"machine"` (survives a reinstall) or
-    /// `"app"` (does not). Recorded so the UI can be truthful, and so a support
-    /// conversation can distinguish "your device is remembered" from "your device
-    /// is remembered only until you reinstall".
+    /// Retired. Where the identity was found: `"machine"` or `"app"`.
     pub locus_identity_store: Option<String>,
 
-    /// The session token the hub minted at recognition, used in place of the
-    /// activation code on every heartbeat.
-    ///
-    /// A device restored by recognition has no code to send — the hub never
-    /// re-sends it — and the heartbeat is where suspension, expiry and config
-    /// refresh are enforced. Without this the device would connect and then
-    /// never check in again, so a suspended device would keep working.
-    ///
-    /// This is a CREDENTIAL, exactly like the activation code: never log it,
-    /// never export it, never render it. The hub stores only its hash, so this
-    /// copy is the only one that exists.
+    /// Retired. The session token the hub minted at recognition.
     pub locus_device_token: Option<String>,
 
-    /// When that token expires, as the hub reported it.
-    ///
-    /// Stored so the client can re-recognise *before* a beat fails, rather than
-    /// discovering the lapse through a 401 and dropping into a recovery path.
-    /// Kept as the hub's own string for the same reason as the expiry: parsing
-    /// at one place means the client and the console cannot disagree.
+    /// Retired. When that token expired.
     pub locus_token_expires_at: Option<String>,
 }
 

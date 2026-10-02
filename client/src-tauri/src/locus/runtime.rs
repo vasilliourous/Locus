@@ -43,34 +43,24 @@ static RUNNING: Mutex<Option<HeartbeatLoop>> = Mutex::new(None);
 /// running is a re-activation that changed the code or tier. Silently keeping the
 /// old one would leave the device reporting a tier it no longer has.
 pub async fn start(activation: store::Activation) {
-    // Which credential this run authenticates with.
-    //
-    // A code is preferred when present: it is the original, non-expiring
-    // credential, and a device holding one should keep using it. A device
-    // restored by recognition has no code (the hub never re-sends it), so it
-    // presents the session token the hub minted instead. Both resolve to the
-    // same code hub-side, so enforcement is identical either way.
-    let credential = if !activation.code.trim().is_empty() {
-        Credential::Code(activation.code.clone())
-    } else {
-        match store::stored_device_token().await {
-            Some(token) => Credential::Token(token),
-            None => {
-                // No code AND no token: this run cannot authenticate at all.
-                // Refusing to start is the honest answer — a loop beating with
-                // an empty credential would hammer the hub with 400s and report
-                // nothing useful. The caller must ensure one of the two exists.
-                logging!(
-                    warn,
-                    Type::Config,
-                    "[locus] refusing to start a heartbeat with no credential (no code, no token)"
-                );
-                return;
-            }
-        }
-    };
+    // A device always authenticates with its activation code now. This used to
+    // fall back to a session token minted at device recognition, for a device
+    // that had no code because recognition had restored it; recognition and the
+    // token are both gone, and the code is kept across restarts by
+    // `crate::locus::credential` instead.
+    if activation.code.trim().is_empty() {
+        // No code: this run cannot authenticate at all. Refusing to start is the
+        // honest answer — a loop beating with an empty credential would hammer
+        // the hub with 400s and report nothing useful.
+        logging!(
+            warn,
+            Type::Config,
+            "[locus] refusing to start a heartbeat with no activation code"
+        );
+        return;
+    }
 
-    start_with(credential, activation);
+    start_with(Credential::code(activation.code.clone()), activation);
 }
 
 /// Starts (or replaces) the heartbeat loop with an already-resolved credential.
@@ -226,23 +216,6 @@ async fn handle_outcome(outcome: BeatOutcome) {
     match outcome {
         BeatOutcome::Ok(response) => handle_success(&response).await,
         BeatOutcome::Refused { reason } => handle_refusal(&reason).await,
-        BeatOutcome::StaleCredential { reason } => {
-            // The hub rejected the CREDENTIAL, not the entitlement. The tunnel is
-            // still legitimate, so nothing is torn down here — this is the
-            // "you have not opened the app in a month and your session lapsed"
-            // case, and the student's access is not in question.
-            //
-            // What must happen is a fresh credential, which recognition mints.
-            // The loop has already stopped (a stale credential is not retried),
-            // so this re-runs the recognition path and restarts the loop if it
-            // succeeds.
-            logging!(
-                info,
-                Type::Config,
-                "[locus] heartbeat credential is stale, renewing: {reason}"
-            );
-            renew_credential().await;
-        }
         BeatOutcome::Unreachable { reason } => {
             // NOT necessarily an entitlement problem. The tunnel keeps working
             // through the grace period, and `locus_status` reports the remaining
@@ -267,74 +240,12 @@ async fn handle_outcome(outcome: BeatOutcome) {
     }
 }
 
-/// Obtains a fresh session token and restarts the loop.
-///
-/// Called only when the hub rejected the *credential*, which can arise only for a
-/// token-authenticated device — a code does not expire. The remedy is
-/// recognition, which re-mints a token and reports the tier the device is still
-/// entitled to; the loop then restarts with the new credential.
-///
-/// Nothing is torn down if this fails. The device's entitlement was never in
-/// question, only its credential, and dropping the tunnel for a student whose
-/// only problem is a lapsed session would be the wrong call. The grace period
-/// still bounds how long an unconfirmable device may run, applied on the next
-/// unreachable outcome.
-async fn renew_credential() {
-    let identity = crate::locus::identity::resolve_with_stores(
-        crate::locus::identity::read_machine_id(),
-        stored_identity().await,
-    );
-
-    // The binding id, not the hardware fingerprint — this value is stored into
-    // `store::Activation.fingerprint` and compared against the hub's
-    // `bound_fingerprint` on the next activation. Using the re-derived hardware
-    // hash here would reintroduce the drift this change removes. See
-    // `DeviceIdentity::binding_id`.
-    let fingerprint = identity.binding_id();
-    match crate::locus::activation::recognise(&identity).await {
-        Ok(crate::locus::activation::Recognition::Recognised { token, tier, .. }) => {
-            if let Err(error) = store::store_device_token(&token, None).await {
-                logging!(
-                    warn,
-                    Type::Config,
-                    "[locus] renewed a token but could not store it: {error:#}"
-                );
-                return;
-            }
-            logging!(info, Type::Config, "[locus] credential renewed for tier {tier}");
-            // Restart with the fresh token. `start_with` is SYNCHRONOUS on
-            // purpose: this runs inside the loop's outcome callback, and an
-            // async start here would both recurse (start → spawn → callback →
-            // start) and make the spawned future non-`Send`. It stops whatever
-            // is held first, so two loops cannot run at once. The code is empty
-            // because this device has none — that is the point of the token.
-            start_with(
-                Credential::Token(token),
-                store::Activation {
-                    code: String::new(),
-                    tier,
-                    fingerprint,
-                },
-            );
-        }
-        Ok(crate::locus::activation::Recognition::NotRecognised) => logging!(
-            warn,
-            Type::Config,
-            "[locus] could not renew the credential: the hub no longer recognises this device"
-        ),
-        Err(error) => logging!(
-            warn,
-            Type::Config,
-            "[locus] could not renew the credential: {error:#}"
-        ),
-    }
-}
-
-/// The app-config half of this device's identity, if one is stored.
-async fn stored_identity() -> Option<crate::locus::identity::StoredIdentity> {
-    let verge = crate::config::Config::verge().await;
-    store::read_identity(&verge.latest_arc())
-}
+// `renew_credential` and `stored_identity` — REMOVED.
+//
+// Both existed to answer a 401 by re-running device recognition and minting a
+// fresh session token. Recognition is gone and the client only ever
+// authenticates with its activation code, so a hub that will not accept that
+// code is a refusal and the device is torn down — see `handle_refusal`.
 
 /// Stops the tunnel when the grace period since the last good beat is spent.
 ///
@@ -346,6 +257,10 @@ async fn stored_identity() -> Option<crate::locus::identity::StoredIdentity> {
 ///
 /// A device that has never beaten (`last_ok == 0`) is given the full window, not
 /// zero: it is a fresh install that has not been online yet, not a lapsed one.
+///
+/// Crucially, a spent grace period does NOT discard the activation code. It is a
+/// local statement about this session — "we cannot confirm the entitlement" —
+/// not a statement that the code is bad. See [`store::record_lapsed_grace`].
 async fn enforce_grace_period() {
     let verge = crate::config::Config::verge().await;
     let last_ok = verge.latest_arc().last_heartbeat_ok.unwrap_or(0);
@@ -375,11 +290,11 @@ async fn enforce_grace_period() {
             "[locus] could not stop the core after the grace period expired: {error:#}"
         );
     }
-    if let Err(error) = store::clear().await {
+    if let Err(error) = store::record_lapsed_grace().await {
         logging!(
             warn,
             Type::Config,
-            "[locus] could not clear the entitlement after the grace period expired: {error:#}"
+            "[locus] could not clear the session state after the grace period expired: {error:#}"
         );
     }
 }
@@ -598,7 +513,7 @@ async fn handle_refusal(reason: &str) {
         logging!(warn, Type::Config, "[locus] could not record the refusal reason: {error:#}");
     }
 
-    if let Err(error) = store::clear().await {
+    if let Err(error) = store::clear_entitlement().await {
         logging!(warn, Type::Config, "[locus] could not clear the entitlement: {error:#}");
     }
 }

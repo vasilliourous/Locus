@@ -154,56 +154,48 @@ pub enum BeatOutcome {
     /// The account is in good standing; the payload may carry a config refresh
     /// and/or an update signal.
     Ok(Box<HeartbeatResponse>),
-    /// The hub refused: suspended, expired, or unknown. The device is no longer
-    /// entitled, and the tunnel should come down.
+    /// The hub refused: suspended, expired, unknown, or a credential it would
+    /// not accept. The device is no longer entitled, and the tunnel should come
+    /// down.
+    ///
+    /// There used to be a separate [`StaleCredential`] arm for a 401 — the
+    /// signal that a recognised device's session token had lapsed, which the
+    /// supervisor answered by re-recognising. Tokens are gone with device
+    /// recognition: a device always authenticates with its code, so a 401 can
+    /// only mean the code itself is not accepted, which is a refusal.
     Refused { reason: String },
-    /// The hub did not accept the *credential*, but the entitlement is intact.
-    ///
-    /// Distinct from [`Self::Refused`] because the remedy is different: this
-    /// device is still entitled to a tunnel, and the fix is to obtain a fresh
-    /// credential (re-recognise) rather than to give up. Distinct from
-    /// [`Self::Unreachable`] because retrying the same dead credential forever
-    /// would never recover — which is exactly what the catch-all would have done
-    /// with the 401 this variant exists for.
-    ///
-    /// A student who has not opened the app in a month hits this: the tunnel is
-    /// fine, their session token simply lapsed.
-    StaleCredential { reason: String },
     /// A transport failure. The account is *not* known to be bad — the tunnel
     /// keeps working through the grace period.
     Unreachable { reason: String },
 }
 
-/// What a heartbeat authenticates with.
+/// What a heartbeat authenticates with: the activation code.
 ///
-/// A device normally holds an activation code. A device restored by recognition
-/// holds a session token instead, because the hub deliberately never re-sends
-/// the code — it is a bearer credential for the entitlement, and handing it back
-/// would be the exposure this design avoids.
-///
-/// The two differ in lifetime (a token expires, a code does not) but not in
-/// authority: the hub resolves either to the same code and enforces identically.
-/// That equivalence is what makes it safe for the loop to treat them alike.
+/// This was a two-variant enum (a code, or a session token minted at device
+/// recognition). Recognition is gone, and with it the token: a device always
+/// holds a code now, and `crate::locus::credential` is what keeps it from being
+/// lost. The type is kept as a newtype rather than being replaced by a bare
+/// `String` so the redaction and formatting rules below stay attached to the
+/// value everywhere it is used.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Credential {
-    /// The activation code, canonical hyphenated form.
-    Code(String),
-    /// A session token minted at recognition.
-    Token(String),
-}
+pub struct Credential(String);
 
 impl Credential {
+    /// Wraps a stored activation code.
+    #[must_use]
+    pub fn code(code: impl Into<String>) -> Self {
+        Self(code.into())
+    }
+
     /// The credential's value, whichever kind it is.
     #[must_use]
     pub fn as_str(&self) -> &str {
-        match self {
-            Self::Code(value) | Self::Token(value) => value,
-        }
+        &self.0
     }
 
     /// A redacted form for logs — never the whole value.
     ///
-    /// Both kinds are credentials, so neither is logged in full. Twelve
+    /// A code is a bearer credential, so it is not logged in full. Twelve
     /// characters is enough to correlate two log lines and not enough to use.
     #[must_use]
     pub fn redacted(&self) -> String {
@@ -295,24 +287,14 @@ impl Default for Backoff {
 
 /// Sends one heartbeat. Makes exactly one attempt.
 ///
-/// `credential` is whichever of a code or a session token this device holds.
-/// Both fields are sent (one of them empty) so the request has a single shape;
-/// the hub accepts either and resolves a token to its code before enforcing
-/// anything.
+/// `credential` is the activation code this device holds. `token` is sent empty:
+/// it is a frozen wire field kept for deployed clients that still read it, and
+/// nothing mints one any more.
 pub async fn beat(credential: &Credential, fingerprint: &str) -> BeatOutcome {
-    let body = match credential {
-        Credential::Code(code) => HeartbeatRequest {
-            code,
-            fingerprint,
-            token: "",
-        },
-        // A token device sends no code — that is the point of recognition — so
-        // the code field is empty and the hub resolves the token instead.
-        Credential::Token(token) => HeartbeatRequest {
-            code: "",
-            fingerprint,
-            token,
-        },
+    let body = HeartbeatRequest {
+        code: credential.as_str(),
+        fingerprint,
+        token: "",
     };
 
     let client = match reqwest::Client::builder()
@@ -366,14 +348,10 @@ pub async fn beat(credential: &Credential, fingerprint: &str) -> BeatOutcome {
 /// though it were a flaky network — half of why nothing ever expired.
 ///
 /// **401 is deliberately its own arm, not a refusal.** A 401 from this endpoint
-/// means the *credential* is stale (a token past its 30-day life), not that the
-/// entitlement is gone — the code behind that token is untouched, and the device
-/// is still entitled to a tunnel. Filing it as `Refused` would tear down a
-/// working connection for a student whose only problem is that they had not
-/// opened the app in a month; filing it as `Unreachable` (which is what the
-/// catch-all below would do) would retry the same dead token forever and never
-/// recover. So it gets [`BeatOutcome::StaleCredential`], and the supervisor
-/// responds by re-recognising.
+/// means the credential is not one the hub will accept, which for a
+/// code-authenticated device means the code itself — an unknown code answers
+/// 404, so a 401 here is treated as a refusal and the device is torn down.
+/// There is no token to renew any more: tokens went with device recognition.
 #[must_use]
 fn classify_response(code: u16, text: &str) -> BeatOutcome {
     let message = || {
@@ -383,15 +361,11 @@ fn classify_response(code: u16, text: &str) -> BeatOutcome {
             .unwrap_or_else(|| format!("the hub refused this device ({code})"))
     };
 
-    if matches!(code, 403 | 404 | 410) {
+    // 401 is included with the other refusals. It used to be the token path's
+    // signal to renew; with tokens gone it means the hub will not accept this
+    // code, which is a refusal like any other.
+    if matches!(code, 401 | 403 | 404 | 410) {
         return BeatOutcome::Refused { reason: message() };
-    }
-
-    // 401: the hub did not accept the credential. For a code-authenticated
-    // client this cannot happen (the hub answers 404 for an unknown code), so it
-    // is the token path's signal that the token needs renewing.
-    if code == 401 {
-        return BeatOutcome::StaleCredential { reason: message() };
     }
 
     if !(200..300).contains(&code) {
@@ -490,17 +464,6 @@ impl HeartbeatLoop {
                     // a refusal too, since that is an answer to the question it
                     // asked.
                     BeatOutcome::Refused { .. } => {
-                        on_outcome(outcome);
-                        wake_waiting_beat(&beat_done_signal);
-                        break;
-                    }
-                    // The credential lapsed, but the entitlement did not. Do NOT
-                    // treat this as a refusal — the tunnel is still legitimate —
-                    // and do NOT back off as though the network were flaky, which
-                    // would retry the same dead token on a doubling schedule
-                    // forever. Stop the loop and let the supervisor obtain a
-                    // fresh credential; the caller sees the outcome either way.
-                    BeatOutcome::StaleCredential { .. } => {
                         on_outcome(outcome);
                         wake_waiting_beat(&beat_done_signal);
                         break;

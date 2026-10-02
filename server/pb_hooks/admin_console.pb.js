@@ -200,65 +200,18 @@ routerAdd("POST", "/api/admin/console", function(e) {
         } catch (evErr) { /* audit is best-effort; never fail the action for it */ }
     }
 
-    // ── Device-binding index ──
+    // ── Device binding: REMOVED ──
     //
-    // The `device_bindings` collection's `fingerprint` field is UNIQUE, so
-    // "one code per device" is enforced by the schema rather than by every hook
-    // remembering to check. These helpers maintain the index; the constraint
-    // itself is what makes the rule hold.
+    // There used to be a `device_bindings` index here, keyed on a fingerprint,
+    // enforcing "one code per device" at the schema level. Both the rule and the
+    // index are gone (see activation.pb.js): a code is single-use, and the only
+    // record of that is `activated_at` on the code row itself. There is no
+    // device left to name, so there is nothing to index, claim, release or
+    // reconcile — which is exactly the class of bug (two structures disagreeing
+    // about the same binding) this removes.
     //
-    // ALL OF THESE ARE BEST-EFFORT. The entitlement lives on the code row, and
-    // failing an operator action because an index write failed would be worse
-    // than an index that is briefly behind.
-    //
-    // A released row is KEPT (released_at set) rather than deleted, so "has
-    // this device ever been bound, and to what" stays answerable — the same
-    // append-only reasoning as code_events.
-    //
-    // Fingerprints are interpolated into the filter string because no caller in
-    // this tree passes findFirstRecordByFilter a parameter object, and they are
-    // alphanumeric by construction (a hex digest), so stripping is enough to
-    // make the interpolation safe.
-    function bindingRow(fp) {
-        var safe = String(fp || "").replace(/[^a-zA-Z0-9]/g, "");
-        if (!safe) return null;
-        try {
-            return $app.dao().findFirstRecordByFilter("device_bindings",
-                "fingerprint = '" + safe + "'");
-        } catch (none) { return null; }
-    }
-    function releaseBinding(fp, reason) {
-        if (!fp) return;
-        try {
-            var row = bindingRow(fp);
-            if (!row) return;
-            row.set("released_at", nowISO());
-            row.set("release_reason", reason || "");
-            $app.dao().saveRecord(row);
-        } catch (relErr) { /* best-effort */ }
-    }
-    function claimBinding(fp, code, tier) {
-        if (!fp) return;
-        try {
-            var row = bindingRow(fp);
-            if (row) {
-                row.set("code", code);
-                row.set("tier", tier || "");
-                row.set("bound_at", nowISO());
-                row.set("released_at", null);
-                row.set("release_reason", "");
-                $app.dao().saveRecord(row);
-                return;
-            }
-            var coll = $app.dao().findCollectionByNameOrId("device_bindings");
-            var rec = new Record(coll);
-            rec.set("fingerprint", String(fp).replace(/[^a-zA-Z0-9]/g, ""));
-            rec.set("code", code);
-            rec.set("tier", tier || "");
-            rec.set("bound_at", nowISO());
-            $app.dao().saveRecord(rec);
-        } catch (claimErr) { /* best-effort */ }
-    }
+    // The actions that used these helpers are rewritten below to operate on
+    // `activated_at` directly.
 
     try {
         var body = $apis.requestInfo(e).data;
@@ -303,7 +256,7 @@ routerAdd("POST", "/api/admin/console", function(e) {
         // ─────────────────────────────────────────────────────────────
         if (action === "dashboard") {
             var allCodes = $app.dao().findRecordsByExpr("codes", $dbx.exp("id != ''"));
-            var bound = 0, suspended = 0, expired = 0, available = 0;
+            var redeemed = 0, suspended = 0, expired = 0, available = 0;
             var byTier = {};
             var expiringSoon = 0;
             var now = Date.now();
@@ -319,7 +272,10 @@ routerAdd("POST", "/api/admin/console", function(e) {
                 var isExp = expMs && !isNaN(expMs) && expMs < now;
                 if (isSusp) suspended++;
                 else if (isExp) expired++;
-                else if (c.getString("bound_fingerprint")) bound++;
+                // "Redeemed" replaces the old "bound": a code is single-use now,
+                // and `activated_at` is the record of that (see activation.pb.js).
+                // No device is named, so there is nothing per-device to count.
+                else if (c.get("activated_at") !== null && c.get("activated_at") !== undefined && String(c.get("activated_at")).trim() !== "") redeemed++;
                 else available++;
                 if (expMs && !isNaN(expMs) && expMs > now && expMs < in30) expiringSoon++;
             }
@@ -345,7 +301,7 @@ routerAdd("POST", "/api/admin/console", function(e) {
                 codes: {
                     total: allCodes.length,
                     available: available,
-                    bound: bound,
+                    redeemed: redeemed,
                     suspended: suspended,
                     expired: expired,
                     byTier: byTier,
@@ -400,7 +356,10 @@ routerAdd("POST", "/api/admin/console", function(e) {
             for (var j = 0; j < recs.length; j++) {
                 var rec = recs[j];
                 var codeVal = rec.getString("code");
-                var fp = rec.getString("bound_fingerprint");
+                // A code is single-use now; `activated_at` is the whole record of
+                // that (see activation.pb.js). There is no fingerprint and no
+                // binding index to cross-check.
+                var redeemedAt = rec.getString("activated_at") || "";
                 var expRaw = rec.get("expires_at");
                 var expMs2 = parsePBDate(expRaw);
                 var isExp2 = expMs2 && !isNaN(expMs2) && expMs2 < nowMs;
@@ -408,35 +367,8 @@ routerAdd("POST", "/api/admin/console", function(e) {
 
                 var status = susp2 ? "suspended"
                            : isExp2 ? "expired"
-                           : fp ? "bound"
+                           : redeemedAt ? "redeemed"
                            : "available";
-
-                // Whether the binding index knows about this code's device.
-                //
-                // Reported per row so the console can flag a DISAGREEMENT
-                // between the code (`bound_fingerprint` set) and the index (no
-                // live row). That state is reachable two ways: a code bound
-                // before the index existed, or an index row an operator
-                // released while the code still holds a fingerprint. Either way
-                // it means the "one code per device" rule cannot see this
-                // binding, which is worth showing rather than discovering later.
-                //
-                // Guarded by `fp`: an unbound code has no binding to check, and
-                // looking one up per row would be a pointless scan.
-                var indexLive = false;
-                if (fp) {
-                    try {
-                        var idxRows = $app.dao().findRecordsByExpr("device_bindings",
-                            $dbx.exp("fingerprint = {:f}", { f: String(fp).replace(/[^a-zA-Z0-9]/g, "") }));
-                        for (var ix = 0; ix < idxRows.length; ix++) {
-                            if (!idxRows[ix].getString("released_at") &&
-                                idxRows[ix].getString("code") === codeVal) {
-                                indexLive = true;
-                                break;
-                            }
-                        }
-                    } catch (idxErr) { indexLive = false; }
-                }
 
                 // The window filter. A code must have a parsable expiry in the
                 // FUTURE and within the window — so already-lapsed codes are
@@ -480,19 +412,12 @@ routerAdd("POST", "/api/admin/console", function(e) {
                     code: codeVal,
                     tier: rec.getString("tier"),
                     status: status,
-                    bound: !!fp,
-                    // Truncated for display. See `fingerprint_full` below.
-                    fingerprint: fp ? fp.substring(0, 12) + "…" : "",
-                    // The untruncated value, so the console can pass it to
-                    // `device.get` without reconstructing it (and without
-                    // guessing at an ellipsis). This is a device identifier the
-                    // client itself put on the wire on every heartbeat, not a
-                    // secret — but it is still shown truncated in the UI, and
-                    // the full value is only ever used to look up a binding.
-                    fingerprint_full: fp || "",
+                    // Whether this code has been redeemed. No device is named:
+                    // a code is single-use, not device-bound.
+                    redeemed: !!redeemedAt,
                     suspended: susp2,
                     expires_at: expRaw ? String(expRaw) : "",
-                    activated_at: rec.getString("activated_at") || "",
+                    activated_at: redeemedAt,
                     middleman: rec.getString("middleman") || "",
                     label: rec.getString("label") || "",
                     notes: rec.getString("notes") || "",
@@ -514,10 +439,6 @@ routerAdd("POST", "/api/admin/console", function(e) {
                         if (expMs2 <= nowMs) return 0;
                         return Math.ceil((expMs2 - nowMs) / (24 * 60 * 60 * 1000));
                     })(),
-                    // True when the code holds a fingerprint the binding index
-                    // cannot see. See the note above: a code bound before the
-                    // index existed, or a released index row.
-                    binding_unindexed: !!fp && !indexLive,
                 });
             }
             // Sort order depends on what the caller is looking at.
@@ -596,7 +517,6 @@ routerAdd("POST", "/api/admin/console", function(e) {
                         nr.set("tier", tier);
                         nr.set("used", false);
                         nr.set("suspended", false);
-                        nr.set("bound_fingerprint", "");
                         nr.set("middleman", middleman);
                         nr.set("label", label);
                         nr.set("notes", notes);
@@ -637,7 +557,14 @@ routerAdd("POST", "/api/admin/console", function(e) {
         }
 
         // ─────────────────────────────────────────────────────────────
-        // codes.unbind — release the device binding
+        // codes.unbind — release a redeemed code back to unused
+        //
+        // There is no device binding any more (see activation.pb.js): the action
+        // is to clear the single-use stamp so the code can be activated again —
+        // by the same student on a new machine, or handed to a different one.
+        // The response key keeps the name `previous_fingerprint` for the console,
+        // but it now carries the time the code was redeemed, which is the only
+        // thing there is to report.
         // ─────────────────────────────────────────────────────────────
         if (action === "codes.unbind") {
             var targetU = canonical(body.code);
@@ -645,22 +572,20 @@ routerAdd("POST", "/api/admin/console", function(e) {
             var recU = null;
             try { recU = $app.dao().findFirstRecordByData("codes", "code", targetU); } catch (nf3) { recU = null; }
             if (!recU) return bad(404, "Code not found");
-            var oldFp = recU.getString("bound_fingerprint");
-            if (!oldFp) return bad(400, "That code is not bound to a device");
-            var reason = String(body.reason || "Unbound from console").trim();
-            recU.set("bound_fingerprint", "");
+            var prevAt = recU.getString("activated_at") || "";
+            if (!prevAt) return bad(400, "That code has not been used yet");
+            var reason = String(body.reason || "Released from console").trim();
+            // Release: clear the single-use stamp. The tier and expiry are
+            // untouched — releasing must not change what the code entitles its
+            // holder to.
             recU.set("activated_at", null);
             // These two columns previously did not exist, so the audit trail
             // recorded nothing. They are part of the schema now.
             recU.set("unbound_at", nowISO());
             recU.set("unbind_reason", reason);
             $app.dao().saveRecord(recU);
-            // Free the device in the binding index, or it could never activate
-            // another code — the uniqueness check would keep seeing a live
-            // binding to the code we just released.
-            releaseBinding(oldFp, "unbind: " + reason);
-            logEvent(targetU, "unbound", reason, oldFp.substring(0, 12));
-            return ok({code: targetU, previous_fingerprint: oldFp.substring(0, 12) + "…"});
+            logEvent(targetU, "unbound", reason, prevAt.substring(0, 16));
+            return ok({code: targetU, previous_fingerprint: prevAt.substring(0, 16)});
         }
 
         // ─────────────────────────────────────────────────────────────
@@ -685,8 +610,8 @@ routerAdd("POST", "/api/admin/console", function(e) {
         // operator ever deciding that. An operator who wants both performs both
         // — two audited actions, two clear records.
         //
-        // Also does NOT touch `bound_fingerprint` or `tier`. Renewal extends
-        // time; it does not move a device or change what was bought.
+        // Also does NOT touch the single-use state or `tier`. Renewal extends
+        // time; it does not change what was bought or whether the code is in use.
         // ─────────────────────────────────────────────────────────────
         if (action === "codes.renew") {
             var targetR = canonical(body.code);
@@ -741,7 +666,7 @@ routerAdd("POST", "/api/admin/console", function(e) {
                          " (term_days=" + termDays +
                          (price ? ", price=" + price : "") +
                          (mm ? ", middleman=" + mm : "") + ")";
-            logEvent(targetR, "renewed", detail, recR.getString("bound_fingerprint").substring(0, 12));
+            logEvent(targetR, "renewed", detail, "");
 
             return ok({
                 code: targetR,
@@ -768,67 +693,18 @@ routerAdd("POST", "/api/admin/console", function(e) {
         // changes ONLY the binding, and never touches `expires_at`.
         // ─────────────────────────────────────────────────────────────
         if (action === "codes.rebind") {
-            var targetRb = canonical(body.code);
-            if (!targetRb) return bad(400, "code is required");
-            var recRb = null;
-            try { recRb = $app.dao().findFirstRecordByData("codes", "code", targetRb); } catch (nfRb) { recRb = null; }
-            if (!recRb) return bad(404, "Code not found");
-
-            var newFp = String(body.fingerprint || "").trim();
-            if (!newFp) {
-                return bad(400,
-                    "A fingerprint is required. Move the device to the new machine by " +
-                    "activating the code there, then pass the fingerprint it reports.");
-            }
-            // Normalised ONCE and used for every write in this action.
-            //
-            // The code's `bound_fingerprint` and the binding index MUST hold the
-            // same value, or the two halves of "one code per device" would
-            // disagree: the code would name a device the index does not know,
-            // and the check would miss it. `recordBinding` in activation.pb.js
-            // enforces the same rule — see the note there.
-            //
-            // The response and the audit entry use the normalised form too, so
-            // what an operator sees is what was stored.
-            var safeNewFp = newFp.replace(/[^a-zA-Z0-9]/g, "");
-            if (!safeNewFp) {
-                return bad(400, "That fingerprint has no usable characters — check it and try again.");
-            }
-            var rbReason = String(body.reason || "").trim();
-            if (!rbReason) {
-                // Required, matching codes.unbind. The audit trail is the only
-                // place the reason a customer's code moved is recorded.
-                return bad(400, "A reason is required so the audit trail says why this code moved.");
-            }
-
-            var oldFpRb = recRb.getString("bound_fingerprint");
-            // Guard against fat-fingering the rebind onto the wrong code: if the
-            // caller tells us what it expects to replace and it does not match,
-            // refuse rather than silently moving someone else's binding.
-            var expect = String(body.expected_fingerprint || "").trim();
-            if (expect && expect !== oldFpRb) {
-                return bad(409,
-                    "This code is not bound to the fingerprint you expected, so nothing " +
-                    "was changed. Reload the code and check before rebinding.");
-            }
-
-            // Release the old binding in the index, then claim the new one.
-            releaseBinding(oldFpRb, "rebind: " + rbReason);
-            recRb.set("bound_fingerprint", safeNewFp);
-            // NOTE: `expires_at` is deliberately untouched — see the header.
-            $app.dao().saveRecord(recRb);
-            claimBinding(safeNewFp, targetRb, recRb.getString("tier"));
-
-            logEvent(targetRb, "rebound",
-                     (oldFpRb ? oldFpRb.substring(0, 12) + "…" : "(unbound)") +
-                     " → " + safeNewFp.substring(0, 12) + "… (" + rbReason + ")",
-                     safeNewFp.substring(0, 12));
-            return ok({
-                code: targetRb,
-                previous_fingerprint: oldFpRb ? oldFpRb.substring(0, 12) + "…" : "",
-                fingerprint: safeNewFp.substring(0, 12) + "…",
-                expires_at: recRb.get("expires_at") ? String(recRb.get("expires_at")) : "",
-            });
+            // REMOVED with the device binding. A code is no longer tied to a
+            // machine, so there is nothing to move it between: a student who
+            // changes machine just activates the code again, and it restores
+            // because re-activating a redeemed code is allowed (see
+            // activation.pb.js). The action is kept as an explicit refusal
+            // rather than deleted, so an operator following an old runbook gets a
+            // sentence explaining the change instead of a silent no-op.
+            return bad(410,
+                "Rebinding is no longer needed: codes are not tied to a device. Your " +
+                "student can simply enter the code again on the new machine — it will " +
+                "restore their access. Use codes.unbind only if you need to release the " +
+                "code for a different student entirely.");
         }
 
         // ─────────────────────────────────────────────────────────────
@@ -951,8 +827,8 @@ routerAdd("POST", "/api/admin/console", function(e) {
         // batches, test rows) and refuses the cases it does.
         //
         // Refusals are the point, not decoration:
-        //   * a BOUND code is refused — a student is using it. Unbind first, so
-        //     the act of releasing the device is a separate, deliberate step.
+        //   * a REDEEMED code is refused — a student is using it. Release it
+        //     first, so letting a code go is a separate, deliberate step.
         //   * an audit event is written BEFORE the row goes, so a deleted code
         //     still leaves a trace (the code_events row outlives the code).
         //
@@ -966,21 +842,19 @@ routerAdd("POST", "/api/admin/console", function(e) {
             var recD = null;
             try { recD = $app.dao().findFirstRecordByData("codes", "code", targetD); } catch (nf6) { recD = null; }
             if (!recD) return bad(404, "Code not found");
-            var dFp = recD.getString("bound_fingerprint");
-            if (body.force_delete_bound !== true && dFp) {
-                return bad(409, "That code is bound to a device. Unbind it first, or pass force_delete_bound to override.");
+            var dRedeemed = recD.getString("activated_at") || "";
+            if (body.force_delete_bound !== true && dRedeemed) {
+                return bad(409, "That code has been used by a student. Release it first, or pass force_delete_bound to override.");
             }
             logEvent(targetD, "deleted",
                      "tier=" + recD.getString("tier") + " middleman=" + recD.getString("middleman") +
-                     (dFp ? " was-bound=" + dFp.substring(0, 12) : ""),
-                     dFp ? dFp.substring(0, 12) : "");
-            // Release the binding index even when a code is force-deleted while
-            // bound. Without this, the index keeps a live row pointing at a code
-            // that no longer exists, and the uniqueness check would then refuse
-            // EVERY future activation on that device — with no code left on the
-            // hub for an operator to unbind. The device would be bricked by a
-            // deletion, which is not a side effect any operator would expect.
-            releaseBinding(dFp, "code deleted");
+                     (dRedeemed ? " was-redeemed=" + dRedeemed.substring(0, 16) : ""),
+                     "");
+            // No binding index to release any more. The old code had to release
+            // one here or a device would be permanently unable to activate again
+            // (the uniqueness check kept seeing a row pointing at a deleted code);
+            // there is nothing equivalent now, which is one less way a deletion
+            // could have bricked a machine.
             $app.dao().deleteRecord(recD);
             return ok({code: targetD, deleted: true});
         }
@@ -1007,8 +881,11 @@ routerAdd("POST", "/api/admin/console", function(e) {
                 var rd = null;
                 try { rd = $app.dao().findFirstRecordByData("codes", "code", cd); } catch (nf7) { rd = null; }
                 if (!rd) { skipped.push({code: cd, why: "not found"}); continue; }
-                var dfp = rd.getString("bound_fingerprint");
-                if (dfp) { skipped.push({code: cd, why: "bound to a device"}); continue; }
+                // A redeemed code is always skipped in a batch: the whole point
+                // of the batch path is cleanup, and silently throwing away a
+                // code a student is actively using is the failure this guards
+                // against. Release it deliberately first if that is intended.
+                if (rd.getString("activated_at")) { skipped.push({code: cd, why: "already used by a student"}); continue; }
                 logEvent(cd, "deleted",
                          "batch: tier=" + rd.getString("tier") + " middleman=" + rd.getString("middleman"), "");
                 $app.dao().deleteRecord(rd);
@@ -1035,112 +912,25 @@ routerAdd("POST", "/api/admin/console", function(e) {
         }
 
         // ─────────────────────────────────────────────────────────────
-        // device.get — what is this machine entitled to?
+        // device.get / devices.list — REMOVED with the device binding
         //
-        // The binding index was written by the activation and admin paths but
-        // never read back, which made it a write-only audit trail. That left
-        // the "one code per device" rule unverifiable from the console: an
-        // operator could not answer "does this device hold more than one
-        // entitlement?" — the exact integrity question the rule creates.
+        // These read the `device_bindings` index, which no longer exists (see
+        // activation.pb.js). A code is single-use and not tied to a machine, so
+        // there is no per-device view to show and no "one code per device"
+        // invariant to audit.
         //
-        // Also gives support a way to confirm a re-bind landed, and to see
-        // whether a device has a history of moving (the signature of a card
-        // changing hands, versus a laptop replacement).
-        // ─────────────────────────────────────────────────────────────
-        if (action === "device.get") {
-            var wantedFp = String(body.fingerprint || "").trim().replace(/[^a-zA-Z0-9]/g, "");
-            if (!wantedFp) return bad(400, "fingerprint is required");
-
-            var row = null;
-            try {
-                row = $app.dao().findFirstRecordByFilter("device_bindings",
-                    "fingerprint = '" + wantedFp + "'");
-            } catch (none) { row = null; }
-
-            if (!row) return ok({found: false, fingerprint: wantedFp});
-
-            var heldCode = row.getString("code");
-            var released = !!row.getString("released_at");
-
-            // Read the code the device is bound to, if it still exists, so the
-            // response can carry the student-facing facts (label, expiry)
-            // alongside the binding. A binding whose code is missing is worth
-            // reporting rather than hiding: it means the index and the codes
-            // table disagree.
-            var heldRec = null;
-            try { heldRec = $app.dao().findFirstRecordByData("codes", "code", heldCode); } catch (nfHeld) { heldRec = null; }
-
-            return ok({
-                found: true,
-                fingerprint: wantedFp,
-                code: heldCode,
-                tier: row.getString("tier") || "",
-                bound_at: row.getString("bound_at") || "",
-                released: released,
-                released_at: row.getString("released_at") || "",
-                release_reason: row.getString("release_reason") || "",
-                // A live binding whose code no longer exists. The uniqueness
-                // check would still refuse a new activation, so this is a state
-                // an operator needs to see and clear, not a silent oddity.
-                code_missing: !released && !heldRec,
-                label: heldRec ? (heldRec.getString("label") || "") : "",
-                expires_at: (heldRec && heldRec.get("expires_at")) ? String(heldRec.get("expires_at")) : "",
-                suspended: heldRec ? heldRec.getBool("suspended") : false,
-            });
-        }
-
-        // ─────────────────────────────────────────────────────────────
-        // devices.list — every binding, for integrity checking
+        // Support still needs to answer "is this code in use, and by when does
+        // it run out?" — that is `codes.list`, which reports `redeemed` and the
+        // expiry per code.
         //
-        // The point is to make the "one code per device" rule AUDITABLE: a
-        // fingerprint appearing more than once as live would mean the rule was
-        // violated (by a bug, by a direct write, or by a migration that predates
-        // the index). The unique constraint should prevent that, so this is the
-        // check that the constraint is actually doing its job.
+        // Kept as explicit refusals rather than deleted, so an operator (or an
+        // old script) following a previous runbook gets a sentence explaining the
+        // change instead of a silent no-op.
         // ─────────────────────────────────────────────────────────────
-        if (action === "devices.list") {
-            var bindings = null;
-            try {
-                bindings = $app.dao().findRecordsByExpr("device_bindings", $dbx.exp("id != ''"));
-            } catch (devErr) {
-                return bad(500, "could not read the binding index: " + (devErr && devErr.message ? devErr.message : String(devErr)));
-            }
-
-            var live = {}, rows = [];
-            for (var b = 0; b < bindings.length; b++) {
-                var br = bindings[b];
-                var bfp = br.getString("fingerprint");
-                var bCode = br.getString("code");
-                var bReleased = !!br.getString("released_at");
-                var bRec = null;
-                try { bRec = $app.dao().findFirstRecordByData("codes", "code", bCode); } catch (nfB) { bRec = null; }
-                if (!bReleased) live[bfp] = (live[bfp] || 0) + 1;
-                rows.push({
-                    fingerprint: bfp ? bfp.substring(0, 12) + "…" : "",
-                    code: bCode,
-                    tier: br.getString("tier") || "",
-                    bound_at: br.getString("bound_at") || "",
-                    released: bReleased,
-                    released_at: br.getString("released_at") || "",
-                    release_reason: br.getString("release_reason") || "",
-                    code_missing: !bReleased && !bRec,
-                    label: bRec ? (bRec.getString("label") || "") : "",
-                    expires_at: (bRec && bRec.get("expires_at")) ? String(bRec.get("expires_at")) : "",
-                });
-            }
-
-            // Duplicates should be impossible given the unique index. Report
-            // them rather than assuming, so a violated assumption is visible.
-            var duplicates = [];
-            for (var dfp in live) { if (live[dfp] > 1) duplicates.push(dfp.substring(0, 12) + "…"); }
-
-            rows.sort(function(a, b) { return (b.bound_at || "").localeCompare(a.bound_at || ""); });
-            return ok({
-                total: rows.length,
-                live_count: (function() { var c = 0; for (var k in live) c++; return c; })(),
-                duplicate_live_fingerprints: duplicates,
-                bindings: rows,
-            });
+        if (action === "device.get" || action === "devices.list") {
+            return bad(410,
+                "Device lookups are gone: codes are no longer tied to a device. Use " +
+                "codes.list to see which codes have been redeemed and when they expire.");
         }
 
         // ─────────────────────────────────────────────────────────────

@@ -161,6 +161,14 @@ async fn init_auto_backup() {
 /// this the entitlement would never refresh, a suspension would go unnoticed,
 /// and the grace period would silently run out.
 async fn init_locus_heartbeat() {
+    // Rehydrate from the durable mirror BEFORE reading the record. An uninstall
+    // or a config reset can leave `verge.yaml` without the code while the
+    // machine-scoped copy still holds it; without this the device would resume
+    // as if unactivated and send the student back to the code screen for a code
+    // they already own. This also writes the recovered code back, so the launch
+    // is not a one-off.
+    let _ = crate::locus::store::read_code_rehydrating().await;
+
     let verge = crate::config::Config::verge().await;
     let activation = match crate::locus::store::read(&verge.latest_arc()) {
         Some(activation) => activation,

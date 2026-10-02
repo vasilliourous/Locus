@@ -60,14 +60,88 @@ pub fn is_usable(activation: &Activation) -> bool {
 /// Returns `None` for a partial record rather than a half-filled struct: the
 /// caller must decide to re-activate, and it cannot make that decision from a
 /// struct that looks populated but is not usable.
+///
+/// When the config has no code, this falls back to the durable machine-store
+/// mirror ([`crate::locus::credential`]) so a device whose `verge.yaml` was
+/// wiped by an uninstall can still be seen as activated. The tier and
+/// fingerprint must still be present in the config for the record to be usable —
+/// those are refreshed by the next heartbeat, and [`read_code_rehydrating`]
+/// is the path that also writes the recovered code back.
 #[must_use]
 pub fn read(verge: &IVerge) -> Option<Activation> {
+    activation_from(verge, crate::locus::credential::read_code())
+}
+
+/// The pure decision behind [`read`], with the mirror value injected.
+///
+/// Split out so the "config first, mirror as fallback" rule can be tested
+/// without touching a real machine-scoped file — the same reason the identity
+/// module takes its sources as arguments.
+#[must_use]
+fn activation_from(verge: &IVerge, mirrored_code: Option<String>) -> Option<Activation> {
+    let code = config_code(verge).or(mirrored_code)?;
     let activation = Activation {
-        code: verge.activation_code.as_deref().unwrap_or_default().to_owned(),
+        code,
         tier: verge.locus_tier.as_deref().unwrap_or_default().to_owned(),
         fingerprint: verge.device_fingerprint.as_deref().unwrap_or_default().to_owned(),
     };
     is_usable(&activation).then_some(activation)
+}
+
+/// The stored activation code, from the config **or** the durable mirror.
+///
+/// `verge.yaml` is the primary store, but it is the app's own config and an
+/// uninstall or a reset takes it — along with the code the student may no longer
+/// have a card for. So a second copy lives in a machine-scoped file
+/// ([`crate::locus::credential`]) and this is the read that consults both.
+///
+/// The config wins when it holds a code, because that is the value the rest of
+/// the app has been running on and it is refreshed by every write. The mirror is
+/// the fallback: when the config has none, a code found there is *adopted back*
+/// into the config so the launch is not a one-off.
+///
+/// Returns `None` when neither holds anything, which is the genuine first-run
+/// state.
+pub async fn read_code_rehydrating() -> Option<String> {
+    let verge = Config::verge().await;
+    if let Some(code) = config_code(&verge.latest_arc()) {
+        return Some(code);
+    }
+
+    // The config lost it. A mirror is the only thing that can recover the
+    // student's entitlement, so adopt it and write it back to the config too.
+    let code = crate::locus::credential::read_code()?;
+    logging::info_recovered_code();
+    // Best-effort: the caller has the code either way, and failing the launch
+    // over a config write would trade a recovering device for a clean file.
+    if let Err(error) = store_code_in_config(&code).await {
+        logging::warn_could_not_write_back(&error);
+    }
+    Some(code)
+}
+
+/// The code held in the config alone, without consulting the mirror.
+#[must_use]
+fn config_code(verge: &IVerge) -> Option<String> {
+    verge
+        .activation_code
+        .as_deref()
+        .map(str::trim)
+        .filter(|code| !code.is_empty())
+        .map(str::to_owned)
+}
+
+/// Writes just the code into the config, leaving the rest of the record alone.
+///
+/// Used by [`read_code_rehydrating`] to put a recovered code back. Deliberately
+/// narrow: it must not touch the tier or the fingerprint, which the heartbeat
+/// owns and which a recovery has no new information about.
+async fn store_code_in_config(code: &str) -> Result<()> {
+    let verge = Config::verge().await;
+    verge.edit_draft(|draft| {
+        draft.activation_code = Some(SmartString::from(code));
+    });
+    verge.data_arc().save_file().await
 }
 
 /// Persists an activation, then saves the file.
@@ -82,100 +156,34 @@ pub async fn store(activation: &Activation) -> Result<()> {
         draft.locus_tier = Some(SmartString::from(activation.tier.as_str()));
         draft.device_fingerprint = Some(SmartString::from(activation.fingerprint.as_str()));
     });
-    verge.data_arc().save_file().await
-}
+    let saved = verge.data_arc().save_file().await;
 
-/// Reads the stored device identity, if the app-config fallback holds one.
-///
-/// This is the *second* place an identity may live. [`crate::locus::identity`]
-/// keeps the real one in a machine-scoped file, which is what survives a
-/// reinstall; these fields exist for a device where that location is not
-/// writable without elevation.
-///
-/// Returns `None` when either half is missing, never a half-populated identity:
-/// a secret with no id cannot be presented, and an id with no secret cannot be
-/// proven, so neither is usable and pretending otherwise would produce a device
-/// that believes it is known to the hub and is not.
-#[must_use]
-pub fn read_identity(verge: &IVerge) -> Option<crate::locus::identity::StoredIdentity> {
-    let device_id = verge.locus_device_id.as_deref().unwrap_or_default().trim().to_owned();
-    let secret = verge.locus_device_secret.as_deref().unwrap_or_default().trim().to_owned();
-    if device_id.is_empty() || secret.is_empty() {
-        return None;
+    // Mirror the code to the machine store in the SAME operation, so a launch
+    // that writes the code once is a launch that has a durable copy of it. This
+    // is the write that makes the code survive `verge.yaml` being wiped by an
+    // uninstall or a reset.
+    //
+    // Best-effort and logged, never fatal: the config write above is what the
+    // session needs, and a device with no writable machine store should still
+    // activate — it simply cannot promise to survive a reinstall.
+    if !activation.code.trim().is_empty() && !crate::locus::credential::write_code(&activation.code) {
+        logging::warn_could_not_mirror();
     }
-    // The store label is read back rather than assumed. A device that recorded
-    // "app" must not be reported as "machine" on the next launch, or the UI
-    // would promise durability the install does not have.
-    let store = match verge.locus_identity_store.as_deref() {
-        Some("machine") => crate::locus::identity::Store::Machine,
-        _ => crate::locus::identity::Store::AppFallback,
-    };
-    Some(crate::locus::identity::StoredIdentity {
-        device_id,
-        secret,
-        store,
-    })
+
+    saved
 }
 
-/// Persists the device identity into the app-config fallback.
-///
-/// Used only when the machine-scoped store is unwritable. The `store` label is
-/// written alongside so the next launch reports the same durability rather than
-/// guessing it — a device that is one reinstall away from losing its entitlement
-/// must keep saying so.
-pub async fn store_identity(identity: &crate::locus::identity::DeviceIdentity) -> Result<()> {
-    let label = match identity.store {
-        crate::locus::identity::Store::Machine => "machine",
-        crate::locus::identity::Store::AppFallback | crate::locus::identity::Store::Fresh => "app",
-    };
-    let verge = Config::verge().await;
-    verge.edit_draft(|draft| {
-        draft.locus_device_id = Some(SmartString::from(identity.device_id.as_str()));
-        draft.locus_device_secret = Some(SmartString::from(identity.secret.as_str()));
-        draft.locus_identity_store = Some(SmartString::from(label));
-    });
-    verge.data_arc().save_file().await
-}
-
-/// Stores the session token minted at recognition.
-///
-/// Written with the expiry, in one operation, so a crash cannot leave a token
-/// with no expiry — which the client could not reason about, and would have to
-/// treat as either "valid forever" or "expired now", both of them wrong.
-///
-/// This is a CREDENTIAL. It is stored in the same plaintext config as the
-/// activation code, for the same reason (it must survive restarts), and it is
-/// subject to the same rules: never logged, never exported.
-pub async fn store_device_token(token: &str, expires_at: Option<&str>) -> Result<()> {
-    let verge = Config::verge().await;
-    verge.edit_draft(|draft| {
-        draft.locus_device_token = Some(SmartString::from(token));
-        draft.locus_token_expires_at = expires_at.map(SmartString::from);
-    });
-    verge.data_arc().save_file().await
-}
-
-/// The stored session token, read from the live config.
-///
-/// Async because reading the config is. Kept separate from [`device_token`] so
-/// the pure accessor stays testable without a config singleton, matching how the
-/// rest of this module splits reading from resolving.
-pub async fn stored_device_token() -> Option<String> {
-    let verge = Config::verge().await;
-    device_token(&verge.latest_arc())
-}
-
-/// The stored session token, if one is held.
-#[must_use]
-pub fn device_token(verge: &IVerge) -> Option<String> {
-    verge
-        .locus_device_token
-        .as_deref()
-        .map(str::trim)
-        .filter(|t| !t.is_empty())
-        .map(str::to_owned)
-}
-
+// `read_identity`, `store_identity`, `store_device_token` and `device_token`
+// — REMOVED.
+//
+// These were the app-config half of the durable device identity and the
+// session token minted at device recognition. Both features are gone: a client
+// keeps its activation code in a machine-scoped store
+// (`crate::locus::credential`) and authenticates with that code alone.
+//
+// The `locus_device_*` / `locus_identity_store` / `locus_device_token` fields
+// still exist on `IVerge` so an upgrade does not fail to deserialize a config
+// that holds them. They are simply never read or written any more.
 /// Records a successful heartbeat.
 ///
 /// The failure count is reset at the same time, because the two are one fact:
@@ -218,24 +226,53 @@ pub async fn record_expiry(expires_at: Option<String>) -> Result<()> {
     verge.data_arc().save_file().await
 }
 
-/// Clears the entitlement, e.g. after the hub says the code is suspended.
+/// Clears the entitlement after the hub has **definitively** refused it.
 ///
-/// Deliberately clears all three fields together. Leaving a stale tier behind
-/// would let a deactivated device keep presenting itself as entitled, and the
-/// UI would show a tier the hub will not serve.
+/// This is the suspension/expiry/refund path — a statement about the code
+/// itself, which the device must act on. It clears the code, the tier and the
+/// expiry together, and removes the durable mirror, because keeping a credential
+/// the hub has rejected is how a suspended device would keep looking entitled
+/// after a restart.
 ///
-/// The expiry is cleared alongside the code, for the same reason. The two
-/// describe one entitlement, and keeping a date after the entitlement is gone
-/// produced a half-state where the client still knew when a code it no longer
-/// held had been due to lapse — which the UI could render as a real, current
-/// subscription on a device that has none.
+/// Deliberately does NOT use this for a transient failure. A grace period that
+/// ran out, or a hub that could not be reached, says nothing about whether the
+/// code is still valid — and wiping it there is exactly the bug this module's
+/// mirror exists to fix: a student whose wifi was down for a week is dropped
+/// back onto the activation screen with a code they may no longer have a card
+/// for. Use [`record_lapsed_grace`] for that case, which keeps the code.
 ///
 /// The refusal reason is NOT cleared, because it is the record of why this
 /// happened; see [`record_refusal`].
-pub async fn clear() -> Result<()> {
+pub async fn clear_entitlement() -> Result<()> {
     let verge = Config::verge().await;
     verge.edit_draft(|draft| {
         draft.activation_code = None;
+        draft.locus_tier = None;
+        draft.locus_expires_at = None;
+        draft.last_heartbeat_ok = None;
+        draft.heartbeat_failures = None;
+    });
+    let saved = verge.data_arc().save_file().await;
+    // The mirror goes with it, and this one IS the durable copy — leaving it
+    // behind would let the next launch re-adopt a code the hub has refused.
+    crate::locus::credential::remove_code();
+    saved
+}
+
+/// Clears what a lapsed grace period invalidates, **keeping the code**.
+///
+/// The grace period is a local rule: the hub has not answered for long enough
+/// that the tunnel must come down, because staying up would mean serving a
+/// device whose entitlement can no longer be confirmed. That is a statement
+/// about *this session*, not about the code.
+///
+/// So the code and its durable mirror survive, and only the session state is
+/// cleared — the tier, the expiry and the heartbeat bookkeeping. On the next
+/// launch, or as soon as the hub answers again, the device re-activates with a
+/// code it still holds rather than sending the student hunting for their card.
+pub async fn record_lapsed_grace() -> Result<()> {
+    let verge = Config::verge().await;
+    verge.edit_draft(|draft| {
         draft.locus_tier = None;
         draft.locus_expires_at = None;
         draft.last_heartbeat_ok = None;
@@ -367,6 +404,33 @@ mod logging {
             "[locus] stored tier config is unusable for the {tier} tier"
         );
     }
+
+    /// The code was recovered from the durable mirror, so the config had lost it.
+    pub fn info_recovered_code() {
+        clash_verge_logging::logging!(
+            info,
+            clash_verge_logging::Type::Config,
+            "[locus] recovered the activation code from the machine store after the config lost it"
+        );
+    }
+
+    /// The code could not be written back into the config after a recovery.
+    pub fn warn_could_not_write_back(error: &anyhow::Error) {
+        clash_verge_logging::logging!(
+            warn,
+            clash_verge_logging::Type::Config,
+            "[locus] recovered the code but could not write it back to the config: {error:#}"
+        );
+    }
+
+    /// The code could not be mirrored to the machine store.
+    pub fn warn_could_not_mirror() {
+        clash_verge_logging::logging!(
+            warn,
+            clash_verge_logging::Type::Config,
+            "[locus] could not mirror the activation code to the machine store"
+        );
+    }
 }
 
 /// Whether an incoming tier config actually differs from the stored one.
@@ -448,7 +512,7 @@ mod tests {
             Some("strike"),
             Some("a".repeat(64).as_str()),
         );
-        let activation = read(&verge).expect("a complete record must read");
+        let activation = activation_from(&verge, None).expect("a complete record must read");
         assert_eq!(activation.tier, "strike");
         assert!(is_usable(&activation));
     }
@@ -468,7 +532,7 @@ mod tests {
             verge_with(Some("   "), Some("eco"), Some(&"a".repeat(64))),
         ] {
             assert!(
-                read(&verge).is_none(),
+                activation_from(&verge, None).is_none(),
                 "an incomplete record must not present as activated: {verge:?}"
             );
         }
@@ -477,7 +541,44 @@ mod tests {
     /// A fresh install is the normal case and must not be an error.
     #[test]
     fn a_fresh_config_is_not_activated() {
-        assert!(read(&IVerge::default()).is_none());
+        assert!(activation_from(&IVerge::default(), None).is_none());
+    }
+
+    /// The mirror is the fallback: when the config has no code but the durable
+    /// store does, the record is usable again.
+    ///
+    /// This is the whole point of Phase 1 — an uninstall wipes `verge.yaml`, and
+    /// the code must come back from the machine store rather than sending the
+    /// student to find a card they threw away.
+    #[test]
+    fn a_mirrored_code_revives_a_code_less_config() {
+        let verge = verge_with(None, Some("strike"), Some(&"a".repeat(64)));
+        let activation = activation_from(&verge, Some("RQ-ABCD-EFGH-JKMN-T".to_owned()))
+            .expect("the mirror must revive a config with no code");
+        assert_eq!(activation.code, "RQ-ABCD-EFGH-JKMN-T");
+        assert_eq!(activation.tier, "strike");
+    }
+
+    /// The config wins when it holds a code, so a stale mirror cannot override a
+    /// freshly activated value.
+    #[test]
+    fn the_config_code_beats_the_mirror() {
+        let verge = verge_with(
+            Some("RQ-ABCD-EFGH-JKMN-T"),
+            Some("eco"),
+            Some(&"a".repeat(64)),
+        );
+        let activation = activation_from(&verge, Some("RQ-ZZZZ-ZZZZ-ZZZZ-Z".to_owned()))
+            .expect("the config record must read");
+        assert_eq!(activation.code, "RQ-ABCD-EFGH-JKMN-T");
+    }
+
+    /// A mirror cannot supply what the config never had: without a tier the
+    /// record is still damaged, and the student is re-activated.
+    #[test]
+    fn a_mirrored_code_without_a_tier_is_still_absent() {
+        let verge = verge_with(None, None, Some(&"a".repeat(64)));
+        assert!(activation_from(&verge, Some("RQ-ABCD-EFGH-JKMN-T".to_owned())).is_none());
     }
 
     /// The redaction must never emit the activation code, whatever else it says.
@@ -526,6 +627,6 @@ mod tests {
     #[test]
     fn an_empty_code_is_not_a_stored_code() {
         let verge = verge_with(Some(""), Some("eco"), Some(&"d".repeat(64)));
-        assert!(read(&verge).is_none());
+        assert!(activation_from(&verge, None).is_none());
     }
 }

@@ -2,30 +2,30 @@
 //!
 //! Ports `legacy/wails-client/internal/activation/fingerprint_*.go`.
 //!
-//! # This is NOT the value an activation code is bound to
+//! # What this value is for now
 //!
-//! It used to be, and that was the bug. This fingerprint is **re-derived on every
-//! launch** from MAC address, disk serial and board UUID, so a NIC enumerating in
-//! a different order, a disk serial becoming unreadable, or the `combine` chain
-//! below degrading to a weaker rung all produce a *different* digest. Binding a
-//! code to it meant a student's own laptop presented a different device after an
-//! update, and the hub refused the code with `403 "Code bound to another
-//! device"`.
+//! It is **not** a binding key, and no longer an identity of any kind. A code is
+//! single-use and not tied to a device (see `server/pb_hooks/activation.pb.js`),
+//! and the client keeps its activation code in a machine-scoped store rather than
+//! recognising a device (see [`crate::locus::credential`]).
 //!
-//! A code is bound to a device's **durable identity** — the persisted
-//! `device_id` from [`crate::locus::identity`], which is written to a
-//! machine-scoped store on first launch and reused verbatim thereafter. See
-//! [`crate::locus::identity::DeviceIdentity::binding_id`] for the full argument.
+//! So this value has exactly two uses, both non-authoritative:
 //!
-//! # What this value is still for
+//! * **A rate-limit and support key** carried on `/api/activate`,
+//!   `/api/code-lookup` and `/api/heartbeat`. The hub buckets requests by it and
+//!   truncates it into an attempt log; it is compared against nothing.
+//! * **The diagnostic "device id"** in the status command, shown truncated — a
+//!   one-shot "what does this machine report" probe.
 //!
-//! * **Seeding a first-run identity** where the OS exposes no `machine-id`
-//!   (see [`crate::locus::identity::resolve`]).
-//! * **Diagnostics** — a one-shot "what does this machine report" probe.
+//! It was once the binding key, and that was the bug: this fingerprint is
+//! **re-derived on every launch** from MAC address, disk serial and board UUID, so
+//! a NIC enumerating in a different order, a disk serial becoming unreadable, or
+//! the `combine` chain below degrading to a weaker rung all produce a *different*
+//! digest — and a device was told its own code belonged to someone else. Nothing
+//! may bind to it again.
 //!
-//! It is deliberately no longer on any activation or heartbeat path. The hash is
-//! still cached for the process lifetime so that a *seeding* read is consistent
-//! within a run, but it is neither persisted nor sent anywhere.
+//! The hash is cached for the process lifetime so a read within one run is
+//! consistent. It is neither persisted nor a credential.
 //!
 //! Three properties were said to matter here, and they pull against each other:
 //!

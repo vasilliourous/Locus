@@ -155,20 +155,25 @@ routerAdd("POST", "/api/code-lookup", function(e) {
             }
         }
 
-        var boundFp = rec.getString("bound_fingerprint");
-        if (boundFp) {
-            // Compared in NORMALISED form. The stored value is normalised by
-            // the activation path, so a raw incoming fingerprint would not
-            // match — and this pre-check exists to tell a student "this is
-            // already active on YOUR device" rather than sending them to a
-            // middleman for a code they already own.
-            if (boundFp === String(fp).replace(/[^a-zA-Z0-9]/g, "")) {
-                resp.status = "bound_this_device";
-                resp.message = "Already activated on this device";
-            } else {
-                resp.status = "bound_other";
-                resp.message = "This code is already in use on another device";
-            }
+        // ── Redeemed already? ──
+        //
+        // A code is single-use, and `activated_at` is that whole rule (see
+        // activation.pb.js). A redeemed code is NOT a refusal here: the student
+        // presenting their own code again is the normal recovery path — a
+        // reinstall, a new machine — and there is no device identity left to
+        // confirm it against. So this is reported as usable, with a message that
+        // says so, rather than as an error that would send them to a middleman.
+        //
+        // The old `bound_other` / `bound_this_device` split is gone with the
+        // device binding it described. Those two statuses are FROZEN wire names —
+        // a deployed client maps them to its own messages — so `already_used` is
+        // a new status an old client would not recognise. That is safe: an
+        // unrecognised status reads as "cannot tell" and falls back to the
+        // activate-time check, which is the correct behaviour anyway.
+        var at = rec.get("activated_at");
+        if (at !== null && at !== undefined && String(at).trim() !== "") {
+            resp.status = "already_used";
+            resp.message = "This code has already been activated — entering it again will restore your access";
             return e.json(200, resp);
         }
 

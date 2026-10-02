@@ -4,13 +4,11 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { useSubscription } from '@/hooks/use-subscription'
 import { LOCUS_COLORS } from '@/pages/_theme'
 import { activationRefusal } from '@/pages/connect-notice'
-import { recognitionNotice } from '@/pages/recognition-notice'
 import {
   locusActivate,
   locusCheckCode,
   locusValidateCode,
   type ActivationResult,
-  type RecognitionResult,
   type ValidateCodeResult,
 } from '@/services/locus'
 import { errorDetail } from '@/services/notice-service'
@@ -45,30 +43,6 @@ const CODE_LENGTH = 15 // RQ + 3x4 + checksum, hyphens excluded
 /** Strips formatting and uppercases, mirroring the backend's normalisation. */
 const clean = (input: string) => input.replace(/[^a-z0-9]/gi, '').toUpperCase()
 
-/**
- * The sentence for each recognition notice.
- *
- * Written as literals here rather than through `t()` because **this screen uses
- * no i18n at all** — every string on it is fixed English, including "Enter the
- * activation code from your card." and "Secure school VPN". That is the existing
- * design, not an oversight, so a lone translated string would be the odd one out.
- *
- * `recognition-notice.ts` still returns i18n *keys* rather than sentences, so
- * when this screen is translated the keys are already defined and this table is
- * the only thing that has to change.
- */
-const RECOGNITION_TEXT: Record<
-  'restoring' | 'durableWarning' | 'unavailable',
-  string
-> = {
-  restoring:
-    'Welcome back — this device is already registered, so no code is needed.',
-  durableWarning:
-    'This device is registered, but only for this installation. If you reinstall Locus you will need the code from your card again.',
-  unavailable:
-    'Could not check whether this device is already registered. Enter the code from your card to continue.',
-}
-
 /** Groups a bare code into the hyphenated form as the student types. */
 const present = (input: string) => {
   const raw = clean(input)
@@ -84,24 +58,9 @@ const present = (input: string) => {
 
 interface Props {
   onActivated: (result: ActivationResult) => void
-  /**
-   * What the first-launch device-recognition check concluded, or `null` before
-   * it lands.
-   *
-   * Passed in rather than fetched here because the check must run ONCE, before
-   * this screen exists: it is what decides whether the student should be looking
-   * at this screen at all. Fetching it here would run it again for every student
-   * who reaches the prompt legitimately.
-   *
-   * The screen renders the *notice* derived from this (`recognitionNotice`), not
-   * the result itself — the mapping from three Rust cases to one sentence is a
-   * pure function with its own tests, and this component has no business
-   * re-deriving it.
-   */
-  recognition?: RecognitionResult | null
 }
 
-const ActivationScreen = ({ onActivated, recognition = null }: Props) => {
+const ActivationScreen = ({ onActivated }: Props) => {
   const [input, setInput] = useState('')
   const [phase, setPhase] = useState<Phase>('idle')
   const [error, setError] = useState<string | null>(null)
@@ -123,15 +82,6 @@ const ActivationScreen = ({ onActivated, recognition = null }: Props) => {
   // rewording it here would replace an action with a description.
   const { subscription } = useSubscription()
   const refusal = activationRefusal(subscription)
-
-  /**
-   * The notice derived from the recognition check, or `null` to say nothing.
-   *
-   * Derived rather than stored: the mapping is a pure function of the prop, so
-   * holding it in state would only create a second copy that can fall out of
-   * step with what was actually passed in.
-   */
-  const recognitionNoticeData = recognitionNotice(recognition)
 
   useEffect(() => {
     inputRef.current?.focus()
@@ -184,9 +134,10 @@ const ActivationScreen = ({ onActivated, recognition = null }: Props) => {
     setError(null)
     setNotice(null)
 
-    // Ask the hub whether the code is usable here BEFORE binding. This is what
-    // turns "activation failed" into "this code is in use on another device",
-    // and it costs one read-only request instead of a failed binding attempt
+    // Ask the hub whether the code is usable BEFORE activating. This is what
+    // turns "activation failed" into a specific reason — "this code has already
+    // been activated", "this code has been suspended", "the code has expired" —
+    // and it costs one read-only request instead of a failed activation attempt
     // that counts against the rate limit.
     setPhase('checking')
     try {
@@ -214,7 +165,7 @@ const ActivationScreen = ({ onActivated, recognition = null }: Props) => {
       // `errorDetail`, not `String`: a Rust failure arrives as
       // `CommandFailure { code, detail }`, so `String(err)` renders as
       // "[object Object]" and throws away the only useful sentence — "this code
-      // is already in use on another device", "the code has expired", and so on.
+      // has already been activated", "the code has expired", and so on.
       setError(errorDetail(err))
       setPhase('idle')
     }
@@ -287,47 +238,6 @@ const ActivationScreen = ({ onActivated, recognition = null }: Props) => {
         >
           Secure school VPN
         </Typography>
-
-        {/* The device-recognition notice, above everything.
-            It explains why this screen is in front of the student at all: either
-            we could not ask the hub (so the card is required after all), or the
-            device is known and the prompt is about to be replaced. A refusal
-            below is a statement about the account, which is the more urgent of
-            the two and renders after this. */}
-        {recognitionNoticeData && (
-          <Box
-            sx={{
-              width: '100%',
-              boxSizing: 'border-box',
-              mb: 2.5,
-              px: 2,
-              py: 1.5,
-              borderRadius: 1.5,
-              border: `1px solid ${
-                recognitionNoticeData.tone === 'caution'
-                  ? LOCUS_COLORS.warning
-                  : LOCUS_COLORS.border
-              }`,
-              bgcolor:
-                recognitionNoticeData.tone === 'caution'
-                  ? alpha(LOCUS_COLORS.warning, 0.12)
-                  : 'transparent',
-            }}
-          >
-            <Typography
-              variant="body2"
-              sx={{
-                color:
-                  recognitionNoticeData.tone === 'caution'
-                    ? LOCUS_COLORS.warning
-                    : LOCUS_COLORS.textSecondary,
-                lineHeight: 1.5,
-              }}
-            >
-              {RECOGNITION_TEXT[recognitionNoticeData.kind]}
-            </Typography>
-          </Box>
-        )}
 
         {/* A refusal, said before anything else on the screen.
             A suspended or expired device lands here with no other explanation:

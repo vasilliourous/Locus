@@ -57,7 +57,8 @@ COLLECTIONS = [
         {"name": "tier", "type": "text", "required": True},
         {"name": "used", "type": "bool"},
         {"name": "suspended", "type": "bool"},
-        {"name": "bound_fingerprint", "type": "text"},
+        # Codes are single-use and not device-bound; `activated_at` is the
+        # record of use. See activation.pb.js.
         {"name": "expires_at", "type": "date"},
         {"name": "activated_at", "type": "date"},
         {"name": "middleman", "type": "text"},

@@ -448,25 +448,54 @@ else
     printf '%s\n' "$dead_header" | sed 's/^/         /'
 fi
 
-# (e) The binding index must be read and written under the SAME key.
+# (e) RETIRED: the device-binding normalisation check.
 #
-# WHY THIS IS A CHECK AND NOT A COMMENT. Fingerprints are normalised to
-# [a-zA-Z0-9] before touching `device_bindings`. An earlier version looked up
-# the stripped value but INSERTED the raw one, and compared a stored
-# (normalised) value against a raw incoming fingerprint. The failure is silent:
-# the write succeeds, the row looks right, and only the uniqueness check quietly
-# stops matching — which is precisely the "one code per device" guarantee.
+# This used to assert that any hook writing a fingerprint into `device_bindings`
+# or `codes.bound_fingerprint` normalised it first, because a raw/stripped
+# mismatch made the "one code per device" uniqueness check silently stop
+# matching. Both the binding and the index are gone (codes are single-use and
+# not device-bound — see activation.pb.js), so the pattern it grepped for no
+# longer exists anywhere in the tree.
 #
-# So: any hook that writes a fingerprint into a row must normalise it in the
-# same statement. A bare `set("fingerprint", fp)` or
-# `set("bound_fingerprint", fp)` is the bug. The normalised form is required.
-raw_fp_write=$(grep -rnE 'set\("(fingerprint|bound_fingerprint)",\s*(fp|newFp|fingerprint)\s*\)' "$HOOKS_DIR"/*.js 2>/dev/null || true)
-if [ -z "$raw_fp_write" ]; then
-    ok "fingerprints are normalised before being written to a binding"
+# It is removed rather than left in place on purpose: a guard whose pattern can
+# never match reads exactly like a guard that passed, which is the failure mode
+# this project has paid for more than once (§(a) of DEBUGGING-METHOD.md). The
+# replacement below checks the invariant that exists now.
+
+# (e2) A code is single-use, and `activated_at` is the whole of that rule.
+#
+# WHY THIS IS A CHECK. The rule is easy to break by accident in a hook that
+# "helpfully" clears the stamp — an operator release legitimately does, but an
+# expiry or a suspension must NOT, because clearing `activated_at` would make a
+# code the student is using look unused and available for a second sale.
+#
+# So: only the release paths may clear `activated_at`. Every other hook is
+# refused. `admin_unbind.pb.js` and the console's codes.unbind are the two
+# places an operator deliberately releases a code.
+stray_clear=$(grep -rnE 'set\("activated_at",\s*(null|"")\s*\)' "$HOOKS_DIR"/*.js 2>/dev/null \
+    | grep -v 'admin_unbind\.pb\.js' \
+    | grep -v 'admin_console\.pb\.js' || true)
+if [ -z "$stray_clear" ]; then
+    ok "only the release paths clear the single-use stamp"
 else
-    bad "raw fingerprint written to a binding — must use the stripped value, or the"
-    bad "index lookup (which normalises) will not find the row:"
-    printf '%s\n' "$raw_fp_write" | sed 's/^/         /'
+    bad "a hook outside the release paths clears codes.activated_at — that makes a"
+    bad "code a student is using look unused, and it can then be sold twice:"
+    printf '%s\n' "$stray_clear" | sed 's/^/         /'
+fi
+
+# (e3) No hook may read or write the retired device-binding fields on a code.
+#
+# `bound_fingerprint` is a frozen column on an existing hub (kept so an operator
+# can still inspect history) but nothing may go on using it, or the retired
+# device model would quietly creep back into the activation path.
+used_binding=$(grep -rn 'bound_fingerprint' "$HOOKS_DIR"/*.js 2>/dev/null \
+    | grep -v '^\s*//' \
+    | grep -vE ':\s*(//|\*)' || true)
+if [ -z "$used_binding" ]; then
+    ok "no hook uses the retired bound_fingerprint field"
+else
+    bad "a hook still reads or writes codes.bound_fingerprint:"
+    printf '%s\n' "$used_binding" | sed 's/^/         /'
 fi
 
 # ─────────────────────────────────────────────────────────────

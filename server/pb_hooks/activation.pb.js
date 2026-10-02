@@ -76,249 +76,49 @@ routerAdd("POST", "/api/activate", function(e) {
         return new Date(fromMs + (days * 24 * 60 * 60 * 1000)).toISOString();
     }
 
-    // ── Register (or update) this device's durable identity ──
+    // ── Whether this code has already been redeemed ──
     //
-    // THE MISSING WRITE. Until 2026-10-02 nothing in this hook set ever created a
-    // `device_identities` row: `/api/device-recognise` and `/api/heartbeat` only
-    // ever READ that collection, so recognition looked up a row that activation
-    // had never written and returned the uniform `unknown` for every device. Two
-    // reported symptoms, one cause:
+    // ONE CODE, ONE USE. A code stops being available the moment it is first
+    // activated. What it must NOT do is tie itself to a device: a student who
+    // reinstalls, replaces a laptop, or resets their machine still owns the code
+    // they paid for, and there is no device identity left in this system to
+    // recognise them by.
     //
-    //   * "auto-sign-in is broken" — it was never wired up. Recognition had
-    //     nothing to find, so the code prompt always showed.
-    //   * "my code is already in use on another device" right after a reinstall —
-    //     binding is decided by `bound_fingerprint` alone (see the 403 below), and
-    //     the durable identity built to survive a reinstall was not consulted on
-    //     the path that decides it.
+    // So the record of "this code is in use" is a timestamp on the code row
+    // itself — `activated_at`, which the bind path already writes. Everything
+    // that used to hang on `bound_fingerprint` (the device binding, the
+    // `device_bindings` index, the identity migration) is gone; what remains is
+    // the simplest possible statement of the rule and it is enforced by one
+    // field.
     //
-    // WHY THE VERIFIER, AND WHY THAT IS SAFE. The client sends `sha256(secret)`,
-    // never the secret, and the hub stores only that digest — the same discipline
-    // `/api/device-recognise` already relies on. A database read therefore yields
-    // nothing that can be replayed as a credential.
+    // RE-ACTIVATION IS ALLOWED, and that is deliberate: `activated_at` set means
+    // "already in use", not "refuse". The student presenting their own code again
+    // is the recovery path — reinstalling, moving to a new machine, repairing a
+    // broken install — and refusing it would recreate exactly the support call
+    // this whole change exists to remove. The value is only used to tell the
+    // FIRST activation ("Activation successful") from a later one ("Already
+    // activated"), so the client can show the right message.
     //
-    // WHY IT IS OPTIONAL. Older deployed clients do not send a verifier at all.
-    // Refusing them would break every install in the field, so a missing verifier
-    // simply skips this write and leaves the previous (working) behaviour intact:
-    // the device just is not recognisable yet.
-    //
-    // Idempotent by verifier: a device that re-activates — a new code, a renewal,
-    // a repair — UPDATES its row rather than creating a second one, because
-    // `verifier` is UNIQUE and a duplicate insert would throw.
-    function registerIdentity(verifier, deviceId, store, code, existingRow) {
-        if (!verifier) return null;
-        var row = existingRow || null;
-        if (!row) {
-            try {
-                row = $app.dao().findFirstRecordByFilter("device_identities",
-                    "verifier = '" + verifier + "'");
-            } catch (none) {
-                row = null;
-            }
-        }
-        var now = new Date().toISOString();
-        if (!row) {
-            row = new Record($app.dao().findCollectionByNameOrId("device_identities"));
-            row.set("verifier", verifier);
-            row.set("first_seen_at", now);
-        }
-        // `code` is a plain string copy, not a relation — see the schema note.
-        // The code ROW stays the authority on the code's own state; every reader
-        // re-reads it rather than trusting this copy.
-        row.set("code", code);
-        if (deviceId) row.set("device_id", deviceId);
-        if (store) row.set("store", store);
-        row.set("last_seen_at", now);
-        // A device that activates a code is not revoked. Clearing here means an
-        // operator who revoked an identity and then re-issued the student a code
-        // does not leave them permanently locked out by a stale tombstone.
-        row.set("revoked_at", "");
-        $app.dao().saveRecord(row);
-        return row;
+    // Returns true when the code has been redeemed before now.
+    function alreadyRedeemed(codeRec) {
+        var at = codeRec.get("activated_at");
+        if (at === null || at === undefined) return false;
+        return String(at).trim() !== "";
     }
 
-    // Whether this device is already bound to a DIFFERENT code.
-    //
-    // ONE CODE PER DEVICE. Without this, a device could activate code after
-    // code and hold every one: `bound_fingerprint` lives on the code, so the
-    // code cannot see its siblings, and nothing else looked either. The
-    // dashboard then counted a single machine as several activated devices.
-    //
-    // Reads the binding index, whose `fingerprint` field is UNIQUE, so the
-    // constraint is enforced by the schema even if this check is ever wrong.
-    // A released row (released_at set) does not count — an operator who
-    // released the device meant to free it.
-    //
-    // Returns the OTHER code's string, or "" when the device is free or is
-    // re-activating the very code it already holds.
-    function deviceBoundToOtherCode(fp, thisCode) {
-        // Normalised identically to `recordBinding` below. The two MUST agree
-        // on the stored key or the check would look in one place while the
-        // write went to another, and the uniqueness rule would silently not
-        // apply. Fingerprints are hex by construction, so this is belt and
-        // braces — but the two halves have to match either way.
-        var safeFp = String(fp).replace(/[^a-zA-Z0-9]/g, "");
-        if (!safeFp) return "";
-        var rows = null;
-        try {
-            rows = $app.dao().findRecordsByExpr("device_bindings",
-                $dbx.exp("fingerprint = {:f}", { f: safeFp }));
-        } catch (lookupErr) {
-            // Fail OPEN, deliberately. A lookup failure must not lock a paying
-            // student out of a code they legitimately own; the schema's unique
-            // constraint is the backstop that cannot be skipped.
-            return "";
-        }
-        for (var i = 0; i < rows.length; i++) {
-            var row = rows[i];
-            if (row.getString("released_at")) continue;
-            var held = row.getString("code");
-            if (held && held !== thisCode) return held;
-        }
-        return "";
-    }
-
-    // Records this device's binding in the index.
-    //
-    // Best-effort by design: the entitlement itself lives on the code row, and
-    // a failure to maintain the index must not fail an activation that has
-    // already succeeded. The unique constraint means a duplicate attempt is
-    // rejected by the schema rather than creating a second live binding.
-    function recordBinding(fp, code, tier) {
-        try {
-            // Normalised ONCE and used for both the lookup and the insert.
-            //
-            // These two must agree exactly. An earlier version looked up the
-            // stripped value but STORED the raw one, so a fingerprint carrying
-            // any strippable character would be written under a key the lookup
-            // could never find — the uniqueness check would then miss the row
-            // and let the same device bind a second code, which is the exact
-            // failure this collection exists to prevent.
-            //
-            // Fingerprints are hex by construction (a SHA-256 digest, or the
-            // client's random-hex fallback), so this should never differ in
-            // practice. It is done anyway because "should never differ" is not
-            // a guarantee, and the cost of being wrong here is silent.
-            //
-            // The value is also interpolated into a filter string rather than
-            // passed as a parameter: no caller in this tree passes
-            // findFirstRecordByFilter a parameter object, and discovering that
-            // form's behaviour on this PocketBase build in production is not
-            // worth the tidiness. Stripping to [a-zA-Z0-9] is what makes the
-            // interpolation safe — it cannot carry a quote.
-            var safeFp = String(fp).replace(/[^a-zA-Z0-9]/g, "");
-            if (!safeFp) return;
-            var fresh = null;
-            try {
-                fresh = $app.dao().findFirstRecordByFilter("device_bindings",
-                    "fingerprint = '" + safeFp + "'");
-            } catch (none) { fresh = null; }
-            if (fresh) {
-                // Re-binding (e.g. after an operator release): revive the row
-                // rather than inserting a second one, which the unique index
-                // would refuse anyway.
-                fresh.set("code", code);
-                fresh.set("tier", tier);
-                fresh.set("bound_at", new Date().toISOString());
-                fresh.set("released_at", null);
-                fresh.set("release_reason", "");
-                $app.dao().saveRecord(fresh);
-                return;
-            }
-            var coll = $app.dao().findCollectionByNameOrId("device_bindings");
-            var rec = new Record(coll);
-            rec.set("fingerprint", safeFp);
-            rec.set("code", code);
-            rec.set("tier", tier);
-            rec.set("bound_at", new Date().toISOString());
-            $app.dao().saveRecord(rec);
-        } catch (bindErr) {
-            // Swallowed on purpose — see above.
-        }
-    }
-
-    // ── Migrate a pre-existing binding onto the device's durable identity ──
-    //
-    // Called ONLY when a code is already bound and the incoming fingerprint does
-    // not match it. Answers: "is the caller the same device this code is already
-    // bound to, just presenting a new binding key?".
-    //
-    // The proof is the verifier. `device_identities.verifier` is
-    // `sha256(secret)` for a secret that never leaves the device, so it cannot be
-    // forged by anyone who merely knows the code. The identity row must ALSO
-    // already name this exact code — so this rebinds the key on a device that was
-    // already entitled, and can never hand a code to a device that was not.
-    //
-    // On success the code row's `bound_fingerprint` and the `device_bindings`
-    // index are both rewritten to the new (identity-derived) value, in the same
-    // form the normal bind path uses, so the two halves of "one code per device"
-    // keep naming the same device. Returns true when the migration happened.
-    //
-    // Returns false on every uncertainty — a missing verifier, no matching
-    // identity, an identity that names a different code. The caller then returns
-    // the ordinary 403. Failing closed here is correct: the worst case is the
-    // pre-existing behaviour (a student contacts their middleman), whereas
-    // failing open would silently move codes between devices.
-    function migrateBindingIfSameDevice(codeRec, verifier, incomingFp) {
-        if (!verifier || !/^[0-9a-f]{64}$/.test(verifier)) return false;
-        var ident = null;
-        try {
-            ident = $app.dao().findFirstRecordByFilter("device_identities",
-                "verifier = '" + verifier + "'");
-        } catch (none) {
-            ident = null;
-        }
-        if (!ident) return false;
-        // The identity must already name THIS code. Without this the endpoint
-        // would let any registered device graft any code onto itself.
-        if (ident.getString("code") !== codeRec.getString("code")) return false;
-        if (ident.getString("revoked_at")) return false;
-
-        // Rebind to the value the client now presents — for a migrated client
-        // that is its persisted `device_id`, carried in `fingerprint`.
-        //
-        // Named `safeNewFp` (not `newFp`) for the same reason `recordBinding`
-        // names its value `safeFp`: it holds the STRIPPED form, and the name has
-        // to say so. Writing the raw incoming value here would put the code's
-        // binding under a key the index lookup — which normalises — could never
-        // find, so the one-code-per-device rule would silently stop applying to
-        // this row. `check-consistency.sh` §(direct-fingerprint-write) flags any
-        // `set("bound_fingerprint", fp|newFp|fingerprint)` for exactly this.
-        var safeNewFp = String(incomingFp).replace(/[^a-zA-Z0-9]/g, "");
-        if (!safeNewFp) return false;
-
-        codeRec.set("bound_fingerprint", safeNewFp);
-        $app.dao().saveRecord(codeRec);
-        // Keep the index in step. `recordBinding` revives the existing row keyed
-        // on the OLD fingerprint only if given it, so release the old key first
-        // and write the new one — otherwise the stale row holds the code against
-        // the new value and the uniqueness rule fights the migration.
-        try {
-            $app.dao().db().newQuery(
-                "UPDATE device_bindings SET released_at = {:now}, release_reason = 'identity-migration' " +
-                "WHERE code = {:code} AND released_at IS NULL"
-            ).bind({ now: new Date().toISOString(), code: codeRec.getString("code") }).execute();
-        } catch (releaseErr) {
-            // Non-fatal: `recordBinding` below revives/reinserts on the new key.
-        }
-        recordBinding(safeNewFp, codeRec.getString("code"), codeRec.getString("tier"));
-        return true;
-    }
 
     try {
         var data = $apis.requestInfo(e).data;
         var code = (data.code || "").trim();
+        // `fingerprint` is still ACCEPTED and still logged, but it no longer
+        // decides anything: it is a coarse rate-limit key and a support
+        // correlator. A deployed 3.2.x client keeps sending it, and refusing a
+        // request for a missing one would break every install in the field, so
+        // it is optional here.
         var fp = (data.fingerprint || "").trim();
-        // Optional: absent on clients older than the identity work. Validated by
-        // shape before use, because it is interpolated into a filter below — the
-        // same argument `device_recognise.pb.js` makes for its own lookup.
-        var verifier = (data.verifier || "").trim().toLowerCase();
-        if (!/^[0-9a-f]{64}$/.test(verifier)) verifier = "";
-        var deviceId = (data.device_id || "").trim();
-        var storeLabel = (data.store || "").trim();
         try { var addr = (e.request().remoteAddr || "").split(":"); var ip = addr[0] || ""; } catch(ex) { var ip = ""; }
 
         if (!code) return e.json(400, {code:400, message:"Missing code"});
-        if (!fp) return e.json(400, {code:400, message:"Missing device fingerprint"});
 
         // Luhn-mod-N check (32-char charset matching client)
         var s = code.replace(/-/g,"").toUpperCase();
@@ -383,100 +183,39 @@ routerAdd("POST", "/api/activate", function(e) {
         }
         if (!rec) return e.json(404, {code:404, message:"Code not found"});
 
-        // Check binding
-        var boundFp = rec.getString("bound_fingerprint");
-
-        // ── Expiry and suspension, checked BEFORE the binding ──
+        // ── Expiry and suspension ──
         //
-        // These used to live only on the first-activation path, BELOW the
-        // `if (boundFp)` re-activation branch that returns early — so a device
-        // that was already bound kept re-activating successfully forever, even
-        // after its code expired or was suspended. The check was unreachable for
-        // exactly the machines it was most likely to matter for.
-        //
-        // Order is now: expiry → suspension → binding. A lapsed code gets a
-        // clear 410 on both paths (the same answer the client already knows how
-        // to display), and a suspended code still returns 403 "Code bound to
-        // another device" first when the fingerprint differs, so suspension
-        // status is not leaked to a probing device.
+        // Checked FIRST, before anything else is decided, so a lapsed or
+        // suspended code gets its real answer rather than a message about
+        // redeemability. A lapsed code returns 410 (which the client already
+        // knows how to display), and a suspended code returns 403 "Code
+        // suspended" — a phrase the client matches on, pinned by the contract
+        // test, so it must keep that exact substring.
         var expMs = parsePBDate(rec.get("expires_at"));
         if (!isNaN(expMs) && expMs > 0 && expMs < Date.now()) {
             return e.json(410, {code:410, message:"Code expired"});
         }
-        var suspended = rec.getBool("suspended");
+        if (rec.getBool("suspended")) return e.json(403, {code:403, message:"Code suspended"});
 
-        if (boundFp) {
-            // Compared in NORMALISED form on both sides.
-            //
-            // The stored value is normalised by the bind path, so comparing it
-            // against a raw incoming fingerprint would refuse a device that is
-            // re-activating its OWN code — the worst kind of false positive,
-            // since it tells a paying student their code belongs to someone
-            // else and sends them to a middleman. Normalising both sides makes
-            // the comparison mean what it says: "is this the same device?".
-            var incomingFp = String(fp).replace(/[^a-zA-Z0-9]/g, "");
-            if (boundFp !== incomingFp) {
-                // ── Binding-key migration (2026-10-02) ──
-                //
-                // Before this returns 403, ask a stronger question than "does
-                // the fingerprint match": "does this request prove it is the
-                // device this code was bound to?".
-                //
-                // Codes used to bind to a hardware fingerprint that the client
-                // RE-DERIVED on every launch (MAC + disk serial + board UUID),
-                // so an update could hand the hub a different digest for the
-                // same laptop — and its own code came back "bound to another
-                // device". The client now binds to its persisted `device_id`
-                // instead, which is stable. But a device bound BEFORE this
-                // change still has the old fingerprint on its code row, so its
-                // first post-update activation presents the new id and would
-                // 403 — turning an intermittent per-update failure into a
-                // guaranteed one for every already-bound device. This branch is
-                // what stops that.
-                //
-                // The proof is the `verifier`: `sha256(secret)` for a secret
-                // only this device holds. An attacker who merely knows a code
-                // cannot produce it, and the hub only accepts it when the
-                // identity row ALREADY names this very code — so this can never
-                // move a code to a device that was not already entitled to it.
-                // It rebinds the key on the same device, not to a new one.
-                if (migrateBindingIfSameDevice(rec, verifier, fp)) {
-                    // The row was updated in place; fall through as a
-                    // same-device re-activation with the new key.
-                    boundFp = String(rec.getString("bound_fingerprint")).replace(/[^a-zA-Z0-9]/g, "");
-                    incomingFp = boundFp;
-                } else {
-                    return e.json(403, {code:403, message:"Code bound to another device"});
-                }
-            }
-            if (suspended) return e.json(403, {code:403, message:"Code suspended"});
-            // Same-device re-activation: return the current tier config too, so
-            // clients can refresh stale connection parameters (see FIXES.md).
+        // ── Redeemed already? ──
+        //
+        // `activated_at` is the whole of the single-use rule (see
+        // `alreadyRedeemed` above). A code that has been redeemed before is NOT
+        // refused — the student presenting their own code again is the recovery
+        // path, and there is no device identity left to check it against. It
+        // simply re-issues the entitlement and reports "Already activated" so
+        // the client can say so.
+        //
+        // The tier config is returned on this path too, so a reinstalling student
+        // refreshes stale connection parameters rather than keeping whatever was
+        // cached before (see FIXES.md).
+        if (alreadyRedeemed(rec)) {
             var tierVal2 = rec.getString("tier").replace(/[^a-zA-Z0-9_]/g, "_");
-            // findFirstRecordByFilter (NOT findRecordsByFilter — see the rate-limit
-            // note above; the list variant returns nothing on this PB build).
+            // findFirstRecordByFilter (NOT findRecordsByFilter — see the
+            // rate-limit note above; the list variant returns nothing here).
             var cfgRec2 = null;
             try { cfgRec2 = $app.dao().findFirstRecordByFilter("tier_configs", "tier = '" + tierVal2 + "'"); } catch (e2) { cfgRec2 = null; }
-            // Make sure the index knows about this binding. A code bound before
-            // the index existed (or whose index row was lost) would otherwise
-            // hold an entitlement the index cannot see, and the device could
-            // then bind a SECOND code through the check below. Repair on read.
-            recordBinding(fp, rec.getString("code"), rec.getString("tier"));
-            // Register the durable identity on the re-activation path too. This
-            // is the branch a REPAIR lands on — the student whose code is bound to
-            // this device re-enters it — and it is the most likely place for a
-            // device to be missing a row, because it is the path an already-bound
-            // install takes. Best-effort: an identity-registration failure must
-            // not fail an activation that has already succeeded, or a student
-            // with a working code would be blocked by bookkeeping.
-            try {
-                registerIdentity(verifier, deviceId, storeLabel, rec.getString("code"), null);
-            } catch (identErr2) {
-                // Swallowed deliberately — see above. The device still holds its
-                // entitlement; it simply is not recognisable until a later call
-                // succeeds.
-            }
-            var resp2 = {code:200, message:"Already activated", tier:rec.getString("tier"), device_fingerprint:boundFp};
+            var resp2 = {code:200, message:"Already activated", tier:rec.getString("tier")};
             resp2.expires_at = expiryForWire(rec);
             if (cfgRec2) {
                 try { resp2.server_config = JSON.parse(cfgRec2.get("config")); } catch(ex) { resp2.server_config = cfgRec2.get("config"); }
@@ -484,32 +223,8 @@ routerAdd("POST", "/api/activate", function(e) {
             }
             return e.json(200, resp2);
         }
-        if (suspended) return e.json(403, {code:403, message:"Code suspended"});
 
-        // ── One code per device ──
-        //
-        // Refuse when this device already holds a DIFFERENT live code. Checked
-        // HERE, after the code's own expiry/suspension checks, so a student with
-        // a lapsed code is told that rather than being sent to a middleman about
-        // a binding they did not create.
-        //
-        // 409, NOT 403. 403 is already overloaded on this endpoint for both
-        // "suspended" and "bound to another device", and the client tells them
-        // apart by looking for the substring "suspended" in the message — a
-        // contract pinned by activation_contract_test. Reusing 403 here would
-        // make an old client report the wrong account state, and the message
-        // must therefore also avoid that word.
-        var otherCode = deviceBoundToOtherCode(fp, rec.getString("code"));
-        if (otherCode) {
-            return e.json(409, {
-                code: 409,
-                message: "This device is already activated on another Locus code. " +
-                         "One code works on one device — contact the person who sold " +
-                         "you this code and they can move it for you."
-            });
-        }
-
-        // Bind device.
+        // ── First redemption ──
         //
         // The expiry is recomputed from the TERM, now, because this is the
         // moment the student's clock starts. Previously `expires_at` was fixed
@@ -525,35 +240,11 @@ routerAdd("POST", "/api/activate", function(e) {
         var termDays = rec.get("term_days");
         var termExpiry = expiryFromTerm(termDays, nowMs);
         if (termExpiry) rec.set("expires_at", termExpiry);
-        // The code's `bound_fingerprint` and the binding index MUST hold the
-        // same value, or the two halves of "one code per device" disagree: the
-        // code names a device the index cannot see, so the check misses it.
-        //
-        // `recordBinding` normalises internally, so this writes the normalised
-        // form too. Both sides come from the same expression on purpose — see
-        // the note in `recordBinding` for the latent bug this prevents.
-        var boundFpNormalised = String(fp).replace(/[^a-zA-Z0-9]/g, "");
-        rec.set("bound_fingerprint", boundFpNormalised);
+        // The whole of the single-use rule: stamp the code as redeemed. This is
+        // one field, written once, and `alreadyRedeemed` above is the only reader
+        // — there is no device, no fingerprint and no index to keep in step.
         rec.set("activated_at", new Date().toISOString());
         $app.dao().saveRecord(rec);
-        recordBinding(boundFpNormalised, rec.getString("code"), rec.getString("tier"));
-
-        // ── Register the durable identity, in the same transaction as the bind ──
-        //
-        // This is the write whose absence produced BOTH reported symptoms (see
-        // `registerIdentity` above). It runs on the first-activation path, after
-        // the code row is committed, so a device that has just paid is
-        // immediately recognisable on its next launch and survives a reinstall.
-        //
-        // Best-effort by design: the student's entitlement is already bound and
-        // saved. Failing the whole activation because bookkeeping could not be
-        // written would trade a working code for a clean database, which is the
-        // wrong direction — the next activation or recognition repairs it.
-        try {
-            registerIdentity(verifier, deviceId, storeLabel, rec.getString("code"), null);
-        } catch (identErr) {
-            // Swallowed deliberately — see above.
-        }
 
         // Clean rate limiting
         $app.dao().db().newQuery("DELETE FROM activation_attempts WHERE rate_key={:key}").bind({key:rateKey}).execute();
@@ -566,6 +257,11 @@ routerAdd("POST", "/api/activate", function(e) {
         var tierVal = rec.getString("tier").replace(/[^a-zA-Z0-9_]/g, "_");
         var cfgRec = null;
         try { cfgRec = $app.dao().findFirstRecordByFilter("tier_configs", "tier = '" + tierVal + "'"); } catch (e3) { cfgRec = null; }
+        // `device_fingerprint` is echoed back because it is a FROZEN wire field:
+        // deployed 3.2.x clients read it and would break if it vanished. It no
+        // longer means "the device this code is bound to" — nothing does — and
+        // the client has stopped using it, but the key stays for as long as a
+        // released build might send the request.
         var resp = {code:200, message:"Activation successful", tier:rec.getString("tier"), device_fingerprint:fp};
         resp.expires_at = expiryForWire(rec);
         if (cfgRec) {

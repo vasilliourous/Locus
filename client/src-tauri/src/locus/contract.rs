@@ -74,93 +74,14 @@ pub struct HeartbeatRequest<'a> {
     pub token: &'a str,
 }
 
-/// Request body for `/api/device-recognise`.
-///
-/// Note what is **absent**: there is no code field. Recognition exists precisely
-/// for the device that cannot produce its code any more, so the request is an
-/// identity claim and nothing else.
-///
-/// `verifier` is `sha256(secret)`, not the secret. The secret never crosses the
-/// wire; the hub stores only the verifier, so a hub compromise yields something
-/// that can confirm a guess rather than a credential that can be replayed.
-#[derive(Debug, Clone, Serialize)]
-pub struct RecogniseRequest<'a> {
-    pub verifier: &'a str,
-    /// The non-secret device name. Diagnostic only — the hub does not
-    /// authenticate on it, and it is safe to appear in logs.
-    pub device_id: &'a str,
-    /// Where the identity was persisted: `"machine"` or `"app"`.
-    ///
-    /// Sent so the hub can record why a device that believes it is remembered
-    /// still needed to be recognised. Not used in the decision.
-    pub store: &'a str,
-}
-
-/// Response body for `/api/device-recognise`.
-///
-/// The hub answers `recognised` with the facts needed to rebuild a working app,
-/// or `unknown` for **every** negative — no such device, revoked, malformed,
-/// nothing entitled. Collapsing the negatives into one arm is deliberate: it is
-/// what stops the endpoint being a confirmation oracle, and it means the client
-/// has exactly one fallback path instead of several that could disagree.
-///
-/// # There is no code field here, and there must never be one
-///
-/// The activation code is a bearer credential. If this response carried it, then
-/// anyone able to produce a matching identity could read the code out and walk
-/// away with the entitlement. The client does not need it: the tier config is
-/// stored locally and refreshed by the heartbeat. Adding such a field would
-/// reintroduce the exact IDOR this design exists to prevent, so a test asserts
-/// its absence rather than leaving it to a comment.
-#[derive(Debug, Clone, Deserialize)]
-pub struct RecogniseResponse {
-    /// `"recognised"` or `"unknown"`. Unknown deserializes to [`Recognised::Unknown`].
-    pub status: Recognised,
-    #[serde(default)]
-    pub tier: Option<String>,
-    #[serde(default)]
-    pub expires_at: Option<String>,
-    /// Echoed back so the client can confirm which store the hub saw.
-    #[serde(default)]
-    pub store: Option<String>,
-    #[serde(default)]
-    pub message: Option<String>,
-    /// The tier's connection parameters, same payload as `/api/activate`.
-    ///
-    /// Sent so a recognised device can build a tunnel rather than merely knowing
-    /// its tier's name. It carries the tunnel credentials — the same values every
-    /// activated client already holds — and **not** the activation code.
-    #[serde(default)]
-    pub server_config: Option<TierConfig>,
-    #[serde(default)]
-    pub udp_relay: bool,
-    /// The session credential the heartbeat accepts in place of a code.
-    ///
-    /// A recognised device has no code, but every enforcement rule runs on the
-    /// heartbeat. This token is the stand-in: device-scoped, revocable, and it
-    /// does **not** carry the activation code. Treat it as a credential — never
-    /// log it, never include it in a diagnostics export.
-    #[serde(default)]
-    pub token: Option<String>,
-    #[serde(default)]
-    pub token_expires_at: Option<String>,
-}
-
-/// The classification `/api/device-recognise` returns.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum Recognised {
-    /// The identity is real and holds a live entitlement.
-    Recognised,
-    /// Every negative. The client falls back to the code prompt.
-    ///
-    /// `#[serde(other)]` so a hub that introduces a new status — a future
-    /// "pending", say — degrades to this safe default rather than failing to
-    /// deserialize. Guessing "recognised" would be the dangerous direction: it
-    /// would skip the code prompt for a device the hub did not actually accept.
-    #[serde(other)]
-    Unknown,
-}
+// `/api/device-recognise` — REMOVED.
+//
+// `RecogniseRequest`, `RecogniseResponse` and the `Recognised` status enum all
+// went with the device-recognition feature: the client no longer asks the hub
+// whether it remembers a device, because nothing on either side identifies a
+// device any more. A student's recovery path is the activation code, which the
+// client persists to a machine-scoped store precisely so a reinstall does not
+// lose it — see `crate::locus::credential`.
 
 /// The tier's connection parameters, as the hub emits them.
 ///
@@ -248,20 +169,26 @@ pub struct LookupResponse {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum LookupStatus {
-    /// The code exists and is ready to activate on this device.
+    /// The code exists and is ready to activate.
     Ok,
-    /// The code exists and is bound to no device yet.
+    /// The code exists and has not been redeemed yet.
     Unbound,
-    /// The code is already bound to *this* device — activation will succeed.
-    BoundThisDevice,
-    /// The code is bound to a different device.
-    BoundOther,
+    /// The code has already been redeemed. Activation will still succeed — it
+    /// restores the entitlement — so the screen says so rather than refusing.
+    ///
+    /// This replaced `BoundThisDevice` / `BoundOther`: a code is no longer tied
+    /// to a device, so there is nothing to compare against, only the single-use
+    /// stamp to report.
+    AlreadyUsed,
     Suspended,
     Expired,
     NotFound,
     /// An older hub that lacks the route, or a transient failure. The caller
     /// falls back to validating at activation time rather than reporting a
     /// failure, because "we could not ask" is not "your code is bad".
+    ///
+    /// A deployed 3.2.x hub will send `bound_this_device` / `bound_other`, which
+    /// deserialize here — an unrecognised status must not be a hard error.
     #[serde(other)]
     Unknown,
 }
@@ -438,26 +365,24 @@ mod tests {
         assert_eq!(artifact_for("macos"), None);
     }
 
-    /// The EXACT response shape the deployed hub returns, verified live on
-    /// 2026-09-25. A parsing mismatch here would show a student the wrong reason
-    /// their code was refused — or, worse, report a bound code as ready.
+    /// The response shape the hub returns for a code that has already been
+    /// redeemed. A parsing mismatch here would show a student the wrong reason
+    /// their code was refused — or, worse, report a lapsed code as ready.
     #[test]
-    fn parses_the_live_hub_lookup_response() {
-        // Verbatim from https://networkingguides.duckdns.org/api/code-lookup
-        // for a real bound code.
+    fn parses_a_redeemed_lookup_response() {
         let live = r#"{
           "expires_at": "2027-09-19 00:00:00.000Z",
-          "message": "This code is already in use on another device",
-          "status": "bound_other",
+          "message": "This code has already been activated",
+          "status": "already_used",
           "tier": "strike"
         }"#;
 
-        let parsed: LookupResponse = serde_json::from_str(live).expect("the live response shape must parse");
+        let parsed: LookupResponse = serde_json::from_str(live).expect("the redeemed response shape must parse");
 
         assert_eq!(
             parsed.status,
-            LookupStatus::BoundOther,
-            "misreading this status would tell a student their in-use code is ready"
+            LookupStatus::AlreadyUsed,
+            "misreading this status would tell a student their own code is unusable"
         );
         assert_eq!(parsed.tier.as_deref(), Some("strike"));
         assert!(parsed.expires_at.is_some());
@@ -471,8 +396,7 @@ mod tests {
         for (wire, expected) in [
             ("unbound", LookupStatus::Unbound),
             ("ok", LookupStatus::Ok),
-            ("bound_this_device", LookupStatus::BoundThisDevice),
-            ("bound_other", LookupStatus::BoundOther),
+            ("already_used", LookupStatus::AlreadyUsed),
             ("suspended", LookupStatus::Suspended),
             ("expired", LookupStatus::Expired),
             ("not_found", LookupStatus::NotFound),

@@ -15,9 +15,9 @@
 pub mod activation;
 pub mod apply;
 pub mod contract;
+pub mod credential;
 pub mod device;
 pub mod expiry;
-pub mod identity;
 pub mod heartbeat;
 pub mod runtime;
 pub mod store;

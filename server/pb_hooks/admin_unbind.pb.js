@@ -45,15 +45,28 @@ routerAdd("POST", "/api/admin/unbind-code", function(e) {
         }
         if (!record) return e.json(404, {code:404, message:"Code not found"});
 
-        var boundFp = record.getString("bound_fingerprint");
-        if (!boundFp) return e.json(400, {code:400, message:"Code is not bound to any device"});
+        // ── What "unbind" means now ──
+        //
+        // There is no device binding any more (see activation.pb.js): a code is
+        // either unused or redeemed, and the only record of that is
+        // `activated_at`. So this endpoint's job is to RELEASE the code — put it
+        // back to unused so it can be handed to a different student, or so a
+        // student who is moving to a new machine can redeem it again.
+        //
+        // The appeal is unchanged; only the mechanism is simpler. It used to have
+        // to clear a fingerprint AND repair a `device_bindings` index row, and a
+        // mismatch between the two was a real source of "one code per device"
+        // silently not applying.
+        var wasRedeemed = record.get("activated_at") !== null && String(record.get("activated_at")).trim() !== "";
+        if (!wasRedeemed) return e.json(400, {code:400, message:"Code has not been used yet"});
 
-        // Log the unbind for audit
-        var auditFp = boundFp.substring(0, 8) + "****";
-        $app.logger().info("Admin unbind: code=" + code.substring(0,4) + "****, old_fingerprint=" + auditFp + ", reason=" + reason);
+        // Log the release for audit. No fingerprint to name — that is the point
+        // of the change — so the code prefix and the reason are the record.
+        $app.logger().info("Admin release: code=" + code.substring(0,4) + "****, reason=" + reason);
 
-        // Clear the binding
-        record.set("bound_fingerprint", "");
+        // Release the code: clear the redeemed stamp so a fresh activation is a
+        // first redemption again. The tier and expiry are untouched — releasing a
+        // code must not change what it entitles its holder to.
         record.set("activated_at", null);
         record.set("unbound_at", new Date().toISOString());
         record.set("unbind_reason", reason);
@@ -61,7 +74,7 @@ routerAdd("POST", "/api/admin/unbind-code", function(e) {
 
         return e.json(200, {
             code: 200,
-            message: "Code unbound successfully.",
+            message: "Code released successfully.",
             tier: record.getString("tier"),
             middleman: record.getString("middleman") || ""
         });

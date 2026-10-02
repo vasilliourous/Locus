@@ -258,21 +258,15 @@ pub async fn locus_status() -> LocusStatus {
     let verge = Config::verge().await;
     let verge_data = verge.latest_arc();
 
-    // The device id reported for support is the value the code is BOUND to
-    // (`identity.device_id`), not the hardware fingerprint.
+    // The identifier reported for support is the hardware fingerprint — a
+    // one-shot "what does this machine report" probe, shown truncated.
     //
-    // It used to be `device::fingerprint()`, on the reasoning that a derived
-    // value is available before activation and would not "blank on a fresh
-    // install". But support correlates this against `bound_fingerprint` on the
-    // code, and the two disagreed the moment the hardware hash drifted — the
-    // operator saw a fingerprint the hub had never bound, and the student was
-    // told their code belonged to another device. Reporting the binding id makes
-    // this column, the hub's column and the recognition row name one device.
-    //
-    // It is resolved from the identity stores, so it is available before
-    // activation too: a fresh device resolves a `Fresh`/`AppFallback` identity
-    // and gets an id, exactly as it got a hardware fingerprint before.
-    let fingerprint = resolve_identity().await.binding_id();
+    // It used to be the durable device identity's id, because support correlated
+    // it against the code's binding column on the hub. There is no binding any
+    // more, so there is nothing to correlate: this is now purely descriptive,
+    // and the hardware fingerprint is the honest value for that. It changes when
+    // the hardware changes, which is fine for a support screenshot.
+    let fingerprint = crate::locus::device::fingerprint();
     let activation = store::read(&verge_data);
 
     let subscription = classify_subscription(
@@ -362,214 +356,22 @@ pub struct ValidateCodeResult {
 /// situations and only one of them is the student's fault.
 #[tauri::command]
 pub async fn locus_check_code(code: String) -> CmdResult<activation::CodeCheck> {
-    // The lookup is advisory and binds nothing, but it must ask about the SAME
-    // device the activation will bind — otherwise a code that is this device's
-    // own binding would be reported as held by another. Use the binding id.
-    let fingerprint = resolve_identity().await.binding_id();
+    // The lookup is advisory. It carries a fingerprint only as a rate-limit and
+    // logging key — the hub no longer compares it against anything, because a
+    // code is not tied to a device.
+    let fingerprint = crate::locus::device::fingerprint();
     activation::lookup_code(&code, &fingerprint)
         .await
         .map_err(|error| super::coded_error("LOCUS_LOOKUP_FAILED", format!("{error:#}")))
 }
 
-/// What a first-launch recognition check concluded.
-///
-/// Deliberately not a `bool`. The three cases lead to different UI:
-///   * [`Self::Recognised`] skips the code prompt entirely;
-///   * [`Self::UnknownDevice`] shows the prompt with no comment;
-///   * [`Self::Unavailable`] shows the prompt *and* can explain that we could not
-///     reach the hub — which is not the student's fault and must not be reported
-///     as "your device is not recognised".
-#[derive(Debug, Clone, Serialize)]
-#[serde(tag = "kind", rename_all = "camelCase")]
-pub enum RecognitionResult {
-    /// The hub knows this device and it holds a live entitlement.
-    Recognised {
-        tier: String,
-        expires_at: Option<String>,
-        /// Whether this device's identity survives a reinstall. The UI must not
-        /// promise durability the install does not have.
-        durable: bool,
-    },
-    /// The hub answered, and does not know this device.
-    UnknownDevice,
-    /// We could not ask. Not a refusal — see the type docs.
-    Unavailable,
-}
-
-/// Resolves this device's identity, creating and persisting one if needed.
-///
-/// The order is the fix for the reported bug:
-///
-///   1. Build the identity from whatever is stored — machine store first, then
-///      the app-config fallback — plus the machine id.
-///   2. If it was freshly generated, persist it. The machine store is tried
-///      first because it is the one that survives a reinstall; only if that
-///      fails do we fall back to the app config, and the identity records which
-///      happened so the UI can be honest about it.
-///
-/// Returned to the caller rather than cached in a `OnceLock` because the store
-/// it resolved from is part of the value: a device whose identity lives only in
-/// the app config is a materially different situation, and a process-lifetime
-/// cache would flatten the two together.
-async fn resolve_identity() -> crate::locus::identity::DeviceIdentity {
-    let app_stored = {
-        let verge = Config::verge().await;
-        store::read_identity(&verge.latest_arc())
-    };
-
-    let identity = crate::locus::identity::resolve_with_stores(
-        crate::locus::identity::read_machine_id(),
-        app_stored,
-    );
-
-    // Persist into the app config whenever the identity is not machine-backed.
-    // This covers two cases: a fresh identity the machine store refused, and an
-    // identity read back from the app fallback (rewriting it is harmless and
-    // keeps the record current).
-    if !identity.store.survives_reinstall()
-        && let Err(error) = store::store_identity(&identity).await
-    {
-        // Not fatal. The identity still works for this session; it simply
-        // will not survive a restart. Logged rather than surfaced, because
-        // a storage failure is not something a student can act on.
-        logging!(
-            warn,
-            Type::Config,
-            "[locus] could not persist the device identity to the app config: {error:#}"
-        );
-    }
-
-    identity
-}
-
-/// Asks the hub whether this device already holds an entitlement.
-///
-/// This is what lets a reinstalling student skip the code prompt. It is safe to
-/// call on every launch: it never binds, never activates, and never returns the
-/// activation code — the hub authenticates on a verifier the device proves it
-/// holds, and answers only whether *this* device has a live tier.
-///
-/// Every failure path falls through to the code prompt, so a student holding
-/// their card is never worse off than before this existed. That is the property
-/// that makes it safe to add: the only way recognition can hurt is if it wrongly
-/// claims a device is known, and only the hub can say that.
-#[tauri::command]
-pub async fn locus_recognise() -> RecognitionResult {
-    let identity = resolve_identity().await;
-
-    match activation::recognise(&identity).await {
-        Ok(activation::Recognition::Recognised {
-            tier,
-            expires_at,
-            store: _,
-            config,
-            udp_relay,
-            token,
-        }) => {
-            // Store the session token FIRST, because `runtime::start` reads it
-            // back out to authenticate: without it the loop would refuse to
-            // start, and the device would be connected but never checking in.
-            if let Err(error) = store::store_device_token(&token, None).await {
-                logging!(
-                    warn,
-                    Type::Cmd,
-                    "[locus] recognised but could not store the session token: {error:#}"
-                );
-                // Not recognised after all: a device that cannot authenticate is
-                // not a restored device, and reporting success would leave the
-                // student with a working-looking app that never re-syncs.
-                return RecognitionResult::UnknownDevice;
-            }
-
-            // Persist the entitlement. The code is EMPTY on purpose — this device
-            // has none, which is the point of recognition. `store::read` is not
-            // consulted here because a token-authenticated device is a shape it
-            // predates; `locus_status` learns about it through the tier instead.
-            if let Err(error) = store::store(&store::Activation {
-                code: String::new(),
-                tier: tier.clone(),
-                fingerprint: identity.device_id.clone(),
-            })
-            .await
-            {
-                logging!(
-                    warn,
-                    Type::Cmd,
-                    "[locus] could not store the recognised entitlement: {error:#}"
-                );
-                return RecognitionResult::UnknownDevice;
-            }
-
-            // A previous refusal is now history: the hub accepted this device.
-            // Best-effort, so a failure here cannot undo a successful restore.
-            if let Err(error) = store::clear_refusal().await {
-                logging!(warn, Type::Cmd, "[locus] could not clear a previous refusal: {error:#}");
-            }
-
-            // The expiry, so the account screen shows the date immediately rather
-            // than waiting for the first beat.
-            if expires_at.is_some()
-                && let Err(error) = store::record_expiry(expires_at.clone()).await
-            {
-                logging!(warn, Type::Cmd, "[locus] could not store the expiry: {error:#}");
-            }
-
-            // The tier's connection details, so Connect has something to dial.
-            // Without a config the device is recognised but cannot connect, and
-            // that is reported as "not recognised" rather than presented as a
-            // working app that reaches nothing.
-            let Some(tier_config) = config.as_ref() else {
-                logging!(
-                    warn,
-                    Type::Cmd,
-                    "[locus] recognised device has no tier config for {tier}; cannot restore"
-                );
-                return RecognitionResult::UnknownDevice;
-            };
-            if let Err(error) = store::store_tier_config(tier_config, udp_relay).await {
-                logging!(
-                    warn,
-                    Type::Cmd,
-                    "[locus] could not store the tier config: {error:#}"
-                );
-                return RecognitionResult::UnknownDevice;
-            }
-            match apply::apply_tier(tier_config, udp_relay).await {
-                Ok(apply::ApplyOutcome::Rejected { reason }) => {
-                    logging!(warn, Type::Cmd, "[locus] restored tier config rejected: {reason}");
-                }
-                Err(error) => {
-                    logging!(warn, Type::Cmd, "[locus] could not apply the restored tier: {error:#}");
-                }
-                Ok(_) => {}
-            }
-
-            logging!(
-                info,
-                Type::Config,
-                "[locus] device recognised; restored the {tier} entitlement"
-            );
-            RecognitionResult::Recognised {
-                tier,
-                expires_at,
-                durable: identity.store.survives_reinstall(),
-            }
-        }
-        Ok(activation::Recognition::NotRecognised) => RecognitionResult::UnknownDevice,
-        Err(error) => {
-            // A hub we cannot reach is NOT a refusal, and must not be reported
-            // as one. The student is shown the code prompt either way, but only
-            // this branch is a problem worth logging.
-            logging!(
-                warn,
-                Type::Config,
-                "[locus] could not check whether this device is recognised: {error:#}"
-            );
-            RecognitionResult::Unavailable
-        }
-    }
-}
-
+// `locus_recognise`, `resolve_identity`, `RecognitionResult` — REMOVED.
+//
+// These asked the hub whether it remembered this device so the code prompt
+// could be skipped. Device recognition is gone from both sides: the hub no
+// longer stores a device identity, and the client no longer presents one. A
+// reinstall keeps its access because the activation code itself is persisted to
+// a machine-scoped store — see `crate::locus::credential`.
 /// Activates this device, persists the result, and configures the tunnel.
 ///
 /// The order matters and is the whole point of this function:
@@ -584,28 +386,19 @@ pub async fn locus_recognise() -> RecognitionResult {
 /// A failure at any step leaves the previous state untouched.
 #[tauri::command]
 pub async fn locus_activate(code: String) -> CmdResult<ActivationResult> {
-    // The durable identity, resolved FIRST, because it is also what the code is
-    // bound to. `identity.binding_id()` is the `device_id`, which is persisted —
-    // so the value the hub binds is stable across launches and updates.
+    // The hardware fingerprint is sent only as a rate-limit and support key. The
+    // hub no longer binds a code to it — a code is single-use and not tied to a
+    // device — so the value does not need to be stable, and a hardware hash is
+    // exactly the wrong thing to require stability from.
     //
-    // This used to send `device::fingerprint()` (a hardware hash re-derived on
-    // every launch) as the binding value *and* register the identity separately.
-    // Those are two different keys, so the hub bound the code to one and stored
-    // recognition against the other: a hardware change moved the fingerprint
-    // without moving `device_id`, and the student's own code came back
-    // `403 "Code bound to another device"`. Binding to the identity is the fix —
-    // the binding and the recognition row now name the same device.
-    //
-    // See `DeviceIdentity::binding_id` for the full argument.
-    let identity = resolve_identity().await;
-    let fingerprint = identity.binding_id();
-    let identity_wire = activation::IdentityWire {
-        verifier: identity.verifier(),
-        device_id: identity.device_id.clone(),
-        store: activation::store_label(identity.store).to_owned(),
-    };
+    // This used to resolve the durable device identity here and send both an
+    // `identity_wire` (verifier + id + store) and a binding fingerprint. All of
+    // that is gone with device recognition; the code itself is the whole
+    // credential, and `crate::locus::credential` is what keeps it across
+    // restarts and reinstalls.
+    let fingerprint = crate::locus::device::fingerprint();
 
-    let outcome = activation::activate_with_identity(&code, &fingerprint, &identity_wire)
+    let outcome = activation::activate(&code, &fingerprint)
         .await
         .map_err(|error| super::coded_error("LOCUS_ACTIVATE_FAILED", format!("{error:#}")))?;
 
@@ -1423,25 +1216,16 @@ mod tests {
         );
     }
 
-    /// The device id shown in the UI must be truncated. It is a stable device
-    /// identifier (the value a code is bound to), and a full one in a screenshot
-    /// is a shareable one.
+    /// The device id shown in the UI must be truncated.
     ///
-    /// This used to truncate `device::fingerprint()`. That value is no longer the
-    /// binding id — the identity's `device_id` is — so the test now pins the
-    /// redaction of the value the status command actually reports, which is what
-    /// the UI renders. Testing a helper against a value the product no longer
-    /// uses would read green while the rendered id was unredacted.
+    /// The value reported is the hardware fingerprint — a one-shot "what does
+    /// this machine report" probe, not a credential — but it is still truncated,
+    /// because a full one in a screenshot is a shareable one.
     #[test]
     fn status_reports_a_redacted_device_id() {
-        let full = crate::locus::identity::DeviceIdentity {
-            device_id: "0123456789abcdef0123456789abcdef".to_owned(),
-            secret: String::new(),
-            store: crate::locus::identity::Store::Machine,
-        }
-        .binding_id();
+        let full = crate::locus::device::fingerprint();
         let redacted = store::redact(&full);
-        assert_ne!(redacted, full, "the device id must not be the full binding id");
+        assert_ne!(redacted, full, "the device id must not be the full fingerprint");
         assert_eq!(redacted.len(), 12);
         assert!(full.starts_with(&redacted));
     }

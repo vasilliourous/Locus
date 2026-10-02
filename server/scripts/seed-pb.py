@@ -211,8 +211,16 @@ collections = [
         {"name":"tier","type":"text","required":True},
         {"name":"used","type":"bool"},
         {"name":"suspended","type":"bool"},
-        {"name":"bound_fingerprint","type":"text"},
+        # NOTE: `bound_fingerprint` was removed. Codes are single-use and not
+        # tied to a device (see server/pb_hooks/activation.pb.js); the whole
+        # record of "this code is in use" is `activated_at` below. An existing
+        # hub keeps its column harmlessly — it is simply never read or written —
+        # but a fresh one is not given it.
         {"name":"expires_at","type":"date"},
+        # When the code was first redeemed. This is the single-use rule: set on
+        # the first activation, cleared by an operator releasing the code. A
+        # later activation of a redeemed code still succeeds (it restores the
+        # student's access) — see `alreadyRedeemed` in activation.pb.js.
         {"name":"activated_at","type":"date"},
         {"name":"middleman","type":"text"},
         # Administrative metadata. `unbound_at`/`unbind_reason` were already
@@ -248,114 +256,22 @@ collections = [
         {"name":"term_days","type":"number"},
         {"name":"term_kind","type":"text"},
     ]),
-    # ── Device binding index ──
+    # ── device_bindings / device_identities — REMOVED ──
     #
-    # WHY THIS COLLECTION EXISTS
+    # These two collections implemented device recognition: a durable device
+    # identity the hub could match on to skip the code prompt, and a binding
+    # index enforcing "one code per device".
     #
-    # `bound_fingerprint` lives on the code, so the code cannot know it is one
-    # of several. Nothing stopped one device activating code after code and
-    # holding every one of them, undetected: there was no reverse index and no
-    # check, so a device could hold unlimited entitlements.
+    # Both are gone. Codes are single-use and not tied to a device — the record
+    # of use is `codes.activated_at` — and the client persists its activation
+    # code itself so a reinstall does not lose it (see
+    # client/src-tauri/src/locus/credential.rs). See activation.pb.js for the
+    # hub side of the change.
     #
-    # The `fingerprint` field is UNIQUE, and that is the whole point: the rule
-    # is enforced by the schema rather than by an application check. This project
-    # has already been burned by application-level checks that silently did not
-    # run (a rate limit that returned zero rows for months; an audit column
-    # PocketBase discarded because it did not exist). A constraint the database
-    # enforces cannot be forgotten by a future hook.
-    #
-    # It also answers a question the old model could not: "what is THIS DEVICE
-    # entitled to?" — which is the integrity check for the rule above.
-    ("device_bindings", [
-        # Unique: one live binding per device. See the note above.
-        {"name":"fingerprint","type":"text","required":True,"unique":True},
-        # The code this device is bound through. Kept as a plain string rather
-        # than a relation so the index survives a code being deleted — a
-        # relation would null out and silently free the device to bind again,
-        # which is the bug this collection exists to prevent.
-        {"name":"code","type":"text","required":True},
-        {"name":"tier","type":"text"},
-        {"name":"bound_at","type":"date"},
-        # Set when an operator unbinds or re-binds. The row is kept rather than
-        # deleted so "has this device ever been bound, and to what" stays
-        # answerable — the same append-only reasoning as code_events.
-        {"name":"released_at","type":"date"},
-        {"name":"release_reason","type":"text"},
-    ]),
-    # ── Durable device identity ──
-    #
-    # WHY THIS COLLECTION EXISTS
-    #
-    # `device_bindings` answers "which code does this fingerprint hold?", keyed
-    # on the *hardware fingerprint*. That key is not durable: it is derived from
-    # hardware on every launch and falls back to a random value held only in the
-    # app's own config, so an uninstall deleted it and the machine came back a
-    # stranger. Two symptoms, one cause — a code that "randomly" stopped being
-    # recognised after an update, and a code lost entirely by a reinstall, which
-    # is a support call when the card is gone.
-    #
-    # This collection keys on a value the device can PROVE it holds:
-    # `sha256(secret)`. The secret never leaves the device, so a hub compromise
-    # yields a verifier, not a reusable credential.
-    #
-    # WHY NOT A COLUMN ON device_bindings
-    #
-    # The two answer different questions. A binding is about a CODE and is
-    # created at activation; an identity is about a DEVICE and exists BEFORE any
-    # code is entered — which is the entire point, since it is what lets a
-    # returning device skip the code prompt. A device with no entitlement yet
-    # has an identity and no binding.
-    #
-    # `verifier` is UNIQUE: one identity per device, enforced by the schema
-    # rather than a hook, for the same reason as `device_bindings.fingerprint`.
-    ("device_identities", [
-        # sha256(secret), hex. The verifier the hub compares against.
-        {"name":"verifier","type":"text","required":True,"unique":True},
-        # The device's non-secret name. Deliberately NOT unique: two devices on
-        # a cloned image can share a machine id, and refusing the second would
-        # lock out a paying student over an operator's imaging choice. It is a
-        # display/lookup aid, never the authorisation key.
-        {"name":"device_id","type":"text"},
-        # The code this device currently holds, if any. A plain string, not a
-        # relation, for the same reason as device_bindings: a relation nulls out
-        # on delete and would silently free the device.
-        {"name":"code","type":"text"},
-        # Where the client could persist its secret: "machine" survives a
-        # reinstall, "app" does not. Recorded so support can see why a device
-        # that believes it is remembered still needed a code.
-        {"name":"store","type":"text"},
-        {"name":"first_seen_at","type":"date"},
-        {"name":"last_seen_at","type":"date"},
-        # ── The session token ──
-        #
-        # WHY A TOKEN
-        #
-        # A recognised device has no activation code — the hub deliberately
-        # never re-sends it, because the code is a bearer credential for the
-        # ENTITLEMENT and handing it back would be the IDOR this whole design
-        # avoids. But the heartbeat is code-keyed, and every enforcement rule
-        # (suspension, expiry, config refresh) runs there. So a recognised
-        # device that could not beat would be a device that can be suspended and
-        # never find out — worse than not recognising it at all.
-        #
-        # The token closes that gap: it is a device-scoped, revocable stand-in
-        # for the code, accepted by /api/heartbeat in the same field. The hub
-        # resolves it back to this identity row, and from there to the code, so
-        # enforcement is unchanged.
-        #
-        # Stored as sha256, not plaintext, for the same reason as the verifier:
-        # a database read must not hand out usable credentials. UNIQUE so a
-        # token cannot be shared between rows.
-        {"name":"token_hash","type":"text","unique":True},
-        # When the token stops being valid. A token with no expiry would be a
-        # permanent credential minted by a single recognition call.
-        {"name":"token_expires_at","type":"date"},
-        # Set when an operator revokes an identity outright (a sold laptop, a
-        # leaked secret). The row is kept, like device_bindings, so the history
-        # stays answerable.
-        {"name":"revoked_at","type":"date"},
-        {"name":"revoke_reason","type":"text"},
-    ]),
+    # An EXISTING hub keeps these collections and any rows in them; nothing
+    # reads or writes them any more, and deleting the data is an operator
+    # decision, not something a schema script should do. A fresh hub is simply
+    # not given them.
     # Append-only history of administrative and lifecycle actions, so the
     # console can show "what happened to this code" without guessing.
     ("code_events", [
