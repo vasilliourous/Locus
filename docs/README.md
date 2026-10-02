@@ -68,7 +68,7 @@ Retired material is separated into [`archive/`](archive/) (the Wails client) and
 | Document | What it is |
 |---|---|
 | [`reference/API.md`](reference/API.md) | HTTP API reference for the hub (activation, heartbeat, code lookup, releases). |
-| [`reference/DEVICE-IDENTITY.md`](reference/DEVICE-IDENTITY.md) | **How a device is identified**, how a reinstall keeps its entitlement, and the recognition endpoint. Read before touching binding, the fingerprint, or the activation gate. |
+| [`reference/DEVICE-IDENTITY.md`](reference/DEVICE-IDENTITY.md) | **How a student keeps their entitlement** across an update, an uninstall or a reset, and why device identity was removed. Read before touching the activation gate or `store::read`/`clear`. |
 | [`reference/DEBUGGING-METHOD.md`](reference/DEBUGGING-METHOD.md) | **How to diagnose a defect here** — the reproduce→locate→prove→fix→guard order, two-sided contracts, checks that cannot fail, and what to verify on the hub. Read before fixing anything that "should work". |
 | [`reference/EGRESS-READINESS.md`](reference/EGRESS-READINESS.md) | **Why the button says "connecting"** — the readiness chain from probe to rendered phase, the classifier trap, and a four-command procedure to localise a stall. Read before touching `probe.rs`. |
 | [`reference/THEMES.md`](reference/THEMES.md) | **The theme registry** — what a theme may and may not change, the six themes, how a selection resolves against the legacy colour fields, and the checklist for adding one. Read before touching `_themes.ts`. |

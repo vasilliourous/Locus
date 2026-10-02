@@ -1,5 +1,16 @@
 # 4. The card and the credential
 
+> **SUPERSEDED IN PART 2026-10.** The requirement this file opened with — *"the
+> code needs to be stored somewhere"* so a student who threw the card away stays
+> logged in — is **built**: the client mirrors the code to a machine-scoped store
+> and re-adopts it if the config loses it. The *other* half of the proposed
+> answer, "forever bound to a device", was **rejected**: a code is single-use and
+> is not tied to a device.
+>
+> See [`../../reference/DEVICE-IDENTITY.md`](../../reference/DEVICE-IDENTITY.md).
+> The status tables in §4.5 are updated; the surrounding narrative describes the
+> design as it was written, and §3 (device binding) is superseded.
+
 > **The reported problem:** *"they should be FOREVER bound to a device, and
 > people are likely to throw their cards away, so they need to remain logged in
 > always and the code needs to be stored somewhere."*
@@ -109,8 +120,8 @@ The report's practical requirement. Three properties must hold:
 | Requirement | Mechanism | Status |
 |---|---|---|
 | The client survives a restart without re-entry | `store::read()` reads the code back from config — **already works** | **Built** |
-| A reinstall does not lose the entitlement | Fingerprint persisted durably + hub keyed by fingerprint | **Half built.** The hub half is **done** — the entitlement is addressed by fingerprint in `device_bindings`. The client half is **NOT BUILT**: the fingerprint still falls back to a value stored only in the client's own config. [`03-device-binding.md`](03-device-binding.md) §3.2 A |
-| An offline student is not silently de-entitled | Grace period is bounded at 7 days (`GRACE_PERIOD`, `GRACE_PERIOD` in `heartbeat.rs`) and then `stop()` + `store::clear()` | **Built, but destructive** — see §4.4 |
+| A reinstall does not lose the entitlement | The client mirrors the code to a machine-scoped store; the hub keys nothing to a device | **Built 2026-10.** [`../../reference/DEVICE-IDENTITY.md`](../../reference/DEVICE-IDENTITY.md) |
+| An offline student is not silently de-entitled | Grace period is bounded at 7 days (`GRACE_PERIOD` in `heartbeat.rs`); on lapse the session is cleared but **the code is kept** (`store::record_lapsed_grace`) | **Built 2026-10** — see §4.4 |
 
 The third row is worth an explicit decision, because it is a deliberate
 trade-off that the report's "always" framing sits awkwardly against. The

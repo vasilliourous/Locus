@@ -128,7 +128,16 @@ device via its `verifier`.
   "not yet improved"; it is the failure mode reintroduced for every already-bound
   device.
 
-### Activation never registers a device identity — FIXED, but inert until the hook is deployed
+### Activation never registers a device identity — SUPERSEDED (2026-10)
+
+**Superseded 2026-10.** The whole device-identity mechanism was removed rather
+than deployed: recognition never worked in the field, and a code is now
+single-use and not tied to a device. There is no `device_identities` row to
+write, no `registerIdentity`, and no `/api/device-recognise`. See the 2026-10
+entry in `FIXES.md` and [`DEVICE-IDENTITY.md`](DEVICE-IDENTITY.md).
+
+The entry below is kept as the historical record of the fix that was applied
+before the removal.
 
 **Added 2026-10-02. Fix applied the same day.** `grep -rln device_identities
 server/pb_hooks/` returned `heartbeat.pb.js` and `device_recognise.pb.js` — both
@@ -235,30 +244,30 @@ displaced while the Core is running. Until then the honest claim class is
 
 ---
 
-### The recognition path has never been exercised against the live hub
+### The activation code's durability has never been exercised against a real machine
 
-**Added 2026-10-01.** The wiring is complete (see the 2026-10-01 `FIXES.md`
-entry), and the *unit* behaviour is tested — the result-to-sentence mapping in
-`src/pages/recognition-notice.ts` has eight tests, one of which pins that an
-unreachable hub is never reported as a refusal.
+**Added 2026-10.** The code is now mirrored to a machine-scoped store
+(`locus/credential.rs`) so a reinstall, an update or an unexpected shutdown does
+not lose it. The unit behaviour is tested — round-trip, corrupt file, empty code,
+config-first-then-mirror ordering — and the module is pure I/O against a scratch
+directory.
 
 What is **not** observed, and cannot be from here:
 
-- That `locus_recognise()` returns `recognised` for a real returning device, and
-  that the gate then clears. That is a **structural argument** from the code
-  (`cmd/locus.rs` stores the entitlement and applies the tier; `locus_status`
-  reads the same store), not a measurement.
-- That `durable` is `true` on a machine where the identity went to the machine
-  store rather than the app-config fallback. `identifier::DeviceIdentity::
-  store.survives_reinstall()` decides it, and the UI now *renders* that decision
-  as a warning — so a wrong `false` is a visible over-caution, and a wrong `true`
-  is a broken promise to a student that a reinstall will be easy.
-- That the new immediate re-read (the `entitlementRestored` counter in
-  `main.tsx`) actually replaces the five-minute wait. The counter's effect is
-  asserted only by reading the code; no test mounts `Shell` against a Tauri mock.
+- That a real Windows or macOS install writes `/Library/Application Support/Locus`
+  (or `%PROGRAMDATA%\Locus`) successfully, without elevation. The fallback is
+  the app config, which does not survive an uninstall — so on a machine where the
+  machine store is unwritable, the guarantee is weaker than the design intends.
+  That distinction is *not* surfaced in the UI today; it should be, before this is
+  called done.
+- That the code survives an actual uninstall-and-reinstall cycle, and that
+  `read_code_rehydrating` re-adopts it into `verge.yaml` on the next launch.
+- That re-activating a redeemed code on the hub returns the tier config and
+  restores a working tunnel. Both paths parse and are contract-tested, but the
+  hub hooks have not run against a live database from here.
 
-Confirming any of these needs a device with a durable identity, a hub that knows
-it, and a reinstall. Do not read "87 tests pass" as covering them.
+Confirming these needs a device, a hub, and a real uninstall. Do not read
+"the tests pass" as covering them.
 
 ---
 
@@ -336,37 +345,34 @@ Two things a successor should know:
    total data outage in its output. It was not noticed because nobody published a
    release in the window.
 
-### The term model, renewal and device binding have never met a database
+### The term model, renewal and the single-use rule have never met a database
 
-**Added 2026-09-29.** `9a91da1` + `6a422bc` added the term model, `codes.renew`,
-`codes.rebind`, `codes.set-term`, one-code-per-device (a unique index plus a 409),
-name search, the renewal worklist, and `device.get`/`devices.list`.
+**Added 2026-09-29. Amended 2026-10** — one-code-per-device, `codes.rebind` and
+`device.get`/`devices.list` are gone with the device-binding removal; the term
+model, `codes.renew`, `codes.set-term`, `codes.unbind` (now "release") and the
+renewal worklist remain.
 
-**Every one of those is unrun against PocketBase.** They parse, the guards are
-green, the console builds, and the arithmetic was exercised directly — but no
-hook has ever executed on the deployed build, and the schema changes have never
-been applied to the live database. The full list of what is unverified, with the
-reason each matters, is in
+**None of the remaining ones has been run against PocketBase.** They parse, the
+guards are green, the console builds, and the arithmetic was exercised directly —
+but no hook has ever executed on the deployed build, and the schema changes have
+never been applied to the live database. The full list of what is unverified, with
+the reason each matters, is in
 `docs/business/redesign/implementation/05-not-yet-true.md`.
 
-The three to check first, in order:
+The two to check first, in order:
 
-1. **The unique index actually rejects a duplicate.** The whole
-   one-code-per-device guarantee rests on it, and it has not been observed
-   enforcing anything. (U4 in that file.)
+1. **A first activation followed by a re-activation.** The single-use stamp
+   (`codes.activated_at`) is the whole rule now: the first activation must set it
+   and report "Activation successful", and the second must report "Already
+   activated" and still return the tier config. Neither path has been run live.
 2. **The migration preserves the paying codes.** `server/scripts/backfill-terms.py`
    has a `--dry-run` and **never writes `expires_at`**, but it has never run
    against the live hub, which holds real paid codes in active use — no count is
    recorded here on purpose (`operate/CLAIMS.md` §4). Read the diff before applying.
-3. **A renewal reaching a running client.** The propagation is reasoned and
-   unit-tested in pieces; the chain has never been run end to end.
 
-Also unbuilt, deliberately: the **client-side fingerprint persistence**. The hub
-now keys the entitlement by fingerprint, but the client still stores its
-fingerprint only in its own config, so a reinstall presents a new identity and is
-refused at 409. Deferred because the fix's core property ("survives a reinstall")
-cannot be verified without real Windows and macOS hardware, and an unverified
-storage change could make drift worse.
+Also note: the removal leaves `device_identities` and `device_bindings` in place
+on an existing hub, and `codes.bound_fingerprint` on every code row. None is read
+or written any more. Dropping them is a separate, deliberate operator action.
 
 ### CI now runs the tests — but nobody has watched it do so
 
@@ -796,50 +802,41 @@ checkout, so the hooks are syntax-checked and covered by the
 `check-consistency.sh` trap wave — the same standard as every other hook here, and
 not a substitute for executing them.
 
-Specifically unverified:
+Specifically unverified — after the device-identity removal, what remains is:
 
 | Claim | Status |
 |---|---|
-| `device_identities` can be created on the live database | **Untested.** `seed-pb.py` is additive-only and idempotent, but this collection is new. |
 | The hooks execute correctly on PB 0.22.21 | **Untested.** Never run. |
-| A real recognition round-trip returns a token | **Untested.** |
-| The token renewal path (`401` -> `StaleCredential` -> `renew_credential`) | **Untested.** Needs a real hub to return a 401; compiles and is reasoned, never executed. The most likely place a field bug hides. |
-| The unique constraints actually reject duplicates | **Untested** — same class as the existing `device_bindings` open item. |
+| A first activation sets `codes.activated_at` and a second reports "Already activated" | **Untested.** The whole single-use rule, unrun. |
+| A repeat activation returns the tier config | **Untested.** |
+| The term model and `codes.renew` against a real database | **Untested.** |
+| The retired tombstone answers `unknown` on the deployed build | **Untested.** |
 
-To close it: deploy (`setup.sh`), then call `/api/device-recognise` with a known
-verifier and confirm a token comes back and a heartbeat with it succeeds. Then
-age a token deliberately and confirm the 401 path renews rather than tearing the
-tunnel down.
+To close it: deploy (`setup.sh`), then activate a code once and again, and
+confirm the first says "Activation successful" and the second "Already
+activated" with a `server_config`.
 
-### "The identity survives a real reinstall" still needs real hardware
+### The code survives a real reinstall — needs real hardware
 
-**Added 2026-10-01.** The design moves the *decision logic* out of the
-"cannot verify here" bucket: `resolve()` is pure over injected sources, and the
-reinstall-vs-wipe distinction is unit-tested. What remains genuinely hardware-gated
-is the thing that sank the previous attempt — whether the machine-scoped store
-**survives an actual uninstall** and is **writable without elevation** in each
-deployment shape.
+**Added 2026-10.** The design moves the *decision logic* out of the
+"cannot verify here" bucket: `credential.rs` is pure I/O tested against a scratch
+directory, and the config-first-then-mirror ordering is unit-tested. What remains
+genuinely hardware-gated is whether the machine-scoped store **survives an actual
+uninstall** and is **writable without elevation** in each deployment shape.
 
 Needs a real Windows and a real macOS machine, an install -> uninstall ->
 reinstall cycle per platform, and confirmation the path is writable by a
 non-elevated process. The paths chosen are `/var/lib/locus` (Linux),
 `/Library/Application Support/Locus` (macOS), `%PROGRAMDATA%\Locus` (Windows).
 
-Until then, the honest position: an update no longer breaks the identity (that
-part was fixable and is fixed), and a reinstall *should* keep it because the
-identity is now written outside the app's own directory — but nobody has watched
-it happen.
+Until then, the honest position: an update no longer loses the code, and a
+reinstall *should* keep it because the code is written outside the app's own
+directory — but nobody has watched it happen.
 
-### The account screen cannot yet say "remembered only until reinstall"
-
-**Added 2026-10-01.** `RecognitionResult::Recognised` carries `durable: bool`, and
-`Store::AppFallback.describe()` already produces the right sentence. It is not
-surfaced in `pages/account.tsx`, so a student on a device where the machine store
-was unwritable is not told their identity will not survive a reinstall — which is
-the honesty the design explicitly requires.
-
-Small, and the data is already there: read the flag and render the sentence.
-
+Where the machine store is unwritable the code falls back to the app config,
+which does **not** survive an uninstall. That is a weaker guarantee than the
+design intends, and the UI does not yet say which case a device is in. It should,
+before this is called done.
 
 ### The client works; a real update has never been INSTALLED
 

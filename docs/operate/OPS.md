@@ -101,7 +101,7 @@ console is broken, and because they are what the console actually calls.
 # Everything the console shows is available raw:
 curl -s "$PB_API/api/collections/codes/records?skipTotal=1" \
   -H "Authorization: Bearer $PB_TOKEN" \
-  | jq '.items[] | {code, tier, suspended, bound_fingerprint}'
+  | jq '.items[] | {code, tier, suspended, activated_at}'
 ```
 
 ### Suspend / reactivate a user
@@ -117,29 +117,31 @@ curl -X PATCH "$PB_API/api/collections/codes/records/$RECORD_ID" \
   -d '{"suspended": true}'
 ```
 
-### Unbind a device (allow re-activation)
+### Release a code (allow re-activation by a different student)
 
-> **If the student is moving to a NEW device, use `codes.rebind` instead** (see
-> below). Unbind clears `activated_at`, which the term model uses as the basis
-> for an expiry, so it is the right tool for "free this code up" and the wrong
-> one for "move this student to a new laptop" — the latter can silently reset
-> time they have already paid for.
+A code is **single-use** and not tied to a device: `codes.activated_at` is the
+whole record of redemption. Releasing clears that stamp, so the code can be
+handed to someone else.
+
+> **You almost never need this to "move a student to a new laptop".** A code is
+> not tied to a device, so a student who changes machine simply enters their code
+> again and it restores their access. Releasing is for handing a code to a
+> *different* student.
+>
+> Releasing does **not** touch the tier or the expiry, because it must not change
+> what a code entitles its holder to.
 
 ```bash
-# In the console: find the code -> Unbind.
+# In the console: find the code -> Release.
 # By hand (note: the token goes in the JSON BODY as `admin_token`, not a header):
 curl -X POST "$PB_API/api/admin/unbind-code" \
   -H "Content-Type: application/json" \
   -d '{
     "admin_token": "'$ADMIN_TOKEN'",
     "code": "RQ-ABCD-EFGH-JKMN-T",
-    "reason": "Device reported lost"
+    "reason": "Re-issued to a different student"
   }'
 ```
-
-> Unbinding also **releases the device in the binding index**, so it can
-> activate another code. Without that release the one-code-per-device rule would
-> keep refusing it.
 
 ### Generate new codes
 
@@ -188,33 +190,20 @@ curl -s -X POST "$PB_API/api/admin/console" \
 # rather than a reminder.
 ```
 
-### Move a student to a new device
+### A student moved to a new device — do nothing
+
+Codes are not tied to a device. The student enters their code again on the new
+machine and it restores their access; the hub reports "Already activated" and
+returns the tier config. There is no action for you to take.
+
+### Is this code in use?
 
 ```bash
-# USE THIS, NOT unbind. unbind clears `activated_at`, which the term model
-# uses as the basis for an expiry — moving a device must never reset the time a
-# student has already paid for. This changes only the binding.
-curl -s -X POST "$PB_API/api/admin/console" \
-  -H "Content-Type: application/json" -H "X-Admin-Token: $ADMIN_TOKEN" \
-  -d '{"action":"codes.rebind","code":"RQ-XXXX-XXXX-XXXX-C",
-       "fingerprint":"<new device fingerprint>","reason":"Laptop replaced"}' | jq .
-```
-
-### Check the binding index
-
-```bash
-# What is this machine entitled to?
+# Which codes are redeemed, and when do they expire?
 curl -s -X POST "$PB_API/api/admin/console" -H "Content-Type: application/json" \
   -H "X-Admin-Token: $ADMIN_TOKEN" \
-  -d '{"action":"device.get","fingerprint":"<fp>"}' | jq .
-
-# Every binding. `duplicate_live_fingerprints` should ALWAYS be empty — the
-# unique index prevents otherwise, so a non-empty list means the rule is not
-# holding and should be investigated before it is trusted.
-curl -s -X POST "$PB_API/api/admin/console" -H "Content-Type: application/json" \
-  -H "X-Admin-Token: $ADMIN_TOKEN" -d '{"action":"devices.list"}' | jq \
-  '{live: .live_count, dupes: .duplicate_live_fingerprints,
-    stuck: [.bindings[] | select(.code_missing)] | length}'
+  -d '{"action":"codes.list","status":"redeemed"}' | jq \
+  '.codes[] | {code, label, activated_at, expires_at, days_remaining}'
 ```
 
 ### Admin API actions (reference)
@@ -228,15 +217,14 @@ Every console page is a POST to `/api/admin/console` with an `action`:
 | `codes.generate` | Create codes (`tier`, `count`, **`term_days`**, `expires_at`, `middleman`, `label`, `notes`) |
 | **`codes.renew`** | **Extend a code's term after a payment** (`code`, `term_days` override, `price`, `middleman`) |
 | **`codes.set-term`** | Set how long one purchase lasts, **without moving the expiry** (`code`, `term_days`) |
-| **`codes.rebind`** | Move a code to a different device, leaving the expiry alone (`code`, `fingerprint`, `reason`) |
+| **`codes.rebind`** | **Retired.** Codes are not tied to a device; returns `410` explaining that a student simply re-enters their code on a new machine |
 | `codes.suspend` / `codes.unsuspend` | Toggle suspension |
-| `codes.unbind` | Release a device binding (`code`, `reason`) |
+| `codes.unbind` | Release a used code back to unused, so a different student can activate it (`code`, `reason`) |
 | `codes.expire` | Set or clear an **absolute** expiry (`code`, `expires_at`) |
 | `codes.update` | Edit `middleman` / `label` / `notes` |
 | `codes.history` | Per-code event trail |
 | `codes.delete` / `codes.deleteBatch` | Remove one / many codes (**prefer suspend or unbind**) |
-| **`device.get`** | What a machine is bound to (`fingerprint`) |
-| **`devices.list`** | Every binding, plus a duplicate-live-fingerprint check |
+| `device.get` / `devices.list` | **Retired.** Codes are not tied to a device; both return `410` pointing at `codes.list` |
 | `middlemen.list` | Distinct middleman labels and their code counts |
 | `tiers.list` / `tiers.update` | Read / edit tier connection settings |
 | `releases.get` / `releases.set` | Read the current release / turn it on or off |
@@ -476,7 +464,7 @@ when you sign out or the session ends.
 | Page | What it is for |
 |---|---|
 | **Dashboard** | Counts of available / activated / suspended codes, codes per tier, codes expiring in 30 days, and a recent-activity feed. |
-| **Codes & Clients** | Generate codes (1–500 at a time, per tier, with a **term** or an absolute expiry, a middleman and a label), search by code **or name**, renew a code after a payment, move one to a new device, suspend/reactivate, unbind a device, edit detail, export CSV. The **Due in 7 / 30 days** toggles turn the list into a renewal worklist. |
+| **Codes & Clients** | Generate codes (1–500 at a time, per tier, with a **term** or an absolute expiry, a middleman and a label), search by code **or name**, renew a code after a payment, suspend/reactivate, release a used code, edit detail, export CSV. The **Due in 7 / 30 days** toggles turn the list into a renewal worklist. |
 | **Devices** | Every code/device binding, live and released. Shows the states the unique index cannot express: a binding whose code is gone (`code_missing`), and any duplicate live fingerprint (which should be impossible — the index prevents it, so seeing one means the rule is not holding). Read-only. |
 | **Releases** | Pull a build straight from its GitHub Release, verify it, and offer it (or stop offering it). |
 | **Tiers** | Server hostname, port, method and active/UDP-relay flags per tier. |
@@ -489,9 +477,10 @@ For middleman = `Sarah`, Label = anything you find useful → **Create codes** �
 **Copy all**. The generated list is shown once; export CSV if you want a record.
 
 **A student changed laptops**
-Find the code → **Unbind**. The code returns to *available* and can be activated
-again on the same or a different device. The unbind (with your reason) is
-recorded in that code's history.
+Nothing to do — codes are not tied to a device. The student enters the same code
+on the new machine and it restores their access. If you want to hand their code
+to a *different* student instead, find it and **Release** it; the code returns to
+*available*, and the release (with your reason) is recorded in its history.
 
 **A student stopped paying**
 **Suspend**. Their next heartbeat returns *Account suspended* and the app stops

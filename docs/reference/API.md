@@ -161,20 +161,22 @@ update signal and a refreshed tier config.
 | Field | Type | Required | Description |
 |-------|------|:--------:|-------------|
 | `code` | string | ✅ | Full activation code |
-| `fingerprint` | string | ❌ | Device fingerprint (binds the check-in to this device) |
-| `token` | string | ❌ | Session token, **instead of** `code`, for a device restored by recognition |
+| `fingerprint` | string | ❌ | Hardware fingerprint. A **rate-limit and support key only** — it is logged truncated and compared against nothing |
+| `token` | string | ❌ | **Retired.** A frozen wire field; the hub no longer mints or accepts one |
 
-> **`code` OR `token` is required — not both, not neither.** A device restored by
-> device recognition has no activation code (the hub never re-sends it), so it
-> authenticates with the session token minted at recognition. The hub resolves
-> the token to its code **before** any enforcement, so suspension, expiry and the
-> update signal behave identically whichever credential was used. See
-> [`DEVICE-IDENTITY.md`](DEVICE-IDENTITY.md) §4.
+> **`code` is the only credential.** It used to be possible to authenticate with
+> a session token minted at device recognition, for a device the hub had restored
+> without a code. Recognition and the token are both removed: a client always
+> holds its activation code, and keeps it across a reinstall itself (see
+> [`DEVICE-IDENTITY.md`](DEVICE-IDENTITY.md)).
 >
-> A `401` means the **credential** is stale (an expired token) and the entitlement
-> is intact — the client renews rather than giving up. It is deliberately **not**
-> a 403: that is a refusal, and tearing down a working tunnel for a student whose
-> session merely lapsed is the wrong call.
+> `token` is still accepted in the request shape so a deployed 3.2.x client's
+> body is not rejected, but it resolves to nothing: a request with no `code`
+> answers `400 Missing code`.
+>
+> A `401` is treated as a **refusal**, like `403`, `404` and `410`. It used to
+> be the token path's "renew me" signal; with tokens gone it means the hub will
+> not accept this code.
 
 **Response `200` (strike tier — carries a UoT endpoint):**
 ```json
@@ -252,72 +254,31 @@ way out (`server/pb_hooks/heartbeat.pb.js`), frozen because deployed clients rea
 
 ## 3. Device Recognition
 
-### `POST /api/device-recognise`
+### `POST /api/device-recognise` — RETIRED
 
-Asks whether this **device** already holds a live entitlement, so a reinstalling
-student is not forced to find their card again. Takes **no code** — the student
-may not have one to give. Full rationale in [`DEVICE-IDENTITY.md`](DEVICE-IDENTITY.md).
+Answers a uniform `unknown` for every request. It is kept as a **tombstone**, not
+as a feature: deployed 3.2.x clients call it once per launch, and without the
+route they would get a `404` and log a transport error on a path that no longer
+matters. `unknown` is the answer those clients already handle — fall through to
+the code prompt.
 
-**Rate limited:** 10 attempts per 10 minutes per IP (own bucket, `recognise_`).
+It once asked whether *this device* already held a live entitlement, keyed on a
+`verifier` and returning a session `token`, so a reinstalling student could skip
+the code prompt. Device identity and the token are both removed; a student's
+recovery path is the activation code, which the client keeps durably on the
+device. See [`DEVICE-IDENTITY.md`](DEVICE-IDENTITY.md).
 
-**Request:**
-```json
-{
-  "verifier": "9f2c…(64 hex chars)…",
-  "device_id": "3b1a…(64 hex chars)…",
-  "store": "machine"
-}
-```
-
-| Field | Type | Required | Description |
-|-------|------|:--------:|-------------|
-| `verifier` | string | ✅ | `sha256(secret)` — the credential. The secret itself never crosses the wire |
-| `device_id` | string | ❌ | Non-secret device name. Diagnostic only; **not** used for authorisation |
-| `store` | string | ❌ | `"machine"` or `"app"` — where the client persisted its secret |
-
-The `verifier` is what authenticates. `device_id` is a *name* that appears in
-support logs; a name is not a credential, and treating one as a credential is how
-a screenshot becomes a takeover. See [`DEVICE-IDENTITY.md`](DEVICE-IDENTITY.md) §2.
-
-**Response `200` (recognised):**
-```json
-{
-  "status": "recognised",
-  "tier": "strike",
-  "expires_at": "2027-03-14 00:00:00.000Z",
-  "store": "machine",
-  "server_config": { "server": "…", "server_port": 8445, "uot_port": 8446, "…": "…" },
-  "udp_relay": true,
-  "token": "…(64 hex chars)…",
-  "token_expires_at": "2026-10-31T00:00:00.000Z"
-}
-```
-
-**Response `200` (any negative):**
+**Response `200` (always):**
 ```json
 {"status": "unknown", "message": "This device is not recognised"}
 ```
 
-> **Every negative is deliberately identical.** Unknown device, revoked identity,
-> malformed verifier, and a device with no entitlement all return the same body,
-> so the endpoint cannot be used to confirm a guessed credential. The rate-limit
-> response (`429`) carries the same body, so "we are busy" and "we do not know
-> you" are not distinguishable either.
+The endpoint does **no** work: no database read, no rate limit, no token. It
+cannot leak, because it cannot look anything up. `activation_contract.rs` asserts
+the absence of `device_identities`, `token_hash`, `verifier` and any lookup in
+the hook, so the retired machinery cannot quietly return.
 
-> **This endpoint NEVER returns the activation code.** The code is a bearer
-> credential for the entitlement; returning it would let anyone producing a
-> matching identity read it out. The client does not need it — `server_config` is
-> what builds a tunnel. Enforced by the test
-> `recognition_never_returns_the_activation_code`.
-
-> **`token` is a credential.** It authenticates the heartbeat in place of a code
-> (see §2). The hub stores only `sha256(token)`. It expires after 30 days and is
-> re-minted on every recognition. Never log it.
-
-**Status codes:** `200` for every well-formed request (so the client can tell
-"not recognised" from "transport failed"); `429` when rate-limited; `500` on an
-internal failure — which the client also treats as "cannot tell", falling back to
-the code prompt.
+There is no rate limit any more — nothing is looked up to limit.
 
 ---
 
@@ -325,7 +286,10 @@ the code prompt.
 
 ### `POST /api/admin/unbind-code`
 
-Clears the device fingerprint from a code, allowing re-activation on a new device.
+Releases a code back to unused, so it can be re-activated — by the same student
+on a new machine, or handed to a different one. It clears the single-use stamp
+(`codes.activated_at`); it does **not** touch the tier or the expiry, because
+releasing must not change what a code entitles its holder to.
 Requires valid admin API token.
 
 **Rate limit:** None (admin endpoint).
@@ -493,8 +457,7 @@ PocketBase admin interface at `https://networkingguides.duckdns.org/_/`.
 ```
 Activation:    POST /api/activate            ─── JSON body (PocketBase hook)
 Code lookup:   POST /api/code-lookup         ─── JSON body, read-only pre-check (PB hook)
-Recognition:   POST /api/device-recognise    ─── JSON body, no code required (PB hook)
-Heartbeat:     POST /api/heartbeat           ─── JSON body, code OR token (PB hook)
+Heartbeat:     POST /api/heartbeat           ─── JSON body, code (PB hook)
 Release manifest: GET /api/release           ─── Public, credential-free (PB hook)
 Update manifest:  GET /api/update            ─── Query: version, platform (PB hook, no auth)
 Admin Unbind:  POST /api/admin/unbind-code   ─── JSON body (admin_token)
@@ -526,15 +489,17 @@ here, because two lists of actions is exactly how one of them goes stale.
 
 Three things about this API that are easy to get wrong:
 
-* **`codes.renew` does not clear a suspension, move the device, or change the
-  tier.** A renewal is a payment event. Those are separate, separately-audited
-  actions, and an operator who wants two of them performs two.
+* **`codes.renew` does not clear a suspension or change the tier.** A renewal is
+  a payment event. Those are separate, separately-audited actions, and an
+  operator who wants two of them performs two.
 * **Renewal extends from the later of now and the current expiry**, so paying
   early never loses days. The response carries `previous_expires_at` and
   `expires_at` so the change can be quoted exactly.
-* **`codes.rebind` is not `codes.unbind`.** Unbind clears `activated_at`, which
-  a term is measured from, so it can silently reset paid time. Rebind moves the
-  device and leaves the expiry alone. Use rebind to move a student.
+* **`codes.rebind` is retired.** Codes are no longer tied to a device, so there
+  is nothing to move between machines: a student who changes machine simply
+  enters their code again and it restores their access. The action returns a
+  `410` explaining that, rather than a silent no-op. Use `codes.unbind` only to
+  release a code for a *different* student.
 
 ---
 
@@ -559,7 +524,6 @@ HTTP status code matches the `code` field in the JSON body.
 |----------|:-----:|:------:|-----------|
 | `/api/activate` | 5 | 10 minutes | Caddy + JS hook |
 | `/api/code-lookup` | 10 | 10 minutes | JS hook (own bucket) |
-| `/api/device-recognise` | 10 | 10 minutes | JS hook (own bucket, keyed on IP) |
 | `/api/heartbeat` | 1 | 10 seconds | Caddy |
 | `/api/*` (general) | 100 | 10 seconds | Caddy default zone |
 | `/api/admin/unbind-code` | None | — | Admin token required instead |
@@ -580,10 +544,3 @@ would have explained the mistake. Confirmed live 2026-09-19. See FIXES.md 33.
 A successful activation clears that device's `activate_…` rows, so a student who
 finds their code is not counted against themselves afterwards. Lookups are never
 cleared, since they are the enumeration surface.
-
-**`/api/device-recognise` is keyed on the IP, not the verifier.** Keying it on
-the verifier would let an attacker spread guesses across many verifiers and never
-trip the limit. Its bucket is `recognise_…`, separate from the other two, so a
-student retrying recognition cannot consume the activation or lookup budget. The
-verifier is never written to `activation_attempts` — only a redacted device-id
-prefix — because that table is read by operators, and a verifier is a credential.

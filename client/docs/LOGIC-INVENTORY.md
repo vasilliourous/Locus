@@ -34,9 +34,9 @@ src-tauri/src/
 ├─ locus/
 │  ├─ mod.rs
 │  ├─ contract.rs        # every wire name (HUB_URL, tier payload, platform keys, artifact names)
-│  ├─ activation.rs      # code validation + /api/activate + /api/code-lookup + /api/device-recognise
-│  ├─ device.rs          # device fingerprint (per-OS), cached for the process
-│  ├─ identity.rs        # durable device identity (id + secret + verifier), the reinstall fix
+│  ├─ activation.rs      # code validation + /api/activate + /api/code-lookup
+│  ├─ device.rs          # device fingerprint (per-OS) — a rate-limit/support key
+│  ├─ credential.rs      # the activation code mirrored to a machine-scoped store
 │  ├─ heartbeat.rs       # loop, backoff, jitter, grace, outcome classification
 │  ├─ expiry.rs          # subscription date parsing + connect-gate decision
 │  ├─ tier.rs            # tier payload -> mihomo config (incl. the UoT outbound)
@@ -283,41 +283,33 @@ Per-OS device fingerprint. Behaviours to preserve:
 
 Windows is the priority platform; Linux is best-effort (~2% of clients).
 
-> **Its role changed on 2026-10-01.** The fingerprint is still computed and still
-> sent, but it is **no longer what an entitlement hangs on**. It is derived from
-> hardware and falls back to a random value, so it could not survive a reinstall —
-> which is why codes "stopped being recognised". Durable identity now lives in
-> `identity.rs`; the fingerprint is a supporting signal. Do not reintroduce a
-> dependency on it for authorisation.
+> **Its role changed twice.** It was once the code-binding key; it is now neither
+> a binding key nor an identity. It is a **rate-limit and support key** sent on
+> `/api/activate`, `/api/code-lookup` and `/api/heartbeat`, and the truncated
+> "device id" shown in the status command. It is derived from hardware and falls
+> back to a random value, so it is stable within a run but not across installs —
+> which is exactly why nothing may authorise on it. Do not reintroduce a
+> dependency on it.
 
 ---
 
-## 5a. `locus/identity.rs`
+## 5a. `locus/credential.rs`
 
-**Added 2026-10-01.** The durable device identity, and the reinstall fix. The full
-design, the wire contract and the debugging steps are in
+**Rewritten 2026-10.** The activation code mirrored to a machine-scoped store,
+so a reinstall, an update or an unexpected shutdown does not lose it. The full
+design is in
 [`../../docs/reference/DEVICE-IDENTITY.md`](../../docs/reference/DEVICE-IDENTITY.md);
 this is the module summary.
 
-Three parts that must **not** be conflated:
-
-| Part | What | Visible to |
-|---|---|---|
-| `device_id` | stable, non-secret name | logs/support (truncated to 12) |
-| `secret` | 32 random bytes — the credential | nobody |
-| `sha256(secret)` | the hub's verifier | the hub only |
-
-Behaviours to preserve:
-
-- **A stored identity is reused verbatim**, whatever the hardware now reports.
-  Re-deriving it is the bug this module exists to fix.
-- The machine store is preferred; the app-config fallback is used only when it is
-  unwritable without elevation, and is **reported as not surviving a reinstall**.
-- `resolve()` stays **pure over `IdentitySources`** — that is what makes the
-  reinstall-vs-wipe distinction testable without real Windows/macOS hardware.
-- The secret is never logged, exported, or sent to the frontend.
-
----
+- It replaces `identity.rs`, the durable device identity that was removed
+  (recognition never worked, and binding an entitlement to a device is heavier
+  than the problem needs).
+- The code is the whole credential: `verge.yaml` is the primary store,
+  `credential.rs` the machine-scoped mirror, and `store::read` prefers the config
+  with the mirror as fallback.
+- Only `store::clear_entitlement` — a definitive hub refusal — removes the
+  mirror. The grace-period path (`store::record_lapsed_grace`) keeps it, because
+  a local inability to confirm the entitlement must never destroy the credential.
 
 ## 6. `locus/update/*`
 

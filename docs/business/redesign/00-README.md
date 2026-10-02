@@ -13,6 +13,16 @@ verified-against: docs/STATE.md
 > **deliberately deferred** until it can be tested on real hardware — see
 > [`10-open-questions.md`](10-open-questions.md) §10.2.
 >
+> **PARTLY SUPERSEDED 2026-10.** Device binding — and with it
+> one-code-per-device, `codes.rebind`, `device_bindings` and the durable device
+> identity — was **removed**, not finished. The design below chose to bind an
+> entitlement to a device; the shipped decision is the opposite: a code is
+> single-use and tied to nothing, and the *client* keeps the code durably so a
+> reinstall does not lose it. Read
+> [`../../reference/DEVICE-IDENTITY.md`](../../reference/DEVICE-IDENTITY.md) for
+> the live model. The **term model and renewal** parts of this corpus remain
+> accurate and are still authoritative.
+>
 > **What is built:** `term_days` on codes with the expiry materialised into
 > `expires_at`; `codes.renew`, `codes.rebind`, `codes.set-term`; the
 > `device_bindings` collection with a unique fingerprint index; the console's

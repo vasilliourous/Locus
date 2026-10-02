@@ -64,26 +64,27 @@ Three rules live here and each was a real bug:
   left it covering the activation screen permanently — a blank window over a
   working app.
 
-### A command that mutates a polled value must trigger the re-read
+### The gate reads the status, and nothing mutates it out of band
 
-`Shell` also runs the **device-recognition** check once: `locus_recognise()` asks
-the hub whether it already knows this device, so a reinstalling student is not
-asked for a card they may have thrown away. Its result is passed to
-`ActivationScreen` as a prop, and the three cases (`recognised` /
-`unknownDevice` / `unavailable`) map to one sentence through the pure function in
-`src/pages/recognition-notice.ts` — never re-derived in JSX.
+`Shell` renders `ActivationScreen` until `locus_status` reports `activated`, and
+re-reads that on an interval (`ENTITLEMENT_POLL_MS`) so a background refusal — a
+suspension, an expiry, a refund — moves the student off a working connection
+screen rather than leaving them on one until they restart.
 
-**The rule to carry forward:** `locus_recognise` STORES the entitlement and
-applies the tier as a side effect, but `activated` is not what it returns — that
-is what `locus_status` reports. The two are joined only at the call site, so the
-successful case bumps an `entitlementRestored` counter which is a dependency of
-the status effect. Without it the gate had no reason to look again and a returning
-student was left on the code prompt for a full poll interval — **five minutes** —
-while the app knew perfectly well they had a working device.
+There used to be a second writer: a **device-recognition** check
+(`locus_recognise()`) that asked the hub whether it already knew the device, and
+STORED the entitlement as a side effect. Because `activated` is not what that
+command returns, the successful case had to bump an `entitlementRestored` counter
+to make the status effect re-read — otherwise a returning student sat on the code
+prompt for a full poll interval while the app knew they had a working device.
 
-Nothing in the type system or the linter can see that mistake: both halves are
-individually correct. It was found by tracing what happens *after* the command
-returns. See the 2026-10-01 entry in `docs/reference/FIXES.md`.
+**All of that is gone.** Device recognition was removed, so the status read is
+the only writer and there is no counter to keep in step.
+
+**The rule to carry forward:** if a command ever mutates a polled value again,
+the poll must be told. Join the two at the call site; nothing in the type system
+or the linter can see the omission, because both halves are individually correct.
+See the 2026-10-01 entry in `docs/reference/FIXES.md`.
 
 ### Routing is a HASH router — do not "simplify" it
 

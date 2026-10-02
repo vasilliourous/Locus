@@ -14,8 +14,7 @@ The legacy plans had almost none of this. The live system does.
 | **Renewal** | `codes.renew`; extends from the **later of now and the existing expiry** | **Taking money for another term.** The operation the business runs on. |
 | **Expiry** | `expires_at` reached → HTTP **410** | Enforces the subscription; drives renewal. |
 | **Suspension** | `suspended` flag; → HTTP **403**. Reversible. | Refunds, abuse, "the card bounced". **Not cleared by a renewal** — a payment is not an abuse pardon. |
-| **Unbind** | Release `bound_fingerprint`; student moves to a new laptop. | Support without reissuing a code. |
-| **Re-bind** | `codes.rebind` — moves the device, **leaves the expiry alone** | The safe route for a laptop replacement. |
+| **Release** | Clears `codes.activated_at` (the single-use stamp); the code is available to a different student | Support without reissuing a code. **Not needed to move a student to a new machine** — a code is not tied to a device. |
 | **Expiry edit** | `codes.expire` sets or clears the date | Goodwill extensions. An absolute override, not the normal path. |
 | **Term edit** | `codes.set-term` — sets the term, **never moves an expiry** | Fixing a code minted without a term; changing what future renewals produce. |
 | **Audit trail** | `code_events` — append-only. Renewals record `before → after`. | Answers "what happened to this code" without guessing. |

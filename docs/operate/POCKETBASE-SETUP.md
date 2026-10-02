@@ -67,9 +67,9 @@ In PocketBase admin UI, go to **Settings → Collections** and create these:
 | `tier` | select | ✅ | ❌ | Options: `eco`, `stealth`, `strike` |
 | `used` | bool | ❌ | ❌ | Default: false |
 | `suspended` | bool | ❌ | ❌ | Default: false |
-| `bound_fingerprint` | text (plain) | ❌ | ❌ | SHA256 hash, set on activation |
+| ~~`bound_fingerprint`~~ | text (plain) | ❌ | ❌ | **Retired.** Kept on an existing hub, never read or written |
 | `expires_at` | datetime | ❌ | ❌ | Code expiry date |
-| `activated_at` | datetime | ❌ | ❌ | First activation timestamp |
+| `activated_at` | datetime | ❌ | ❌ | When the code was redeemed. **The single-use record** — cleared to release the code |
 | `middleman` | text (plain) | ❌ | ❌ | Distributor identifier |
 | `unbound_at` | datetime | ❌ | ❌ | Last unbind (added 2026-09) |
 | `unbind_reason` | text (plain) | ❌ | ❌ | Why the binding was released |
@@ -287,10 +287,10 @@ systemctl restart pocketbase
 
 | Hook | Endpoint(s) | Purpose |
 |------|-------------|---------|
-| `activation.pb.js` | `POST /api/activate` | Validates + binds a code to a device |
+| `activation.pb.js` | `POST /api/activate` | Validates a code, stamps it redeemed, returns the tier config |
 | `heartbeat.pb.js` | `POST /api/heartbeat` | Expiry + suspension check, expiry report, server-config refresh, update signal |
-| `code_lookup.pb.js` | `POST /api/code-lookup` | Read-only pre-check ("is this code recognised?") — never binds |
-| `admin_unbind.pb.js` | `POST /api/admin/unbind-code` | Release a device binding |
+| `code_lookup.pb.js` | `POST /api/code-lookup` | Read-only pre-check ("is this code ready?") — never activates |
+| `admin_unbind.pb.js` | `POST /api/admin/unbind-code` | Release a used code back to unused |
 | `admin_console.pb.js` | `POST /api/admin/console` | Single route + `action` discriminator backing the web console |
 | `release.pb.js` | `GET /api/release` | Public, credential-free release manifest (no code required) |
 | `update.pb.js` | `GET /api/update` | Per-device update manifest the Tauri updater polls (`version`, `platform`) |

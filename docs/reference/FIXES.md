@@ -27,7 +27,84 @@ corrections are marked. For what is *still* broken, read `STILL-OPEN.md`.
 
 ---
 
-## THE TUNNEL PROVED ITSELF ONLY BY A DELAY TEST IT COULD FAIL FOR THE WRONG REASON, SO THE BUTTON STAYED ON "CONNECTING" WHILE TRAFFIC FLOWED (2026-10-02)
+## THE ACTIVATION CODE WAS STORED ONLY WHERE AN UNINSTALL DELETES IT, AND THE DEVICE-IDENTITY MACHINERY THAT WAS MEANT TO BE THE SAFETY NET WAS REMOVED (2026-10)
+
+| Severity | 🔴 A student who reinstalled, reset, or was offline past the grace period lost their code and had to find a card they may have thrown away |
+|----------|--------------------------------------------------------------------------------|
+| **Reported as** | *"when an update happens, or the app is shut off after some unexplainable circumstances, the code for the client app is no longer saved so it puts you back into the code entering menu … the hardware identification logic … is completely broken and does not work, should be removed entirely"* |
+| **Files:** | `locus/credential.rs` (new), `locus/store.rs`, `locus/runtime.rs`, `utils/resolve/mod.rs`, `locus/identity.rs` (deleted), `locus/activation.rs`, `locus/heartbeat.rs`, `cmd/locus.rs`, `src/main.tsx`, `src/pages/activation.tsx`, `src/services/locus.ts`, `src/pages/recognition-notice.ts` (deleted), `server/pb_hooks/*`, `server/scripts/*` |
+| **Fixed in:** | next tag (client + hook) |
+
+### Two defects, one decision
+
+**(1) The code lived only in `verge.yaml`** — the app's own config, which an
+uninstall deletes, an update can replace, and the app's backup/restore can reset.
+On top of that, `store::clear()` wiped it on a **lapsed grace period**, which is a
+local statement that the hub could not be reached for a week — not a statement
+that the code is bad. Two ways for a student to lose a code they may no longer
+have a card for.
+
+**The fix is durability, not a safety net.** The code is mirrored to the same
+machine-scoped store the identity used (`locus/credential.rs`), owner-only, and
+`store::read` prefers the config with the mirror as fallback.
+`store::clear` is split: `clear_entitlement` (a definitive hub refusal — suspended,
+expired, refunded) removes the code and the mirror; `record_lapsed_grace` clears
+only the session and **keeps the code**. The rule: *a local inability to confirm
+the entitlement must never destroy the credential.*
+
+**(2) Device recognition was removed, not repaired.** It asked the hub whether it
+remembered the device so the code prompt could be skipped, keyed on a durable
+device identity that was never actually written on the activation path — so it
+looked up a row that did not exist and every device looked unknown. Codes were
+additionally bound to that identity, so the student's own machine was refused
+after a reinstall. The report says to remove it, and removing it is the right
+call: binding an entitlement to a device is a heavier mechanism than the problem
+needs, and it fails whenever the device is replaced — the ordinary case.
+
+The replacement is strictly simpler: a code is **single-use and not tied to a
+device**, and `codes.activated_at` is the whole record of redemption.
+Re-activating a code restores access (a reinstall, a new machine) rather than
+being refused, which is the recovery path; and because the code is now durable on
+the device, a student rarely needs even that.
+
+### What was removed
+
+- Client: `locus/identity.rs`, `activation::recognise`, the `RecognitionResult`
+  command, the `Credential::Token` heartbeat path, the retired `verge.yaml`
+  fields (kept as inert `Option`s so an upgrade does not fail to deserialize),
+  and the frontend recognition UI (`recognition-notice.ts`, the `Shell` effect,
+  the `ActivationScreen` prop).
+- Hub: `registerIdentity`, `migrateBindingIfSameDevice`, `recordBinding`,
+  `deviceBoundToOtherCode`, the `device_bindings` index, the token branch of
+  `/api/heartbeat`, and `/api/device-recognise` (a tombstone answering a uniform
+  `unknown` so deployed 3.2.x clients fall through to the prompt instead of 404ing).
+- The lookup reports `already_used` instead of `bound_this_device` /
+  `bound_other`; both old statuses still deserialize to `Unknown`.
+- The console's `codes.rebind`, `device.get` and `devices.list` are retired
+  (each returns a sentence explaining why); `codes.unbind`/`admin/unbind-code`
+  now release the single-use stamp.
+
+### The guard that could not fail
+
+`check-consistency.sh` §(e) asserted that any hook writing a fingerprint
+normalised it first — a rule about `device_bindings` and `codes.bound_fingerprint`.
+With both gone its grep matched nothing, so it would have read **green forever
+while checking nothing**. It was retired and replaced with two checks that can
+fail: one that only the release paths clear `activated_at`, and one that no hook
+references `bound_fingerprint`. Both were verified to fail against a deliberate
+edit before being kept.
+
+### Verified / unverified
+
+- **Verified:** `cargo test` (567 lib + 28 integration), `pnpm typecheck`, `pnpm
+  lint`, `pnpm test`, `node --check` on every hook, `check-consistency.sh` exits
+  0, and both new guards fail against a deliberate edit.
+- **Unverified:** the hub hooks are not executed here. They need a PocketBase
+  deploy and a real activation/reinstall to exercise end to end. The retired
+  collections are left in place on an existing hub and are not dropped.
+
+---
+
 
 | Severity | 🔴 The recurring "stuck on connecting" report, fourth occurrence |
 |----------|------------------------------------------------------------------|

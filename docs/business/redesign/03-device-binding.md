@@ -1,4 +1,16 @@
-# 3. Device binding
+# 3. Device binding — SUPERSEDED
+
+> **SUPERSEDED 2026-10.** Everything in this file — one-code-per-device, the
+> `device_bindings` index, explicit re-binding, fingerprint stability — was
+> **removed rather than finished**. A code is now single-use and is not tied to
+> any device: `codes.activated_at` is the whole record of redemption, and
+> re-activating a code restores a student's access on a new machine. The client
+> keeps its code durably so a reinstall does not lose it.
+>
+> Read [`../../reference/DEVICE-IDENTITY.md`](../../reference/DEVICE-IDENTITY.md)
+> for the live model. This file is kept as the design record of a decision that
+> was made and then reversed, because the reasoning about *why* binding was
+> attractive is still useful.
 
 > **Decisions (operator):** fix all three defects — one code per device,
 > explicit re-binding, and fingerprint stability. A second code activated on an
