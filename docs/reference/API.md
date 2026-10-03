@@ -348,6 +348,54 @@ Standard PocketBase health check.
 
 ---
 
+## 5b. Code Lookup (the pre-activation check)
+
+### `POST /api/code-lookup`
+
+A **read-only** pre-check: "is this code ready to activate?" It binds nothing and
+never activates. The activation screen calls it before `/api/activate` so a
+typo or a lapsed code is answered without spending one of the five activation
+attempts.
+
+**Response `200`** — `status` is one of:
+
+| `status` | Client treats as | Meaning |
+|---|:---:|---|
+| `ok` | ready | Code exists and is ready |
+| `unbound` | ready | Code has not been redeemed yet |
+| `bound_this_device` | **ready** | Code has already been redeemed. Re-activating restores the student's access |
+| `suspended` | blocked | Operator suspended the code |
+| `expired` | blocked | Past `expires_at` |
+| `not_found` | blocked | No such code |
+| *anything else* | **ready** | Unknown status — proceed to `/api/activate`, which is the authority |
+
+> ### `bound_this_device` is a FROZEN NAME, and `already_used` must not be sent
+>
+> A redeemed code reports `bound_this_device`. The name is a leftover from the
+> device-binding era and reads oddly now that a code is not tied to a device —
+> but it is the **only** status every deployed client maps to `ready: true`, and
+> that is the property that matters.
+>
+> A client's `LookupStatus` is an allow-list whose `#[serde(other)]` catch-all is
+> `Unknown`. A **new** status string therefore reaches a deployed client as
+> `Unknown`, and an older client read `Unknown` as *not ready* — so it refused to
+> call `/api/activate` at all. This shipped once (2026-10-03): the hub began
+> sending `already_used` for a redeemed code and every reinstalling student was
+> stranded at the code prompt, unable even to update out of it because the
+> updater runs behind this gate. The remedy was an operator releasing the code.
+>
+> So: **do not rename this status, and do not add a new one for an existing
+> meaning.** A rename here is not cosmetic — it is a dead end for clients that
+> cannot update their way out of it. Current clients tolerate unknown statuses by
+> proceeding, but deployed ones do not.
+>
+> The client side is pinned by `activation_contract.rs`:
+> `a_redeemed_code_reports_a_status_deployed_clients_accept` (the hub emits the
+> frozen name) and `an_unknown_lookup_status_does_not_block_activation` (the
+> client proceeds on an unknown status).
+
+---
+
 ## 6. Update Check
 
 ### `GET /api/update?version=<running>&platform=<key>`

@@ -27,7 +27,88 @@ corrections are marked. For what is *still* broken, read `STILL-OPEN.md`.
 
 ---
 
-## THE ACTIVATION CODE WAS STORED ONLY WHERE AN UNINSTALL DELETES IT, AND THE DEVICE-IDENTITY MACHINERY THAT WAS MEANT TO BE THE SAFETY NET WAS REMOVED (2026-10)
+## A NEW LOOKUP STATUS NAME LEFT REINSTALLING STUDENTS UNABLE TO RE-ENTER THEIR CODE (2026-10-03)
+
+| Severity | 🔴 Every student who uninstalled and reinstalled was stranded, and could not update out of it |
+|----------|--------------------------------------------------------------------------------|
+| **Reported as** | *"they can re-enter the code, but if they uninstall and reinstall, the code no longer works for them, and requires a release from the admin ui"* |
+| **Files:** | `server/pb_hooks/code_lookup.pb.js`, `locus/contract.rs`, `locus/activation.rs`, `tests/activation_contract.rs` |
+| **Fixed in:** | 3.2.23 (client) + the hook, deployed immediately for 3.2.22 and older |
+
+### The defect, in one line
+
+The hub invented a **new status string** on a route whose old clients parse it as
+an **allow-list**, and the fallback they land on is a dead end.
+
+The lookup began reporting a redeemed code as `already_used`. A deployed
+client's `LookupStatus` is an allow-list with `#[serde(other)] -> Unknown`, and
+the deployed `classify_lookup` read `Unknown` as `ready: false` — so the client
+showed "Could not check this code right now" and **never called
+`/api/activate`**. The hub's activate path was correct the whole time and would
+have returned `200 "Already activated"` with the tier config. The gate stopped
+the request before it was made.
+
+The only visible symptom was on the client, and the only remedy an operator had
+was to **release the code** — which clears `activated_at`, so the lookup then
+reported `unbound` and the old client accepted it.
+
+### Why the mistake looked safe at the time
+
+The comment that shipped with the change said an unrecognised status "falls back
+to the activate-time check, which is the correct behaviour anyway". That was
+**wrong**: the fallback is `Unknown = not ready`, i.e. a refusal. The same
+reasoning is repeated in the client enum's own note. A fallback is only a
+fallback if it fails *open*; this one failed closed, and nothing tested the
+two sides against each other.
+
+**The lesson, stated as a rule:** on a route a client parses by allow-list, a new
+status string is not additive — it is a **breaking change that disables the
+feature for every client that cannot be updated**. Where the meaning already
+exists, reuse the frozen name.
+
+### The fix, both halves
+
+- **Hub:** report a redeemed code as the **frozen** `bound_this_device`, which
+  every deployed build already maps to `ready: true`. No client update was needed
+  for anyone in the field, so this shipped to the hub immediately and unblocked
+  everyone still on 3.2.22 or older.
+- **Client:** accept both names (`#[serde(alias = "bound_this_device")]`), and
+  treat a genuinely unknown status as **proceed**, not block — so a future hub
+  cannot strand a client this way again. A client that cannot get past the lookup
+  cannot reach the updater either, which is what made this unrecoverable.
+
+### The tests assert the AGREEMENT, not each side alone
+
+- `a_redeemed_code_reports_a_status_deployed_clients_accept` — the hub emits the
+  one name deployed clients treat as ready, and does *not* emit `already_used`.
+- `an_unknown_lookup_status_does_not_block_activation` — the client's `Unknown`
+  arm is `ready: true`.
+
+Both were shown to **fail** against the bug before being kept (reverting the
+hub status to `already_used`; flipping the client arm to `false`).
+
+### Verified live (2026-10-03)
+
+Against the deployed hub, with a real code:
+
+1. fresh code → lookup `unbound`; activate → `200 "Activation successful"`.
+2. same code again → lookup **`bound_this_device`** (was `already_used`).
+3. **simulated reinstall** (different fingerprint) → activate → `200 "Already
+   activated"` **with `server_config`**, i.e. a working tunnel, no operator
+   action.
+4. `activated_at` was **not** re-stamped by the re-activation, so a reinstall
+   does not reset the term.
+
+The probe code was released afterwards, restoring the hub to its prior state.
+
+### Unverified
+
+That a real Windows/macOS client, uninstalled and reinstalled, now completes this
+flow through the UI. The hub half is proven by the calls above; the client half
+is proven by unit tests and the contract tests. No client on 3.2.23 exists yet.
+
+---
+
 
 | Severity | 🔴 A student who reinstalled, reset, or was offline past the grace period lost their code and had to find a card they may have thrown away |
 |----------|--------------------------------------------------------------------------------|
@@ -78,8 +159,11 @@ the device, a student rarely needs even that.
   `deviceBoundToOtherCode`, the `device_bindings` index, the token branch of
   `/api/heartbeat`, and `/api/device-recognise` (a tombstone answering a uniform
   `unknown` so deployed 3.2.x clients fall through to the prompt instead of 404ing).
-- The lookup reports `already_used` instead of `bound_this_device` /
-  `bound_other`; both old statuses still deserialize to `Unknown`.
+- The lookup ~~reports `already_used` instead of `bound_this_device` /
+  `bound_other`~~. **Corrected 2026-10-03** — see the entry at the top of this
+  file. Reporting a new status name to clients that parse the vocabulary as an
+  allow-list broke reinstall for every deployed client. The lookup reports the
+  frozen `bound_this_device` again.
 - The console's `codes.rebind`, `device.get` and `devices.list` are retired
   (each returns a sentence explaining why); `codes.unbind`/`admin/unbind-code`
   now release the single-use stamp.
