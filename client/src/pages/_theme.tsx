@@ -26,40 +26,74 @@ const OS = getSystem()
  * relationships, inverted for a light surface. Documented as an addition so
  * nobody later mistakes it for part of the original spec.
  *
- * # Why the greens are dark enough to matter
+ * # The 3.3.0 palette pass — what changed and why
  *
- * `#2EA86A` on white is roughly 3.0:1 — fine for large text and UI shapes,
- * short of the 4.5:1 needed for body copy. Light mode therefore uses a darker
- * accent (`#1E7A4A`, ~4.6:1 on white) for anything textual, while keeping the
- * brand green for fills and borders where contrast rules are looser. Using one
- * green for both would have meant either failing contrast in light mode or
- * dulling the brand in dark, which is the mode that matters most.
+ * The values were re-derived against three rules, and the guards in
+ * `client/tests/theme-colors.test.ts` now assert all three:
+ *
+ * 1. **No pure white and no pure black.** `#F4F8F5`/`#FFFFFF` and `#06130C`
+ *    were the old light and dark grounds. Pure white on a full-window panel is
+ *    a light source rather than a surface — it glares, and it makes text halo
+ *    for exactly the people who need a high-legibility theme. Pure black
+ *    crushes the surface ladder: at `#06130C` the card sat a 1.008 contrast
+ *    ratio above the page, which is a different colour on paper and the same
+ *    flat plane on screen.
+ * 2. **The surface ladder must be visible.** Every theme now keeps its card a
+ *    deliberate step above its page (the registry guard asserts >= 1.03), so the
+ *            1px border reinforces separation instead of doing all of it alone.
+ * 3. **The accent must carry text and the logo.** The accent is used for
+ *    `button` labels and now paints the wordmark, so it clears 3:1 against both
+ *    the page and the surface in every theme — asserted, not hoped for.
+ *
+ * # Why the light accent is darker than the dark one
+ *
+ * The dark accent (`#4FBF84`) on a dark ground is comfortable, but the same
+ * green on a light ground is roughly 1.9:1 — unusable for body copy. Light mode
+ * therefore uses a genuinely darker green (`#2A6E4C`, ~5.6:1 on its surface)
+ * for anything textual. Using one green for both would have meant either failing
+ * contrast in light mode or dulling the brand in dark, which is the mode that
+ * matters most.
  */
 
 /** Locus green, and the surfaces it sits on. Single source for the brand. */
 export const LOCUS_COLORS = {
-  /** The window. Green-black, deliberately almost black so the accent carries. */
-  background: '#06130C',
-  /** Cards and panels: one step up from the window. */
-  surface: '#0C1711',
+  /**
+   * The window. A dark slate with a green cast, not a near-black.
+   *
+   * This was `#06130C`, which measured L=0.003 — close enough to black that the
+   * page and the cards had almost nothing to separate them (a 1.008 contrast
+   * step), and harsh on an OLED panel at night. The hue is unchanged in spirit
+   * (green, ~h158) but the value is lifted into the comfortable band, which is
+   * what gives the surface ladder somewhere to go.
+   */
+  background: '#0D1512',
+  /**
+   * Cards and panels: one visible step up from the window.
+   *
+   * The step is the point. `#0C1711` was a 1.008 contrast ratio against the old
+   * background — technically a different colour, visually the same flat plane.
+   * A card that cannot be seen does no work, and the 1px border was left
+   * carrying separation it should only be reinforcing.
+   */
+  surface: '#1B2A24',
   /** Hover state for interactive surfaces. */
-  surfaceHover: '#13241A',
+  surfaceHover: '#22332C',
   /** Dividers, input borders. */
-  border: '#1F3629',
+  border: '#2C3F35',
   /** Body text on the dark surface. */
-  textPrimary: '#EAF2EC',
+  textPrimary: '#E4EDE7',
   /** Labels and hints. */
-  textSecondary: '#8CA596',
+  textSecondary: '#9BAFA3',
   /** The brand accent. Buttons, active indicators. */
-  accent: '#2EA86A',
+  accent: '#4FBF84',
   /** Accent hover. */
-  accentHover: '#46C186',
+  accentHover: '#6ED29C',
   /** Connected. */
-  success: '#22C55E',
+  success: '#4FBF84',
   /** Disconnected, failures. */
-  error: '#EF4444',
+  error: '#D97070',
   /** Connecting, degraded, renewal warnings. */
-  warning: '#F59E0B',
+  warning: '#D9A94E',
 } as const
 
 /**
@@ -68,14 +102,20 @@ export const LOCUS_COLORS = {
  * Derived, not quoted — see the note above. The greens keep their relationship
  * to the surfaces (surface lightest, border a visible step down) so the layout
  * reads identically in both modes.
+ *
+ * **The surface is deliberately not `#FFFFFF`.** It was, and it was the sharpest
+ * thing in the app: a card at L=1.000 against an already-bright page reads as a
+ * light source rather than a panel, and on a large window at night it is
+ * genuinely uncomfortable. `#F2F6F4` is an off-white with the same green cast as
+ * the dark theme, which keeps the two modes recognisably the same product.
  */
 export const LOCUS_LIGHT = {
-  background: '#F4F8F5',
-  surface: '#FFFFFF',
-  surfaceHover: '#E8F0EA',
-  border: '#CBDDD2',
-  accent: '#1E7A4A',
-  accentHover: '#166139',
+  background: '#EDF1EF',
+  surface: '#F2F6F4',
+  surfaceHover: '#DFE6E2',
+  border: '#C3D0C9',
+  accent: '#2A6E4C',
+  accentHover: '#215839',
 } as const
 
 /** The font stack. System fonts: they load instantly and look native. */

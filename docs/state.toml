@@ -117,7 +117,7 @@ provenance = "unverified"
 #
 # Note the ordering is part of the value: it is the order the dropdown renders,
 # and the first entry is what the control shows when nothing is stored.
-value      = ["default-dark", "default-light", "midnight", "paper", "high-contrast", "forest", "gruvbox", "nord", "ink", "amber-crt"]
+value      = ["default-dark", "default-light", "slate", "dawn", "ember", "moss", "linen", "sepia", "contrast"]
 source     = "client/src/pages/_themes.ts (the THEMES registry)"
 provenance = "derived"
 

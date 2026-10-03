@@ -1,5 +1,5 @@
 import { DragDropProvider, KeyboardSensor, PointerSensor } from '@dnd-kit/react'
-import { Box, List, Menu, MenuItem, SvgIcon } from '@mui/material'
+import { Box, List, Menu, MenuItem, SvgIcon, useTheme } from '@mui/material'
 import { useCallback, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
@@ -28,7 +28,13 @@ const SENSORS = [PointerSensor, KeyboardSensor]
 export const LayoutSidebar = (props: LayoutSidebarProps) => {
   const { isDark, isCollapsed } = props
   const { t } = useTranslation()
+  const theme = useTheme()
   const { verge, mutateVerge, patchVerge } = useVerge()
+  // Both SVGs are `fill: currentColor` now, so the dark/light pair is no longer
+  // two colours but two *glyph weights*: the dark variant is the solid mark and
+  // the light one the outlined mark, which is a legibility choice about the
+  // background rather than about hue. The colour comes from the theme.
+  const iconMark = isDark ? iconDark : iconLight
   const [menuUnlocked, setMenuUnlocked] = useState(false)
   const [menuContextPosition, setMenuContextPosition] =
     useState<MenuContextPosition | null>(null)
@@ -118,7 +124,24 @@ export const LayoutSidebar = (props: LayoutSidebarProps) => {
 
   return (
     <div className="layout-content__left">
-      {/* Logo */}
+      {/* Logo.
+          //
+          // Both marks are painted in the theme's accent, and neither is a
+          // per-theme asset: the SVGs were converted to `fill: currentColor`, so
+          // the colour arrives from CSS rather than from nine copies of the same
+          // file. That is the durable form of "recolour the logo per theme" — a
+          // duplicated asset per theme is a file that can be forgotten, and the
+          // one thing this wordmark used to do was ignore the theme entirely
+          // (`fill={isDark ? 'white' : 'black'}`, which the SVG's own `.st1`
+          // class overrode anyway, so it never changed at all).
+          //
+          // The accent is safe here by construction: the registry test asserts
+          // every theme's accent clears 3:1 against both its page and its
+          // surface, which is the floor for a non-text UI mark.
+          //
+          // `color` rather than `fill`: `SvgIcon` and the imported component
+          // both resolve `currentColor` from the inherited `color`, so one
+          // declaration drives the shield and the wordmark together. */}
       <div className="the-logo" data-tauri-drag-region="false">
         <div
           data-tauri-drag-region="true"
@@ -126,10 +149,11 @@ export const LayoutSidebar = (props: LayoutSidebarProps) => {
             height: '27px',
             display: 'flex',
             justifyContent: 'space-between',
+            color: theme.palette.primary.main,
           }}
         >
           <SvgIcon
-            component={isDark ? iconDark : iconLight}
+            component={iconMark}
             style={{
               height: '36px',
               width: '36px',
@@ -139,7 +163,7 @@ export const LayoutSidebar = (props: LayoutSidebarProps) => {
             }}
             inheritViewBox
           />
-          <LogoSvg fill={isDark ? 'white' : 'black'} />
+          <LogoSvg />
         </div>
       </div>
 

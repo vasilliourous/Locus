@@ -214,8 +214,8 @@ describe('theme registry', () => {
     expect(light.palette.accent).toBe(LOCUS_LIGHT.accent)
     expect(light.palette.accentHover).toBe(LOCUS_LIGHT.accentHover)
     // The two legacy typography values the MUI palette is built from.
-    expect(light.palette.textPrimary).toBe('#0B1F14')
-    expect(light.palette.textSecondary).toBe('#4A6356')
+    expect(light.palette.textPrimary).toBe('#1B2A23')
+    expect(light.palette.textSecondary).toBe('#55665D')
   })
 
   it('body text clears 4.5:1 on its own surface, and labels clear 3:1', () => {
@@ -381,6 +381,71 @@ describe('theme registry', () => {
     }
   })
 
+  it('no theme uses pure white or pure black', () => {
+    // The rule the 3.3.0 redesign exists to enforce, and the one that is easiest
+    // to reintroduce: `#FFFFFF` and `#000000` are the two values a palette
+    // reaches for by default, and both are wrong here. Pure white on a large
+    // panel is a light source rather than a surface — it glares, and for the
+    // people who most need the accessibility theme it makes text halo. Pure
+    // black crushes the surface ladder until a card and the page are the same
+    // plane, which is what the old `midnight` did.
+    //
+    // Asserted as a *property of every theme* rather than as a checklist of
+    // literals, so a theme added later cannot quietly reintroduce either.
+    const PURE = new Set(['#ffffff', '#000000'])
+    const offenders: string[] = []
+    const scan = (label: string, id: string, hex: string) => {
+      if (PURE.has(hex.toLowerCase())) offenders.push(`${id}: ${label} ${hex}`)
+    }
+    for (const spec of specs) {
+      for (const [field, value] of Object.entries(spec.palette)) {
+        scan(field, spec.id, value as string)
+      }
+    }
+    expect(offenders).toEqual([])
+  })
+
+  it('the base palettes use no pure white or pure black either', () => {
+    // The registry's two default entries are *projections* of `LOCUS_COLORS` /
+    // `LOCUS_LIGHT` rather than literals, so the check above would not see them.
+    // This is the half that actually had the sharp white in it (`surface` was
+    // `#FFFFFF`).
+    const PURE = new Set(['#ffffff', '#000000'])
+    const offenders: string[] = []
+    for (const [name, palette] of [
+      ['LOCUS_COLORS', LOCUS_COLORS],
+      ['LOCUS_LIGHT', LOCUS_LIGHT],
+    ] as const) {
+      for (const [field, value] of Object.entries(palette)) {
+        if (PURE.has(String(value).toLowerCase())) {
+          offenders.push(`${name}: ${field} ${value}`)
+        }
+      }
+    }
+    expect(offenders).toEqual([])
+  })
+
+  it('every accent is legible as a non-text UI mark on its own page', () => {
+    // The logo is now painted in `palette.accent` (see `layout-sidebar.tsx`), so
+    // the accent's contrast against the surface it sits on is no longer only a
+    // button-label question — it is whether the wordmark is readable. 3:1 is the
+    // floor for a non-text UI component, and it is asserted per theme so a new
+    // palette cannot ship an unreadable logo.
+    const failures: string[] = []
+    for (const spec of specs) {
+      const onBackground = contrast(
+        spec.palette.accent,
+        spec.palette.background,
+      )
+      const onSurface = contrast(spec.palette.accent, spec.palette.surface)
+      const worst = Math.min(onBackground, onSurface)
+      if (worst < 3) {
+        failures.push(`${spec.id}: accent mark contrast ${worst.toFixed(2)}`)
+      }
+    }
+    expect(failures).toEqual([])
+  })
+
   it('the projection carries every field the MUI palette is built from', () => {
     // `themeDefaultFor` is the bridge between the registry's vocabulary and the
     // hook's. A missing field here does not crash — it falls back to `undefined`
@@ -455,7 +520,7 @@ describe('locus palette consistency across paint layers', () => {
     // code too, and the test above would pass vacuously. A colour that IS in the
     // code must still be found.
     const theme = readCode('../src/pages/_theme.tsx')
-    expect(theme).toContain('#2ea86a')
+    expect(theme).toContain('#4fbf84')
   })
 
   it('the stylesheet fallback is Locus, not Verge', () => {
@@ -465,8 +530,8 @@ describe('locus palette consistency across paint layers', () => {
     // how it survives review. It previously held Verge's purple accent
     // (`#5b5c9d`), visible as a purple flash before the green theme applied.
     const scss = readCode('../src/assets/styles/index.scss')
-    expect(scss).toContain('--primary-main: #2ea86a')
-    expect(scss).toContain('--background-color: #06130c')
+    expect(scss).toContain('--primary-main: #4fbf84')
+    expect(scss).toContain('--background-color: #0d1512')
     expect(scss).not.toContain('#5b5c9d')
     expect(scss).not.toContain('#f5f5f5')
   })
@@ -526,13 +591,16 @@ describe('locus palette consistency across paint layers', () => {
     expect(theme).toContain('#7fb48f') // eco, muted green
   })
 
-  it('the accent is Locus green and the surfaces are the spec values', () => {
-    expect(LOCUS_COLORS.accent).toBe('#2EA86A')
-    expect(LOCUS_COLORS.background).toBe('#06130C')
-    expect(LOCUS_COLORS.surface).toBe('#0C1711')
-    expect(LOCUS_COLORS.border).toBe('#1F3629')
-    expect(LOCUS_COLORS.textPrimary).toBe('#EAF2EC')
-    expect(LOCUS_COLORS.textSecondary).toBe('#8CA596')
+  it('the base palette is the designed values', () => {
+    expect(LOCUS_COLORS.accent).toBe('#4FBF84')
+    expect(LOCUS_COLORS.background).toBe('#0D1512')
+    expect(LOCUS_COLORS.surface).toBe('#1B2A24')
+    expect(LOCUS_COLORS.border).toBe('#2C3F35')
+    expect(LOCUS_COLORS.textPrimary).toBe('#E4EDE7')
+    expect(LOCUS_COLORS.textSecondary).toBe('#9BAFA3')
+    // The light surfaces, which are where the sharp white used to be.
+    expect(LOCUS_LIGHT.background).toBe('#EDF1EF')
+    expect(LOCUS_LIGHT.surface).toBe('#F2F6F4')
   })
 
   it('light-mode text is dark and dark-mode text is light', () => {
@@ -547,6 +615,6 @@ describe('locus palette consistency across paint layers', () => {
     expect(luminance(LOCUS_COLORS.textPrimary)).toBeGreaterThan(
       luminance(LOCUS_COLORS.background),
     )
-    expect(luminance('#0B1F14')).toBeLessThan(luminance(LOCUS_LIGHT.background))
+    expect(luminance('#1B2A23')).toBeLessThan(luminance(LOCUS_LIGHT.background))
   })
 })

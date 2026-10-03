@@ -158,14 +158,13 @@ export type DecorationId =
 export type ThemeId =
   | 'default-dark'
   | 'default-light'
-  | 'midnight'
-  | 'paper'
-  | 'high-contrast'
-  | 'forest'
-  | 'gruvbox'
-  | 'nord'
-  | 'ink'
-  | 'amber-crt'
+  | 'slate'
+  | 'dawn'
+  | 'ember'
+  | 'moss'
+  | 'linen'
+  | 'sepia'
+  | 'contrast'
 
 /**
  * The decoration presets.
@@ -181,13 +180,20 @@ export type ThemeId =
  * and removing that element removes every trace of the layer.
  */
 export const DECORATIONS: Record<DecorationId, DecorationSpec> = {
+  /**
+   * `forest-glow` — a soft green wash from above, for `moss`.
+   *
+   * The light source is the top edge, which is the conventional reading of a
+   * window in a wall. Kept at a low alpha against a desaturated palette, so it
+   * reads as depth rather than as a coloured panel.
+   */
   'forest-glow': {
     short: `
       background-image:
         radial-gradient(
           ellipse 120% 60% at 50% -10%,
-          rgba(46, 168, 106, 0.16),
-          rgba(46, 168, 106, 0) 70%
+          rgba(143, 191, 159, 0.10),
+          rgba(143, 191, 159, 0) 70%
         );
       background-repeat: no-repeat;
     `,
@@ -195,7 +201,7 @@ export const DECORATIONS: Record<DecorationId, DecorationSpec> = {
   },
 
   /**
-   * `ember-pit` — a warm light source from below, for the gruvbox warm-dark look.
+   * `ember-pit` — a warm light source from below, for `ember`.
    *
    * Deliberately bottom-anchored: every other wash in this registry comes from
    * the top, which is the generic "product hero gradient". Light from underneath
@@ -206,8 +212,8 @@ export const DECORATIONS: Record<DecorationId, DecorationSpec> = {
       background-image:
         radial-gradient(
           ellipse 100% 55% at 50% 112%,
-          rgba(254, 128, 25, 0.14),
-          rgba(254, 128, 25, 0) 68%
+          rgba(224, 137, 95, 0.16),
+          rgba(224, 137, 95, 0) 68%
         );
       background-repeat: no-repeat;
     `,
@@ -215,7 +221,7 @@ export const DECORATIONS: Record<DecorationId, DecorationSpec> = {
   },
 
   /**
-   * `blueprint` — a cold grid, for the nord dark look.
+   * `blueprint` — a cold grid, for `slate`.
    *
    * Drawn with repeating gradients rather than an image so it needs no asset and
    * cannot shift layout. The lines are extremely low-alpha on purpose: a grid
@@ -225,12 +231,12 @@ export const DECORATIONS: Record<DecorationId, DecorationSpec> = {
   blueprint: {
     short: `
       background-image:
-        linear-gradient(rgba(136, 192, 208, 0.05) 1px, transparent 1px),
-        linear-gradient(90deg, rgba(136, 192, 208, 0.05) 1px, transparent 1px),
+        linear-gradient(rgba(136, 192, 208, 0.045) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(136, 192, 208, 0.045) 1px, transparent 1px),
         radial-gradient(
           ellipse 120% 70% at 50% -15%,
-          rgba(94, 129, 172, 0.18),
-          rgba(94, 129, 172, 0) 70%
+          rgba(129, 161, 193, 0.14),
+          rgba(129, 161, 193, 0) 70%
         );
       background-size: 32px 32px, 32px 32px, auto;
       background-repeat: repeat, repeat, no-repeat;
@@ -239,7 +245,7 @@ export const DECORATIONS: Record<DecorationId, DecorationSpec> = {
   },
 
   /**
-   * `risograph` — print misregistration, for the warm paper inks.
+   * `risograph` — print misregistration, for `sepia`.
    *
    * Two offset flat tints that read as over-inked plates. Kept to a very low
    * alpha and a small offset: the effect is meant to be noticed only once you
@@ -251,13 +257,13 @@ export const DECORATIONS: Record<DecorationId, DecorationSpec> = {
       background-image:
         radial-gradient(
           ellipse 90% 60% at 22% 8%,
-          rgba(21, 94, 117, 0.07),
-          rgba(21, 94, 117, 0) 62%
+          rgba(47, 100, 128, 0.07),
+          rgba(47, 100, 128, 0) 62%
         ),
         radial-gradient(
           ellipse 90% 60% at 82% 96%,
-          rgba(157, 23, 77, 0.06),
-          rgba(157, 23, 77, 0) 62%
+          rgba(150, 96, 42, 0.08),
+          rgba(150, 96, 42, 0) 62%
         );
       background-repeat: no-repeat;
     `,
@@ -265,22 +271,28 @@ export const DECORATIONS: Record<DecorationId, DecorationSpec> = {
   },
 
   /**
-   * `signal-noise` — scanline and phosphor glow, for the amber CRT.
+   * `signal-noise` — a phosphor glow with a fine scanline, for `dawn`.
    *
-   * The scanline is a single repeating gradient at a low alpha, and the vignette
-   * is the second layer. Both are composited, so neither can reflow anything.
-   * The glow sits *behind* the scanline in paint order, which is what makes it
-   * read as light coming off the phosphor rather than an overlay on the text.
+   * The glow is the second layer and the scanline the first, so the glow sits
+   * *behind* the line pattern — which is what makes it read as light coming off
+   * the screen rather than as an overlay on the text.
+   *
+   * **The scanline is the one preset here that can cost legibility**, because it
+   * is a pattern over the entire window rather than a static wash. It is
+   * therefore limited to a 1px line on a 4px period at a very low alpha, and it
+   * is deliberately *not* on `contrast` — the theme whose whole job is
+   * legibility. If text ever reads as thin or shimmering under this theme, this
+   * preset is the first thing to remove.
    */
   'signal-noise': {
     short: `
       background-image:
         repeating-linear-gradient(
           to bottom,
-          rgba(0, 0, 0, 0.16) 0px,
-          rgba(0, 0, 0, 0.16) 1px,
+          rgba(0, 0, 0, 0.10) 0px,
+          rgba(0, 0, 0, 0.10) 1px,
           rgba(0, 0, 0, 0) 1px,
-          rgba(0, 0, 0, 0) 3px
+          rgba(0, 0, 0, 0) 4px
         );
       background-repeat: repeat;
     `,
@@ -288,9 +300,9 @@ export const DECORATIONS: Record<DecorationId, DecorationSpec> = {
       `
       background-image:
         radial-gradient(
-          ellipse 120% 80% at 50% 50%,
-          rgba(255, 176, 0, 0.10),
-          rgba(255, 176, 0, 0) 55%
+          ellipse 120% 80% at 50% 42%,
+          rgba(122, 162, 247, 0.10),
+          rgba(122, 162, 247, 0) 58%
         );
       background-repeat: no-repeat;
       `,
@@ -324,8 +336,8 @@ const defaultDark: ThemeSpec = {
     success: LOCUS_COLORS.success,
     warning: LOCUS_COLORS.warning,
     error: LOCUS_COLORS.error,
-    secondary: '#5BBF8E',
-    info: '#5AA9E6',
+    secondary: '#7FB8A0',
+    info: '#7FB0C9',
   },
   shape: DEFAULT_SHAPE,
 }
@@ -334,7 +346,7 @@ const defaultDark: ThemeSpec = {
  * `default-light` — the shipped light appearance.
  *
  * The accent is the *darker* green because this value is used for text-bearing
- * controls, where `#2EA86A` on white is ~3.0:1 and fails the body-copy rule.
+ * controls, where the dark accent on an off-white page fails the body-copy rule.
  * That is a property of this theme, not a special case in the code.
  */
 const defaultLight: ThemeSpec = {
@@ -346,15 +358,15 @@ const defaultLight: ThemeSpec = {
     surface: LOCUS_LIGHT.surface,
     surfaceHover: LOCUS_LIGHT.surfaceHover,
     border: LOCUS_LIGHT.border,
-    textPrimary: '#0B1F14',
-    textSecondary: '#4A6356',
+    textPrimary: '#1B2A23',
+    textSecondary: '#55665D',
     accent: LOCUS_LIGHT.accent,
     accentHover: LOCUS_LIGHT.accentHover,
-    success: '#1E7A4A',
-    warning: '#B45309',
-    error: '#C2362B',
-    secondary: '#5B8C6F',
-    info: '#2563EB',
+    success: '#2A6E4C',
+    warning: '#8A5A00',
+    error: '#A33226',
+    secondary: '#4F6B5E',
+    info: '#2C6480',
   },
   shape: DEFAULT_SHAPE,
 }
@@ -372,290 +384,248 @@ export const THEMES: Record<ThemeId, ThemeSpec> = {
   'default-light': defaultLight,
 
   /**
-   * `midnight` — true black, for OLED panels and dark rooms.
+   * `slate` — cool blue-grey, low stimulus.
    *
-   * The accent is *lifted* (`#3FBF7F`) rather than the shipped green: on pure
-   * black the shipped `#2EA86A` reads dimmer than it does on green-black, and
-   * the accent has to stay the focal point. The border is lighter than the
-   * surfaces by more than the default theme's, because on black the border is
-   * doing all of the surface-separation work.
+   * Scheme: **split-complementary** on a ~h220 blue-grey base. The accent
+   * (`#88C0D0`, a frost blue) sits a quarter-turn from the surfaces, and the
+   * status colours swing across to the warm side (`#D08770` orange, `#EBCB8B`
+   * straw) so a warning is never mistaken for a link.
    *
-   * Not the default: pure black loses the surface hierarchy the brand is built
-   * on, and a card must still be visible against the page.
+   * Mood: calm and recessive. Every colour is low-saturation and close in value,
+   * so nothing competes with the Connect control. This is the theme for someone
+   * who wants the app to stop shouting.
    */
-  midnight: {
-    id: 'midnight',
-    labelKey: 'home.components.connection.account.themeMidnight',
+  slate: {
+    id: 'slate',
+    labelKey: 'home.components.connection.account.themeSlate',
     mode: 'dark',
     palette: {
-      background: '#000000',
-      surface: '#0A0A0A',
-      surfaceHover: '#141414',
-      border: '#2A2A2A',
-      textPrimary: '#F2F2F2',
-      textSecondary: '#9E9E9E',
-      accent: '#3FBF7F',
-      accentHover: '#5CD396',
-      success: '#34D399',
-      warning: '#FBBF24',
-      error: '#F87171',
-      secondary: '#6ECFA0',
-      info: '#7CC4F2',
-    },
-    shape: DEFAULT_SHAPE,
-  },
-
-  /**
-   * `paper` — warm, low-glare light.
-   *
-   * The difference from `default-light` is **temperature, not brightness**:
-   * off-white (`#F6F3EC`) rather than white, and a warm-neutral text colour
-   * (`#2B2620`) rather than a green-black one. A warm theme that was merely
-   * dimmer than the default would be a worse default, not a distinct look.
-   *
-   * This is the light theme §5 of the design record names as the one to test the
-   * cold-start transition against, because cold-start paints dark for everyone.
-   */
-  paper: {
-    id: 'paper',
-    labelKey: 'home.components.connection.account.themePaper',
-    mode: 'light',
-    palette: {
-      background: '#F6F3EC',
-      surface: '#FFFFFF',
-      surfaceHover: '#EFEAE0',
-      border: '#D8D0C0',
-      textPrimary: '#2B2620',
-      textSecondary: '#6B6152',
-      accent: '#1F6B45',
-      accentHover: '#175236',
-      success: '#1F6B45',
-      warning: '#8A5A00',
-      error: '#A33226',
-      secondary: '#6B7F52',
-      info: '#255E8A',
-    },
-    shape: DEFAULT_SHAPE,
-  },
-
-  /**
-   * `high-contrast` — accessibility.
-   *
-   * Maximum legibility: near-black page, near-white text, borders that are meant
-   * to be *seen* rather than to separate quietly, and a bright accent. The one
-   * theme where "too loud" is the point.
-   *
-   * Still bound by the structural rules — the surface step and the text
-   * hierarchy stay intact — because a high-contrast theme that flattened the
-   * hierarchy would be harder to read, not easier.
-   */
-  'high-contrast': {
-    id: 'high-contrast',
-    labelKey: 'home.components.connection.account.themeHighContrast',
-    mode: 'dark',
-    palette: {
-      background: '#0A0A0A',
-      surface: '#1A1A1A',
-      surfaceHover: '#2A2A2A',
-      border: '#8A8A8A',
-      textPrimary: '#FFFFFF',
-      textSecondary: '#D4D4D4',
-      accent: '#4ADE80',
-      accentHover: '#86EFAC',
-      success: '#4ADE80',
-      warning: '#FDE047',
-      error: '#FCA5A5',
-      secondary: '#93C5FD',
-      info: '#93C5FD',
-    },
-    shape: DEFAULT_SHAPE,
-  },
-
-  /**
-   * `forest` — the character theme, and the decoration seam's proof.
-   *
-   * Deeper and greener than `default-dark`, with a soft radial wash from the top
-   * of the window (`forest-glow`) and larger radii. It exists to exercise the
-   * case that would break a layer built only for colour: a theme that changes
-   * palette *and* shape *and* decoration at once.
-   *
-   * Not to be confused with `default-dark` plus a background image: the preset is
-   * a fixed, named, non-interactive wash. The user's `background_image` field
-   * keeps working independently and is not part of any theme.
-   */
-  forest: {
-    id: 'forest',
-    labelKey: 'home.components.connection.account.themeForest',
-    mode: 'dark',
-    palette: {
-      background: '#04170D',
-      surface: '#0A2A19',
-      surfaceHover: '#113A24',
-      border: '#24543A',
-      textPrimary: '#E8F5EC',
-      textSecondary: '#8FBFA2',
-      accent: '#34C47C',
-      accentHover: '#57D894',
-      success: '#34C47C',
-      warning: '#F0B429',
-      error: '#F0736A',
-      secondary: '#6FD3A0',
-      info: '#6FB6D9',
-    },
-    shape: { cardRadius: 16, controlRadius: 10 },
-    decoration: 'forest-glow',
-  },
-
-  /**
-   * `gruvbox` — warm earth, from the Gruvbox terminal scheme.
-   *
-   * The registry's first theme that is not a member of the Locus green family.
-   * Warm beige text (`#EBDBB2`) on a brown-black page, with a mustard accent and
-   * an orange glow rising from the bottom edge (`ember-pit`).
-   *
-   * Why it is here: warm schemes are easier on the eye at night than the
-   * blue-white default, and a *warm dark* theme is a genuinely different look
-   * from `default-dark` in a way that a saturation change is not. The palette's
-   * blue channel is deliberately kept low throughout — that is what makes it read
-   * as lamplight rather than as a tinted grey.
-   */
-  gruvbox: {
-    id: 'gruvbox',
-    labelKey: 'home.components.connection.account.themeGruvbox',
-    mode: 'dark',
-    palette: {
-      background: '#1D2021',
-      surface: '#282828',
-      surfaceHover: '#32302F',
-      border: '#504945',
-      textPrimary: '#EBDBB2',
-      textSecondary: '#BDAE93',
-      accent: '#FABD2F',
-      accentHover: '#FFC95F',
-      success: '#B8BB26',
-      warning: '#FE8019',
-      error: '#FB4934',
-      secondary: '#83A598',
-      info: '#8EC07C',
-    },
-    shape: DEFAULT_SHAPE,
-    decoration: 'ember-pit',
-  },
-
-  /**
-   * `nord` — cold arctic blue, from the Nord scheme.
-   *
-   * The cool counterpart to `gruvbox`, and the first theme whose *surfaces* are
-   * saturated rather than neutral: the page and cards are both blue-grey, one a
-   * visible step from the other, with a frost-blue accent on a quiet grid
-   * (`blueprint`).
-   *
-   * Why it is here: it is the low-stimulus dark theme. Every colour sits close in
-   * hue and low in saturation, so nothing competes for attention — which is the
-   * opposite design goal from `high-contrast`, and both are legitimate.
-   */
-  nord: {
-    id: 'nord',
-    labelKey: 'home.components.connection.account.themeNord',
-    mode: 'dark',
-    palette: {
-      background: '#2E3440',
-      surface: '#3B4252',
-      surfaceHover: '#434C5E',
-      border: '#4C566A',
-      textPrimary: '#ECEFF4',
-      textSecondary: '#C2CBD9',
+      background: '#1E222A',
+      surface: '#272C36',
+      surfaceHover: '#323845',
+      border: '#3E4553',
+      textPrimary: '#D8DEE9',
+      textSecondary: '#A9B4C4',
       accent: '#88C0D0',
-      accentHover: '#9BD0DE',
+      accentHover: '#A3D4E2',
       success: '#A3BE8C',
       warning: '#EBCB8B',
-      error: '#BF616A',
+      error: '#D08770',
       secondary: '#81A1C1',
-      info: '#5E81AC',
+      info: '#5E9FD8',
     },
     shape: DEFAULT_SHAPE,
     decoration: 'blueprint',
   },
 
   /**
-   * `ink` — warm paper with print inks.
+   * `dawn` — indigo night with a lit horizon.
    *
-   * The light theme that is not a whitened version of the default. Off-paper
-   * ground (`#F2EDE3`), warm-black text, and an *oxblood* accent (`#8C2F39`)
-   * rather than a green one, with two offset flat tints (`risograph`) reading as
-   * over-inked plates.
+   * Scheme: **analogous** on an indigo base (h~230), with the accent a step
+   * toward blue-cyan and the warm accents (peach, coral, violet) acting as
+   * complements. Four hues in the accent family, deliberately: this is the most
+   * colourful theme, and the variety is the point.
    *
-   * Why it is here: `default-light` and `paper` are both green-accented and
-   * differ mainly in temperature. This is the light theme with a different
-   * *identity* — a printed page rather than a screen — and it is the only theme
-   * in the registry whose accent is not in the green/blue family at all.
-   *
-   * The accent is dark enough for body copy on paper by construction: `#8C2F39`
-   * on `#FBF8F2` is ~7.0:1, so it needs no special-casing to be legible as text.
+   * Mood: nocturnal but not gloomy — the palette of a screen in a dark room at
+   * 3am. It is the highest-chroma dark theme in the registry, which is what makes
+   * it the "vibrant alternative" rather than another grey.
    */
-  ink: {
-    id: 'ink',
-    labelKey: 'home.components.connection.account.themeInk',
+  dawn: {
+    id: 'dawn',
+    labelKey: 'home.components.connection.account.themeDawn',
+    mode: 'dark',
+    palette: {
+      background: '#1A1B26',
+      surface: '#24283B',
+      surfaceHover: '#2F3349',
+      border: '#3B4261',
+      textPrimary: '#C0CAF5',
+      textSecondary: '#9AA5CE',
+      accent: '#7AA2F7',
+      accentHover: '#9AB8FF',
+      success: '#9ECE6A',
+      warning: '#E0AF68',
+      error: '#F7768E',
+      secondary: '#BB9AF7',
+      info: '#7DCFFF',
+    },
+    shape: DEFAULT_SHAPE,
+    decoration: 'signal-noise',
+  },
+
+  /**
+   * `ember` — warm terracotta, lamplight.
+   *
+   * Scheme: **complementary** on a warm terracotta base (h~25). The accent
+   * (`#E0895F`) is the base hue at full strength, and the cool counterweight is
+   * carried by `info` (`#8FB0C9`) rather than by the accent — which is what keeps
+   * a warm theme from turning muddy.
+   *
+   * Mood: warm and energetic without being loud. Warm light is easier on the eye
+   * at night than a blue-white screen, and this is the theme for a cold room.
+   * The blue channel is kept low throughout so it reads as lamplight, not as a
+   * tinted grey.
+   */
+  ember: {
+    id: 'ember',
+    labelKey: 'home.components.connection.account.themeEmber',
+    mode: 'dark',
+    palette: {
+      background: '#211A17',
+      surface: '#2E2521',
+      surfaceHover: '#3B302A',
+      border: '#4E4038',
+      textPrimary: '#EDE0D8',
+      textSecondary: '#C0ABA0',
+      accent: '#E0895F',
+      accentHover: '#F0A17C',
+      success: '#9CB380',
+      warning: '#E0A85F',
+      error: '#E0706B',
+      secondary: '#C98F9E',
+      info: '#8FB0C9',
+    },
+    shape: DEFAULT_SHAPE,
+    decoration: 'ember-pit',
+  },
+
+  /**
+   * `moss` — desaturated deep green, the quiet one.
+   *
+   * Scheme: **analogous** on a green base (h~145), a half-turn away from the
+   * brand green in value rather than in hue. Every colour is muted, and the
+   * range between the lightest and darkest surface is small.
+   *
+   * Mood: restful and organic. This is the closest relative of the default in the
+   * registry, and it exists for people who like the default's character but want
+   * it softer — the difference is saturation and lift, not identity.
+   */
+  moss: {
+    id: 'moss',
+    labelKey: 'home.components.connection.account.themeMoss',
+    mode: 'dark',
+    palette: {
+      background: '#1B2320',
+      surface: '#243029',
+      surfaceHover: '#2E3D35',
+      border: '#3A4A41',
+      textPrimary: '#DCE8DF',
+      textSecondary: '#A3B5A8',
+      accent: '#8FBF9F',
+      accentHover: '#A8D4B6',
+      success: '#8FBF9F',
+      warning: '#D9B382',
+      error: '#D98C8C',
+      secondary: '#7FA8B8',
+      info: '#8FB8C9',
+    },
+    shape: { cardRadius: 14, controlRadius: 8 },
+    decoration: 'forest-glow',
+  },
+
+  /**
+   * `linen` — cool neutral light.
+   *
+   * Scheme: **analogous** on a neutral-cool base (h~210). Near-monochrome
+   * surfaces with a single blue accent, so the one saturated thing on screen is
+   * always interactive.
+   *
+   * Mood: clean and clinical. The off-white ground (`#F4F7FA`, L=0.93) is chosen
+   * rather than white so the card edge is a relationship rather than a glare —
+   * see the note in `_theme.tsx` on why `#FFFFFF` was removed.
+   */
+  linen: {
+    id: 'linen',
+    labelKey: 'home.components.connection.account.themeLinen',
     mode: 'light',
     palette: {
-      background: '#F2EDE3',
-      surface: '#FBF8F2',
-      surfaceHover: '#E9E2D5',
-      border: '#C9BFAE',
-      textPrimary: '#22201C',
-      textSecondary: '#5E5648',
-      accent: '#8C2F39',
-      accentHover: '#73252E',
+      background: '#EAEEF2',
+      surface: '#F4F7FA',
+      surfaceHover: '#DFE5EB',
+      border: '#C0CAD4',
+      textPrimary: '#1E2733',
+      textSecondary: '#55636F',
+      accent: '#2F6F9F',
+      accentHover: '#255A82',
       success: '#3F6C45',
       warning: '#8A5A00',
       error: '#A33226',
-      secondary: '#155E75',
+      secondary: '#5B6E85',
       info: '#255E8A',
+    },
+    shape: DEFAULT_SHAPE,
+  },
+
+  /**
+   * `sepia` — warm paper, low glare.
+   *
+   * Scheme: **analogous** on a warm paper base (h~35), with a burnt-orange accent
+   * the same hue at full strength. The text is a warm near-black rather than a
+   * neutral one, which is what makes the whole surface feel like paper.
+   *
+   * Mood: calm and analogue. Designed for a bright room or beside a window, where
+   * a cool white screen competes with the daylight. The warm ground also reduces
+   * the blue-light load for evening reading.
+   */
+  sepia: {
+    id: 'sepia',
+    labelKey: 'home.components.connection.account.themeSepia',
+    mode: 'light',
+    palette: {
+      background: '#EDE4D3',
+      surface: '#F6F0E3',
+      surfaceHover: '#E0D5BF',
+      border: '#C4B69C',
+      textPrimary: '#2B2620',
+      textSecondary: '#6B6152',
+      accent: '#96602A',
+      accentHover: '#7A4D20',
+      success: '#4A6B3A',
+      warning: '#8A5A00',
+      error: '#9E3A2A',
+      secondary: '#6B6152',
+      info: '#2F6480',
     },
     shape: DEFAULT_SHAPE,
     decoration: 'risograph',
   },
 
   /**
-   * `amber-crt` — a monochrome phosphor terminal.
+   * `contrast` — maximum legibility, still not a glare.
    *
-   * The most committed theme in the registry: amber text on near-black, with
-   * every colour in the amber/warm family and a scanline-and-glow treatment
-   * (`signal-noise`). It is the only theme where the *text colour itself* is the
-   * accent, which is what a monochrome CRT actually was.
+   * Scheme: a **neutral ramp** with a single green accent. Not a colour scheme at
+   * all, deliberately: this theme's job is legibility, and hue variety would
+   * work against it. What separates it from the other dark themes is *range* —
+   * text at ~13:1 on the surface, borders at 2.40:1, and the largest surface step
+   * in the registry.
    *
-   * Why it is here: it is the proof that the decoration seam can carry a
-   * full-window treatment rather than a single wash, and it is the theme most
-   * likely to be someone's favourite or least favourite — which is the point of
-   * offering a registry instead of one appearance.
-   *
-   * Deliberately *not* the default and not the only dark theme: a screen where
-   * everything is one hue trades colour-coding for mood, so status colours here
-   * shift in warmth and lightness rather than in hue, and the integrity risk is
-   * real. If a student needs status to be unmistakable, `high-contrast` is the
-   * theme for that.
+   * It replaces the old pure-white-on-pure-black `high-contrast`, which met the
+   * contrast numbers by every measure and was still the wrong answer: `#FFFFFF`
+   * on `#000000` is the highest-glare combination possible, and for the people
+   * who need this theme most — those with astigmatism or light sensitivity —
+   * glare is the symptom, not the fix. `#F0F3F5` on `#242A30` is still ~13:1 and
+   * does not halo.
    */
-  'amber-crt': {
-    id: 'amber-crt',
-    labelKey: 'home.components.connection.account.themeAmberCrt',
+  contrast: {
+    id: 'contrast',
+    labelKey: 'home.components.connection.account.themeContrast',
     mode: 'dark',
     palette: {
-      background: '#0C0A06',
-      surface: '#171208',
-      surfaceHover: '#221B0D',
-      border: '#4A3A16',
-      textPrimary: '#FFC24B',
-      textSecondary: '#C79A45',
-      accent: '#FFB000',
-      accentHover: '#FFC94D',
-      success: '#B4C24B',
-      warning: '#FF9E2C',
-      error: '#FF6B4A',
-      secondary: '#D9A03C',
-      info: '#C9A227',
+      background: '#14171A',
+      surface: '#242A30',
+      surfaceHover: '#2E353C',
+      border: '#5A646E',
+      textPrimary: '#F0F3F5',
+      textSecondary: '#C2CAD2',
+      accent: '#6FD08C',
+      accentHover: '#8FDFA6',
+      success: '#6FD08C',
+      warning: '#E8C46A',
+      error: '#F08A8A',
+      secondary: '#9AB4CC',
+      info: '#8FC4E8',
     },
-    shape: { cardRadius: 6, controlRadius: 4 },
-    decoration: 'signal-noise',
+    shape: DEFAULT_SHAPE,
   },
 }
 

@@ -100,19 +100,18 @@ export interface TranslationResources {
             refreshFailed: string
             subscription: string
             theme: string
-            themeAmberCrt: string
+            themeContrast: string
             themeDark: string
+            themeDawn: string
             themeDefaultDark: string
             themeDefaultLight: string
-            themeForest: string
-            themeGruvbox: string
-            themeHighContrast: string
+            themeEmber: string
             themeHint: string
-            themeInk: string
             themeLight: string
-            themeMidnight: string
-            themeNord: string
-            themePaper: string
+            themeLinen: string
+            themeMoss: string
+            themeSepia: string
+            themeSlate: string
             themeSystem: string
             thisDevice: string
             title: string
@@ -137,6 +136,8 @@ export interface TranslationResources {
           subscriptionExpiresIn: string
           subscriptionExpiresToday: string
           subscriptionLapsed: string
+          support: string
+          supportEmail: string
           takingLonger: string
           toggleHint: string
         }
