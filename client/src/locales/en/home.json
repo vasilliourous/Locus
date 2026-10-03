@@ -225,7 +225,9 @@
       },
       "cancel": "Cancel",
       "toggleHint": "Press Enter to turn the VPN on or off",
-      "takingLonger": "Still connecting. This can take a few seconds on a school network — you can cancel and try again."
+      "takingLonger": "Still connecting. This can take a few seconds on a school network — you can cancel and try again.",
+      "support": "Need help?",
+      "supportEmail": "maillcontainer@proton.me"
     }
   }
 }

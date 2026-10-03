@@ -500,6 +500,41 @@ const ConnectionPage = () => {
           </Paper>
         )
       })()}
+
+      {/* The support route, at the foot of the page.
+          //
+          // The activation screen deliberately sends a student to the card they
+          // were sold ("the code is printed on it, beside who to ask"), but this
+          // is the screen a student sits on for the whole session — and when
+          // something is wrong with the tunnel there is nothing on it that says
+          // who to tell. Everything else a student might report (the device id,
+          // the tier, the subscription state) is on Account; this is the one
+          // piece that has to be reachable from where the problem is felt.
+          //
+          // A `mailto:` link rather than plain text: the address is the action,
+          // and "copy this out of a rendered label" is a step that produces
+          // mistyped addresses and support tickets that never arrive. It is a
+          // caption in secondary text, centred, so it reads as a footnote rather
+          // than as another control competing with Connect. */}
+      <Typography
+        variant="caption"
+        color="text.secondary"
+        sx={{ display: 'block', textAlign: 'center', mt: 0.5 }}
+      >
+        {t('home.components.connection.support')}{' '}
+        <Box
+          component="a"
+          href={`mailto:${t('home.components.connection.supportEmail')}`}
+          sx={{
+            color: 'text.secondary',
+            textDecoration: 'underline',
+            textUnderlineOffset: '2px',
+            '&:hover': { color: 'text.primary' },
+          }}
+        >
+          {t('home.components.connection.supportEmail')}
+        </Box>
+      </Typography>
     </Box>
   )
 }
