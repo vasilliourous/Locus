@@ -27,6 +27,68 @@ corrections are marked. For what is *still* broken, read `STILL-OPEN.md`.
 
 ---
 
+## macOS SHIPPED A TERMINAL-ONLY REMEDY: A README THE STUDENT COULD NOT ACT ON (2026-10-03)
+
+| | |
+|---|---|
+| Severity | 🟠 Every macOS student who met the Gatekeeper dialog needed a command line to get past it |
+| **Reported as** | *"remove the read me text from the macos install, really unnecessary"* |
+| **Files:** | `.github/workflows/client.yml`, `client/src-tauri/packages/macos/READ ME FIRST.txt` (deleted), `server/scripts/check-consistency.sh` §20, `docs/operate/OPS.md` |
+| **Fixed in:** | next tag (macOS only) |
+
+### The defect, in one line
+
+The mitigation for an unsigned macOS build told the student to run `xattr -cr` in
+**Terminal** — which is not a remedy for someone who cannot evaluate a shell
+command, and it was the only path forward, because an unsigned + quarantined
+`.app` produces *"damaged and can't be opened"*, a dialog with **no** "Open
+Anyway".
+
+### Why the fix is signing, not better wording
+
+The wording was already accurate. What was wrong was the class of failure: macOS
+distinguishes a bundle with **no** signature (reported as corrupt) from one with a
+signature that is **not a Developer ID** (reported as unverified), and only the
+second is surfaced in System Settings → Privacy & Security with an actionable
+button. So `codesign --force --deep --sign -` does not make the app trusted — it
+moves the failure into the class the student can escape **without a Terminal**.
+
+The README was removed rather than kept alongside it. Two remedies that disagree
+about which is primary is worse than one, so `check-consistency.sh` §20 now
+asserts the file is **gone** and that the signing step exists — inverting a guard
+that previously asserted the opposite.
+
+### The guard was wrong twice before it was right, and both times were instructive
+
+`§20`'s replacement is an inverted assertion, and the first two drafts failed on
+**their own documentation**:
+
+1. A bare `grep 'READ ME FIRST'` matched the comment explaining *why* the file was
+   removed. The cheapest way to make it green would have been to delete the
+   explanation — a guard passing for the wrong reason, with the reasoning lost.
+   Fixed by matching the **mechanism** (`cp`/`install` of that path, or a read-back
+   of it) rather than the name.
+2. The doc check then flagged the sentence "the `.dmg` **no longer** carries a
+   README" — a sentence that *agrees* with the removal. Fixed by asserting the
+   operational verb and filtering explicit negations.
+
+This is the §3 class ("a check that cannot distinguish a right answer from a wrong
+one reads exactly like a check that passed") found in a guard written by the same
+change that was quoting it — which is the argument for probing a guard before
+keeping it, not after.
+
+### Verified / not verified
+
+- **Verified:** all five §20 assertions and all eleven §1c assertions were
+  observed **failing** against the defect each catches, then restored; the workflow
+  and both embedded scripts parse; `check-consistency.sh` exits 0 (89 OK / 0 BAD);
+  the console builds and type-checks.
+- **Not verified:** that macOS actually draws the corrupt-vs-unverified distinction
+  for this build, that "Open Anyway" appears, and that a student can open the
+  extracted `.app`. No Mac was involved. See `STILL-OPEN.md`.
+
+---
+
 ## A NEW LOOKUP STATUS NAME LEFT REINSTALLING STUDENTS UNABLE TO RE-ENTER THEIR CODE (2026-10-03)
 
 | Severity | 🔴 Every student who uninstalled and reinstalled was stranded, and could not update out of it |

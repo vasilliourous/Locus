@@ -118,6 +118,44 @@ PLATFORMS = [
 ]
 MANIFEST_NAME = "manifest.json"
 
+## ── HUMAN-FACING INSTALLERS, WHICH ARE NOT UPDATE PAYLOADS ──
+##
+## These are deliberately SEPARATE from PLATFORMS above, and the separation is
+## the whole safety property. PLATFORMS decides what a client downloads and
+## EXECUTES to replace itself: those bytes are cross-checked against CI's
+## manifest and written into `update_<platform>`. This list decides what a
+## PERSON downloads from the console, and nothing here may ever reach
+## `update_config` — a compressed app bundle handed to `tauri_plugin_updater`
+## is the raw-Windows-PE mistake again, in a different costume: a legitimate
+## release asset that is wrong in the update slot.
+##
+## The macOS zip carries the ad-hoc-signed `Locus.app`. It exists because the
+## `.dmg` cannot serve the one case that matters: a student whose download is
+## quarantined and refused, where the remedy is a bundle that survives
+## transport intact so macOS reports the bypassable "unidentified developer"
+## dialog rather than "damaged and can't be opened". See
+## docs/operate/OPS.md ("Notes & limitations") and check-consistency.sh §20.
+##
+## The Windows installer is ALSO an updater payload and IS already in PLATFORMS
+## — it is not listed here, because listing it twice would invite the two
+## definitions to drift. This list is only for artifacts no client fetches.
+##
+## `%s` is the version; `%s` the arch. Filled by `installer_zip_names()`.
+MACOS_ZIP_TEMPLATE = "installer-Locus_%s_%s.zip"
+MACOS_ZIP_ARCHES = ("amd64", "arm64")
+
+
+def installer_zip_names(version):
+    """The macOS human-download archives CI produces for `version`.
+
+    Both architectures, by the same names the release job asserts are present.
+    Kept as a function so the template exists once and can be pinned — the
+    Windows installer learned this the hard way when CI's manifest and the
+    hub's fetcher drifted apart on a filename and no check compared them.
+    """
+    return [MACOS_ZIP_TEMPLATE % (version, arch) for arch in MACOS_ZIP_ARCHES]
+
+
 ## manifest.json is a few hundred bytes and is NOT a binary, so it must not be
 ## held to the executable floor below — doing so rejects a perfectly good
 ## release with "downloaded only 719 bytes". The floor applies to executables
@@ -396,6 +434,22 @@ def fetch_release(version, force=False):
             400,
         )
 
+    # ── The macOS human download: WANTED, BUT NOT REQUIRED ──
+    #
+    # Deliberately not in `wanted` above, and the asymmetry is the point. That
+    # list is all-or-nothing because a missing UPDATE payload is a fleet that
+    # silently cannot update. A missing macOS zip is one less convenience
+    # download on the console page — and failing the whole publish for it would
+    # mean a Windows or Linux hotfix could not ship because a macOS packaging
+    # step had broken. That trade is wrong in the direction that matters: it
+    # would let a cosmetic gap block a security fix.
+    #
+    # So it is staged when present, reported when absent, and never fatal. The
+    # console shows the result either way, so "absent" is visible to an operator
+    # rather than silent.
+    optional = [("zip_macos_" + arch, name)
+                for arch, name in zip(MACOS_ZIP_ARCHES, installer_zip_names(version))]
+
     os.makedirs(target_dir, exist_ok=True)
     staged = {}
     results = {}
@@ -479,7 +533,83 @@ def fetch_release(version, force=False):
                 pass
             raise
 
-    # ── Cross-check the filenames against CI's manifest ──
+    # ── The macOS human download, staged AFTER the required set ──
+    #
+    # Runs only once every required artifact is on disk and verified, so a
+    # broken CI release still fails on the artifacts that matter before we spend
+    # bandwidth on a convenience copy. Absence is reported, never raised — see
+    # the note where `optional` is built.
+    #
+    # The `.zip` gets its own floor rather than the 1 MB binary floor. Both
+    # would pass a real zip, but the reason differs: a zip is not an executable
+    # and the binary floor's meaning ("this is not a truncated pointer for an
+    # executable") does not apply to it. A few hundred KB is a plausible
+    # compressed .app on a good day; a few hundred BYTES is a pointer or an
+    # error page. Deliberately loose, because the check that the archive holds a
+    # real bundle lives in CI (`unzip -l` assertions) where the bundle is
+    # actually present.
+    MIN_ARCHIVE_BYTES = 64 * 1024
+
+    for key, name in optional:
+        if name not in assets:
+            log("  ~ %s not in the v%s release — the console will show no macOS download"
+                % (name, version))
+            results[key] = {"filename": name, "absent": True}
+            continue
+        url, asset_size = assets[name]
+        if asset_size and asset_size > MAX_ASSET_BYTES:
+            raise FetchError(
+                "%s is %d bytes according to GitHub — larger than the %d byte cap"
+                % (name, asset_size, MAX_ASSET_BYTES),
+                400,
+            )
+
+        final_path = os.path.join(target_dir, name)
+        if not force and os.path.isfile(final_path) and os.path.getsize(final_path) >= MIN_ARCHIVE_BYTES:
+            existing = _sha256_file(final_path)
+            log("  = %s already present (%s)" % (name, existing[:16]))
+            results[key] = {"filename": name, "sha256": existing,
+                            "bytes": os.path.getsize(final_path), "skipped": True}
+            continue
+
+        fd, tmp_path = tempfile.mkstemp(prefix=".fetch-", dir=target_dir)
+        os.close(fd)
+        try:
+            log("  ↓ %s (macOS download)" % name)
+            sha, size = _download(url, tmp_path, MIN_ARCHIVE_BYTES, MAX_ASSET_BYTES,
+                                  what="archive")
+
+            # The archive must actually BE a zip. This is the same class of check
+            # as the ELF/PE/Mach-O slot validation: a wrong file in a slot is the
+            # realistic failure, and a compressed app that is not an archive
+            # would be served to a student as a "zip" and fail to open. Local
+            # magic rather than a content scan — `PK\x03\x04` is the local file
+            # header, and an empty archive is the only legitimate case that
+            # lacks it, which is not something CI produces.
+            with open(tmp_path, "rb") as fh:
+                magic = fh.read(4)
+            if magic[:2] != b"PK":
+                raise FetchError(
+                    "%s is not a zip archive (starts with %r) — refusing to "
+                    "publish it as the macOS download"
+                    % (name, magic[:4]),
+                    400,
+                )
+
+            os.chmod(tmp_path, 0o644)
+            os.replace(tmp_path, final_path)
+            with open(final_path + ".sha256", "w") as f:
+                f.write("%s  %s\n" % (sha, name))
+            os.chmod(final_path + ".sha256", 0o644)
+            results[key] = {"filename": name, "sha256": sha, "bytes": size,
+                            "format": "zip archive", "skipped": False}
+            log("    %d bytes sha256=%s" % (size, sha[:16]))
+        except Exception:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+            raise
     #
     # THE DEFECT THIS EXISTS FOR. `manifest.json` names, per platform, the file
     # CI intends a client to install from itself — and for Windows that has been

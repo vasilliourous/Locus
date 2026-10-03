@@ -14,6 +14,64 @@ Ordered by whether I could have validated it here.
 
 ## Open, and blocked in this environment
 
+### The macOS Gatekeeper bypass is argued from how macOS classifies signatures, never observed on a Mac
+
+**Added 2026-10-03.** The macOS install path changed: the `.dmg` no longer carries
+a `READ ME FIRST.txt` telling the student to run `xattr -cr` in Terminal, and the
+bundle inside it is now **ad-hoc signed** (`codesign --force --deep --sign -`),
+with a `.zip` of the signed `.app` published as a human download alongside it.
+
+The claim the change rests on is a claim about **macOS**, not about this tree:
+
+> An unsigned, quarantined `.app` fails Gatekeeper as *corrupt* — *"…is damaged and
+> can't be opened"* — and that dialog offers no "Open Anyway". An ad-hoc-signed
+> bundle fails as *unverified* instead, because the signature exists but is not a
+> Developer ID, and **that** dialog is surfaced in System Settings → Privacy &
+> Security with a working **Open Anyway**.
+
+**What is verified here:**
+
+- the signing step runs, verifies (`codesign --verify --deep --strict`) and prints
+  the identity; a failure fails the build rather than warning and continuing;
+- the signing/repack step is macOS-gated on `matrix.label`;
+- the repack re-mounts the rebuilt image and re-verifies the bundled `.app`;
+- the zip is asserted to contain `Locus.app/` and `Locus.app/Contents/MacOS/` by
+  name, and to **extract to a bundle that still verifies as signed**;
+- the zip can never enter the update path — CI's manifest and the hub's
+  `PLATFORMS` both refuse a `.zip`, asserted by `check-consistency.sh` §1c, and
+  each of those assertions was observed failing against the defect it catches.
+
+**What is NOT verified, and cannot be from here:**
+
+- **That macOS actually draws the distinction above.** The whole design turns on
+  Gatekeeper treating ad-hoc-signed-but-unnotarized as an identity problem rather
+  than corruption. That is read from Apple's documented behaviour and from how the
+  same distinction is described for `spctl`, **not measured**. No Mac was involved.
+- **That the "Open Anyway" button appears** for this build, on the macOS versions
+  students run. On macOS 15+ a first right-click → Open may be needed to force the
+  dialog before the Settings pane offers the button; that interaction is untested.
+- **That the zip extracts to a launchable app on a real machine.** `ditto -x -k`
+  is the documented-correct extractor and the signature survives it — but only a
+  Mac confirms the app then opens.
+- **The `.dmg` repack itself.** `hdiutil attach`/`create` and `codesign` run only
+  on the macOS runners, so neither the signing nor the rebuild has executed
+  anywhere in this environment.
+
+**The specific observation that would settle it.** On a real Mac: download the
+`.dmg` from a tagged release in a browser, drag the app to Applications, launch
+it, and record **which** dialog appears and whether System Settings offers **Open
+Anyway**. Then repeat with the `.zip` from the console's Releases page. Record both
+on `CLAIMS.md` §5 (a new claim — A6/A7 cover Windows only and are unaffected).
+
+**Until then**, the honest claim class for the whole macOS change is **structural
+argument plus CI guard**, and the old README's implicit claim — *"this is expected
+and here is what to type"* — is **not** replaced by anything verified on hardware.
+
+NOTE: this work is on the `rice/themes` branch and is uncommitted-then-committed
+per change; nothing here has been tagged, so no student has received it.
+
+---
+
 ### The egress probe judges the tunnel by the group's selected member, and a 504 is unreachable by the classifier
 
 **Added 2026-10-02. FIXED the same day** — the probe now asks each outbound by name

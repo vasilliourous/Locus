@@ -135,6 +135,28 @@ server/scripts/verify-release.sh 3.1.0      # read-only; hashes the SERVED bytes
 `verify-release.sh` is the right tool: it checks the `update_config` row **and**
 re-downloads each artifact to confirm the served bytes match the recorded hash.
 
+### The macOS download, which is not an update
+
+CI also produces `installer-Locus_<v>_amd64.zip` and `..._arm64.zip` — the
+compressed, **ad-hoc-signed** `Locus.app`. The hub fetches them, and the console's
+Releases page links them with the verified size, format and SHA-256.
+
+They are **not** update payloads and never appear in `update_config`, CI's
+`manifest.json` platform map, or the hub's `PLATFORMS`. Both sides actively refuse
+a `.zip` in an update slot (`check-consistency.sh` §1c), because a compressed
+bundle handed to the updater is the 2026-10-01 Windows mistake in a new costume —
+a legitimate release asset that is wrong in the slot.
+
+**A missing macOS zip does not block a publish.** It is staged when present and
+reported when absent, so a broken macOS packaging step can never stop a Windows or
+Linux hotfix shipping. The console shows it either way.
+
+**Why it exists:** ad-hoc signing moves the Gatekeeper failure from
+*"damaged and can't be opened"* (no bypass, Terminal only) to *"unidentified
+developer"* (System Settings → Privacy & Security → **Open Anyway**). The `.dmg`
+is still the normal install; the zip is what to hand a student whose download was
+refused. See [`OPS.md`](OPS.md) → "Notes & limitations".
+
 ### ⚠️ There is no rollout, and no automatic downgrade
 
 Publishing **is** offering. `active` (boolean) is the only off switch, and
