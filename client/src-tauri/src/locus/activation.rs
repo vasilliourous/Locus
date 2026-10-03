@@ -319,9 +319,17 @@ fn classify_lookup(response: &LookupResponse) -> CodeCheck {
         LookupStatus::Suspended => (false, "This code has been suspended"),
         LookupStatus::Expired => (false, "This code has expired"),
         LookupStatus::NotFound => (false, "That code was not found"),
-        // An unknown status means a hub this build does not understand. Do not
-        // claim the code is fine, and do not claim it is bad.
-        LookupStatus::Unknown => (false, "Could not check this code right now"),
+        // An unknown status means a hub this build does not understand — a NEWER
+        // hub, or a transient failure. It must NOT block: the lookup is an
+        // advisory pre-check, and `/api/activate` is the authority that answers
+        // the same question. Refusing here means a client can never activate a
+        // code on a hub that has moved ahead of it, which is how a student gets
+        // permanently stuck at the prompt — unable even to update, since the
+        // update path is behind this gate.
+        //
+        // `ready` is therefore true, but the message does not claim the code is
+        // fine; it says we could not check and proceeds.
+        LookupStatus::Unknown => (true, "Could not check this code — trying it anyway"),
     };
 
     CodeCheck {
@@ -652,8 +660,8 @@ mod tests {
         }
     }
 
-    /// The lookup is advisory: "not found" is actionable, but an unrecognised
-    /// status must not be reported as either good or bad.
+    /// The lookup is advisory. A code that is *known bad* blocks; anything the
+    /// client cannot interpret must PROCEED, to the authority that can answer.
     #[test]
     fn lookup_classification_covers_the_redeemed_and_unknown_cases() {
         let ready = classify_lookup(&LookupResponse {
@@ -676,30 +684,52 @@ mod tests {
         });
         assert!(reused.ready, "an already-used code must still be activatable");
 
+        // THE REGRESSION THIS PINS: an unrecognised status must not block.
+        //
+        // It used to return `ready: false`, which meant a client meeting a hub
+        // whose status vocabulary had moved ahead of it could never activate at
+        // all — and could not update out of it either, because the updater runs
+        // behind this gate. Found live 2026-10-03 when the hub began sending
+        // `already_used` to clients that only knew the old names.
         let unknown = classify_lookup(&LookupResponse {
             status: LookupStatus::Unknown,
             tier: None,
             expires_at: None,
             message: None,
         });
-        assert!(!unknown.ready, "an unknown status must not be presented as ready");
+        assert!(
+            unknown.ready,
+            "an unknown lookup status must fall through to activation, not block it"
+        );
     }
 
-    /// A deployed 3.2.x hub answers the lookup with the retired binding statuses.
-    /// They must deserialize to `Unknown` rather than failing, because the screen
-    /// degrades to "could not check" — which is correct — while a parse failure
-    /// would be a hard error on a code that is probably fine.
+    /// The wire names the hub uses for a redeemed code must both be understood.
+    ///
+    /// `bound_this_device` is what the hub actually sends (a frozen name every
+    /// deployed client already accepts as ready); `already_used` is the
+    /// descriptive alias. Reading either as `Unknown` is the dead end that
+    /// stranded reinstalling students on 2026-10-03.
     #[test]
-    fn the_retired_binding_statuses_are_tolerated() {
-        for retired in ["bound_this_device", "bound_other"] {
+    fn the_redeemed_status_names_are_both_understood() {
+        for name in ["bound_this_device", "already_used"] {
             let parsed: LookupStatus =
-                serde_json::from_value(serde_json::json!(retired)).expect("a retired status must deserialize");
+                serde_json::from_value(serde_json::json!(name)).expect("a redeemed status must deserialize");
             assert_eq!(
                 parsed,
-                LookupStatus::Unknown,
-                "{retired} came from a hub this build predates the change for; it must degrade to Unknown"
+                LookupStatus::AlreadyUsed,
+                "`{name}` must map to AlreadyUsed (a code that is yours and awaitable), \
+                 not to Unknown"
             );
         }
+    }
+
+    /// A genuinely unknown name still degrades safely — to `Unknown`, which the
+    /// classifier now treats as "try anyway", never as a refusal.
+    #[test]
+    fn a_genuinely_unknown_status_does_not_fail_to_parse() {
+        let parsed: LookupStatus =
+            serde_json::from_value(serde_json::json!("some_future_status")).expect("must not hard-fail");
+        assert_eq!(parsed, LookupStatus::Unknown);
     }
 
     /// The checksum must agree with the **deployed hub**, not merely with

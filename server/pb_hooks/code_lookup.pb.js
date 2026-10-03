@@ -164,15 +164,31 @@ routerAdd("POST", "/api/code-lookup", function(e) {
         // confirm it against. So this is reported as usable, with a message that
         // says so, rather than as an error that would send them to a middleman.
         //
-        // The old `bound_other` / `bound_this_device` split is gone with the
-        // device binding it described. Those two statuses are FROZEN wire names —
-        // a deployed client maps them to its own messages — so `already_used` is
-        // a new status an old client would not recognise. That is safe: an
-        // unrecognised status reads as "cannot tell" and falls back to the
-        // activate-time check, which is the correct behaviour anyway.
+        // WHY `bound_this_device`, AND NOT A NEW STATUS NAME.
+        //
+        // This shipped as `already_used` and BROKE every deployed client (found
+        // live 2026-10-03). A deployed client's `LookupStatus` enum is an
+        // ALLOW-LIST with `#[serde(other)] -> Unknown`, and `Unknown` is
+        // `ready: false` — so the client showed "Could not check this code right
+        // now" and never called /api/activate at all. The hub's activate path
+        // was correct the whole time; the lookup gate stopped the request before
+        // it was made, and the only way out was an operator releasing the code.
+        //
+        // The old note here claimed an unrecognised status "falls back to the
+        // activate-time check". That was WRONG, and it is what made this look
+        // safe. The fallback is `Unknown = not ready`, i.e. a dead end.
+        //
+        // So the frozen wire name is used deliberately. `bound_this_device` is
+        // the one status every deployed build already maps to `ready: true`
+        // ("Already activated on this device — activating again is safe"), which
+        // is exactly the semantics a redeemed code has now that a code is not
+        // tied to a device. The name is a leftover from device binding; the
+        // MEANING is "this code is already yours, go ahead". Do not rename it:
+        // on this route a new name is a new dead end for every client in the
+        // field, and a client stuck here cannot update its way out.
         var at = rec.get("activated_at");
         if (at !== null && at !== undefined && String(at).trim() !== "") {
-            resp.status = "already_used";
+            resp.status = "bound_this_device";
             resp.message = "This code has already been activated — entering it again will restore your access";
             return e.json(200, resp);
         }

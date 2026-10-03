@@ -252,7 +252,6 @@ fn the_lookup_status_vocabulary_is_unchanged() {
     for status in [
         "ok",
         "unbound",
-        "already_used",
         "suspended",
         "expired",
         "not_found",
@@ -261,10 +260,72 @@ fn the_lookup_status_vocabulary_is_unchanged() {
             hook_emits_status(&hook, status),
             "the lookup hook no longer emits status \"{status}\". The client's \
              `LookupStatus` enum deserializes these exact snake_case strings; a \
-             rename degrades to `Unknown`, which the activation screen shows as \
-             \"could not check this code right now\"."
+             rename degrades to `Unknown` on deployed builds."
         );
     }
+}
+
+/// The status the hub sends for an already-redeemed code must be one the
+/// DEPLOYED clients already treat as ready.
+///
+/// # This is the defect that shipped, pinned
+///
+/// The hub began sending a NEW name (`already_used`) for a redeemed code. A
+/// deployed client's `LookupStatus` is an allow-list with a `#[serde(other)]`
+/// catch-all, so the unknown name became `Unknown`, and the deployed classifier
+/// read `Unknown` as NOT ready — the client refused to call `/api/activate` at
+/// all. A student who reinstalled could not re-enter their code, and the only
+/// remedy was an operator releasing it. Found live 2026-10-03.
+///
+/// So this asserts the AGREEMENT between the two sides rather than each alone:
+/// whatever the hook emits for a redeemed code must be `bound_this_device`,
+/// because that is the one frozen name every deployed build maps to
+/// `ready: true`. A new name here is a dead end for clients that cannot update
+/// their way out of it.
+#[test]
+fn a_redeemed_code_reports_a_status_deployed_clients_accept() {
+    let hook = lookup_hook();
+
+    assert!(
+        hook.contains(r#"resp.status = "bound_this_device""#),
+        "the lookup hook no longer reports a redeemed code as `bound_this_device`. \
+         That frozen name is the only status a DEPLOYED client maps to \
+         `ready: true`; any other name reaches it as `Unknown` and the client \
+         will refuse to activate — a student stuck at the code prompt with a \
+         valid code, unable even to update."
+    );
+
+    assert!(
+        !hook.contains(r#""already_used""#),
+        "the lookup hook still emits `already_used`, which deployed clients read \
+         as `Unknown` (= not ready) and which blocks activation. See the note in \
+         code_lookup.pb.js: the meaning is right, the WIRE NAME is what broke."
+    );
+}
+
+/// The client must PROCEED on an unknown lookup status, never block.
+///
+/// The other half of the same agreement. Even with the hub's name pinned above,
+/// a future hub will eventually send something this build does not know, and the
+/// lookup must not be the thing that strands a student: `/api/activate` is the
+/// authority and answers the same question.
+#[test]
+fn an_unknown_lookup_status_does_not_block_activation() {
+    let activation = read_code(&repo_root().join("client/src-tauri/src/locus/activation.rs"));
+
+    // Find the Unknown arm and assert it is `true` (proceed), not `false`.
+    let unknown_arm = activation
+        .lines()
+        .find(|line| line.contains("LookupStatus::Unknown =>"))
+        .unwrap_or_else(|| panic!("no `LookupStatus::Unknown` arm found in classify_lookup"));
+
+    assert!(
+        unknown_arm.contains("(true,"),
+        "`LookupStatus::Unknown` no longer marks the code as ready to try. An \
+         unrecognised status must fall through to `/api/activate` — blocking on \
+         it is how a client meeting a newer hub becomes permanently stuck at the \
+         code prompt. Arm was: {unknown_arm}"
+    );
 }
 
 /// An unknown status must degrade to `Unknown`, never to a success.

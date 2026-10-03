@@ -176,19 +176,33 @@ pub enum LookupStatus {
     /// The code has already been redeemed. Activation will still succeed — it
     /// restores the entitlement — so the screen says so rather than refusing.
     ///
-    /// This replaced `BoundThisDevice` / `BoundOther`: a code is no longer tied
-    /// to a device, so there is nothing to compare against, only the single-use
-    /// stamp to report.
+    /// # Two wire names, deliberately
+    ///
+    /// A code is no longer tied to a device, so `BoundThisDevice`/`BoundOther`
+    /// lost their meaning. But the hub cannot simply start sending a new name:
+    /// an older client's enum is an allow-list whose `#[serde(other)]` catch-all
+    /// is `Unknown`, and `Unknown` is `ready: false` — so a new status string is
+    /// a **dead end** for every client already in the field, and a student stuck
+    /// at the code prompt cannot update their way out of it. That happened:
+    /// the hub sent `already_used` and deployed clients refused to activate at
+    /// all (found live 2026-10-03).
+    ///
+    /// So the hub sends the frozen name `bound_this_device` — which every
+    /// deployed build already maps to `ready: true` — and this build accepts it
+    /// under the meaning that actually applies, alongside the descriptive alias
+    /// `already_used` for any hub that has learned to send it.
+    #[serde(alias = "bound_this_device")]
     AlreadyUsed,
     Suspended,
     Expired,
     NotFound,
-    /// An older hub that lacks the route, or a transient failure. The caller
-    /// falls back to validating at activation time rather than reporting a
-    /// failure, because "we could not ask" is not "your code is bad".
+    /// An older hub that lacks the route, or a transient failure.
     ///
-    /// A deployed 3.2.x hub will send `bound_this_device` / `bound_other`, which
-    /// deserialize here — an unrecognised status must not be a hard error.
+    /// **Not a refusal.** The caller must fall back to attempting activation
+    /// rather than treating this as "the code is bad": the hub is the authority
+    /// and answers the same question at activate time. Reading this as "not
+    /// ready" is exactly the dead end described above, so `classify_lookup`
+    /// treats `Unknown` as *proceed*, not as *block*.
     #[serde(other)]
     Unknown,
 }
@@ -365,27 +379,30 @@ mod tests {
         assert_eq!(artifact_for("macos"), None);
     }
 
-    /// The response shape the hub returns for a code that has already been
-    /// redeemed. A parsing mismatch here would show a student the wrong reason
-    /// their code was refused — or, worse, report a lapsed code as ready.
+    /// The response shape the hub ACTUALLY returns for a redeemed code, and the
+    /// descriptive alias, must both map to `AlreadyUsed`.
+    ///
+    /// The hub sends the frozen `bound_this_device` because deployed clients
+    /// only accept known names (see the enum's own note); `already_used` is
+    /// accepted too so a hub that learns the clearer name is not a breaking
+    /// change for this build. Both must parse to the same variant.
     #[test]
-    fn parses_a_redeemed_lookup_response() {
-        let live = r#"{
-          "expires_at": "2027-09-19 00:00:00.000Z",
-          "message": "This code has already been activated",
-          "status": "already_used",
-          "tier": "strike"
-        }"#;
+    fn both_redeemed_status_names_map_to_the_same_variant() {
+        for status in ["bound_this_device", "already_used"] {
+            let live = format!(
+                r#"{{"expires_at": "2027-09-19 00:00:00.000Z", "message": "This code has already been activated", "status": "{status}", "tier": "strike"}}"#
+            );
+            let parsed: LookupResponse =
+                serde_json::from_str(&live).expect("the redeemed response shape must parse");
 
-        let parsed: LookupResponse = serde_json::from_str(live).expect("the redeemed response shape must parse");
-
-        assert_eq!(
-            parsed.status,
-            LookupStatus::AlreadyUsed,
-            "misreading this status would tell a student their own code is unusable"
-        );
-        assert_eq!(parsed.tier.as_deref(), Some("strike"));
-        assert!(parsed.expires_at.is_some());
+            assert_eq!(
+                parsed.status,
+                LookupStatus::AlreadyUsed,
+                "misreading `{status}` would either refuse a student their own code \
+                 (`bound_this_device` read as Unknown) or lose the reason entirely"
+            );
+            assert_eq!(parsed.tier.as_deref(), Some("strike"));
+        }
     }
 
     /// Every status the hub emits must round-trip. An unrecognised one degrades
@@ -396,6 +413,7 @@ mod tests {
         for (wire, expected) in [
             ("unbound", LookupStatus::Unbound),
             ("ok", LookupStatus::Ok),
+            ("bound_this_device", LookupStatus::AlreadyUsed),
             ("already_used", LookupStatus::AlreadyUsed),
             ("suspended", LookupStatus::Suspended),
             ("expired", LookupStatus::Expired),
