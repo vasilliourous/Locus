@@ -72,6 +72,16 @@ impl RunState {
     /// The Service is the only supported way to run the Core, so a Service that
     /// is present but unusable is now always the student's to resolve. There is
     /// no longer an accepted-Sidecar escape that makes such a Service ignorable.
+    ///
+    /// `NotInstalled` is deliberately NOT listed here, and that is not the same
+    /// as saying a missing Service needs no attention. It is answered elsewhere:
+    /// startup raises an install request for an absent Service on macOS (see
+    /// `prepare_startup`), and `pending` below makes that request a decision.
+    /// Keeping it out of this arm preserves the runtime safety valve in
+    /// `tun_should_be_disabled` — a confirmed-absent Service with nothing
+    /// outstanding has to turn TUN off on its own, or the Core can never start.
+    /// Including it here would silently disable that valve on every platform,
+    /// which is why the affordance is raised through `pending` instead.
     #[must_use]
     pub const fn service_needs_attention(&self) -> bool {
         if self.op_in_flight {
@@ -95,10 +105,35 @@ impl RunState {
         !matches!(self.health, ServiceHealth::Unknown) && !self.op_in_flight && !self.service_needs_attention()
     }
 
-    /// Present-but-broken services remain in the repair flow rather than being disabled here.
+    /// Whether *startup* should turn the stored TUN preference off.
+    ///
+    /// Scoped to the platforms where an absent Service means it was REMOVED.
+    ///
+    /// The reasoning behind this branch is about a Service that went away: a
+    /// preference left on across a removal would make every future start wait
+    /// for a Service that is not coming, which is why startup clears it.
+    ///
+    /// That premise does not hold on macOS, where an absent Service is the
+    /// *ordinary first-run state* — a `.app` dragged out of the `.dmg` has one,
+    /// because nothing in that path registers it. Clearing the preference there
+    /// is actively harmful: it is half of the deadlock. The install request is
+    /// driven by the Service's absence (see `prepare_startup`), so the state
+    /// stays "needs an answer" and the correct outcome is to leave the
+    /// preference alone and let the student install the Service.
+    ///
+    /// Keeping the Windows behaviour rather than flipping it globally is the
+    /// point: on Windows an absent Service really does mean removal, because
+    /// NSIS registers it during setup.
     #[must_use]
     pub const fn startup_tun_should_be_disabled(&self, tun_enabled: bool) -> bool {
-        matches!(self.health, ServiceHealth::NotInstalled) && self.tun_should_be_disabled(tun_enabled)
+        if !matches!(self.health, ServiceHealth::NotInstalled) {
+            return false;
+        }
+        // macOS: an absent Service is first-run, not removal. Do not clear.
+        if cfg!(target_os = "macos") {
+            return false;
+        }
+        self.tun_should_be_disabled(tun_enabled)
     }
 
     #[must_use]
@@ -166,9 +201,33 @@ mod tests {
 
     #[test]
     fn a_service_that_is_merely_absent_needs_no_decision() {
+        // `NotInstalled` alone is not a decision. The macOS affordance is raised
+        // through a pending install request instead, so that this arm stays out
+        // of `tun_should_be_disabled`'s way (see its doc comment).
         assert!(!state(ServiceHealth::NotInstalled, false, false).service_needs_attention());
         assert!(!state(ServiceHealth::Ready, false, false).service_needs_attention());
         assert!(!state(ServiceHealth::Unknown, false, false).service_needs_attention());
+    }
+
+    /// The macOS first-run path raises the install request, and THAT is what
+    /// makes the state a decision the student must answer.
+    ///
+    /// This is the link the bug was missing. Excluding `NotInstalled` from
+    /// `service_needs_attention` is only safe because startup requests the
+    /// install for an absent Service on macOS, which sets `pending` — so the
+    /// dialog opens by that route. If the request stops being raised, the
+    /// student is back to a dead end with nothing to press, which is what this
+    /// asserts against.
+    #[test]
+    fn an_absent_service_with_an_install_request_is_a_decision() {
+        let mut requested = state(ServiceHealth::NotInstalled, false, false);
+        requested.pending = Some(PendingAction::Install);
+
+        assert!(
+            requested.service_needs_attention(),
+            "a raised install request must open the install affordance, even though \
+             NotInstalled alone does not"
+        );
     }
 
     #[test]
@@ -256,9 +315,16 @@ mod tests {
 
     #[test]
     fn startup_tun_is_disabled_only_for_a_confirmed_absent_service() {
-        assert!(
-            state(ServiceHealth::NotInstalled, false, false).startup_tun_should_be_disabled(true),
-            "a non-elevated reinstall must not keep an unusable TUN setting"
+        // Platform-scoped, because the premise differs: on Windows an absent
+        // Service means it was REMOVED (NSIS registers it at setup), so a
+        // preference left on would wait forever. On macOS it is first-run, and
+        // clearing the preference is half of the connect deadlock.
+        let settled = state(ServiceHealth::NotInstalled, false, false);
+        let expected = !cfg!(target_os = "macos");
+        assert_eq!(
+            settled.startup_tun_should_be_disabled(true),
+            expected,
+            "an absent Service clears TUN only where absence means removal"
         );
 
         for health in [
@@ -272,6 +338,20 @@ mod tests {
                 "{health:?} is not proof that the Service was removed"
             );
         }
+    }
+
+    /// The macOS no-clear rule needs its own assertion, not a `cfg!` in a shared
+    /// test: a `cfg!`-driven expectation still passes on Windows when the macOS
+    /// branch is deleted, so it would not protect the half of the fix that runs
+    /// on the platform the bug was found on.
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn startup_does_not_clear_tun_for_an_absent_service_on_macos() {
+        assert!(
+            !state(ServiceHealth::NotInstalled, false, false).startup_tun_should_be_disabled(true),
+            "clearing the preference on first run recreates the deadlock: with TUN off, \
+             nothing requests the Service, and the student has no way to connect"
+        );
     }
 
     #[test]

@@ -613,9 +613,16 @@ fn describe_outcome(outcome: &activation::ActivationOutcome) -> String {
 /// Linux either one is sufficient, and it says "administrator rights" rather than
 /// "TUN" — the student does not know what TUN is, and naming our mechanism would
 /// describe the implementation instead of the obstacle.
+///
+/// It used to say "Install the service from Settings". That is now false on
+/// macOS, and it was never the whole story: an absent Service on macOS is
+/// requested by startup, so the install prompt appears on its own and the
+/// student's job is to APPROVE it. Sending them to hunt for a Settings control
+/// (which macOS does not render) was the second half of a real dead end — a
+/// student reported this message and could find nothing to press.
 const TUN_UNAVAILABLE_MESSAGE: &str = "Locus needs administrator rights to create the VPN tunnel, \
-     and the Locus service is not available on this device. Install the service from Settings, or \
-     start Locus as an administrator, then try again.";
+     and its helper service is not available on this device. Approve the permission prompt when \
+     Locus asks to install it, or start Locus as an administrator, then try again.";
 
 /// Whether a connect attempt may proceed on the given run state.
 ///
@@ -1363,6 +1370,32 @@ mod tests {
         assert!(
             lowered.contains("tunnel") || lowered.contains("vpn"),
             "must say what access they are getting, got {text:?}"
+        );
+    }
+
+    /// The refusal must not send the student to a control that does not exist.
+    ///
+    /// It used to say "Install the service from Settings". On macOS there is no
+    /// such control, and a student who followed that instruction found nothing to
+    /// press — then had nowhere left to go, because the app never raised the
+    /// install itself either. The message now points at the permission prompt
+    /// that the app actually shows, which is the route that exists on every
+    /// platform.
+    ///
+    /// Pinning the *approval* wording rather than a screen name is the point: a
+    /// screen name is a claim about the UI that this file cannot check, which is
+    /// exactly how the old sentence went stale without anyone noticing.
+    #[test]
+    fn the_tun_refusal_points_at_a_prompt_that_exists() {
+        let lowered = TUN_UNAVAILABLE_MESSAGE.to_lowercase();
+        assert!(
+            lowered.contains("prompt") || lowered.contains("permission"),
+            "must name the permission step the app raises, got {TUN_UNAVAILABLE_MESSAGE:?}"
+        );
+        assert!(
+            !lowered.contains("from settings"),
+            "must not direct the student to a Settings control that is not rendered, \
+             got {TUN_UNAVAILABLE_MESSAGE:?}"
         );
     }
 

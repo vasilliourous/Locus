@@ -167,7 +167,7 @@
       "metricPending": "Not reported yet",
       "speed": "Speed",
       "needsActivation": "This device needs an activation code before it can connect.",
-      "requiresSetup": "Locus cannot turn the VPN on yet: it needs administrator rights, and the Locus service is not installed. Installing Locus with the installer sets this up automatically.",
+      "requiresSetup": "Locus cannot turn the VPN on yet: it needs administrator rights, and its helper service is not installed. Locus will ask for permission to set this up when it starts — approve that prompt, then try again.",
       "subscriptionLapsed": "Your Locus subscription has expired, so the VPN will not connect. Contact the person who sold you the code to renew it.",
       "subscriptionExpiresToday": "Your Locus subscription expires today. Contact the person who sold you the code to renew it.",
       "subscriptionExpiresIn": "Your Locus subscription expires in {{count}} days. Contact the person who sold you the code to renew it.",

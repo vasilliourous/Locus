@@ -1679,7 +1679,11 @@ echo "18. The Windows installer is signed, under the name the release job prefix
 # (AGENTS.md, "assert the agreement").
 wf_installer="$WORKFLOW"
 if [ -f "$wf_installer" ]; then
-    sign_glob="$(grep -oE 'for f in installer/[^;]+' "$wf_installer" | head -1 || true)"
+    # Scoped to `installer/Locus_*` deliberately. Several steps iterate
+    # `installer/*` now (the macOS .dmg repack does), and a bare `head -1` would
+    # grab whichever comes first in the file — so this check would silently stop
+    # testing the step it exists for, which is the failure mode it is about.
+    sign_glob="$(grep -oE 'for f in installer/Locus_[^;]+' "$wf_installer" | head -1 || true)"
     prefix_src="$(grep -oE 'cp "\$f" "release/installer-\$base"' "$wf_installer" | head -1 || true)"
     # The `if:` line follows the step name, but a comment block may sit between
     # them (the file explains WHY at the point of contact). Scan forward from the
@@ -1806,6 +1810,247 @@ PY
     fi
 else
     warn "workflow not found at ${WORKFLOW}; skipping the matrix-condition check"
+fi
+
+echo
+echo "20. The macOS disk image still carries the launch instructions"
+# ─────────────────────────────────────────────────────────────
+# WHY THIS EXISTS
+#
+# Locus ships unsigned on macOS (no Apple Developer ID — gap #3). A quarantined
+# unsigned .app produces
+#
+#   "Locus" is damaged and can't be opened. You should move it to the Trash.
+#
+# rather than the accurate "unidentified developer". The wording cannot be fixed
+# without an Apple account, so the mitigation is to tell the student what the
+# message means and what to type — inside the disk image, where they are looking.
+#
+# That mitigation existed and was LOST. The retired Wails client staged a
+# "READ ME FIRST.txt" into every image (legacy/wails-client/build/macos/make-dmg.sh),
+# and the Tauri pipeline that replaced it dropped the file and the ad-hoc
+# codesign while `docs/operate/OPS.md` went on claiming "The .dmg carries a
+# README with the exact steps". The claim outlived the file, and nothing
+# noticed, because a missing README breaks nothing that a test can see — the
+# .dmg still builds, signs, publishes and verifies.
+#
+# This guard ties the three pieces together, so the documentation cannot drift
+# away from the artifact again:
+#   - the README source exists in the tree;
+#   - a workflow step actually copies it into the .dmg;
+#   - that step is macOS-gated and read-back-verified.
+#
+# Like §14 this is a grep, not a mount: it cannot prove the bytes reach a
+# student, which is why the workflow step re-mounts and reads the file back on
+# the runner. This check catches the change that would make that step dead —
+# renaming the file, deleting it, or unwiring the step — at commit time.
+# ─────────────────────────────────────────────────────────────
+MACOS_README="$REPO/client/src-tauri/packages/macos/READ ME FIRST.txt"
+if [ ! -f "$MACOS_README" ]; then
+    bad "client/src-tauri/packages/macos/READ ME FIRST.txt is missing"
+    bad "  unsigned macOS builds show 'damaged and can't be opened'; this file is the only"
+    bad "  place a student is told that is expected and what to run (xattr -cr)"
+else
+    ok "the macOS launch instructions are in the tree"
+    # The content has to be the content that helps: a stub would satisfy a
+    # bare existence check while leaving a student with a Trash prompt.
+    missing=""
+    for needle in "xattr -cr" "Locus.app" "Applications"; do
+        grep -qF "$needle" "$MACOS_README" || missing="$missing '$needle'"
+    done
+    if [ -n "$missing" ]; then
+        bad "READ ME FIRST.txt no longer mentions:$missing"
+        bad "  it must tell the student the app is not damaged, where to put it, and what to run"
+    else
+        ok "it names the app, the install location and the quarantine fix"
+    fi
+fi
+
+# The step that puts it in the image. Without this the file is inert — the same
+# "repo fix is inert until the piece that runs it is deployed" shape as a hook
+# fix that never reaches the hub.
+if [ -f "$WORKFLOW" ]; then
+    # Match the ACTUAL copy, not the filename. A bare `grep READ ME FIRST.txt`
+    # also matches the comments that explain the step, so deleting the `cp` and
+    # leaving its prose behind would keep this check green — which is precisely
+    # the "check that cannot fail" trap. So this asserts the copy SOURCE (the
+    # tree path that must exist and be committed) and a destination that ends in
+    # `READ ME FIRST.txt`. The destination folder is deliberately not pinned:
+    # whether the file is written into the mounted volume or into a staging
+    # directory is an implementation detail of the repack, and pinning it here
+    # would make this check fail on a correct change — the opposite of its job.
+    if grep -qE 'cp "?src-tauri/packages/macos/READ ME FIRST\.txt"?[^|]*"?[^" ]*/READ ME FIRST\.txt"?' "$WORKFLOW"; then
+        ok "a workflow step copies READ ME FIRST.txt into the macOS image"
+    else
+        bad "no workflow step copies READ ME FIRST.txt into the .dmg"
+        bad "  expected a: cp \"src-tauri/packages/macos/READ ME FIRST.txt\" \".../READ ME FIRST.txt\""
+        bad "  Tauri cannot do it: DmgConfig has no 'files' key, and MacConfig.files only"
+        bad "  injects into the .app's Contents/. The image must be repacked after bundling."
+    fi
+    # The step must be macOS-only, or it runs on Linux and Windows runners that
+    # have no `hdiutil` at all — turning a solaris-free step into a hard failure
+    # on two of four platforms. Gating on `matrix.label` rather than `matrix.os`
+    # is the same lesson §18/§19 encode.
+    if grep -qE "if: *startsWith\(matrix\.label, *'macos'\)" "$WORKFLOW"; then
+        ok "the repack step is gated on matrix.label (macOS slices only)"
+    else
+        bad "the DMG repack step is not gated on matrix.label starting with 'macos'"
+        bad "  it would run on the linux and windows runners, where hdiutil does not exist"
+    fi
+    # A repack that silently produced an imageless .dmg looks exactly like a
+    # success, so the step must mount the result back and read the file out.
+    if grep -q 'hdiutil attach' "$WORKFLOW" && grep -q 'hdiutil create' "$WORKFLOW"; then
+        ok "the repack uses hdiutil (available on macOS runners, nothing to install)"
+    else
+        bad "no hdiutil repack step found — the .dmg would ship without the instructions"
+    fi
+    # The read-back half. Without it, "the file was written" is an assumption:
+    # `hdiutil create` can produce an image that lacks it and exit 0.
+    if grep -q 'does not contain a usable' "$WORKFLOW"; then
+        ok "the step re-mounts and verifies the README is really in the image"
+    else
+        bad "the repack step does not read READ ME FIRST.txt back out of the rebuilt .dmg"
+        bad "  an hdiutil create that dropped the file exits 0 and looks identical to success"
+    fi
+else
+    warn "workflow not found at ${WORKFLOW}; skipping the DMG-step check"
+fi
+
+echo
+echo "21. macOS asks for the Service install when it is absent"
+# ─────────────────────────────────────────────────────────────
+# WHY THIS EXISTS
+#
+# macOS has no installer that registers the Locus Service. On Windows the NSIS
+# setup does it during install, so a fresh install is never `NotInstalled` — but
+# a `.app` dragged out of the `.dmg` is, on first launch, with `enable_tun_mode`
+# defaulting to false. The only writer of that flag was the Connect path, which
+# sits behind the `tun_capable()` refusal an absent Service causes:
+#
+#     no Service -> Connect refused -> TUN never enabled
+#     TUN disabled -> install never requested -> no Service
+#
+# Nothing broke the loop, so a student who installed from the `.dmg` could never
+# connect, and the install affordance never appeared either (the dialog is driven
+# by `serviceNeedsAttention`, and an absent Service was deliberately excluded
+# from it). A real student hit this and there was no in-app route out at all.
+#
+# The fix is that `prepare_startup` requests the install for an absent Service on
+# macOS. This guard exists because that behaviour is INVISIBLE from the tree: it
+# cannot be exercised without macOS, the deadlock is silent, and reverting it
+# restores a state where the app looks healthy and simply never connects. Every
+# separate piece below was independently necessary, so each is asserted:
+#   - the predicate that decides it,
+#   - its macOS gate,
+#   - that it is actually called from the startup path,
+#   - and that the refusal no longer points at a Settings control macOS lacks.
+# ─────────────────────────────────────────────────────────────
+LIFECYCLE="$REPO/client/src-tauri/src/core/manager/lifecycle.rs"
+if [ ! -f "$LIFECYCLE" ]; then
+    warn "no lifecycle.rs — this guard cannot run"
+else
+    if grep -q 'fn should_request_install_for_absent_service' "$LIFECYCLE"; then
+        ok "the absent-Service install predicate exists"
+    else
+        bad "should_request_install_for_absent_service is gone from lifecycle.rs"
+        bad "  without it nothing requests the Service install on macOS, and a DMG"
+        bad "  install can never connect — see the comment above it for the loop"
+    fi
+
+    # The call site, not just the definition. A predicate nothing calls is inert,
+    # which is the exact shape of the original bug (the pieces were all present).
+    #
+    # Read through a python extractor that strips comments, because this file
+    # explains all three pieces in prose at the point of contact — a bare grep
+    # matches the explanation, so deleting the call while keeping its comment
+    # would read as a pass. That blind spot was found by falsifying this guard
+    # rather than by writing it.
+    lifecycle_code="$(python3 - "$LIFECYCLE" <<'PY'
+import re, sys
+text = open(sys.argv[1], encoding="utf-8", errors="replace").read()
+# Drop `//`-style comments (including doc comments) line by line.
+kept = []
+for line in text.splitlines():
+    stripped = line.strip()
+    if stripped.startswith("//"):
+        continue
+    kept.append(line)
+print("\n".join(kept))
+PY
+)"
+
+    if printf '%s' "$lifecycle_code" | grep -q 'if should_request_install_for_absent_service('; then
+        ok "the startup path calls the absent-Service predicate"
+    else
+        bad "prepare_startup does not CALL should_request_install_for_absent_service"
+        bad "  the predicate existing is not enough: nothing raises the install request,"
+        bad "  so a macOS DMG install still cannot connect"
+    fi
+
+    if printf '%s' "$lifecycle_code" | grep -q 'require_install_for_session()'; then
+        ok "the startup path still raises the install request"
+    else
+        bad "prepare_startup no longer calls require_install_for_session()"
+    fi
+
+    # The gate must be macOS. On Windows the NSIS installer registers the Service,
+    # so an absent one means removal and the pre-existing handling applies;
+    # widening this platform-blind would change Windows behaviour unasked.
+    #
+    # Checked as the cfg attribute IMMEDIATELY preceding the call, since the file
+    # also carries a `#[cfg(target_os = "macos")]` elsewhere (the dev chmod path).
+    if python3 - "$LIFECYCLE" <<'PY'
+import re, sys
+code = "\n".join(
+    l for l in open(sys.argv[1], encoding="utf-8", errors="replace").read().splitlines()
+    if not l.strip().startswith("//")
+)
+# An `if should_request_install_for_absent_service(` guarded by a macOS cfg on the
+# line directly above it.
+ok = re.search(
+    r'#\[cfg\(target_os = "macos"\)\]\s*\n\s*if should_request_install_for_absent_service\(',
+    code,
+)
+sys.exit(0 if ok else 1)
+PY
+    then
+        ok "the absent-Service request is cfg-gated to macOS at the call site"
+    else
+        bad "the absent-Service install request is not immediately cfg-gated to macOS"
+        bad "  it must not change Windows behaviour, where absence means removal"
+    fi
+fi
+
+# The refusal wording. It used to say "Install the service from Settings", which
+# macOS does not render — a student followed it, found no such control, and had
+# nowhere left to go. A message naming UI that does not exist is worse than no
+# message, because it sends someone looking.
+REFUSAL="$REPO/client/src-tauri/src/cmd/locus.rs"
+if [ ! -f "$REFUSAL" ]; then
+    warn "no cmd/locus.rs — this guard cannot run"
+else
+    # Scoped to the CONSTANT, not the file. The explanatory comments above it
+    # quote the old wording to say why it was wrong, and a bare file-wide grep
+    # matches those — so removing the string while keeping its rationale would
+    # read as a failure, which is backwards. This extracts the value only.
+    refusal_value="$(python3 - "$REFUSAL" <<'PY'
+import re, sys
+text = open(sys.argv[1], encoding="utf-8", errors="replace").read()
+m = re.search(r'TUN_UNAVAILABLE_MESSAGE\s*:\s*&str\s*=\s*"(.*?)";', text, re.S)
+print(m.group(1) if m else "")
+PY
+)"
+
+    if [ -z "$refusal_value" ]; then
+        bad "TUN_UNAVAILABLE_MESSAGE was not found in cmd/locus.rs"
+        bad "  if it was renamed, update this guard so the wording stays checked"
+    elif printf '%s' "$refusal_value" | grep -q 'from Settings'; then
+        bad "the TUN refusal still tells the student to install the service 'from Settings'"
+        bad "  macOS renders no such control; the message must name the permission"
+        bad "  prompt the app raises instead"
+    else
+        ok "the refusal does not point at a Settings control that may not exist"
+    fi
 fi
 
 echo

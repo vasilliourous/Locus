@@ -715,8 +715,22 @@ the served bytes, and exits non-zero if anything disagrees.
   Updating it means shipping a new installer and re-publishing.
 - **macOS builds are unsigned**, so Gatekeeper blocks first launch
   (right-click → Open). Tracked as gap #3, out of scope. The `.dmg` carries a
-  README with the exact steps, including the `xattr -cr` fallback for the
-  "damaged and can't be opened" variant.
+  `READ ME FIRST.txt` with the exact steps, including the `xattr -cr` fallback
+  for the "damaged and can't be opened" variant. CI stages it into the image
+  after `tauri build` — Tauri's `DmgConfig` cannot add files to the DMG root —
+  and re-mounts the result to confirm it is there. The source is
+  `client/src-tauri/packages/macos/READ ME FIRST.txt`, and
+  `check-consistency.sh` §20 fails the tree if that file, its instructions, or
+  the step that copies it ever go missing.
+
+  **This was not always true, and the documentation claimed it anyway.** The
+  file appears in a Tauri-built `.dmg` only as of the commit that added the CI
+  repack step; the retired Wails client had its own copy
+  (`legacy/wails-client/build/macos/make-dmg.sh`) and the Tauri rewrite dropped
+  it while this paragraph stayed behind. So v3.2.22 and v3.2.23 shipped a bare
+  image, and the only macOS failure mode was the misleading Trash prompt. Check
+  the image, not this sentence: `hdiutil attach` the published `.dmg` and look
+  for `READ ME FIRST.txt` beside `Locus.app`.
 - **Where a client installs decides whether it can update itself.** An installed
   copy (Program Files / Applications / `~/.local/bin`) self-updates reliably; a
   portable copy stages privately inside its own directory. The client reports
