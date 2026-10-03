@@ -29,13 +29,51 @@ top** of the shipped appearance and must not restructure it:
 |---|---|
 | The palette (accent, surfaces, borders, text, status colours) | The two-tab shape, or anything in `_navigation-meta.ts` |
 | Corner radii, via two CSS variables | Tier identity (`TIER_COLORS`) — see §3 |
-| One additive decorative block, from a **named preset** | Any component's structure, props or behaviour |
-| Nothing else | Whether a state is shown, or what it says |
+| A **multi-layer decoration** from a named preset, scoped to `[data-theme-skin]` | Any component's structure, props or behaviour |
+| Anything a decoration can paint **without changing layout** | Whether a state is shown, or what it says |
 
 It is deliberately not a redesign. The Connection screen's layout, its state
 machine and its message priority (`client/docs/FRONTEND.md` §§2–4) are
 untouched by a theme, and a theme that changes what a student reads is a bug in
 the theme, not a feature.
+
+### What changed in 3.3.0, and why
+
+Before 3.3.0 a decoration was a **single flat string**, and the guard enforcing
+that rejected any `{` or `}` in a preset. That was true to the original design —
+a preset was one `radial-gradient` — but it could not express a *rice*, which is
+inherently layered: a base wash, a directional treatment, a texture pass and a
+vignette, composited in a defined order.
+
+A preset is now a `DecorationSpec` — `short` (root declarations) plus an ordered
+`layers` array. The safety properties are unchanged; the **enforcement** is now
+direct rather than a proxy. The old check banned braces, which:
+
+- **permitted** a stray unbalanced `}` in a preset, which closes the scoped block
+  early and leaves the rest of the text loose at the top level of the injected
+  `<style>` — a real escape the old guard did not detect; and
+- **rejected** balanced nested blocks, layered gradients and `@supports`, none of
+  which can escape anything.
+
+`theme-colors.test.ts` now asserts the properties that actually matter:
+every brace balances, no construct introduces a document-level rule, no preset
+can load a remote or inline asset, and no preset can leave the skin scope. Each
+of those assertions was demonstrated failing before it was kept — including the
+early-close case above, which the previous guard could not have caught.
+
+### The rule that replaced "no braces"
+
+The constraint that has not changed, and which a test **cannot** enforce, is that
+every layer stays **compositor-only**. `background-*`, `box-shadow`, `border-*`,
+`opacity`, `filter`, `mix-blend-mode` and custom-property declarations are all
+fine, because none can change layout. Nothing in a preset may set `width`,
+`height`, `margin`, `padding`, `position`, `display`, `flex`, `grid`, `gap`,
+`order` or `font-size` on anything. A decoration that could resize or move an
+element is a decoration that can move the Connect button, which is the one thing
+this app must not do.
+
+That is a **review obligation**, and §10 records it as an unguarded gap rather
+than claiming the suite covers it.
 
 ### Why decoration is a named preset and not injected CSS
 
@@ -94,8 +132,8 @@ theme-plus-mode matrix: selecting `Midnight` gives a dark appearance whatever
 `theme_mode` says, because the theme *is* the mode.
 
 The consequence, stated so nobody later reports it as a bug: **a student cannot
-have a light variant of a dark-only theme.** Six themes are six palettes, not
-six palettes with two variants each. This was a deliberate simplification — it
+have a light variant of a dark-only theme.** Ten themes are ten palettes, not
+ten palettes with two variants each. This was a deliberate simplification — it
 keeps the registry readable and the contrast checking tractable — and if a
 theme is wanted in both modes it is added as two entries with two names.
 
@@ -135,7 +173,7 @@ Four rules, each enforced by a test in `client/tests/theme-colors.test.ts`:
 
 ---
 
-## 4. The six themes
+## 4. The ten themes
 
 Colours are given so a reader can see each theme's intent; the **authority is
 the registry** (`client/src/pages/_themes.ts`), and `check-consistency.sh` §9
@@ -202,9 +240,58 @@ break a layer built only for colour.
 is a fixed, named, non-interactive wash — not the user's `background_image`
 field, which keeps working independently and is not part of any theme.
 
+### 4.7 `gruvbox` — warm earth
+
+The first theme outside the Locus green family. Warm beige text (`#EBDBB2`) on a
+brown-black page, a mustard accent, and an orange wash rising from the bottom
+edge (`ember-pit`).
+
+*Why it exists:* warm schemes are easier on the eye at night than a blue-white
+one, and a *warm dark* theme is a genuinely different look from `default-dark`
+in a way that moving the saturation dial is not. The blue channel is kept low
+throughout, which is what makes it read as lamplight rather than a tinted grey.
+
+### 4.8 `nord` — cold arctic blue
+
+The cool counterpart, and the first theme whose **surfaces are saturated**:
+both the page and the cards are blue-grey, one a visible step from the other,
+with a frost-blue accent on a quiet grid (`blueprint`).
+
+*Why it exists:* it is the low-stimulus dark theme. Every colour sits close in
+hue and low in saturation so nothing competes for attention — the opposite
+design goal from `high-contrast`, and both are legitimate.
+
+### 4.9 `ink` — warm paper, print inks
+
+The light theme that is *not* a whitened version of the default. Off-paper
+ground (`#F2EDE3`), warm-black text, and an **oxblood** accent (`#8C2F39`) —
+the only accent in the registry outside the green/blue family — with two offset
+flat tints (`risograph`) reading as over-inked plates.
+
+*Why it exists:* `default-light` and `paper` are both green-accented and differ
+mainly in temperature. This is a light theme with a different *identity* — a
+printed page rather than a screen. The accent is dark enough for body copy on
+paper by construction (~7.0:1), so it needs no special-casing to be legible.
+
+### 4.10 `amber-crt` — monochrome phosphor
+
+The most committed theme: amber text on near-black, every colour in the warm
+family, and a scanline-and-glow treatment (`signal-noise`) — the first preset
+that uses more than one layer.
+
+*Why it exists:* it is the proof that the decoration seam carries a full-window
+treatment and not only a wash, and it is the theme most likely to be someone's
+favourite or least favourite — which is the point of a registry rather than one
+appearance.
+
+*The tradeoff, stated:* a screen where everything is one hue gives up
+colour-coding for mood. Status colours here shift in warmth and lightness rather
+than in hue. A student who needs status to be unmistakable should use
+`high-contrast`; this is not that theme.
+
 ---
 
-## 5. The three paint layers, for six themes
+## 5. The three paint layers, for ten themes
 
 `client/docs/FRONTEND.md` §5 describes three places the window background colour
 exists and cannot share code:
@@ -227,7 +314,7 @@ green-black default rather than true black. This is a **transition between two
 dark colours**, which is not perceptible in the way the upstream-grey-to-Locus-
 green flash was, and it costs nothing.
 
-The alternative — teaching the native window and the document about six themes —
+The alternative — teaching the native window and the document about ten themes —
 means threading the selected theme through the Rust window resolver and a
 pre-bundle script, adding a second place a theme id can be wrong, to remove an
 imperceptible flash. That is not a trade worth making here. If a future theme has
@@ -370,9 +457,17 @@ see §10.
 Adding a theme is safe and guarded (§6). The things that are *not* guarded, and
 should be treated as review-blocking:
 
-- **Making a theme reach past the skin attribute.** A preset is scoped to
-  `[data-theme-skin]`; the test rejects `{`, `}` and `url(` in a preset, but it
-  cannot stop someone replacing the scoping with a raw stylesheet injection.
+- **Making a theme reach past the skin attribute.** A preset's layers are each
+  scoped to `[data-theme-skin]` by `use-custom-theme`, and the test asserts that
+  every brace balances, that no layer introduces a document-level rule
+  (`@import`, `@charset`, `@namespace`, `@font-face`) and that no layer can load
+  a remote or inline asset. What it **cannot** stop is someone replacing that
+  scoping with a raw stylesheet injection, or adding a layout-affecting
+  declaration (see §1's compositor-only rule) — both are review-blocking.
+- **A decoration that changes layout.** The tests check the *shape* of a preset,
+  not which properties it sets. `width`, `margin`, `position` and friends would
+  pass every assertion in the suite and could move a control the student has to
+  press. This is the sharpest unguarded edge the layer has; it is listed in §10.
 - **Deriving the accent's role from `mode` instead of from the theme.** The
   shipped light accent is darker *because it is used as text*. A future theme that
   copies the dark accent into a light palette will pass nothing — the contrast
@@ -406,9 +501,20 @@ is a gap the next agent rediscovers. None of these has a guard.
    translucent green wash designed against a dark background. Nothing prevents a
    future light theme from naming it, and no test would object — the test checks
    the preset's *shape*, not its contrast against the palette using it.
-4. **A decoration preset cannot be verified without eyes.** `forest-glow` uses
-   `radial-gradient`, chosen because it composites without needing an asset and
-   cannot shift layout. That it *looks* right on four platforms is unverified and
-   is stated as such in §8.
-5. **Cold-start under a light theme** is the standing risk from §5, not a defect.
+4. **A decoration preset cannot be verified without eyes.** Every preset in the
+   registry uses compositor-only techniques chosen because they need no asset and
+   cannot shift layout. That they *look* right on four platforms is unverified and
+   is stated as such in §8. The layered presets (`signal-noise` in particular)
+   were not rendered on a real screen during this change — their **validity** is
+   asserted, their **appearance** is not.
+5. **Compositor-only is a review rule, not a checked one.** No test can tell
+   `box-shadow` from `margin-top`; both are just declarations. A preset that
+   changed layout would pass every guard in the suite. This is the direct cost of
+   allowing multi-layer decorations, and it is the first thing to check in a
+   theme diff.
+6. **Four themes have never been seen on a real screen.** `gruvbox`, `nord`,
+   `ink` and `amber-crt` were authored against computed contrast figures (all four
+   clear the §3 floors and the surface-ladder rule) but were not rendered during
+   this change. The figures are trustworthy; the *taste* is not yet evidence.
+7. **Cold-start under a light theme** is the standing risk from §5, not a defect.
    Revisit if a light default is ever shipped.

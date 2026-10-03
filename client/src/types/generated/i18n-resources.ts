@@ -100,14 +100,18 @@ export interface TranslationResources {
             refreshFailed: string
             subscription: string
             theme: string
+            themeAmberCrt: string
             themeDark: string
             themeDefaultDark: string
             themeDefaultLight: string
             themeForest: string
+            themeGruvbox: string
             themeHighContrast: string
             themeHint: string
+            themeInk: string
             themeLight: string
             themeMidnight: string
+            themeNord: string
             themePaper: string
             themeSystem: string
             thisDevice: string

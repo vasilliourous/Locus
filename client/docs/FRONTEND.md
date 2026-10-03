@@ -222,9 +222,10 @@ field as `setting.X || dt.X`, so a student who customised a colour keeps it.
 
 ### The named themes are a layer over this, not a replacement for it
 
-`src/pages/_themes.ts` holds a registry of six named themes (`default-dark`,
-`default-light`, `midnight`, `paper`, `high-contrast`, `forest`) that a student
-picks from a dropdown on **Account**. The design record is
+`src/pages/_themes.ts` holds a registry of ten named themes (`default-dark`,
+`default-light`, `midnight`, `paper`, `high-contrast`, `forest`, `gruvbox`,
+`nord`, `ink`, `amber-crt`) that a student picks from a dropdown on **Account**.
+The design record is
 [`../../docs/reference/THEMES.md`](../../docs/reference/THEMES.md) — read it before
 touching the registry.
 
@@ -239,12 +240,15 @@ The three properties that make it safe to have alongside this section:
 - **Shape and decoration travel by CSS variables** (`--card-radius`,
   `--control-radius`) and one `<style id="locus-theme-decoration">` element scoped
   to `[data-theme-skin]`. `cardSx` reads `var(--card-radius, 12px)` — the explicit
-  fallback is what an unthemed app and the pre-hook startup window render.
+  fallback is what an unthemed app and the pre-hook startup window render. A
+  decoration is one or more declaration blocks (`DecorationSpec`); each is scoped
+  identically, so a layer cannot introduce a selector of its own.
 
 A theme **cannot** change structure, tier identity, or what a state says. A
 decoration is a **named preset**, never injected CSS: a theme that could emit
-arbitrary CSS could restyle any component, and the registry test asserts no preset
-contains `{`, `}` or `url(`.
+arbitrary CSS could restyle any component. The registry test asserts each
+preset's braces balance, that no layer introduces a document-level rule, and
+that none can load a remote or inline asset — see `THEMES.md` §1.
 
 `src/pages/_surfaces.ts` defines the shared card styling, so every card is the
 same object. Note the app zeroes MUI's shadow scale app-wide and uses a 1px border

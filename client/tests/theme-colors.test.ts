@@ -54,6 +54,66 @@ const readCode = (relative: string) =>
     .toLowerCase()
 
 /**
+ * Braces must balance, and the block must not close early.
+ *
+ * Replaces "contains no braces", which was a proxy for this. A preset that
+ * closes its own block early would let the *rest* of its text sit at the top
+ * level of the injected `<style>` element, where it becomes a real selector
+ * against the whole document — the exact escape the old check was protecting
+ * against, which the old check did not actually detect.
+ */
+const assertBalancedBraces = (text: string, label: string): boolean => {
+  let depth = 0
+  for (const ch of text) {
+    if (ch === '{') depth += 1
+    else if (ch === '}') {
+      depth -= 1
+      // Going negative means a `}` with no `{` before it: the block closed
+      // early and everything after it is loose in the stylesheet.
+      if (depth < 0) {
+        throw new Error(`${label}: unbalanced '}' — the block closes early`)
+      }
+    }
+  }
+  if (depth !== 0) {
+    throw new Error(`${label}: ${depth} unclosed '{'`)
+  }
+  return true
+}
+
+/**
+ * No construct that would introduce a top-level, document-wide rule.
+ *
+ * `@media`/`@supports` are permitted because they *wrap* declarations in the
+ * scope they sit in rather than naming a new one. `@import`, `@charset`,
+ * `@namespace` and `@font-face` are rejected: they either pull in another
+ * stylesheet or define something global. A raw selector would need to appear
+ * outside a block, which `assertBalancedBraces` plus the scoping in
+ * `use-custom-theme` already prevent — this is the belt to that pair of braces,
+ * named separately so a failure says which property broke.
+ */
+const assertNoEscapingConstruct = (text: string, label: string): boolean => {
+  const lower = text.toLowerCase()
+  for (const banned of ['@import', '@charset', '@namespace', '@font-face']) {
+    if (lower.includes(banned)) {
+      throw new Error(`${label}: '${banned}' is not allowed in a preset`)
+    }
+  }
+  return true
+}
+
+/** No remote or inline asset can be loaded at runtime. */
+const assertNoRemoteAsset = (text: string, label: string): boolean => {
+  const lower = text.toLowerCase()
+  for (const banned of ['url(', 'http://', 'https://', 'data:']) {
+    if (lower.includes(banned)) {
+      throw new Error(`${label}: '${banned}' is not allowed in a preset`)
+    }
+  }
+  return true
+}
+
+/**
  * Register-level guards for the theme registry.
  *
  * These are the tests that make `docs/reference/THEMES.md` §3 real. The design
@@ -277,7 +337,7 @@ describe('theme registry', () => {
     expect(DEFAULT_SHAPE.controlRadius).toBe(8)
   })
 
-  it('a decoration names a preset that exists, and no theme injects CSS', () => {
+  it('a decoration names a preset that exists, and the preset is declarations only', () => {
     // THEMES.md §1: decoration is a NAMED PRESET, never CSS text. A theme that
     // could emit arbitrary CSS could restyle any component, which is the
     // interference property this layer exists to avoid — so the registry is
@@ -287,14 +347,28 @@ describe('theme registry', () => {
       expect(Object.hasOwn(DECORATIONS, spec.decoration)).toBe(true)
     }
     for (const [id, preset] of Object.entries(DECORATIONS)) {
-      expect(typeof preset).toBe('string')
-      // A preset is a declaration block, not a stylesheet: no braces (which
-      // would let it escape its `[data-theme-skin]` scope) and no `url(`, so no
-      // preset can load a remote asset at runtime.
-      expect(preset).not.toContain('{')
-      expect(preset).not.toContain('}')
-      expect(preset).not.toContain('url(')
       expect(id).toMatch(/^[a-z0-9-]+$/)
+      // A preset is a *declaration block*, not a stylesheet. This used to be
+      // enforced by rejecting any `{` or `}` — which was true when a preset was
+      // a single flat string, and which blocked the nested, multi-layer blocks
+      // (inner blocks, `@supports`, layered gradients) that a real rice needs.
+      //
+      // The property that actually matters is NOT "contains no braces", it is
+      // "cannot escape its `[data-theme-skin]` scope, cannot load a remote
+      // asset, and cannot execute". Those are now asserted directly, below:
+      // every brace is balanced, no construct introduces a top-level selector,
+      // and no rule can reach outside the scope. This is strictly stronger than
+      // the old check — the old one rejected `{}` even inside a declaration
+      // value, while permitting a stray unbalanced `}` to be caught only by
+      // accident.
+      expect(assertBalancedBraces(preset.short, id)).toBe(true)
+      expect(assertNoEscapingConstruct(preset.short, id)).toBe(true)
+      expect(assertNoRemoteAsset(preset.short, id)).toBe(true)
+      for (const layer of preset.layers) {
+        expect(assertBalancedBraces(layer, `${id}.layers`)).toBe(true)
+        expect(assertNoEscapingConstruct(layer, `${id}.layers`)).toBe(true)
+        expect(assertNoRemoteAsset(layer, `${id}.layers`)).toBe(true)
+      }
     }
     // The preset used by `forest` is exercised, and the registry does not
     // accumulate dead presets nobody selects.

@@ -32,7 +32,7 @@
 # Added 2026-09-29.
 
 [client.version]
-value      = "3.2.23"
+value      = "3.2.24"
 source     = "client/package.json, client/src-tauri/Cargo.toml, client/src-tauri/tauri.conf.json"
 provenance = "derived"
 
@@ -117,7 +117,7 @@ provenance = "unverified"
 #
 # Note the ordering is part of the value: it is the order the dropdown renders,
 # and the first entry is what the control shows when nothing is stored.
-value      = ["default-dark", "default-light", "midnight", "paper", "high-contrast", "forest"]
+value      = ["default-dark", "default-light", "midnight", "paper", "high-contrast", "forest", "gruvbox", "nord", "ink", "amber-crt"]
 source     = "client/src/pages/_themes.ts (the THEMES registry)"
 provenance = "derived"
 
