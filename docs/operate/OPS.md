@@ -713,24 +713,39 @@ the served bytes, and exits non-zero if anything disagrees.
 
 - **sing-box is not updated** by this pipeline — it is bundled in the installer.
   Updating it means shipping a new installer and re-publishing.
-- **macOS builds are unsigned**, so Gatekeeper blocks first launch
-  (right-click → Open). Tracked as gap #3, out of scope. The `.dmg` carries a
-  `READ ME FIRST.txt` with the exact steps, including the `xattr -cr` fallback
-  for the "damaged and can't be opened" variant. CI stages it into the image
-  after `tauri build` — Tauri's `DmgConfig` cannot add files to the DMG root —
-  and re-mounts the result to confirm it is there. The source is
-  `client/src-tauri/packages/macos/READ ME FIRST.txt`, and
-  `check-consistency.sh` §20 fails the tree if that file, its instructions, or
-  the step that copies it ever go missing.
+- **macOS builds are ad-hoc signed, not Developer-ID signed**, so Gatekeeper
+  still warns on first launch. Tracked as gap #3; notarization remains out of
+  scope. What the ad-hoc signature buys is the *kind* of warning:
 
-  **This was not always true, and the documentation claimed it anyway.** The
-  file appears in a Tauri-built `.dmg` only as of the commit that added the CI
-  repack step; the retired Wails client had its own copy
-  (`legacy/wails-client/build/macos/make-dmg.sh`) and the Tauri rewrite dropped
-  it while this paragraph stayed behind. So v3.2.22 and v3.2.23 shipped a bare
-  image, and the only macOS failure mode was the misleading Trash prompt. Check
-  the image, not this sentence: `hdiutil attach` the published `.dmg` and look
-  for `READ ME FIRST.txt` beside `Locus.app`.
+  | Build | What macOS says | Can the student get past it? |
+  |---|---|---|
+  | Unsigned (before 2026-10) | *"Locus" is damaged and can't be opened. You should move it to the Trash.* | **No** — no "Open Anyway"; Terminal only |
+  | Ad-hoc signed (now) | *"…cannot be opened because Apple cannot check it for malicious software."* | **Yes** — System Settings → Privacy & Security → **Open Anyway** |
+
+  Gatekeeper treats a signature that exists but is not from a Developer ID as an
+  identity/notarization problem rather than corruption, which is what moves the
+  app from the unbypassable class to the bypassable one. The step lives in
+  `.github/workflows/client.yml` ("Ad-hoc sign the macOS bundle"): it mounts the
+  `.dmg` Tauri produced, signs the bundle inside the image with
+  `codesign --force --deep --sign -`, **verifies the result**
+  (`codesign --verify --deep --strict`) and prints the signature, rebuilds the
+  image, then re-mounts and re-verifies the bundle that actually shipped.
+  `check-consistency.sh` §20 fails the tree if the signing step, its
+  verification half, or its macOS gating go missing.
+
+  **The `.dmg` no longer carries a `READ ME FIRST.txt`, and that is deliberate.**
+  It used to, telling the student to run `xattr -cr` in Terminal. That advice was
+  accurate and it was a dead end: the remedy required a command line, which is
+  not a remedy for someone who cannot evaluate one. Ad-hoc signing is the
+  replacement, and two remedies that disagree about which is primary is worse
+  than one — so §20 now asserts the file is **gone** rather than present. If a
+  future change needs it back, say so here and update that section; do not ship
+  both.
+
+  **Unverified:** that a student on a given macOS version meets the bypassable
+  dialog rather than the Trash prompt. The step is guarded in the tree and the
+  artifact is re-verified on the runner, but nothing here launches the app on
+  real hardware — see `../reference/STILL-OPEN.md`.
 - **Where a client installs decides whether it can update itself.** An installed
   copy (Program Files / Applications / `~/.local/bin`) self-updates reliably; a
   portable copy stages privately inside its own directory. The client reports

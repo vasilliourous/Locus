@@ -213,6 +213,7 @@ hub expects exactly this shape:
 | Asset | Consumer | Notes |
 |---|---|---|
 | `installer-*` (`Locus_<v>_x64-setup.exe`, `.dmg`, `.deb`, `.rpm`) | **humans** | The supported way to install Locus. Windows NSIS also registers the system service (`StartVergeService`), and the app binary itself declares `requireAdministrator` (see `src-tauri/build.rs`), so it prompts for UAC at launch and does not depend on the service to reach TUN. |
+| `installer-Locus_<v>_<arch>.zip` | **humans (macOS)** | The compressed, **ad-hoc-signed** `Locus.app` for each architecture. Exists for the one case the `.dmg` cannot serve: a download that arrives quarantined and refused. A zip does **not** avoid quarantine — a browser fetching it stamps the archive and the extracted `.app` inherits the flag — but it delivers a bundle that survives transport intact, so macOS reports the bypassable "unidentified developer" dialog (System Settings → Privacy & Security → **Open Anyway**) instead of *"damaged and can't be opened"*, which has no such button. **Not an updater payload**: the hub fetches it as a human download, and CI's manifest and the hub's `PLATFORMS` both refuse a `.zip` in an update slot (`check-consistency.sh` §1c). |
 | raw `locus-<os>-<arch>[.exe]` | **auto-updater + hub** | Must be raw; the updater cannot unpack a zip. **NOT a human download** — it ships alone, so `sidecar("verge-mihomo")` cannot resolve and validation fails with `os error 2`. |
 | `manifest.json` | updater + hub | Version + per-platform filename + SHA256 |
 

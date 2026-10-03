@@ -1023,43 +1023,65 @@ jobs:
             exit 1
           fi
 
-      # ── Put the launch instructions INSIDE the macOS disk image ──
+      # ── Ad-hoc sign the macOS bundle ──
       #
       # WHY THIS STEP EXISTS
       #
-      # Locus ships unsigned on macOS (no Apple Developer ID — see
-      # client/docs/SIGNING.md and docs/operate/OPS.md gap #3). A quarantined,
-      # unsigned .app does not produce the accurate "unidentified developer"
-      # dialog; it produces
+      # Locus ships without an Apple Developer ID (gap #3), so a quarantined
+      # .app is refused by Gatekeeper. macOS draws a distinction that matters
+      # more than it looks: a bundle with NO signature at all is reported as
+      # *corrupt* —
       #
       #   "Locus" is damaged and can't be opened. You should move it to the Trash.
       #
-      # which is alarming, wrong, and — because it names Trash — actively invites
-      # the student to delete a perfectly good install. The message cannot be
-      # fixed without an Apple account, but the STUDENT can be told what it means
-      # and what to type, at the exact moment they have the window open.
+      # — and that dialog offers no "Open Anyway". A bundle with a signature
+      # that exists but is not from a Developer ID is reported as *unverified*:
       #
-      # The retired Wails client did exactly this: its make-dmg.sh staged a
-      # "READ ME FIRST.txt" into the image carrying the xattr -cr fallback (see
-      # legacy/wails-client/build/macos/make-dmg.sh). The Tauri pipeline that
-      # replaced it dropped both that file AND the ad-hoc codesign, but kept the
-      # docs claiming they were there. This step restores the file.
+      #   "Locus" cannot be opened because Apple cannot check it for malicious
+      #   software.
       #
-      # It must be done HERE, by repacking, because Tauri cannot do it:
-      # `DmgConfig` (config.schema.json) accepts only `background`, the window
-      # size/position and the two icon positions — there is no `files` key for
-      # the DMG root. `MacConfig.files` only injects into the .app's `Contents/`,
-      # which is not where a student looks. So the DMG's contents are copied out,
-      # the README added alongside the .app, and the image rebuilt.
+      # which macOS 15 surfaces in System Settings > Privacy & Security with an
+      # "Open Anyway" button. So ad-hoc signing does not make the app trusted;
+      # it moves the failure from a class the student cannot bypass to one they
+      # can, without a Terminal.
       #
-      # `hdiutil` is part of macOS, so this runs on the two macOS slices without
-      # installing anything.
-      - name: Add the launch instructions to the macOS disk image
+      # WHY NOT A README
+      #
+      # The previous mitigation was a "READ ME FIRST.txt" staged into the .dmg
+      # telling the student to run `xattr -cr` in Terminal. It was accurate and
+      # it was a dead end: the remedy required a command line, and a student who
+      # cannot evaluate a shell command has no path forward but to follow
+      # instructions they must take on faith. The file is gone; signing replaces
+      # it. If you are tempted to restore it, read check-consistency.sh §20 —
+      # two remedies that disagree about which is primary is worse than one.
+      #
+      # WHY `--deep` AND AN ENTITLEMENTS FILE
+      #
+      # `--deep` signs the nested helper binaries (the `verge-mihomo` sidecars)
+      # with the same identity. Without it the outer bundle carries a signature
+      # while its contents do not, which is the state that produces the
+      # "damaged" dialog even when `codesign` reported success — the app is
+      # *signed*, and its own sidecar is not, so the bundle fails validation.
+      #
+      # The entitlements file is the one already configured in
+      # `tauri.macos.conf.json`, so signing here cannot disagree with what the
+      # bundler intended. It is passed explicitly because `tauri build` was told
+      # `signingIdentity: null` and passes no `--sign` at all — nothing has been
+      # signed up to this point.
+      #
+      # NOT A SUBSTITUTE FOR DEVELOPER ID + NOTARIZATION. Both are still gaps.
+      # This step does not remove the warning; it changes which warning appears.
+      - name: Ad-hoc sign the macOS bundle
         if: startsWith(matrix.label, 'macos')
         shell: bash
         run: |
           set -euo pipefail
 
+          # The .app lives inside the .dmg Tauri produced; signing the copy in
+          # installer/ would sign nothing a student receives. Mount, sign the
+          # bundle in the staging copy, rebuild the image — the same read-out /
+          # modify / rebuild shape the repack used, for the same reason: writing
+          # into the volume being read makes `hdiutil create` its own input.
           dmg=""
           for f in installer/*.dmg; do
             [ -f "$f" ] || continue
@@ -1076,34 +1098,15 @@ jobs:
           fi
 
           work="$(mktemp -d)"
-          echo "Repacking $dmg with the launch instructions"
-
-          # Mount the image READ-ONLY, copy its whole contents into a staging
-          # folder, and unmount. The README is added to the FOLDER, not to the
-          # mounted volume.
-          #
-          # Writing into the mounted volume and rebuilding from it is the
-          # tempting shortcut, and it is the one to avoid: the volume being read
-          # is the same file being rewritten, so `hdiutil create` can be handed a
-          # half-written source. Copying out first keeps the rewrite atomic with
-          # respect to its own input.
-          #
-          # `-nobrowse` keeps the volume out of Finder, which matters on a shared
-          # runner; `-readonly` is what makes the copy-out the only write path.
-          # The mount point is explicit so the unmount cannot race another volume.
           mount="$work/mnt"
           stage="$work/stage"
           mkdir -p "$mount" "$stage"
+
+          echo "Signing the app inside $dmg"
           hdiutil attach "$dmg" -nobrowse -noverify -readonly -mountpoint "$mount"
 
-          # `cp -R .../.` copies the CONTENTS, including dotfiles, and preserves
-          # the `/Applications` symlink as a symlink — which is the drag-to-install
-          # target Finder renders as the Applications folder icon. A broken
-          # symlink would still install, but the image would look wrong.
-          #
-          # If this fails the volume stays mounted, and a later step that mounts
-          # the same image can hang, so the detach is chained to the failure
-          # rather than left to a trap that `set -e` skips.
+          # Copy the CONTENTS out (dotfiles and the /Applications symlink
+          # included), so the rebuild cannot be handed a half-written source.
           cp -R "$mount"/. "$stage"/ || {
             hdiutil detach "$mount" || true
             echo "::error::could not read the contents of $dmg"
@@ -1111,40 +1114,65 @@ jobs:
           }
           hdiutil detach "$mount"
 
-          cp "src-tauri/packages/macos/READ ME FIRST.txt" "$stage/READ ME FIRST.txt"
+          app="$stage/Locus.app"
+          if [ ! -d "$app" ]; then
+            echo "::error::no Locus.app in $dmg"
+            ls -la "$stage" || true
+            exit 1
+          fi
 
-          # Rebuild. UDZO matches what Tauri emits.
+          # `--force` replaces any signature Tauri left; `-` is the ad-hoc
+          # identity (the literal hyphen, not a name). `--options runtime` is the
+          # hardened runtime, which is what a notarized build would use and what
+          # keeps this step truthful if a Developer ID is ever added.
+          #
+          # This is NOT best-effort. The retired Wails script logged and
+          # continued when codesign was unavailable, which means a runner where
+          # signing failed still published a .dmg that looks identical in the
+          # release list and behaves exactly like the unsigned build this step
+          # exists to replace. A failure here must fail the build.
+          codesign --force --deep --sign - \
+            --options runtime \
+            --entitlements src-tauri/packages/macos/entitlements.plist \
+            "$app"
+
+          # ── Read it back ──
+          #
+          # `codesign --sign` exiting 0 is not evidence the bundle validates:
+          # `--deep` can sign nested binaries in an order that leaves the outer
+          # seal inconsistent, and that is precisely the state that still shows
+          # the "damaged" dialog on a student's machine while the log is clean.
+          # So the signature is verified, and the identity is PRINTED — an
+          # ad-hoc signature reports "Signature=adhoc", and seeing that in the
+          # log is what distinguishes this step having worked from it having
+          # silently done nothing.
+          codesign --verify --deep --strict --verbose=2 "$app"
+          echo "--- signature as the bundle actually carries it ---"
+          codesign -dv --verbose=4 "$app" 2>&1 | sed 's/^/    /'
+
+          # Rebuild the image from the signed staging folder.
           rm -f "$dmg"
           hdiutil create -volname "Locus" -srcfolder "$stage" -ov -format UDZO "$dmg"
 
-          # ── Prove it, rather than assuming it ──
-          #
-          # An `hdiutil create` that silently produced an image without the file
-          # would look identical to success here, and the loss would only surface
-          # on a student's Mac. So the rebuilt image is re-mounted and the file
-          # is read back.
+          # Re-mount and confirm the SIGNED app is inside the rebuilt image. An
+          # `hdiutil create` that dropped or reverted the bundle exits 0, so the
+          # artifact — not the step's exit status — is what is checked.
           verify="$work/verify"
           mkdir -p "$verify"
           hdiutil attach "$dmg" -nobrowse -noverify -readonly -mountpoint "$verify"
           ok=0
-          if [ -f "$verify/READ ME FIRST.txt" ] && [ -d "$verify/Locus.app" ]; then
-            # The two things the file must actually tell the student to do. A
-            # README that lost its body would still pass a bare existence check.
-            if grep -q 'xattr -cr' "$verify/READ ME FIRST.txt" &&
-               grep -q 'Locus.app' "$verify/READ ME FIRST.txt"; then
-              ok=1
-            fi
+          if [ -d "$verify/Locus.app" ] && codesign --verify --deep --strict "$verify/Locus.app" 2>/dev/null; then
+            ok=1
           fi
           hdiutil detach "$verify"
 
           if [ "$ok" -ne 1 ]; then
-            echo "::error::$dmg does not contain a usable 'READ ME FIRST.txt' next to Locus.app"
+            echo "::error::$dmg does not contain a validly ad-hoc-signed Locus.app"
             ls -la "$verify" || true
             exit 1
           fi
 
-          echo "Verified: $dmg carries READ ME FIRST.txt and Locus.app"
-          ls -la installer/
+          echo "Verified: $dmg carries a signed Locus.app (ad-hoc, no Developer ID)"
 
       # ── Sign the Windows installer ──
       #
@@ -1244,6 +1272,124 @@ jobs:
           echo "Signed ${setup}:"
           cat "${setup}.sig"
 
+      # ── The human download: a compressed, signed copy of the .app ──
+      #
+      # WHY A SECOND ARTIFACT
+      #
+      # The `.dmg` above is the drag-to-Applications install a person runs. This
+      # zip exists for the case the .dmg cannot serve: a student whose download
+      # arrives quarantined and refused, where the advice is to keep the bundle
+      # and clear the flag. A `.zip` of a signed `.app` is the form macOS itself
+      # treats as an app bundle in transit — extracting it with Finder or
+      # `ditto -x -k` restores a `Locus.app` that still carries the ad-hoc
+      # signature, and `ditto` preserves the bundle metadata and the symlinks
+      # inside `Contents/Frameworks` that a naive `zip` would flatten.
+      #
+      # WHAT THIS DOES NOT DO, and it matters because it is the obvious
+      # assumption: a zip does NOT arrive unquarantined. Quarantine is applied
+      # by whatever DOWNLOADS the file — a browser fetching it from the GitHub
+      # Release stamps the archive, and the extracted `.app` inherits the flag
+      # from its parent. So this is not a way to avoid Gatekeeper; it is a way
+      # to deliver the same signed bundle in a form that survives transport
+      # intact, so the student meets the bypassable "unidentified developer"
+      # dialog (see "Ad-hoc sign the macOS bundle" above) rather than a corrupt
+      # archive.
+      #
+      # NAME: it carries the version and the architecture, and it is NOT an
+      # updater payload. `fetch-release.py` resolves updater assets from an
+      # allowlist and `manifest.json` names what a client installs from itself;
+      # neither includes this file. The release job's collision guard rejects
+      # any installer whose name begins `locus-`, and this one deliberately does
+      # not — so it can never be mistaken for the thing the updater fetches.
+      - name: Package the macOS app for download
+        if: startsWith(matrix.label, 'macos')
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          # Reuse the signed bundle the previous step verified. It is inside
+          # installer/ only as the .dmg, so the staging copy is re-extracted
+          # from the image we just rebuilt and re-verified — meaning the bytes
+          # zipped here are the bytes that were checked, not a re-derivation.
+          dmg=""
+          for f in installer/*.dmg; do
+            [ -f "$f" ] || continue
+            dmg="$f"
+          done
+          if [ -z "$dmg" ]; then
+            echo "::error::no .dmg in installer/ to extract the signed app from"
+            exit 1
+          fi
+
+          work="$(mktemp -d)"
+          mount="$work/mnt"
+          mkdir -p "$mount"
+          hdiutil attach "$dmg" -nobrowse -noverify -readonly -mountpoint "$mount"
+          app_src="$mount/Locus.app"
+          if [ ! -d "$app_src" ]; then
+            hdiutil detach "$mount" || true
+            echo "::error::no Locus.app inside $dmg"
+            exit 1
+          fi
+
+          # Which architecture this slice is, for the filename. `matrix.label`
+          # is `macos-intel` / `macos-arm`; the artifact names use the same
+          # words CI already uses for the updater payloads (`darwin-amd64`,
+          # `darwin-arm64`), kept in step deliberately so one naming table
+          # describes both.
+          case "${{ matrix.label }}" in
+            macos-intel) arch="amd64" ;;
+            macos-arm)   arch="arm64" ;;
+            *) echo "::error::unexpected macOS label '${{ matrix.label }}'"; exit 1 ;;
+          esac
+
+          ver="$(node -p "require('./package.json').version")"
+          out="installer/Locus_${ver}_${arch}.zip"
+
+          # `--keepParent` so the archive contains `Locus.app/` rather than the
+          # bundle's CONTENTS at the archive root. Without it, extracting gives
+          # a loose `Contents/` directory and the result is not an app at all —
+          # Finder shows a folder, and there is nothing to drag to Applications.
+          # `--sequesterRsrc` keeps resource forks in `__MACOSX`, and `-c -k`
+          # is the PKZip form.
+          ditto -c -k --sequesterRsrc --keepParent "$app_src" "$out"
+          hdiutil detach "$mount"
+
+          echo "Packaged $out ($(du -h "$out" | cut -f1))"
+
+          # ── Read it back ──
+          #
+          # `ditto` exiting 0 is not evidence the archive holds a usable app: a
+          # zip missing `--keepParent`, or one that lost the bundle's structure,
+          # extracts to something that is not an app and looks identical in
+          # `ls`. So the archive is listed, and the two things that must be in
+          # it are asserted BY NAME — the bundle directory and its executable.
+          listing="$(unzip -l "$out")"
+          printf '%s\n' "$listing" | head -20 | sed 's/^/    /'
+          bad=0
+          printf '%s' "$listing" | grep -q 'Locus\.app/' || {
+            echo "::error::$out does not contain Locus.app/ — the bundle root is missing"
+            bad=1
+          }
+          printf '%s' "$listing" | grep -q 'Locus\.app/Contents/MacOS/' || {
+            echo "::error::$out does not contain Locus.app/Contents/MacOS/ — the executable is missing"
+            bad=1
+          }
+          [ "$bad" -eq 0 ] || exit 1
+
+          # And the extracted bundle must still VERIFY as signed. This is the
+          # check that makes the artifact's purpose true: the whole reason this
+          # zip exists is that the student receives a bundle macOS recognises as
+          # signed-but-untrusted rather than as corrupt. Extracting here proves
+          # the round trip preserves the signature, which a zip that mangles
+          # file modes would not.
+          extract="$work/extract"
+          mkdir -p "$extract"
+          ditto -x -k "$out" "$extract"
+          codesign --verify --deep --strict "$extract/Locus.app"
+          echo "Verified: $out extracts to a validly signed Locus.app"
+
+          ls -la installer/
       - uses: actions/upload-artifact@v4
         with:
           name: installer-${{ matrix.label }}
@@ -1311,6 +1457,33 @@ jobs:
             exit 1
           fi
           echo "Staged $count installer asset(s)."
+
+          # ── The macOS download must be present, and named for a human ──
+          #
+          # Asserted by SHAPE rather than by an exact version, so a bump does not
+          # turn this into a false failure: `installer-Locus_<v>_<arch>.zip` for
+          # both architectures. The failure this catches is the one the 3.2.14
+          # Windows outage was made of — a build job that did not produce the
+          # artifact, and a release that publishes anyway, with the omission
+          # invisible from the release list until a student downloads nothing.
+          #
+          # It is NOT a `.dmg` check: the .dmg is the drag-to-install image a
+          # person runs, and it is still published. This asserts the zip, which
+          # is the artifact whose whole purpose is that its contents survive
+          # transport with the bundle intact.
+          zip_count=0
+          for z in release/installer-Locus_*_amd64.zip release/installer-Locus_*_arm64.zip; do
+            [ -f "$z" ] || continue
+            zip_count=$((zip_count + 1))
+            echo "  macOS download present: $(basename "$z")"
+          done
+          if [ "$zip_count" -lt 2 ]; then
+            echo "::error::expected two macOS download zips (amd64 and arm64), found $zip_count"
+            ls -la release/ || true
+            echo "::error::the 'Package the macOS app for download' step is macOS-gated; if it"
+            echo "::error::was renamed or un-gated, one or both slices stopped producing this"
+            exit 1
+          fi
 
       - name: List what will be published
         run: ls -la release/
@@ -1394,6 +1567,24 @@ jobs:
               raise SystemExit(
                   "refusing to publish: the windows platform entry is the raw "
                   "updater executable, which a client cannot install from itself"
+              )
+
+          # GUARD: no entry may name a .zip. A zip is a HUMAN download — it is
+          # the compressed, signed .app a student extracts — and it is not
+          # something the updater can execute or a macOS client can replace
+          # itself with. `tauri_plugin_updater` would try to treat it as one and
+          # fail on the client, which is the same class of mistake as serving the
+          # raw Windows PE: an artifact that is legitimate in the release and
+          # wrong in the update slot. The zip is deliberately absent from
+          # `platforms`, and this asserts that it stays that way rather than
+          # leaving it to whoever edits the map next.
+          zipped = [k for k, v in platforms.items() if v.endswith(".zip")]
+          if zipped:
+              raise SystemExit(
+                  "refusing to publish: the manifest names a .zip for "
+                  + ", ".join(zipped)
+                  + " — a compressed app bundle is a human download, not an "
+                  "artifact a client installs from itself"
               )
 
           out = {"version": os.environ["VERSION"].lstrip("v"), "platforms": {}}
