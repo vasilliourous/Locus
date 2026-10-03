@@ -73,6 +73,18 @@ REMOTE_HOOKS="/opt/pocketbase/pb_hooks"
 # service unless this file is present here, and the systemd unit runs it from
 # this path — so this is the location that matters, not the repo's copy.
 REMOTE_FETCH="/root/server/scripts/fetch-release.py"
+
+# ssh wrapper so a single remote command is spelled the same everywhere, and so
+# a custom transport (SSH="sshpass -e ssh") needs no branching at each call site.
+#
+# Defined HERE, above its first use, rather than beside `verify()` further down.
+# It used to be defined after `assert_reachable` had already called it, so that
+# function died with `remote: command not found`, the probe came back empty, and
+# the script reported "cannot reach <host> over SSH" for EVERY host — including
+# a perfectly reachable one. The reachability check whose whole purpose is to
+# stop "we could not ask" being read as "the answer is no" was itself the thing
+# turning every answer into "no". Verified failing against the old ordering.
+remote() { $SSH -o StrictHostKeyChecking=accept-new "$VPS" "$@"; }
 FETCH_SRC="${REPO_ROOT}/server/scripts/fetch-release.py"
 DRY_RUN=0
 DO_RESTART=1
@@ -264,10 +276,6 @@ shopt -s nullglob
 HOOKS=("${HOOKS_SRC}"/*.pb.js)
 shopt -u nullglob
 [ "${#HOOKS[@]}" -gt 0 ] || fail "no *.pb.js files in ${HOOKS_SRC}"
-
-# ssh wrapper so a single remote command is spelled the same everywhere, and so
-# a custom transport (SSH="sshpass -e ssh") needs no branching at each call site.
-remote() { $SSH -o StrictHostKeyChecking=accept-new "$VPS" "$@"; }
 
 # ── Verification (also used standalone with --check) ───────────────────────
 verify() {
