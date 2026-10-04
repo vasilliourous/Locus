@@ -1893,6 +1893,26 @@ jobs:
           #
           # The OTHER platforms' installers are human-only and remain unfetched
           # by `fetch-release.py`.
+          # THIS LIST MUST MATCH WHAT manifest.json ADVERTISES.
+          #
+          # The macOS entries name the `.app.tar.gz` payloads, NOT the bare
+          # Mach-O binaries — the same names `manifest.json` declares and
+          # `fetch-release.py` resolves. This list used to name the raw
+          # `locus-darwin-*` binaries while the manifest had already been
+          # switched to the tarballs, so the release was published WITHOUT the
+          # files the hub would try to fetch:
+          #
+          #   manifest.json: macos_arm -> locus-darwin-arm64.app.tar.gz
+          #   release assets: locus-darwin-arm64   (the bare binary)
+          #
+          # The run went green and the release looked complete, because both
+          # halves were individually valid — only the agreement was broken. That
+          # is the failure `fetch-release.py`'s "the v%s release is missing"
+          # check exists to catch, and §24 now pins the agreement so it cannot
+          # be re-broken here.
+          #
+          # The bare macOS binaries are still uploaded as assets: they are
+          # harmless, and pre-3.2.27 hub rows referenced them.
           files: |
             release/locus-linux-amd64
             release/locus-linux-amd64.sig
@@ -1902,6 +1922,10 @@ jobs:
             release/locus-darwin-amd64.sig
             release/locus-darwin-arm64
             release/locus-darwin-arm64.sig
+            release/locus-darwin-amd64.app.tar.gz
+            release/locus-darwin-amd64.app.tar.gz.sig
+            release/locus-darwin-arm64.app.tar.gz
+            release/locus-darwin-arm64.app.tar.gz.sig
             release/manifest.json
             release/installer-*
           draft: false

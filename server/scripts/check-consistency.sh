@@ -2592,6 +2592,36 @@ if [ -f "$INSTALL_RS" ]; then
         bad "fetch-release.py would refuse the macOS tarball's .sig as an unknown filename"
     fi
 
+    # (f3) The RELEASE must actually PUBLISH the tarballs. This is the check
+    #      whose absence let a green run produce a release whose manifest
+    #      advertised files the release did not carry:
+    #
+    #        manifest.json:  macos_arm -> locus-darwin-arm64.app.tar.gz
+    #        release assets: locus-darwin-arm64  (the bare binary)
+    #
+    #      Both halves were individually valid — only the agreement was broken —
+    #      so nothing failed. The `Create the release` step's `files:` list is
+    #      what decides the assets, and it must name the tarballs.
+    #
+    #      Scoped to the `files:` block itself, not the surrounding step: the
+    #      step's own comment quotes the tarball name while explaining the bug,
+    #      so a step-wide grep stays green with the entry deleted. (It did — this
+    #      is the third assertion in this section to make that mistake, which is
+    #      why every one of them is now checked against a deliberate break.)
+    release_files=$(sed -n '/^ *files: |$/,/^ *draft: false/p' "$WORKFLOW" \
+        | sed -n '/^ *release\//p')
+    if printf '%s\n' "$release_files" | grep -q 'locus-darwin-.*\.app\.tar\.gz$'; then
+        ok "the release publishes the macOS .app.tar.gz assets"
+    else
+        bad "the release's file list omits the macOS .app.tar.gz — the manifest would advertise files the release does not carry"
+    fi
+    #      And its signature, for the reason in (f2).
+    if printf '%s\n' "$release_files" | grep -q 'locus-darwin-.*\.app\.tar\.gz\.sig$'; then
+        ok "the release publishes the tarball signatures too"
+    else
+        bad "the release's file list omits the macOS tarball .sig — the updater verifies mandatorily and would refuse the download"
+    fi
+
     # (g) ORDERING: the `update-*` upload must come AFTER the macOS packaging
     #     step. This is not style — the tarball does not exist until the bundle
     #     has been signed and packed, so an upload above it ships a payload set
