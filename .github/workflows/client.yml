@@ -1219,6 +1219,9 @@ jobs:
       - name: Package the macOS updater payload
         if: startsWith(matrix.label, 'macos')
         shell: bash
+        env:
+          # The same key the artifact signing step uses; see client/docs/SIGNING.md.
+          LOCUS_UPDATE_KEY: ${{ secrets.LOCUS_UPDATE_KEY }}
         run: |
           set -euo pipefail
 
@@ -1282,6 +1285,48 @@ jobs:
           echo "Packaged $(basename "$tarball") ($size bytes)"
           tar -tzf "$tarball" | head -5 | sed 's/^/    /'
 
+          # ── Sign the tarball, as its own artifact ──
+          #
+          # A SEPARATE signature from the raw binary's, and not interchangeable.
+          # `tauri_plugin_updater` calls
+          #
+          #     verify_signature(&buffer, &self.signature, &pubkey)
+          #
+          # over the bytes it DOWNLOADED (updater.rs), and on macOS the bytes it
+          # downloads are this tarball. minisign signs exact bytes, so the raw
+          # Mach-O's `.sig` verifies only the raw Mach-O — the hub's manifest
+          # cross-check caught exactly that, refusing a macOS entry whose
+          # signature did not accompany its payload.
+          #
+          # Signing the ARCHIVE is correct rather than a workaround: the plugin
+          # verifies before it extracts, so the signature has to cover what
+          # arrives over the wire. The `.app` inside is additionally ad-hoc
+          # signed, which is what Gatekeeper sees once it is on disk. The two
+          # signatures answer different questions.
+          #
+          # The key is written HERE rather than reused from the earlier signing
+          # step: that step deletes `$RUNNER_TEMP/locus.key` when it finishes, so
+          # by this point the file is gone. Depending on a file another step
+          # cleans up is the kind of cross-step coupling that works until someone
+          # reorders the steps.
+          KEY="$RUNNER_TEMP/locus-tarball.key"
+          printf '%s' "${LOCUS_UPDATE_KEY:-}" > "$KEY"
+          chmod 600 "$KEY"
+          if [ ! -s "$KEY" ]; then
+            echo "::error::LOCUS_UPDATE_KEY is not set, so the macOS updater payload cannot be signed (see client/docs/SIGNING.md)."
+            exit 1
+          fi
+          "$RUNNER_TEMP/minisign/minisign" -S -s "$KEY" -m "$tarball" \
+            -x "$tarball.sig" -t "Locus ${{ matrix.label }} app bundle"
+          rm -f "$KEY"
+
+          if [ ! -s "$tarball.sig" ]; then
+            echo "::error::$tarball.sig is empty — the updater verifies mandatorily and would refuse this release"
+            exit 1
+          fi
+          echo "Signed $(basename "$tarball"):"
+          cat "$tarball.sig"
+
       # ── Upload the updater payload ──
       #
       # LAST among the payload steps, and that placement is load-bearing on
@@ -1302,10 +1347,14 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: update-${{ matrix.label }}
+          # The macOS tarball AND ITS OWN `.sig`. The two signatures are not
+          # interchangeable — minisign signs exact bytes, and the plugin verifies
+          # the bytes it downloaded, which on macOS is the tarball.
           path: |
             client/artifacts/${{ matrix.artifact }}
             client/artifacts/${{ matrix.artifact }}.sig
             client/artifacts/${{ matrix.artifact }}.app.tar.gz
+            client/artifacts/${{ matrix.artifact }}.app.tar.gz.sig
           if-no-files-found: error
 
       # ── Sign the Windows installer ──

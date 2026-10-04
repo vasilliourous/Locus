@@ -2575,6 +2575,23 @@ if [ -f "$INSTALL_RS" ]; then
         bad "install.rs's is_bare_executable does not match Mach-O magic — a bare macOS binary would fall through as an unknown container"
     fi
 
+    # (f2) The tarball needs its OWN `.sig`, and the upload must carry it.
+    #      minisign signs exact bytes and the plugin verifies the bytes it
+    #      DOWNLOADED — which on macOS is the tarball, not the Mach-O inside it.
+    #      Shipping the raw binary's `.sig` alongside the tarball is a release
+    #      that downloads, fails verification, and installs nothing.
+    if grep -q 'app\.tar\.gz\.sig' "$WORKFLOW" 2>/dev/null; then
+        ok "CI uploads the macOS tarball's own .sig"
+    else
+        bad "CI does not upload the macOS tarball's .sig — the updater would verify the tarball against the raw binary's signature and refuse it"
+    fi
+    # And the hub must accept that name.
+    if grep -q 'app\.tar\.gz\.sig\|name + "\.sig"' "$FETCH" 2>/dev/null; then
+        ok "the hub's allow-list admits the tarball's .sig"
+    else
+        bad "fetch-release.py would refuse the macOS tarball's .sig as an unknown filename"
+    fi
+
     # (g) ORDERING: the `update-*` upload must come AFTER the macOS packaging
     #     step. This is not style — the tarball does not exist until the bundle
     #     has been signed and packed, so an upload above it ships a payload set
