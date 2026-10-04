@@ -110,12 +110,48 @@ def installer_name(version):
     return INSTALLER_NAME_TEMPLATE % version
 
 
-PLATFORMS = [
+## What each platform's UPDATER PAYLOAD is called, on the GitHub Release.
+##
+## The macOS entries carry `.app.tar.gz`, and that is NOT cosmetic. It is the
+## fix for a live defect: a macOS client on 3.2.24 was offered nothing, and the
+## hub half of the reason is that this list named a bare Mach-O executable
+## (`locus-darwin-arm64`) for the macOS slots.
+##
+## `tauri_plugin_updater` does not consume a bare binary on macOS. Its install
+## path is `GzDecoder` + `tar::Archive` expecting
+##
+##     Locus.app.tar.gz
+##     └── Locus.app/
+##         └── Contents/...
+##
+## and its `extract_path` there is the `.app` BUNDLE, not a single file
+## (`extract_path_from_executable`). Handed a raw Mach-O it fails at extraction
+## — after a ~48 MB download the student paid for and a signature that verified
+## fine. There is no path in which a bare binary updates a macOS app.
+##
+## Linux and Windows keep the bare artifacts they always had: their install
+## paths take the executable/installer directly, so the old names were correct
+## for them.
+##
+## `resolve_platform_names` below falls back to the bare name when the tarball
+## is absent from a release, so publishing a version built before this fix
+## degrades rather than failing outright.
+NEW_PLATFORMS = [
     ("linux", "locus-linux-amd64", "download_linux"),
     ("windows", None, "download_windows"),  # resolved by installer_name()
-    ("macos_intel", "locus-darwin-amd64", "download_macos_intel"),
-    ("macos_arm", "locus-darwin-arm64", "download_macos_arm"),
+    ("macos_intel", "locus-darwin-amd64.app.tar.gz", "download_macos_intel"),
+    ("macos_arm", "locus-darwin-arm64.app.tar.gz", "download_macos_arm"),
 ]
+
+## The pre-fix macOS payload names, kept ONLY as a fallback for releases that
+## predate the packaging step. Never preferred: a bare Mach-O in a macOS update
+## slot is the defect, not the behaviour.
+LEGACY_MACOS_NAMES = {
+    "macos_intel": "locus-darwin-amd64",
+    "macos_arm": "locus-darwin-arm64",
+}
+
+PLATFORMS = NEW_PLATFORMS
 MANIFEST_NAME = "manifest.json"
 
 ## ── HUMAN-FACING INSTALLERS, WHICH ARE NOT UPDATE PAYLOADS ──
@@ -180,7 +216,7 @@ def log(msg):
     print("[fetch %s] %s" % (time.strftime("%H:%M:%S"), msg), flush=True)
 
 
-def resolve_platform_names(version):
+def resolve_platform_names(version, available=None):
     """The asset name carrying each platform, for a given version.
 
     One place decides what the hub fetches for each platform, so the names can
@@ -188,10 +224,33 @@ def resolve_platform_names(version):
     the filename comparison in `verify_and_stage`, and it is the one that catches
     the hub and CI drifting apart on an asset name. The Windows entry is
     version-bearing because Tauri names its NSIS bundle with the version.
+
+    `available` is the set of asset names the release actually carries. When a
+    macOS tarball is ABSENT but the legacy bare binary is present, the legacy
+    name is returned so a release published before the packaging step still
+    resolves. That fallback is deliberately narrow — macOS only, and only when
+    the tarball is genuinely missing — because preferring a bare Mach-O in a
+    macOS update slot is the defect this function now avoids.
     """
     names = []
     for key, name, column in PLATFORMS:
-        names.append((key, installer_name(version) if name is None else name, column))
+        if name is None:
+            resolved = installer_name(version)
+        elif available is not None and name not in available:
+            legacy = LEGACY_MACOS_NAMES.get(key)
+            if legacy and legacy in available:
+                log(
+                    "WARNING: %s has no %s in this release; falling back to the "
+                    "pre-fix bare binary %s, which a macOS updater cannot install. "
+                    "Re-cut the release from a build that ran the packaging step."
+                    % (key, name, legacy)
+                )
+                resolved = legacy
+            else:
+                resolved = name
+        else:
+            resolved = name
+        names.append((key, resolved, column))
     return names
 
 
@@ -212,6 +271,11 @@ VERSION_RE = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+([-.][0-9A-Za-z.]+)?$")
 # without them is not installable by any client.
 ALLOWED_FILENAMES = {name for _, name, _ in PLATFORMS if name} | {MANIFEST_NAME}
 ALLOWED_FILENAMES |= {name + ".sig" for _, name, _ in PLATFORMS if name}
+# The pre-fix macOS names stay ALLOWED as a fallback source, but are never
+# preferred — `resolve_platform_names` only reaches for them when the tarball is
+# genuinely absent from the release.
+ALLOWED_FILENAMES |= set(LEGACY_MACOS_NAMES.values())
+ALLOWED_FILENAMES |= {name + ".sig" for name in LEGACY_MACOS_NAMES.values()}
 
 
 def validate_version(version):
@@ -416,11 +480,15 @@ def fetch_release(version, force=False):
     target_dir = os.path.join(UPDATES_DIR, version)
     assets = resolve_release(version)
 
-    wanted = [(key, name) for key, name, _ in resolve_platform_names(version)]
-    # The signature for each binary is required, not optional: a published
+    # Pass the release's own asset names so a macOS tarball is used when it
+    # exists and the legacy bare binary is only a fallback.
+    # `resolve_release` returns {name: (url, size)}.
+    resolved = resolve_platform_names(version, available=set(assets))
+    wanted = [(key, name) for key, name, _ in resolved]
+    # The signature for each payload is required, not optional: a published
     # update nobody can install is worse than no update, because it looks like
     # it worked from the operator's seat.
-    wanted += [("sig_" + key, name + ".sig") for key, name, _ in resolve_platform_names(version)]
+    wanted += [("sig_" + key, name + ".sig") for key, name, _ in resolved]
     wanted += [("manifest", MANIFEST_NAME)]
     missing = [name for _, name in wanted if name not in assets]
     if missing:
@@ -830,20 +898,88 @@ def verify_artifact_kind(path, platform_key):
             return False, "not an ELF executable"
         return True, "ELF"
     if platform_key in ("macos_intel", "macos_arm"):
-        if not (is_macho_thin(head) or is_macho_fat(head)):
-            return False, "not a Mach-O executable"
-        # Architecture of a FAT binary is only resolvable by walking the
-        # headers, so a universal binary is accepted for either slot.
-        if is_macho_fat(head):
-            return True, "Mach-O (universal)"
-        little = head[:4] in (b"\xcf\xfa\xed\xfe", b"\xfe\xed\xfa\xcf")
-        cputype = int.from_bytes(head[4:8], "little" if little else "big")
-        if cputype == 0x0100000C:  # ARM64
-            return (platform_key == "macos_arm"), "Mach-O arm64"
-        if cputype == 0x01000007:  # x86_64
-            return (platform_key == "macos_intel"), "Mach-O x86_64"
-        return True, "Mach-O"
+        # The macOS updater payload is a `.app.tar.gz`, and the check reads INSIDE
+        # it rather than at its first bytes. That is not a weakening: a bare
+        # Mach-O is now REFUSED here, which is the point — the updater cannot
+        # install one, so accepting it at publish time would be exactly the
+        # silent mis-slotting this function exists to catch.
+        if head[:2] == b"\x1f\x8b":
+            return _check_macos_app_tarball(path, platform_key, is_macho_thin, is_macho_fat)
+        if is_macho_thin(head) or is_macho_fat(head):
+            return False, (
+                "a bare Mach-O binary, but the macOS updater slot needs a "
+                "`*.app.tar.gz` — `tauri_plugin_updater` extracts a tar of an "
+                ".app bundle, so a raw executable downloads, verifies, and then "
+                "fails to install. Re-run CI on a commit that packages the bundle."
+            )
+        return False, "not a gzip archive (expected an .app.tar.gz)"
     return True, "unknown"
+
+
+## The first tar member of a `.app.tar.gz` that is the bundle directory.
+_APP_BUNDLE_RE = re.compile(r"^[^/]+\.app/")
+
+
+def _check_macos_app_tarball(path, platform_key, is_macho_thin, is_macho_fat):
+    """Validate a macOS updater payload: a tar.gz holding `<Name>.app/Contents/MacOS/`.
+
+    Three properties, each of which the updater depends on and none of which is
+    visible from the file's first bytes:
+
+    1. **It is a real gzip+tar** — not a truncated upload.
+    2. **Entries begin `<Name>.app/`** — the plugin strips one leading path
+       component (`entry.path()?.iter().skip(1)`), so a tarball rooted at
+       `Contents/` would extract a bundle with no name and the swap would find
+       nothing to move.
+    3. **The inner executable is the right architecture** — a universal binary
+       is accepted for either slot, matching the per-slot rule the bare-Mach-O
+       check used to apply.
+
+    Checked by streaming the members rather than extracting to disk: this runs
+    on the hub, and unpacking an untrusted 100 MB archive into the working
+    directory to inspect it would be its own problem.
+    """
+    import tarfile
+
+    try:
+        with tarfile.open(path, "r:gz") as tar:
+            names = []
+            exe_member = None
+            for member in tar:
+                if not member.isfile():
+                    continue
+                if not names:
+                    names.append(member.name)
+                    if not _APP_BUNDLE_RE.match(member.name):
+                        return False, (
+                            "the tarball does not start with a `.app/` directory "
+                            "(first member: %r) — the updater strips one leading "
+                            "path component and would find no bundle" % member.name
+                        )
+                if member.name.endswith("/Contents/MacOS/locus") or (
+                    "/Contents/MacOS/" in member.name
+                    and not member.name.endswith("/")
+                ):
+                    # The bundle's main executable; the exact name is Tauri's.
+                    exe_member = member
+                    break
+            if exe_member is None:
+                return False, "no Contents/MacOS/ executable inside the .app bundle"
+            head = tar.extractfile(exe_member).read(8)
+    except (tarfile.TarError, OSError, EOFError) as exc:
+        return False, "unreadable .app.tar.gz: %s" % exc
+
+    if not (is_macho_thin(head) or is_macho_fat(head)):
+        return False, "the .app's executable is not Mach-O"
+    if is_macho_fat(head):
+        return True, "app.tar.gz (Mach-O universal)"
+    little = head[:4] in (b"\xcf\xfa\xed\xfe", b"\xfe\xed\xfa\xcf")
+    cputype = int.from_bytes(head[4:8], "little" if little else "big")
+    if cputype == 0x0100000C:  # ARM64
+        return (platform_key == "macos_arm"), "app.tar.gz (Mach-O arm64)"
+    if cputype == 0x01000007:  # x86_64
+        return (platform_key == "macos_intel"), "app.tar.gz (Mach-O x86_64)"
+    return True, "app.tar.gz (Mach-O)"
 
 
 def verify_signature_file(path):

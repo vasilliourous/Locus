@@ -116,6 +116,10 @@ export interface TranslationResources {
             thisDevice: string
             title: string
             today: string
+            updateBlocked: string
+            updateCheckOff: string
+            updateCheckOffAction: string
+            updateUpToDate: string
           }
           activeConnections: string
           cancel: string

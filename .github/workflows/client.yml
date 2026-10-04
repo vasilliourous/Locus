@@ -960,13 +960,23 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: update-${{ matrix.label }}
-          # The binary AND its signature, always together. They are published as
+          # The payload AND its signature, always together. They are published as
           # a pair and a release with one and not the other is refused.
+          #
+          # macOS uploads the `.app.tar.gz` built later in this job (the `--`
+          # below), not the raw Mach-O the `.sig` was computed over: the updater
+          # on macOS extracts a tar of an .app bundle, so a bare binary is not
+          # installable there (see the packaging step for the full reasoning).
+          #
+          # Both files are still uploaded on macOS — the raw binary is harmless to
+          # publish and is what older clients' `/api/update` response was built
+          # around — but the HUB must be pointed at the tarball. That is the
+          # `fetch-release.py` change, guarded by check-consistency.sh §23.
           path: |
             client/artifacts/${{ matrix.artifact }}
             client/artifacts/${{ matrix.artifact }}.sig
+            client/artifacts/${{ matrix.artifact }}.app.tar.gz
           if-no-files-found: error
-
       # ── Stage the human-facing installer ──
       #
       # `tauri build` already produced a real bundle above (NSIS on Windows, .app
@@ -1173,6 +1183,110 @@ jobs:
           fi
 
           echo "Verified: $dmg carries a signed Locus.app (ad-hoc, no Developer ID)"
+
+      # ── Package the macOS updater payload as a .app.tar.gz ──
+      #
+      # WHY THIS STEP EXISTS (the defect it fixes)
+      #
+      # The macOS slot in `update_config` used to carry `locus-darwin-arm64` — a
+      # bare Mach-O executable copied out of `target/<triple>/release/`. That is
+      # what Linux and Windows consume, so it looked consistent. It is not what
+      # the updater consumes on macOS, and the mismatch was invisible until a
+      # student reported no update being offered on 3.2.24.
+      #
+      # `tauri_plugin_updater`'s macOS install path is `GzDecoder` + `tar::Archive`
+      # expecting:
+      #
+      #     [AppName].app.tar.gz
+      #     └── [AppName].app/
+      #         └── Contents/...
+      #
+      # and its `extract_path` on macOS is the `.app` BUNDLE (resolved with
+      # `extract_path_from_executable`), not a single file. Handed a raw Mach-O,
+      # the extraction fails — after the student has downloaded ~48 MB and the
+      # signature has verified. There is no path in which a bare binary updates a
+      # macOS app.
+      #
+      # WHY THE TAR IS BUILT FROM THE SIGNED BUNDLE
+      #
+      # The archive must contain the AD-HOC-SIGNED app, and it must be built after
+      # the signing step above — packaging the unsigned bundle first would hand
+      # students an app that fails Gatekeeper with the "damaged" dialog, which is
+      # the exact failure the signing step exists to move away from.
+      #
+      # The `tar` layout matters too: the plugin strips one leading path component
+      # (`entry.path()?.iter().skip(1)`), so the archive must hold `Locus.app/...`
+      # rather than a bare `Contents/...`. Archiving from the parent directory
+      # produces that shape.
+      #
+      # NO `--options runtime` HERE, unlike the .dmg bundle: this lands in the
+      # updater's swap, not in a download a student double-clicks, and the
+      # signature is already on the bundle.
+      - name: Package the macOS updater payload
+        if: startsWith(matrix.label, 'macos')
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          # Re-mount the signed .dmg — the signing step rebuilt it, so this reads
+          # the bytes a student would actually get rather than the pre-sign
+          # staging copy.
+          dmg=""
+          for f in installer/*.dmg; do
+            [ -f "$f" ] || continue
+            dmg="$f"
+          done
+          if [ -z "$dmg" ]; then
+            echo "::error::no .dmg to repackage for ${{ matrix.label }}"
+            ls -la installer/ || true
+            exit 1
+          fi
+
+          work="$(mktemp -d)"
+          mount="$work/mnt"
+          mkdir -p "$mount"
+          hdiutil attach "$dmg" -nobrowse -noverify -readonly -mountpoint "$mount"
+          cp -R "$mount/Locus.app" "$work/" || {
+            hdiutil detach "$mount" || true
+            echo "::error::no Locus.app inside $dmg"
+            exit 1
+          }
+          hdiutil detach "$mount"
+
+          # The published name stays what the hub's allowlist expects, so no
+          # server-side change is needed: the SLOT keeps its name and only its
+          # CONTENTS change type. `fetch-release.py` and the hub's PLATFORMS map
+          # both key on `matrix.artifact`.
+          tarball="artifacts/${{ matrix.artifact }}.app.tar.gz"
+
+          # `tar` from the parent so entries begin `Locus.app/`, which is what
+          # the plugin's `skip(1)` expects. `--no-xattrs` keeps resource forks
+          # out; `gzip -9` because a 100 MB app is a student's download.
+          ( cd "$work" && tar --no-xattrs -czf - Locus.app ) > "$tarball"
+
+          # ── Read it back ──
+          #
+          # Prove the archive is the shape the plugin will accept, from the
+          # artifact rather than from the step's exit status: a tar that captured
+          # the wrong depth exits 0 and installs nothing.
+          if ! tar -tzf "$tarball" | head -1 | grep -q '^Locus\.app/'; then
+            echo "::error::$tarball does not start with Locus.app/ — the updater's skip(1) would miss it"
+            tar -tzf "$tarball" | head -10 || true
+            exit 1
+          fi
+          if ! tar -tzf "$tarball" | grep -q '^Locus\.app/Contents/MacOS/'; then
+            echo "::error::$tarball is missing Locus.app/Contents/MacOS/ — not a runnable bundle"
+            exit 1
+          fi
+
+          size=$(wc -c < "$tarball")
+          if [ "$size" -lt 1000000 ]; then
+            echo "::error::$tarball is only $size bytes — the bundling step produced a stub"
+            exit 1
+          fi
+
+          echo "Packaged $(basename "$tarball") ($size bytes)"
+          tar -tzf "$tarball" | head -5 | sed 's/^/    /'
 
       # ── Sign the Windows installer ──
       #
@@ -1553,12 +1667,33 @@ jobs:
 
           # Platform key -> filename. The keys say macos_*, the files say darwin-*:
           # that asymmetry is frozen and must not be "tidied".
+          #
+          # macOS names the `.app.tar.gz`, NOT the raw Mach-O. This is the same
+          # class of bug as the Windows entry below, and it shipped: the raw
+          # macOS binary was advertised in the update slot while
+          # `tauri_plugin_updater` expects a tar of an `.app` bundle there, so a
+          # macOS client could not install what it was offered. The hub resolves
+          # exactly these names (fetch-release.py PLATFORMS), and its
+          # cross-check refuses to publish when the two disagree — which is what
+          # makes this a single decision rather than two that can drift.
           platforms = {
               "linux": "locus-linux-amd64",
               "windows": windows_installer(),
-              "macos_intel": "locus-darwin-amd64",
-              "macos_arm": "locus-darwin-arm64",
+              "macos_intel": "locus-darwin-amd64.app.tar.gz",
+              "macos_arm": "locus-darwin-arm64.app.tar.gz",
           }
+
+          # GUARD: the macOS entries must be the packaged bundle. A bare Mach-O
+          # in a macOS update slot is exactly the defect above, so a future edit
+          # that "restores" it fails here rather than on a student's machine.
+          for _key in ("macos_intel", "macos_arm"):
+              if not platforms[_key].endswith(".app.tar.gz"):
+                  raise SystemExit(
+                      f"{_key} must name the .app.tar.gz updater payload, not "
+                      f"{platforms[_key]!r}. A macOS client extracts a tar of an "
+                      ".app bundle; a bare Mach-O downloads and verifies and then "
+                      "fails to install."
+                  )
 
           # GUARD: the Windows entry must not be the raw updater binary. This is
           # the mechanical form of the bug, so a future edit that "restores" it

@@ -56,11 +56,11 @@ Publishing is **one action**, from the console:
 
 That runs `locus-fetch` (`server/scripts/fetch-release.py`), which:
 
-1. Resolves the four raw binaries **and their `.sig` files** from the GitHub
+1. Resolves the four platform payloads **and their `.sig` files** from the GitHub
    Release tagged `v<version>`.
-2. Downloads each one, enforcing a size floor (a binary under 1 MB is a
+2. Downloads each one, enforcing a size floor (a payload under 1 MB is a
    truncated download or a Git LFS pointer).
-3. Checks each binary's **format** matches its platform slot — a Windows `.exe`
+3. Checks each payload's **format** matches its platform slot — a Windows `.exe`
    in the Linux slot is refused.
 4. Checks each `.sig` is a plausible minisign signature (four lines, base64
    payloads).
@@ -70,6 +70,24 @@ That runs `locus-fetch` (`server/scripts/fetch-release.py`), which:
 A release missing **any** platform, or missing a signature for any platform, is
 refused. A partial publish is worse than no publish: it looks complete from the
 operator's seat while some clients silently cannot update.
+
+### What each platform's payload actually is
+
+**These are not all "the binary".** Each slot carries whatever that platform's
+updater can install, and the two are not interchangeable:
+
+| Slot | Payload | Why that one |
+|---|---|---|
+| `linux` | `locus-linux-amd64` (ELF) | The plugin replaces the AppImage/installs the package directly. |
+| `windows` | `installer-Locus_<v>_x64-setup.exe` (NSIS) | The plugin ShellExecutes **any** PE as an installer, so the raw app would make a client re-execute itself (`FIXES.md`, 2026-09-30). |
+| `macos_intel` / `macos_arm` | `locus-darwin-<arch>.app.tar.gz` | The plugin's macOS path is `GzDecoder` + `tar::Archive` over an `.app` bundle — **a bare Mach-O is not installable there**. |
+
+> **The macOS row is a fix, not a detail (2026-10-04).** Both the CI manifest and
+> the hub named the bare `locus-darwin-arm64` for the macOS slots, so a macOS
+> client downloaded and verified an artifact its installer could never apply.
+> macOS auto-update had therefore never worked. Three sites name this payload and
+> `check-consistency.sh` **§24** asserts they agree — nothing checked it before,
+> which is why the mismatch survived every green pipeline.
 
 ### There is no rollout percentage
 

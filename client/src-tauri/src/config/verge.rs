@@ -322,6 +322,22 @@ pub struct IVerge {
     /// hub may simply not have been reached yet.
     pub locus_update_offered: Option<String>,
 
+    /// Why the last heartbeat did not produce an update offer, if it did not.
+    ///
+    /// A human-readable sentence derived from
+    /// [`crate::locus::update::NoOfferReason`], shown on the Account page so a
+    /// student (or support) can answer "why is this device not updating?"
+    /// without reading a log.
+    ///
+    /// `None` means either the last beat offered an update, or none has run yet.
+    /// Both are "no complaint to make", which is why they share a value: the
+    /// question this field answers is only ever asked when nothing appeared.
+    ///
+    /// Written on EVERY beat, including the healthy case (to `None`), so a
+    /// problem that is fixed stops being reported. A stale reason that outlived
+    /// its cause would send a student to change a setting that is already right.
+    pub locus_update_check_reason: Option<String>,
+
     // ── The free tier's usage window ─────────────────────────────────────────
     //
     // The allowance is counted CLIENT-SIDE, because the hub has no per-user

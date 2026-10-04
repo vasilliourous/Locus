@@ -273,6 +273,29 @@ export interface UpdateStatus {
    * nothing has been offered — which is NOT the same as "up to date".
    */
   offeredVersion: string | null
+
+  /**
+   * Why no update is being offered, when the last heartbeat did not offer one.
+   *
+   * The answer to "why is this device not updating?", which had no answer before
+   * — every reason was logged at `debug` and the default level is `Info`, so a
+   * suppressed offer left no trace anywhere. A macOS student on 3.2.24 reported
+   * exactly that and there was nothing on the machine to diagnose it with.
+   *
+   * `null` means nothing to report: either an offer exists, or no beat has run.
+   * Deliberately not set for the ordinary "up to date" case.
+   */
+  noOfferReason: string | null
+
+  /**
+   * Whether automatic update checking is enabled.
+   *
+   * Surfaced because it is the one cause a student can fix themselves, and the
+   * one most likely to be stuck: the field is inherited from upstream Clash
+   * Verge Rev, so it can be `false` from an era when the Account row was
+   * mis-wired to auto-launch. The UI points at that control directly.
+   */
+  automaticChecksEnabled: boolean
 }
 
 /** Reports the update state. Never touches the network. */

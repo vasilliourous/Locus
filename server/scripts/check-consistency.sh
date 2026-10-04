@@ -2475,6 +2475,110 @@ else
 fi
 
 echo
+echo "24. The macOS updater payload is a .app.tar.gz, and three sites agree on that"
+#
+# WHY THIS EXISTS
+#
+# A macOS student on 3.2.24 reported "the update wasn't offered". The hub half of
+# the cause was that BOTH sides named a bare Mach-O (`locus-darwin-arm64`) in a
+# macOS update slot, while `tauri_plugin_updater` extracts a tar of an `.app`
+# bundle on macOS. The download verified and the install could not work.
+#
+# Nothing checked this, so it shipped. §1 covers the Windows installer name and
+# §1c covers the macOS human-download zip, but no section covered what a macOS
+# CLIENT downloads to replace itself — which is why the mismatch survived.
+#
+# FOUR sites must agree, and this asserts the AGREEMENT rather than each one:
+#
+#   1. CI       — `.github/workflows/client.yml`, the manifest's platform map
+#   2. the hub  — `fetch-release.py` PLATFORMS
+#   3. publish  — `publish-release.sh` PLATFORMS
+#   4. the doc  — docs/operate/UPDATE-SYSTEM.md, which tells an operator what
+#                 each slot carries
+#
+# And one NEGATIVE, the property that actually protects the fleet: a bare Mach-O
+# must NOT appear as a macOS update payload anywhere. That is the defect this
+# section was written for.
+WORKFLOW="$REPO/.github/workflows/client.yml"
+FETCH="$SCRIPTS/fetch-release.py"
+PUBLISH="$SCRIPTS/publish-release.sh"
+
+for target in "$WORKFLOW" "$FETCH" "$PUBLISH"; do
+    [ -f "$target" ] || { bad "macOS updater guard cannot run: $target is missing"; continue; }
+    want_tgz='locus-darwin-(amd64|arm64)\.app\.tar\.gz'
+    if grep -Eq "$want_tgz" "$target"; then
+        ok "$(basename "$target") names the macOS payload as .app.tar.gz"
+    else
+        bad "$(basename "$target") does not name a .app.tar.gz for a macOS update slot"
+    fi
+done
+
+# The negative: a bare `locus-darwin-<arch>` must not be what a macOS slot
+# RESOLVES TO. Checked on the PLATFORMS declarations specifically, not on the
+# whole file: `fetch-release.py` keeps a `LEGACY_MACOS_NAMES` map holding the old
+# bare names ON PURPOSE, as the narrow fallback for releases published before the
+# packaging step. A whole-file grep cannot tell that deliberate fallback from an
+# accidental re-advertisement, and a guard that fails on intent-correct code is
+# one people learn to bypass.
+#
+# So this reads the lines that BUILD the payload list.
+if [ -f "$FETCH" ]; then
+    if sed -n '/^NEW_PLATFORMS = \[/,/^\]/p' "$FETCH" | grep -E 'locus-darwin-(amd64|arm64)["'"'"',:)]' \
+        | grep -v 'app\.tar\.gz' >/dev/null 2>&1; then
+        bad "fetch-release.py's NEW_PLATFORMS advertises a bare Mach-O in a macOS slot"
+    else
+        ok "fetch-release.py's NEW_PLATFORMS names no bare Mach-O"
+    fi
+fi
+if [ -f "$PUBLISH" ]; then
+    if sed -n '/^PLATFORMS=(/,/^)/p' "$PUBLISH" | grep -E 'locus-darwin-(amd64|arm64)' \
+        | grep -v 'app\.tar\.gz' >/dev/null 2>&1; then
+        bad "publish-release.sh's PLATFORMS advertises a bare Mach-O in a macOS slot"
+    else
+        ok "publish-release.sh's PLATFORMS names no bare Mach-O"
+    fi
+fi
+if [ -f "$WORKFLOW" ]; then
+    # The manifest's platform map, which is the declaration CI publishes.
+    if sed -n '/platforms = {/,/}/p' "$WORKFLOW" | grep -E '"macos_(intel|arm)":' \
+        | grep -v 'app\.tar\.gz' >/dev/null 2>&1; then
+        bad "client.yml's manifest platform map advertises a bare Mach-O in a macOS slot"
+    else
+        ok "client.yml's manifest platform map names no bare Mach-O"
+    fi
+fi
+
+# The client side of the contract: the updater's own guard must accept a gzip
+# and refuse a Mach-O. A hub that publishes the right artifact is useless if the
+# client refuses it, or — worse — if the client accepts the wrong one.
+INSTALL_RS="$REPO/client/src-tauri/src/locus/update/install.rs"
+if [ -f "$INSTALL_RS" ]; then
+    if grep -q 'app\.tar\.gz\|gzip' "$INSTALL_RS"; then
+        ok "the client's payload guard is aware of the macOS tarball"
+    else
+        warn "install.rs does not mention the macOS tarball — check is_installer_payload still accepts it"
+    fi
+    # The Mach-O refusal is what makes a bare binary fail loudly rather than
+    # fall through as an unrecognised "container".
+    #
+    # Anchored on the actual MAGIC BYTES, not the words "Mach-O": those also
+    # appear in the doc comment explaining the rule, so a word-level grep stays
+    # green with the matching arms deleted — the same "check that cannot fail"
+    # defect §23 hit on its first draft. The escaped byte literals are the code.
+    # Scoped to `is_bare_executable`'s body, NOT the whole file: the same magic
+    # bytes appear in this file's own TESTS, so a whole-file grep stays green
+    # with the implementation arm deleted. (It did — that is why this is scoped.)
+    if sed -n '/^fn is_bare_executable/,/^}/p' "$INSTALL_RS" \
+        | grep -Fq 'xcf\xfa\xed\xfe'; then
+        ok "the client's payload guard matches Mach-O magic (a bare macOS binary is refused, not forwarded)"
+    else
+        bad "install.rs's is_bare_executable does not match Mach-O magic — a bare macOS binary would fall through as an unknown container"
+    fi
+else
+    warn "no install.rs — cannot check the client side of the macOS payload contract"
+fi
+
+echo
 echo "════════════════════════════════════════════════════════════"
 if [ "$FAIL" -eq 0 ]; then
     echo -e "${GREEN}All consistency checks passed.${NC}"

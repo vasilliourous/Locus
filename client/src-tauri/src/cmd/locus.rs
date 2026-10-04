@@ -1018,6 +1018,27 @@ pub struct UpdateStatus {
     /// without waiting for a heartbeat — the offer is recorded when a beat
     /// delivers it, and this is what the popup reads.
     pub offered_version: Option<String>,
+
+    /// Why no update is being offered, when the last heartbeat did not offer one.
+    ///
+    /// The answer to "why is this device not updating?" — a question that had no
+    /// answer before, because every reason was logged at `debug` and the default
+    /// level is `Info`. A student on macOS 3.2.24 reported exactly that ("the
+    /// update wasn't offered") and nothing on the machine said why.
+    ///
+    /// `None` means nothing to report: either an offer exists, or no beat has run.
+    /// Deliberately **not** set in the ordinary "up to date" case, so a healthy
+    /// install shows no notice.
+    pub no_offer_reason: Option<String>,
+
+    /// Whether automatic update checking is enabled.
+    ///
+    /// Surfaced alongside the reason because it is the one cause a student can
+    /// fix themselves, and the one most likely to be stuck: `auto_check_update`
+    /// is inherited from upstream Clash Verge Rev, so it can be `false` from an
+    /// era when the Account-page row was mis-wired to auto-launch. The UI uses
+    /// this to point at the exact control rather than leaving them to hunt.
+    pub automatic_checks_enabled: bool,
 }
 
 /// Reports the update state the prompt should render from.
@@ -1027,11 +1048,17 @@ pub struct UpdateStatus {
 #[tauri::command]
 pub async fn locus_update_status() -> UpdateStatus {
     let verge = Config::verge().await;
-    let offered = verge.latest_arc().locus_update_offered.clone();
+    let data = verge.latest_arc();
+    let offered = data.locus_update_offered.clone();
+    let no_offer_reason = data.locus_update_check_reason.clone();
 
     UpdateStatus {
         current_version: env!("CARGO_PKG_VERSION").to_owned(),
         offered_version: offered.map(Into::into),
+        no_offer_reason: no_offer_reason.map(Into::into),
+        // Same default as the gate itself (`unwrap_or(true)`), so the status
+        // never disagrees with the behaviour it describes.
+        automatic_checks_enabled: data.auto_check_update.unwrap_or(true),
     }
 }
 

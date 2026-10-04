@@ -14,6 +14,51 @@ Ordered by whether I could have validated it here.
 
 ## Open, and blocked in this environment
 
+### macOS auto-update is now the right SHAPE, but has never run on a Mac
+
+**Added 2026-10-04, for v3.2.27.** macOS was reported as "the update wasn't
+offered" (see `FIXES.md`). Two things were wrong, and only one of them is
+verified fixed.
+
+**Verified:**
+
+- The offer is no longer silently suppressed. Every path that skips an offer now
+  logs at `warn`/`info` (they were all `debug`, and the default level is `Info`,
+  so a dropped offer left no trace), and the reason is surfaced on the Account
+  page. The `auto_check_update` case — the likely trigger, and the one a student
+  can fix — gets its own wording and a one-tap repair.
+- The published macOS payload is now a `*.app.tar.gz` holding the ad-hoc-signed
+  bundle, and the three sites that name it agree (CI's manifest,
+  `fetch-release.py` `PLATFORMS`, `publish-release.sh` `PLATFORMS`), enforced by
+  `check-consistency.sh` §24. Every §24 assertion was observed failing against
+  the defect.
+- The client refuses a bare Mach-O as the wrong artifact kind rather than
+  falling through as an unknown container, and accepts a gzip.
+
+**NOT verified, and this is the important part:**
+
+- **That a macOS client installs the new payload.** No Mac was involved. The
+  tarball has never been consumed by a real updater, and the *signature over the
+  bundle* has never been checked by macOS. The change is verified as far as "the
+  artifact has the shape the plugin documents" — a **structural argument**, not a
+  measurement.
+- **That the tarball's ad-hoc signature survives the repack.** CI verifies the
+  bundle inside the rebuilt `.dmg` before packaging, but nothing verifies the
+  bundle *inside the tarball* the way macOS will on a student's machine.
+- **That the stale-setting theory is the actual cause of this report.** It is
+  the most likely explanation given what the student saw, and it is now
+  diagnosable and fixable — but the original 3.2.24 machine was never inspected,
+  so it remains a hypothesis. The fix does not depend on it being right: the
+  reason is now visible either way.
+
+**The specific observation that would settle it.** On a Mac running 3.2.26:
+confirm the Account page reports no obstacle, install 3.2.27, and let the app
+update itself. Then repeat from 3.2.24, which is the version in the report.
+Until that runs, the honest claim class for macOS auto-update is **structural
+argument plus CI guard**, and it should not be recorded as working.
+
+---
+
 ### The free tier's throttle is decided, stored — and applied to nothing
 
 **Added 2026-10-04, updated for 3.2.26.** This is the largest remaining gap in

@@ -221,7 +221,11 @@
         "confirmedDaysAgo": "{{count}} d ago",
         "neverConfirmed": "Not confirmed with the server yet",
         "checkingStatus": "Checking…",
-        "notActivatedToCheck": "Activate a code first — there is nothing to confirm yet."
+        "notActivatedToCheck": "Activate a code first — there is nothing to confirm yet.",
+        "updateCheckOff": "Automatic update checking is off, so Locus is not being told about new versions. Turn it on above to receive fixes.",
+        "updateCheckOffAction": "Turn on automatic updates",
+        "updateBlocked": "Locus cannot update itself right now: {{reason}}",
+        "updateUpToDate": "Locus is up to date."
       },
       "cancel": "Cancel",
       "toggleHint": "Press Enter to turn the VPN on or off",

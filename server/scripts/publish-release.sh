@@ -115,8 +115,8 @@ WINDOWS_INSTALLER="installer-Locus_${VERSION}_x64-setup.exe"
 PLATFORMS=(
     "linux:locus-linux-amd64:update_linux"
     "windows:${WINDOWS_INSTALLER}:update_windows"
-    "macos_intel:locus-darwin-amd64:update_macos_intel"
-    "macos_arm:locus-darwin-arm64:update_macos_arm"
+    "macos_intel:locus-darwin-amd64.app.tar.gz:update_macos_intel"
+    "macos_arm:locus-darwin-arm64.app.tar.gz:update_macos_arm"
 )
 
 log()  { printf '\033[0;32m[publish]\033[0m %s\n' "$*"; }
@@ -315,8 +315,8 @@ plats = m.get("platforms", {})
 # PLATFORMS. Kept in step with fetch-release.py's `resolve_platform_names`.
 ours = {"linux": "locus-linux-amd64",
         "windows": win_installer,
-        "macos_intel": "locus-darwin-amd64",
-        "macos_arm": "locus-darwin-arm64"}
+        "macos_intel": "locus-darwin-amd64.app.tar.gz",
+        "macos_arm": "locus-darwin-arm64.app.tar.gz"}
 bad = 0
 for k in keys:
     entry = plats.get(k)
@@ -426,8 +426,8 @@ keys = sys.argv[7:]
 
 FILES = {"linux": "locus-linux-amd64",
          "windows": win_installer,
-         "macos_intel": "locus-darwin-amd64",
-         "macos_arm": "locus-darwin-arm64"}
+         "macos_intel": "locus-darwin-amd64.app.tar.gz",
+         "macos_arm": "locus-darwin-arm64.app.tar.gz"}
 
 def req(method, path, data=None):
     cmd = ["curl", "-s", "-X", method, api + path,

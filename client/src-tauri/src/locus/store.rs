@@ -329,6 +329,26 @@ pub async fn clear_update_offer() -> Result<()> {
     verge.data_arc().save_file().await
 }
 
+/// Records why the last heartbeat did or did not produce an update offer.
+///
+/// `None` means an offer WAS recorded — the healthy case, and the one that must
+/// clear any previous reason so a fixed problem stops being reported. `Some`
+/// carries the reason it was not.
+///
+/// Persisted so the Account page can answer "why is this device not updating?"
+/// on demand. It is per-heartbeat state, not an event log: the latest beat wins,
+/// because the question a student asks is about *now*.
+pub async fn record_update_check_reason(
+    reason: Option<&crate::locus::update::NoOfferReason>,
+) -> Result<()> {
+    let verge = Config::verge().await;
+    let encoded = reason.map(|r| r.describe());
+    verge.edit_draft(|draft| {
+        draft.locus_update_check_reason = encoded.clone().map(Into::into);
+    });
+    verge.data_arc().save_file().await
+}
+
 /// Forgets a previous refusal, after the device is entitled again.
 ///
 /// Called on a successful activation. Without this a student who renews would

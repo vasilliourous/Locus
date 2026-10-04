@@ -27,6 +27,88 @@ corrections are marked. For what is *still* broken, read `STILL-OPEN.md`.
 
 ---
 
+## A MACOS STUDENT WAS OFFERED NOTHING, AND NOTHING SAID WHY (2026-10-04, v3.2.27)
+
+| | |
+|---|---|
+| Severity | 🔴 macOS auto-update had never worked, and every path that suppressed an offer was invisible |
+| **Reported as** | *"The update wasn't offered to a mac user on 3.2.24"* |
+| **Files:** | `.github/workflows/client.yml`, `server/scripts/fetch-release.py`, `server/scripts/publish-release.sh`, `client/src-tauri/src/locus/update/{mod.rs,install.rs}`, `client/src-tauri/src/locus/{runtime.rs,store.rs}`, `client/src-tauri/src/config/verge.rs`, `client/src-tauri/src/cmd/locus.rs`, `client/src/pages/account.tsx`, `client/src/services/locus.ts`, `server/scripts/check-consistency.sh` §24 |
+| **Fixed in:** | 3.2.27 |
+
+### Two defects, and the one that explained the report
+
+**First, the reason was unobservable.** Every path that suppresses an update
+offer logged at **`debug`**, and the default log level is **`Info`**:
+
+```rust
+logging!(debug, Type::System, "[locus] update {version} is available but automatic checking is off; not offering");
+```
+
+So an offer could be silently dropped and the machine would carry **no trace at
+all** — not in the log, not on screen. That is the report exactly: "it wasn't
+offered", with nothing anywhere saying why. An update advertised and then
+ignored is indistinguishable from a stable release with no update, which is the
+failure mode this whole path exists to avoid.
+
+Fixed by promoting those lines to `warn`/`info` and making the reason a **type**
+(`NoOfferReason`) rather than a log call — then surfacing it on the Account page,
+so the question "why is this device not updating?" has an answer on screen.
+
+The trigger is most likely `auto_check_update`, which is **inherited from
+upstream Clash Verge Rev** and whose Account-page row was once mis-wired to
+auto-launch — so a stale `false` can persist across upgrades. That case now gets
+its own wording and a one-tap fix.
+
+**Second, macOS could not install what it was offered.** The hub's macOS slots
+named a bare Mach-O (`locus-darwin-arm64`), while `tauri_plugin_updater` on macOS
+runs `GzDecoder` + `tar::Archive` expecting:
+
+```
+Locus.app.tar.gz
+└── Locus.app/
+    └── Contents/...
+```
+
+and resolves `extract_path` to the `.app` **bundle**, not a single file. A bare
+Mach-O downloads ~48 MB, verifies its signature, and then fails at extraction.
+There was never a path in which a macOS client updated itself.
+
+Fixed by packaging the ad-hoc-signed bundle as `*.app.tar.gz` in CI (after
+signing, from the rebuilt `.dmg`), and repointing all three sites that name the
+payload: CI's manifest, `fetch-release.py` `PLATFORMS`, and
+`publish-release.sh` `PLATFORMS`.
+
+### Why no guard caught this
+
+§1 covers the Windows installer name and §1c covers the macOS *human download*
+zip, but **nothing checked what a macOS client downloads to replace itself** —
+so the mismatch survived every green pipeline. §24 now asserts the agreement
+across all three sites, plus the negative (no bare Mach-O in a macOS update slot)
+and the client-side half (`is_bare_executable` must match Mach-O magic, so a bare
+macOS binary is refused as the wrong artifact kind rather than falling through as
+an unknown "container").
+
+§24's first draft had the defect it exists to catch: its client-side check grepped
+for the words "Mach-O", which also appear in the doc comment and the tests. Both
+scoped checks were observed **failing** against a deleted implementation before
+being kept.
+
+### Verified / not verified
+
+- **Verified:** 603 lib tests (5 new); `cargo clippy -D warnings`, `tsc`, `lint`,
+  96 frontend tests, `check-consistency.sh` (109 checks). All six §24 assertions
+  and the client-side check observed **failing** against the exact defect, then
+  restored. The hub's macOS format check now reads the tarball and confirms the
+  inner bundle's architecture.
+- **Not verified:** **that a macOS client installs the new payload.** No Mac was
+  involved, and the packaged tarball has never been consumed by a real updater.
+  The change is verified as far as "the artifact is the shape the plugin
+  documents", which is a structural argument, not a measurement. See
+  `STILL-OPEN.md`.
+
+---
+
 ## THE FREE TIER'S ADVICE FIELDS COULD BREAK THE WHOLE HEARTBEAT, AND FOUR OTHER PRE-EMPTIVE FIXES (2026-10-04, v3.2.26)
 
 | | |
