@@ -3906,7 +3906,7 @@ dependencies = [
 
 [[package]]
 name = "locus"
-version = "3.2.27"
+version = "3.2.28"
 dependencies = [
  "aes-gcm",
  "anyhow",
