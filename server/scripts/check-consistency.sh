@@ -2574,6 +2574,27 @@ if [ -f "$INSTALL_RS" ]; then
     else
         bad "install.rs's is_bare_executable does not match Mach-O magic — a bare macOS binary would fall through as an unknown container"
     fi
+
+    # (g) ORDERING: the `update-*` upload must come AFTER the macOS packaging
+    #     step. This is not style — the tarball does not exist until the bundle
+    #     has been signed and packed, so an upload above it ships a payload set
+    #     with no macOS artifact.
+    #
+    #     This is exactly what happened on the first 3.2.27 run: all four builds
+    #     passed, packaging printed a clean 85 MB tarball, and the release job
+    #     then failed with "refusing to publish a partial release — missing:
+    #     locus-darwin-*.app.tar.gz". The manifest guard caught it correctly, but
+    #     only after a ~30 minute build. This makes the same mistake a two-second
+    #     local failure instead.
+    pack_line=$(grep -n 'name: Package the macOS updater payload' "$WORKFLOW" | head -1 | cut -d: -f1)
+    upload_line=$(grep -n 'name: update-\${{ matrix.label }}' "$WORKFLOW" | head -1 | cut -d: -f1)
+    if [ -z "$pack_line" ] || [ -z "$upload_line" ]; then
+        warn "could not locate the macOS packaging and update-upload steps — ordering unchecked"
+    elif [ "$upload_line" -gt "$pack_line" ]; then
+        ok "the update upload is below the macOS packaging step (order is correct)"
+    else
+        bad "the update-* upload (line $upload_line) is ABOVE the macOS packaging step (line $pack_line) — the .app.tar.gz would not exist yet, and the release would refuse to publish"
+    fi
 else
     warn "no install.rs — cannot check the client side of the macOS payload contract"
 fi

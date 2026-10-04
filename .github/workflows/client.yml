@@ -957,26 +957,20 @@ jobs:
           echo "Signed ${{ matrix.artifact }}:"
           cat "artifacts/${{ matrix.artifact }}.sig"
 
-      - uses: actions/upload-artifact@v4
-        with:
-          name: update-${{ matrix.label }}
-          # The payload AND its signature, always together. They are published as
-          # a pair and a release with one and not the other is refused.
-          #
-          # macOS uploads the `.app.tar.gz` built later in this job (the `--`
-          # below), not the raw Mach-O the `.sig` was computed over: the updater
-          # on macOS extracts a tar of an .app bundle, so a bare binary is not
-          # installable there (see the packaging step for the full reasoning).
-          #
-          # Both files are still uploaded on macOS — the raw binary is harmless to
-          # publish and is what older clients' `/api/update` response was built
-          # around — but the HUB must be pointed at the tarball. That is the
-          # `fetch-release.py` change, guarded by check-consistency.sh §23.
-          path: |
-            client/artifacts/${{ matrix.artifact }}
-            client/artifacts/${{ matrix.artifact }}.sig
-            client/artifacts/${{ matrix.artifact }}.app.tar.gz
-          if-no-files-found: error
+      # The `update-<label>` artifact upload is NOT here, deliberately.
+      #
+      # It used to be, and that is the defect this comment marks. On macOS the
+      # `.app.tar.gz` payload is produced FURTHER DOWN — it must be built after
+      # the bundle is ad-hoc signed, because the tarball has to carry the signed
+      # app — so an upload at this point captured `artifacts/` before the tarball
+      # existed. The release job then failed with
+      #
+      #     refusing to publish a partial release — missing:
+      #     locus-darwin-amd64.app.tar.gz, locus-darwin-arm64.app.tar.gz
+      #
+      # which is the manifest guard working: it prefers publishing nothing to
+      # advertising a payload the hub cannot fetch. The upload now sits below the
+      # packaging step; see "Upload the updater payload".
       # ── Stage the human-facing installer ──
       #
       # `tauri build` already produced a real bundle above (NSIS on Windows, .app
@@ -1287,6 +1281,32 @@ jobs:
 
           echo "Packaged $(basename "$tarball") ($size bytes)"
           tar -tzf "$tarball" | head -5 | sed 's/^/    /'
+
+      # ── Upload the updater payload ──
+      #
+      # LAST among the payload steps, and that placement is load-bearing on
+      # macOS: the `.app.tar.gz` above does not exist until the bundle has been
+      # signed and packaged. An upload earlier in the job silently ships an
+      # artifact set with no macOS payload, and the release job's manifest guard
+      # then refuses the whole publish — a correct refusal, but a confusing one
+      # to diagnose from the release list.
+      #
+      # The payload AND its signature, always together: they are published as a
+      # pair, and a release carrying one without the other is refused downstream.
+      #
+      # On macOS the tarball is what the hub is pointed at (`fetch-release.py`
+      # PLATFORMS), while the raw Mach-O the `.sig` was computed over is still
+      # published — it is harmless, and it is what pre-3.2.27 responses named.
+      # The hub's macOS payload is the tarball, guarded by
+      # check-consistency.sh §24.
+      - uses: actions/upload-artifact@v4
+        with:
+          name: update-${{ matrix.label }}
+          path: |
+            client/artifacts/${{ matrix.artifact }}
+            client/artifacts/${{ matrix.artifact }}.sig
+            client/artifacts/${{ matrix.artifact }}.app.tar.gz
+          if-no-files-found: error
 
       # ── Sign the Windows installer ──
       #
