@@ -38,10 +38,19 @@ SS_CONFIG_DIR = "/etc/shadowsocks"
 # "udp_over_tcp v2" option, but that protocol is proprietary to sing-box —
 # shadowsocks-rust closes those connections (RST, observed 2026-08-01).
 # UDP flows via standard ss UDP (server mode tcp_and_udp).
+#
+# (tier, port, udp, source_tier)
+# `source_tier` is the on-box shadowsocks config this row's credentials come
+# from. It exists for `free`, which shares the Eco endpoint (port 8443, same
+# password, same 1mbit tc class) and has no /etc/shadowsocks/free.json of its
+# own. `free` is what new codes are minted against and what the console lists;
+# `eco` stays so codes already in the field keep resolving. See
+# docs/business/04-tiers.md §4.5.
 TIERS = [
-    ("eco", 8443, False),
-    ("stealth", 8444, False),
-    ("strike", 8445, False),
+    ("eco", 8443, False, "eco"),
+    ("free", 8443, False, "eco"),
+    ("stealth", 8444, False, "stealth"),
+    ("strike", 8445, False, "strike"),
 ]
 
 
@@ -75,8 +84,8 @@ def main():
 
     # ── 1. Ground-truth passwords from live ssserver configs ──
     live = {}
-    for tier, port, _udp in TIERS:
-        path = os.path.join(SS_CONFIG_DIR, f"{tier}.json")
+    for tier, port, _udp, src in TIERS:
+        path = os.path.join(SS_CONFIG_DIR, f"{src}.json")
         try:
             with open(path) as f:
                 cfg = json.load(f)
@@ -85,7 +94,8 @@ def main():
                 "port": cfg.get("server_port", port),
                 "method": cfg.get("method", SS_METHOD),
             }
-            log(f"  {tier}: ssserver on :{live[tier]['port']} (method {live[tier]['method']})")
+            note = "" if src == tier else f" (shared with {src})"
+            log(f"  {tier}: ssserver on :{live[tier]['port']} (method {live[tier]['method']}){note}")
         except Exception as ex:
             log(f"ERROR: cannot read {path}: {ex}")
             sys.exit(1)
@@ -131,7 +141,7 @@ def main():
         resp = api("DELETE", f"/api/collections/tier_configs/records/{rec['id']}", token=token)
         log(f"    deleted {rec.get('tier')} ({rec['id'][:12]}) -> {resp.get('code', 'ok')}")
 
-    for tier, port, udp in TIERS:
+    for tier, port, udp, _src in TIERS:
         body = {
             "tier": tier,
             "config": json.dumps({

@@ -1,5 +1,12 @@
 # 7. Billing
 
+```
+audience:    human-operator
+status:      live
+authoritative-for: how the student actually pays, and how the operator collects
+verified-against: docs/reference/DEVICE-IDENTITY.md
+```
+
 > **The term pass is now a product the system can sell.** It could not before:
 > the code stored one absolute `expires_at` fixed at **mint** time, so there was
 > no way to express "10 weeks from when the student activates", and no way to

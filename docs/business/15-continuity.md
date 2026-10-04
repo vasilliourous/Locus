@@ -1,5 +1,12 @@
 # 15. Continuity — what survives what
 
+```
+audience:    human-operator
+status:      live
+authoritative-for: what survives a change to each part of the system
+verified-against: docs/STATE.md
+```
+
 | Event | What actually happens | Needs |
 |---|---|---|
 | **Tier config changes** (port, cap, UoT) | Clients pick it up on next heartbeat (~5 min). No app update. | edit `tier_configs` in the console ([`09-console.md`](09-console.md)) |
@@ -29,16 +36,23 @@ Because the free quota is enforced **client-side**
 **not** a pure server-side operation:
 
 - The cap itself is a `tc` value on the hub — that part propagates as a
-  normal config change.
+  normal config change (but note it is fixed in `04-tc.sh`, so it takes a
+  `setup.sh` re-run rather than a console edit).
 - The **5 GB allowance** is a number the client holds. Changing it means
   telling existing clients the new number through the same config channel.
 - A client that is offline during the change keeps the old number until it
   heartbeats.
 
-**Implication:** the allowance should be a *server-provided value* read on
-heartbeat, not a constant compiled into the client. This is a design
-constraint on the free tier's implementation, and it is the cheapest way to
-keep the free tier adjustable without shipping a release.
+**Resolved: the allowance is a server-provided value**, sent on every heartbeat
+as `free_allowance_mb` and read by the client. That is what keeps the free tier
+adjustable without shipping a release, and it means there is one place to change
+the number. **Sending nothing is itself the off switch** — the client reads an
+absent allowance as "no allowance applies", never as zero, so the operator can
+end the quota without throttling anyone by accident.
+
+**Still true:** a client that is offline during a change keeps the old value
+until its next successful beat. The grace period makes that at most a week, and
+in the meantime the old number is what that student was promised.
 
 ## 15.3 Related reading
 

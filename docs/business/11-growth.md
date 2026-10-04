@@ -1,5 +1,12 @@
 # 11. Growth
 
+```
+audience:    human-operator
+status:      live
+authoritative-for: the growth channels, and the referral verdict
+verified-against: docs/STATE.md
+```
+
 ## 11.1 What exists, and what carries the weight
 
 | Channel | Status | Notes |

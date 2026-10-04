@@ -322,6 +322,54 @@ pub struct IVerge {
     /// hub may simply not have been reached yet.
     pub locus_update_offered: Option<String>,
 
+    // ── The free tier's usage window ─────────────────────────────────────────
+    //
+    // The allowance is counted CLIENT-SIDE, because the hub has no per-user
+    // accounting (one shared shadowsocks password per tier). These three fields
+    // are that counter's persisted state; the arithmetic lives in
+    // [`crate::locus::usage`], which is pure and fake-clock tested.
+    //
+    // Stored as a serialised [`crate::locus::usage::Usage`] rather than three
+    // loose fields on purpose: the counter is one value with internal
+    // consistency (a count is meaningless without the window it belongs to), and
+    // splitting it across keys is how a half-written window happens — a new
+    // start with the old count, which is a free allowance reset.
+
+    /// The free-tier usage window, serialised JSON.
+    ///
+    /// `None` for a paying tier, or a client that has never recorded a byte.
+    /// Absence means "no window yet", which [`crate::locus::usage::Usage`] starts
+    /// lazily on the first reading — not "zero used", which would report a
+    /// full allowance to a student mid-window.
+    pub locus_usage: Option<String>,
+
+    /// The allowance the hub last advertised, in **mebibytes**.
+    ///
+    /// Cached from the heartbeat so a status read can classify usage without a
+    /// live beat — the Connection screen polls `locus_status` far more often than
+    /// the client beats. This is the *server's* value, refreshed on every beat;
+    /// changing it on the hub takes effect on the student's next beat without a
+    /// release, which is the whole reason it is a wire field.
+    ///
+    /// `None` means the hub has never sent one — a paying tier, or an older hub.
+    /// It reads as "no allowance", never as zero, so it cannot throttle anyone.
+    pub locus_allowance_mb: Option<u64>,
+
+    /// The speed a throttled free student drops to, in Mbps, as the hub last
+    /// advertised it (`free_throttle_mbps`).
+    ///
+    /// Stored with the allowance because the two are one policy: `allowance`
+    /// says how much data, this says how slow once it is gone.
+    ///
+    /// **Persisted but not yet applied.** Nothing lowers a live Core's speed
+    /// from this value yet; see the note on [`crate::locus::store::throttle_mbps`]
+    /// and `STILL-OPEN.md`. It is stored now so the value survives a restart and
+    /// the applying step has something to read when it lands.
+    ///
+    /// `None` means the hub did not send one, and the caller must apply **no**
+    /// throttle — absence is not "zero speed".
+    pub locus_throttle_mbps: Option<u32>,
+
     // ── Retired: device identity and the recognition token ───────────────────
     //
     // These five fields belonged to device recognition — a durable device

@@ -1,5 +1,12 @@
 # 2. Market
 
+```
+audience:    human-operator
+status:      live
+authoritative-for: who the customer is, and why the incumbents fail them
+verified-against: docs/STATE.md
+```
+
 ## 2.1 Who the customer is
 
 Students at N4L-managed schools. The live market is Macleans College.

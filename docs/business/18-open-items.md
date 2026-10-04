@@ -1,5 +1,12 @@
 # 18. Open items
 
+```
+audience:    human-operator
+status:      live
+authoritative-for: what is decided but unbuilt, what is proposed, and what the operator must supply
+verified-against: docs/STATE.md
+```
+
 Proposals awaiting a decision, or work already decided but not yet built.
 Each names what it is and where it is justified.
 
@@ -9,18 +16,50 @@ Each names what it is and where it is justified.
 
 ### P1 — Implement the free tier
 
-The free tier is **decided** ([`04-tiers.md`](04-tiers.md#44-the-free-tier-in-full)) but not
-shipped. Concrete work:
+**Largely built.** The enforcement works end to end; the purchase does not. What
+is done, and what is left:
 
-- Drop the Eco slot's cap to 1 Mbps and stop selling Eco codes
+**Built:**
+- The Eco/8443 slot is capped at 1 Mbps in `04-tc.sh` — both the applied class
+  and the reboot unit, which is the pair that silently disagree if you edit one
   ([`04-tiers.md`](04-tiers.md#45-the-deploy-time-choice-renaming-eco--free)).
-- Add client-side counting of the 5 GB allowance, **read as a server-provided
-  value on heartbeat** so it can change without a release
+- A `free` `tier_configs` row is seeded beside the legacy `eco` one, so codes
+  minted now and codes already in the field both resolve.
+- The allowance is sent on every heartbeat (`free_allowance_mb`,
+  `free_throttle_mbps`), so it can change without a client release
   ([`15-continuity.md`](15-continuity.md#152-the-free-tiers-continuity-question-new)).
-- Add the usage bar, the 80% warning, the persistent throttle banner, and the
-  one-tap upgrade CTA ([`04-tiers.md`](04-tiers.md#444-what-the-free-user-sees)).
-- Add progressive throttling after the allowance
-  ([`04-tiers.md`](04-tiers.md#445-what-throttled-further-means)).
+- Client-side counting of the 5 GB window, the 80% line and the classification —
+  one pure module, `client/src-tauri/src/locus/usage.rs`, fake-clock tested.
+- The usage bar, the warning and the throttle state on the connection screen.
+- `check-consistency.sh` §23 holds all of it in agreement, and was observed
+  failing against each half-deployed state.
+
+- **The upgrade route** (shipped 3.2.26). The throttle state is followed by a
+  sentence naming the action — contact the middleman about Stealth. There is no
+  self-serve checkout to link to; a code is a physical card
+  ([`08-distribution.md`](08-distribution.md)).
+- **Safety guards** (shipped 3.2.26): an absurd allowance from the hub is clamped
+  rather than saturating into a permanent throttle; a future-dated window is
+  repaired rather than underflowing the elapsed-time maths; a malformed advisory
+  field no longer fails the whole heartbeat; a corrupt stored counter resets and
+  **logs** rather than resetting silently.
+
+**Still to do:**
+- **Applying the throttle to a running Core.** `free_throttle_mbps` is parsed and
+  stored, and **nothing yet lowers a live Core's speed from it**. The decision to
+  throttle works; the act does not exist. This is the largest remaining gap and
+  the one whose absence a student would notice — see
+  [`../reference/STILL-OPEN.md`](../reference/STILL-OPEN.md).
+- **Operator control from the console.** The allowance is a hook value today;
+  making it console-editable is what lets the operator change it without a
+  deploy.
+- **Verification.** That the client actually applies the slower cap to a live Core
+  is untested — the classification is tested, the effect on a running tunnel is
+  not.
+- **Deployment.** All of the hub half is inert until `setup.sh` re-runs.
+
+**Before a middleman sells a free card**, the throttle application and a hub
+deploy are the two items that matter.
 
 ### P2 — Confirm the price ladder
 

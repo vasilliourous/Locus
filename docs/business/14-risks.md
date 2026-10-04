@@ -1,5 +1,12 @@
 # 14. Risks
 
+```
+audience:    human-operator
+status:      live
+authoritative-for: the actionable risks, and for each one what mitigates it
+verified-against: docs/STATE.md
+```
+
 Only risks that call for an *action* are listed here. Background and context
 live in the linked files.
 

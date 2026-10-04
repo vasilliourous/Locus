@@ -1,5 +1,12 @@
 # 13. Competition and the moat
 
+```
+audience:    human-operator
+status:      live
+authoritative-for: the competitive set, and what the moat actually is
+verified-against: docs/STATE.md
+```
+
 ## 13.1 The competitive set
 
 | Competitor class | Why they lose *on this network* |

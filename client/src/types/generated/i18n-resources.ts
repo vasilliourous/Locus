@@ -125,6 +125,11 @@ export interface TranslationResources {
           connecting: string
           disconnect: string
           disconnecting: string
+          freeData: string
+          freeDataNearlyOut: string
+          freeDataThrottled: string
+          freeDataThrottledUpgrade: string
+          freeDataUsed: string
           metricPending: string
           metricsWhenConnected: string
           needsActivation: string

@@ -81,7 +81,7 @@ Retired material is separated into [`archive/`](archive/) (the Wails client) and
 | Document | What it is |
 |---|---|
 | [`business/README.md`](business/README.md) | The commercial plan (operator playbook) — start here. |
-| [`business/redesign/00-README.md`](business/redesign/00-README.md) | The design rationale for terms, renewal and device binding. |
+| [`business/redesign/00-README.md`](business/redesign/00-README.md) | **Design record** (`status: design-record`) for terms and renewal. Its device-binding design was removed, not shipped — see [`reference/DEVICE-IDENTITY.md`](reference/DEVICE-IDENTITY.md) for the live model. |
 
 ## The client's own documents — `client/docs/`
 

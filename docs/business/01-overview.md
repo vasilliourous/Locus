@@ -1,5 +1,12 @@
 # 1. The business in one page
 
+```
+audience:    human-operator
+status:      live
+authoritative-for: the business in one page, and the three sentences that drive the rest
+verified-against: docs/STATE.md
+```
+
 | | |
 |---|---|
 | **Product** | Locus — a small commercial VPN service sold to students at N4L-managed NZ schools (the live deployment is Macleans College). |

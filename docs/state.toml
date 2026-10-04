@@ -32,7 +32,7 @@
 # Added 2026-09-29.
 
 [client.version]
-value      = "3.2.25"
+value      = "3.2.26"
 source     = "client/package.json, client/src-tauri/Cargo.toml, client/src-tauri/tauri.conf.json"
 provenance = "derived"
 
@@ -127,6 +127,28 @@ provenance = "derived"
 # Enforced by check-consistency.sh §1.
 value      = ["linux", "windows", "macos_intel", "macos_arm"]
 source     = "client/src-tauri/src/locus/contract.rs; server/pb_hooks/*.pb.js"
+provenance = "derived"
+
+[tiers.free]
+# The free tier's endpoint, recomputable from the tree — a CLASS B fact, so it
+# does not belong in a sentence in docs/business/04-tiers.md.
+#
+# `free` and `eco` are the SAME endpoint: port 8443, the Eco password, the
+# `shadowsocks-eco.service` unit. Both tier_configs rows are seeded on purpose —
+# `free` for codes minted now, `eco` so codes already in the field keep
+# resolving. The customer-facing name is Free; the on-box name stays eco. See
+# docs/business/04-tiers.md §4.5.
+#
+# check-consistency.sh §23 recomputes the cap and the port from 04-tc.sh and
+# compares them here, and separately asserts the seed rows and the heartbeat key
+# agree — the whole point is that four files describe one endpoint, and the
+# AGREEMENT is what must be pinned, not any single file.
+#
+# The allowance is NOT a fact here: it lives in heartbeat.pb.js so the operator
+# can change it without a release, and pinning it in this file would make a
+# deliberate, runtime-changeable value look like a build constant.
+value      = { port = 8443, cap = "1mbit", tier_rows = ["eco", "free"] }
+source     = "server/modules/04-tc.sh; server/scripts/seed-pb.py"
 provenance = "derived"
 
 [world]

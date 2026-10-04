@@ -227,7 +227,12 @@
       "toggleHint": "Press Enter to turn the VPN on or off",
       "takingLonger": "Still connecting. This can take a few seconds on a school network — you can cancel and try again.",
       "support": "Need help?",
-      "supportEmail": "maillcontainer@proton.me"
+      "supportEmail": "maillcontainer@proton.me",
+      "freeData": "Free data",
+      "freeDataUsed": "{{used}} of {{total}} used",
+      "freeDataNearlyOut": "{{used}} of {{total}} used — nearly out of free data",
+      "freeDataThrottled": "{{used}} of {{total}} used — slowed until your allowance resets",
+      "freeDataThrottledUpgrade": "To get full speed back now, contact the person who sold you your code about Stealth."
     }
   }
 }

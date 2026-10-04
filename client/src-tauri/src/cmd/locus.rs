@@ -152,6 +152,92 @@ pub struct LocusStatus {
     /// It is a *rate*, not the Core's lifetime total: see
     /// `core::manager::traffic_probe`.
     pub traffic_flowing: bool,
+
+    /// The free tier's allowance state — what the usage bar, the warning and the
+    /// throttle banner all read.
+    ///
+    /// A closed set rather than loose numbers, for the same reason
+    /// [`SubscriptionStatus`] is: "no allowance applies" (a paying tier, or a hub
+    /// that predates the field) and "zero bytes used of 5 GiB" must not be
+    /// confusable. The first must never show a bar or throttle anything; the
+    /// second must show a bar at 0%.
+    ///
+    /// The UI renders from this and never recomputes: the classification is the
+    /// behaviour, and a second implementation in TypeScript is how the warning
+    /// line and the throttle line drift apart.
+    pub allowance: AllowanceStatus,
+}
+
+/// What the Connection screen should show about the free tier's allowance.
+///
+/// Mirrors [`crate::locus::usage::AllowanceState`], plus the presentation fields
+/// the bar needs, so the frontend does no arithmetic at all.
+#[derive(Debug, Clone, Serialize)]
+#[serde(tag = "state", rename_all = "camelCase", rename_all_fields = "camelCase")]
+pub enum AllowanceStatus {
+    /// No allowance applies. A paying tier, or an older hub. Render nothing and
+    /// never throttle.
+    Unlimited,
+    /// An allowance applies. Carries everything the UI needs.
+    Metered {
+        /// Bytes counted in the current window.
+        used_bytes: u64,
+        /// The window's allowance.
+        allowance_bytes: u64,
+        /// Percentage used, clamped to `0..=100`.
+        percent: u8,
+        /// Past the 80% line but not yet spent.
+        warning: bool,
+        /// The allowance is spent; the connection carries the throttle.
+        throttled: bool,
+    },
+}
+
+/// Builds the [`AllowanceStatus`] from a stored window and the hub's allowance.
+///
+/// Split out so it can be tested without an app handle. Note the hub sends the
+/// allowance on every beat, so a change to it takes effect on the next one — the
+/// client never caches the number itself, only its own usage.
+#[must_use]
+fn classify_allowance(
+    usage: &crate::locus::usage::Usage,
+    allowance_bytes: Option<u64>,
+    now_ms: u64,
+) -> AllowanceStatus {
+    use crate::locus::usage::AllowanceState;
+    match usage.classify(allowance_bytes, now_ms) {
+        AllowanceState::Unlimited => AllowanceStatus::Unlimited,
+        AllowanceState::Within {
+            used_bytes,
+            allowance_bytes,
+        } => AllowanceStatus::Metered {
+            used_bytes,
+            allowance_bytes,
+            percent: usage.percent_used(allowance_bytes, now_ms),
+            warning: false,
+            throttled: false,
+        },
+        AllowanceState::Warning {
+            used_bytes,
+            allowance_bytes,
+        } => AllowanceStatus::Metered {
+            used_bytes,
+            allowance_bytes,
+            percent: usage.percent_used(allowance_bytes, now_ms),
+            warning: true,
+            throttled: false,
+        },
+        AllowanceState::Throttled {
+            used_bytes,
+            allowance_bytes,
+        } => AllowanceStatus::Metered {
+            used_bytes,
+            allowance_bytes,
+            percent: usage.percent_used(allowance_bytes, now_ms),
+            warning: false,
+            throttled: true,
+        },
+    }
 }
 
 /// What the Account screen should say about the subscription.
@@ -291,6 +377,21 @@ pub async fn locus_status() -> LocusStatus {
     // describes the same observation the verdict above was reached from.
     let traffic_flowing = traffic_probe::is_active();
 
+    // The free tier's allowance. Read from the cached hub value and the stored
+    // usage window, then classified by the one implementation of the rule
+    // (`locus::usage`). `now` comes from the system clock, which is the only
+    // place it enters the calculation — `usage` itself is pure and fake-clock
+    // tested, so the rollover boundary is pinned without touching a real clock.
+    let usage = store::usage().await;
+    let allowance = classify_allowance(
+        &usage,
+        verge_data
+            .locus_allowance_mb
+            .filter(|mb| *mb > 0)
+            .map(|mb| crate::locus::usage::sane_allowance_mb(mb) * crate::locus::usage::MIB),
+        now_ms(),
+    );
+
     LocusStatus {
         activated: activation.is_some(),
         tier: activation.as_ref().map(|a| a.tier.clone()),
@@ -303,7 +404,24 @@ pub async fn locus_status() -> LocusStatus {
         subscription,
         last_confirmed_at: verge_data.last_heartbeat_ok,
         traffic_flowing,
+        allowance,
     }
+}
+
+/// The current wall-clock time as Unix milliseconds, saturating at the epoch for
+/// a clock set before 1970.
+///
+/// One helper rather than a `SystemTime::now()` inline, so the elapsed-time cast
+/// (which can panic or truncate on an absurd clock) is handled in exactly one
+/// place. A clock before the epoch yields `0`, which [`crate::locus::usage`]
+/// reads as "start a window now" — the safe answer, since it grants a fresh
+/// allowance rather than expiring a student's on a broken clock.
+#[must_use]
+fn now_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX))
+        .unwrap_or(0)
 }
 /// Whether the tunnel's core is running, from the run state's running mode.
 ///
@@ -1693,5 +1811,77 @@ mod tests {
             value.get("reason").is_some(),
             "`reason` is a single word and must survive; got {value}"
         );
+    }
+
+    /// A paying tier reports `Unlimited`, and that must never look like a
+    /// metered zero.
+    ///
+    /// The whole point of the two variants is that "no allowance applies" cannot
+    /// be confused with "an allowance you have used none of" — the first must
+    /// render no bar and throttle nothing, the second must render a bar at 0%.
+    /// Collapsing them is how a paying student gets a free-tier banner.
+    #[test]
+    fn no_allowance_classifies_as_unlimited_not_metered() {
+        let usage = crate::locus::usage::Usage::default();
+        let value = serde_json::to_value(classify_allowance(&usage, None, 0))
+            .expect("AllowanceStatus must serialize");
+        assert_eq!(
+            value.get("state").and_then(serde_json::Value::as_str),
+            Some("unlimited"),
+            "a missing allowance must serialize as unlimited; got {value}"
+        );
+    }
+
+    /// A metered tier carries the four fields the bar needs, in camelCase.
+    #[test]
+    fn a_metered_allowance_carries_the_bar_fields() {
+        let mb: u64 = 1024 * 1024;
+        let usage = crate::locus::usage::Usage {
+            used_bytes: 0,
+            window_start_ms: 1,
+            warned: false,
+        };
+        let value = serde_json::to_value(classify_allowance(&usage, Some(5 * mb), 1_000))
+            .expect("AllowanceStatus must serialize");
+
+        assert_eq!(
+            value.get("state").and_then(serde_json::Value::as_str),
+            Some("metered")
+        );
+        // The frontend reads these by name; a snake_case slip reads `undefined`.
+        for key in ["usedBytes", "allowanceBytes", "percent", "warning", "throttled"] {
+            assert!(
+                value.get(key).is_some(),
+                "the metered payload must carry `{key}`; got {value}"
+            );
+        }
+    }
+
+    /// The three classification boundaries reach the frontend intact: a full
+    /// allowance under the line, the warning at it, and the throttle past it.
+    #[test]
+    fn the_allowance_boundaries_reach_the_wire() {
+        let mb: u64 = 1024 * 1024;
+        let allowance = 100 * mb;
+        let at = |bytes: u64| {
+            let usage = crate::locus::usage::Usage {
+                used_bytes: bytes,
+                window_start_ms: 1,
+                warned: false,
+            };
+            match classify_allowance(&usage, Some(allowance), 1_000) {
+                AllowanceStatus::Metered {
+                    warning, throttled, ..
+                } => (warning, throttled),
+                AllowanceStatus::Unlimited => panic!("a metered tier must not be unlimited"),
+            }
+        };
+
+        assert_eq!(at(0), (false, false), "a fresh window is not a warning");
+        assert_eq!(at(79 * mb), (false, false), "under the line");
+        assert_eq!(at(80 * mb), (true, false), "the warning line itself warns");
+        assert_eq!(at(99 * mb), (true, false), "under the allowance still warns");
+        assert_eq!(at(100 * mb), (false, true), "the allowance itself throttles");
+        assert_eq!(at(200 * mb), (false, true), "over the allowance throttles");
     }
 }

@@ -23,5 +23,6 @@ pub mod runtime;
 pub mod store;
 pub mod tier;
 pub mod update;
+pub mod usage;
 
 pub use contract::{HUB_URL, TierConfig};

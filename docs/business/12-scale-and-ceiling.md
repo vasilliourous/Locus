@@ -1,5 +1,12 @@
 # 12. Scale and the ceiling
 
+```
+audience:    human-operator
+status:      live
+authoritative-for: how big this can get, and the honest ambition
+verified-against: docs/STATE.md
+```
+
 ## 12.1 The numbers
 
 - **Target per school:** 50–500 students reachable via middlemen.

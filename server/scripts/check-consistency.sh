@@ -975,9 +975,35 @@ def platform_keys():
                        read("client/src-tauri/src/locus/contract.rs"))
     return found or None
 
+def free_tier():
+    """The free tier's port, cap and tier-row names, from the tree.
+
+    Recomputed from the two files that DEFINE it rather than from either alone:
+    the cap and port come from `04-tc.sh`'s applied class, and the tier-row names
+    from `seed-pb.py`'s seed loop. §23 asserts the same agreement from the other
+    direction (and adds the reboot unit and the heartbeat key); this is what
+    `state.toml` is checked against, so the data file cannot go stale about a
+    value the docs point at.
+
+    Returns a dict matching the TOML shape, or None if either file has moved.
+    """
+    tc = read("server/modules/04-tc.sh")
+    m = re.search(r'apply_tc_now\s+(\d+)\s+"[0-9:]+"\s+"([0-9a-z]+)"', tc)
+    if not m:
+        return None
+    port, cap = m.group(1), m.group(2)
+
+    seed = read("server/scripts/seed-pb.py")
+    rows = re.findall(r'\("([a-z_]+)",\s*"ECO_PASS",\s*' + re.escape(port) + r'\)', seed)
+    if not rows:
+        return None
+    # Sorted: the two rows describe one endpoint and their order in the seed loop
+    # carries no meaning, so comparing by position would fail on a harmless
+    # reorder. Compare as a set.
+    return {"port": int(port), "cap": cap, "tier_rows": sorted(rows)}
+
 def licence_client():
     """The client/ licence, as asserted by the root LICENSE scope table.
-
     Derived from the LICENSE table rather than from either manifest, because the
     manifests are what drift. §11 then checks the manifests against the same row,
     so all three are bound to one authority.
@@ -1018,6 +1044,7 @@ CHECKERS = {
     "platforms.keys":       platform_keys,
     "licence.client":       licence_client,
     "client.theme_ids":     theme_ids,
+    "tiers.free":           free_tier,
 }
 
 for path, entry in sorted(facts.items()):
@@ -1040,7 +1067,11 @@ for path, entry in sorted(facts.items()):
         actual = checker()
         if actual is None:
             print(f"BAD\t{path}\tcould not recompute (source: {source})")
-        elif str(actual) != str(value):
+        elif actual != value:
+            # Structural compare, not `str() == str()`: a nested table (like
+            # `tiers.free`) has no guaranteed key order on either side, so a
+            # string comparison would fail on a harmless reordering — a check
+            # that is wrong about the wrong thing is one people learn to ignore.
             print(f"BAD\t{path}\tstate says {value!r}, tree says {actual!r} (source: {source})")
         else:
             print(f"OK\t{path}\t{value!r} agrees")
@@ -2315,6 +2346,131 @@ $ordering_problem
 EOF
     else
         ok "every helper in hooks-sync.sh is defined before its first use"
+    fi
+fi
+
+echo
+echo "23. The free tier's endpoint, cap and allowance agree across the tree"
+#
+# WHY THIS EXISTS
+#
+# The free tier reuses the legacy Eco slot: port 8443, the Eco password, the
+# `tc-eco-cap.service` unit — renamed customerside only. That means FOUR files
+# describe one endpoint, in three different vocabularies:
+#
+#   server/modules/04-tc.sh      the tc cap ("1mbit") and the port (8443)
+#   server/scripts/seed-pb.py    the tier_configs rows ("free" and "eco" -> 8443)
+#   server/scripts/fix-tier-configs.py / seed-live.py   the repair/seed tools
+#   server/pb_hooks/heartbeat.pb.js   the allowance (free_allowance_mb)
+#
+# Nothing tied them together, so the free tier could be half-deployed in a way
+# that looks complete: the cap dropped here, the row forgotten there, and the
+# student gets an activation that names a tier with no server_config — a
+# "connected" app that cannot reach the internet (the exact failure class in
+# FIXES.md). This asserts the AGREEMENT, not each file separately: the point is
+# that they match, and a check on one file alone cannot tell you that.
+#
+# Every assertion below was observed FAILING against the pre-fix tree before it
+# was kept: the 5mbit cap, the missing `free` seed row, and a heartbeat with no
+# allowance field each tripped it.
+
+TC_MOD="$REPO/server/modules/04-tc.sh"
+SEED="$REPO/server/scripts/seed-pb.py"
+HB="$HOOKS/heartbeat.pb.js"
+
+if [ ! -f "$TC_MOD" ] || [ ! -f "$SEED" ] || [ ! -f "$HB" ]; then
+    warn "free-tier guard: a file it needs is missing — skipping"
+else
+    # (a) The 8443 tc class is capped at 1mbit, not the legacy 5mbit.
+    #     Match the apply line specifically: `apply_tc_now 8443 "1:10" "1mbit"`.
+    if grep -Eq 'apply_tc_now[[:space:]]+8443[[:space:]]+"1:10"[[:space:]]+"1mbit"' "$TC_MOD"; then
+        ok "04-tc.sh caps the free/Eco port (8443) at 1mbit"
+    else
+        bad "04-tc.sh does NOT cap port 8443 at 1mbit (expected: apply_tc_now 8443 \"1:10\" \"1mbit\")"
+    fi
+
+    # (b) The reboot-persistence unit uses the same rate, or a reboot silently
+    #     restores the old cap while the running class says otherwise.
+    if grep -Eq 'create_tc_service[[:space:]]+"eco"[[:space:]]+"1:10"[[:space:]]+"1mbit"[[:space:]]+8443' "$TC_MOD"; then
+        ok "04-tc.sh's tc-eco-cap.service uses the same 1mbit rate"
+    else
+        bad "04-tc.sh's tc-eco-cap.service rate disagrees with the applied cap"
+    fi
+
+    # (c) The seed carries BOTH tier names against 8443. `free` is minted
+    #     against; `eco` must survive so codes already in the field resolve.
+    if grep -Eq '\("free",[[:space:]]*"ECO_PASS",[[:space:]]*8443\)' "$SEED"; then
+        ok "seed-pb.py seeds the \`free\` tier against port 8443"
+    else
+        bad "seed-pb.py has no \`free\` tier row on port 8443 — the console cannot mint a working free code"
+    fi
+    if grep -Eq '\("eco",[[:space:]]*"ECO_PASS",[[:space:]]*8443\)' "$SEED"; then
+        ok "seed-pb.py keeps the legacy \`eco\` row so field codes still resolve"
+    else
+        bad "seed-pb.py dropped the \`eco\` row — codes already in the field would activate with no server_config"
+    fi
+
+    # (d) The heartbeat carries the allowance, and only for the free tiers.
+    #     Assert the KEY, because that is the wire contract the client reads.
+    # Anchor on the ASSIGNMENT — see the note on the throttle check below.
+    if grep -Eq 'response\.free_allowance_mb[[:space:]]*=' "$HB"; then
+        ok "heartbeat.pb.js sends free_allowance_mb"
+    else
+        bad "heartbeat.pb.js does not send the free-tier allowance — the client has nothing to count against"
+    fi
+    # Anchor on the ASSIGNMENT (`response.free_throttle_mbps =`), not a bare
+    # mention: the key also appears in the file's own comments and in the
+    # enforcement-version note, so a plain grep stays green with the assignment
+    # deleted — a check that cannot fail, which is the defect this section
+    # exists to catch. (It did exactly that on the first draft.)
+    if grep -Eq 'response\.free_throttle_mbps[[:space:]]*=' "$HB"; then
+        ok "heartbeat.pb.js sends free_throttle_mbps"
+    else
+        bad "heartbeat.pb.js does not send the free-tier throttle speed — the client has nothing to slow to"
+    fi
+    if grep -Eq 'tierVal === "free"' "$HB" && grep -Eq 'tierVal === "eco"' "$HB"; then
+        ok "the allowance is gated to the free/eco tiers only"
+    else
+        bad "the free allowance is not gated to the free/eco tiers (a paying tier must never see an allowance)"
+    fi
+
+    # (e) TWO-SIDED: the client must read the same key the hub writes. A hub key
+    #     with no client reader is a silent no-op, which is precisely how the
+    #     UoT endpoint stayed dead fleet-wide (FIXES.md 29). The heartbeat
+    #     response struct is where the wire keys are declared.
+    CLIENT_HB="$REPO/client/src-tauri/src/locus/heartbeat.rs"
+    if [ -f "$CLIENT_HB" ]; then
+        # Anchor on the FIELD DECLARATION, not a bare mention: the doc comments
+        # and tests also name the key, so a plain grep passes even when the
+        # field itself has been renamed — a check that cannot fail is the exact
+        # defect this whole section exists to avoid.
+        if grep -Eq '^[[:space:]]*pub free_allowance_mb:' "$CLIENT_HB"; then
+            ok "the client declares free_allowance_mb (hub key has a reader)"
+        else
+            bad "the hub sends free_allowance_mb but the client does not declare it — the allowance would be a silent no-op"
+        fi
+        if grep -Eq '^[[:space:]]*pub free_throttle_mbps:' "$CLIENT_HB"; then
+            ok "the client declares free_throttle_mbps (hub key has a reader)"
+        else
+            bad "the hub sends free_throttle_mbps but the client does not declare it — the throttle speed would be a silent no-op"
+        fi
+    else
+        warn "no client heartbeat.rs found — cannot check the client side of the allowance"
+    fi
+
+    # (f) The cached allowance/throttle must be READ back, not only written.
+    #     A `store_*` with no reader is the same class of silent no-op as a wire
+    #     key with no reader: the value arrives, is persisted, and nothing ever
+    #     uses it. `throttle_mbps` is the live example of this being worth
+    #     checking — it is deliberately stored-but-not-yet-applied, and the guard
+    #     makes that an explicit, greppable fact rather than a missing call.
+    CLIENT_STORE="$REPO/client/src-tauri/src/locus/store.rs"
+    if [ -f "$CLIENT_STORE" ]; then
+        if grep -Eq 'pub async fn throttle_mbps\(' "$CLIENT_STORE"; then
+            ok "the client can read back the stored throttle speed"
+        else
+            bad "the client stores the throttle speed with no reader — the value would be persisted and never used"
+        fi
     fi
 fi
 

@@ -208,6 +208,35 @@ routerAdd("POST", "/api/heartbeat", function(e) {
         }
         response.tier = tier;
 
+        // ── The free tier's monthly allowance, sent by the SERVER ────────────
+        //
+        // DELIBERATELY ADVISORY, and deliberately here rather than compiled into
+        // the client. The 5 GB allowance is counted CLIENT-SIDE, because the hub
+        // has no per-user accounting at all: each tier is one shadowsocks
+        // instance holding a single shared password, so every free user is
+        // indistinguishable on the wire. See docs/business/04-tiers.md §4.4.3.
+        //
+        // Sending it in the heartbeat is what lets the operator change the
+        // allowance (or the throttle floor) without shipping a client release —
+        // the client reads the current value on its next beat. That is the whole
+        // reason it is a wire field and not a constant.
+        //
+        // The client honours it only for the free tier; a paying tier has no
+        // allowance and the field is absent, which reads as "unlimited" rather
+        // than "zero" — an unknown key must never gate a paying user's traffic.
+        //
+        // These keys are ADDITIVE. An older client ignores them (it has no
+        // allowance logic), so this changes nothing for builds already deployed.
+        if (tierVal === "free" || tierVal === "eco") {
+            // `free_allowance_mb` — the monthly allowance in MEBIBYTES.
+            response.free_allowance_mb = 5120;   // 5 GiB
+            // `free_throttle_mbps` — speed after the allowance is spent. The
+            // client switches its tc-independent local cap to this; the server's
+            // 1mbit tc class is the hard ceiling either way. "Throttled further",
+            // not cut off, is the decided behaviour (04-tiers.md §4.4.5).
+            response.free_throttle_mbps = 1;
+        }
+
         // ── Which version of this hook is actually running ───────────────────
         //
         // ADDITIVE, and deliberately so: an old client ignores an unknown key, so
@@ -224,7 +253,10 @@ routerAdd("POST", "/api/heartbeat", function(e) {
         // proof of a stale deployment.
         //
         //   2 = expiry enforced (410) + suspension (403) + expires_at in the response
-        response.enforcement_version = 2;
+        //   3 = + the free tier's advisory allowance (free_allowance_mb /
+        //       free_throttle_mbps). Purely additive: an older client ignores
+        //       the keys, so the bump is for a human, not for a gate.
+        response.enforcement_version = 3;
 
         return e.json(200, response);
     } catch(err) {

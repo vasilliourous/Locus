@@ -1,5 +1,12 @@
 # 6. Unit economics and cost base
 
+```
+audience:    human-operator
+status:      live
+authoritative-for: the cost base, breakeven, and which estimates are unvalidated
+verified-against: docs/STATE.md
+```
+
 ## 6.1 The cost base
 
 | Item | Cost | Source |

@@ -357,6 +357,105 @@ pub async fn store_tier_config(config: &TierConfig, udp_relay: bool) -> Result<(
     verge.data_arc().save_file().await
 }
 
+/// Reads the free tier's usage window from the config.
+///
+/// Returns [`Usage::default`] — not an error — when nothing is stored or the
+/// stored JSON is unreadable. Both cases mean "no window recorded", which
+/// [`crate::locus::usage::Usage::window`] starts lazily on the first reading.
+/// An unreadable value is treated as absent rather than as fatal because a
+/// corrupt counter must never block the connection: the worst case is a student
+/// who gets a fresh allowance, and the alternative is an app that will not
+/// connect over bookkeeping.
+pub async fn usage() -> crate::locus::usage::Usage {
+    let verge = Config::verge().await;
+    let data = verge.latest_arc();
+    decode_usage(data.locus_usage.as_deref())
+}
+
+/// Decodes a stored usage window, treating anything unreadable as absent.
+///
+/// Split out as a pure function so the corrupt case is testable without a config
+/// layer — and because the *decision* here (reset rather than fail) is the part
+/// worth pinning, not the plumbing that reaches it.
+///
+/// A corrupt value resets and **logs**. The reset is deliberate: a counter must
+/// never block a connection, and the worst case is a student who gets a fresh
+/// allowance. The log is equally deliberate — without it, "my free data keeps
+/// resetting" is a report with no diagnosable cause.
+fn decode_usage(raw: Option<&str>) -> crate::locus::usage::Usage {
+    let Some(raw) = raw else {
+        // Never written: a paying tier, or a free student before their first
+        // byte. Not an error, and not worth a log line on every poll.
+        return crate::locus::usage::Usage::default();
+    };
+    match serde_json::from_str::<crate::locus::usage::Usage>(raw) {
+        Ok(usage) => usage,
+        Err(error) => {
+            logging::warn_corrupt_usage(&error.to_string());
+            crate::locus::usage::Usage::default()
+        }
+    }
+}
+
+/// Persists the free tier's usage window.
+///
+/// The whole window is written at once, because a count without its window is
+/// the corrupt state this shape exists to prevent.
+pub async fn store_usage(usage: &crate::locus::usage::Usage) -> Result<()> {
+    let verge = Config::verge().await;
+    let encoded = serde_json::to_string(usage).unwrap_or_default();
+    verge.edit_draft(|draft| {
+        draft.locus_usage = Some(encoded.clone().into());
+    });
+    verge.data_arc().save_file().await
+}
+
+/// Reads the throttle speed the hub advertised, in Mbps.
+///
+/// `None` means the hub has not told us — a paying tier, or an older hub — and
+/// the caller must **not** apply any throttle in that case. Absence is not
+/// "zero speed".
+///
+/// NOTE: this value is persisted and readable, but **nothing applies it to a
+/// running Core yet**. The classification that decides *when* to throttle works
+/// and is tested; the step that acts on it does not exist. Kept honest here
+/// rather than implied by the field's presence — see `STILL-OPEN.md`.
+#[must_use]
+pub async fn throttle_mbps() -> Option<u32> {
+    crate::config::Config::verge()
+        .await
+        .latest_arc()
+        .locus_throttle_mbps
+}
+
+/// Caches the throttle speed the hub advertised, in Mbps.
+///
+/// Stored beside the allowance because they arrive together and are meaningless
+/// apart: one says *how much* data a free student gets, the other *how slow*
+/// they go once it is gone.
+pub async fn store_throttle_mbps(mbps: Option<u32>) -> Result<()> {
+    let verge = Config::verge().await;
+    verge.edit_draft(|draft| {
+        draft.locus_throttle_mbps = mbps.filter(|m| *m > 0);
+    });
+    verge.data_arc().save_file().await
+}
+
+/// Caches the free-tier allowance the hub advertised, in mebibytes.
+///
+/// `None` is written through deliberately — it is the hub saying "no allowance
+/// applies" (a paying tier, or the quota switched off), and leaving a stale
+/// value in place would throttle a student the hub had released. See the call
+/// site in `locus::runtime::handle_success` for why this differs from the
+/// expiry rule.
+pub async fn store_allowance(allowance_mb: Option<u64>) -> Result<()> {
+    let verge = Config::verge().await;
+    verge.edit_draft(|draft| {
+        draft.locus_allowance_mb = allowance_mb.filter(|mb| *mb > 0);
+    });
+    verge.data_arc().save_file().await
+}
+
 /// Reads back the stored tier connection details.
 ///
 /// Returns `None` — rather than an error — when nothing is stored or the stored
@@ -402,6 +501,18 @@ mod logging {
             warn,
             clash_verge_logging::Type::Config,
             "[locus] stored tier config is unusable for the {tier} tier"
+        );
+    }
+
+    /// The stored usage window could not be parsed, so it was reset.
+    ///
+    /// Worth a line: the visible symptom is "my free data keeps resetting", and
+    /// without this the cause is unknowable from the student's side.
+    pub fn warn_corrupt_usage(detail: &str) {
+        clash_verge_logging::logging!(
+            warn,
+            clash_verge_logging::Type::Config,
+            "[locus] the stored free-tier usage window was unreadable and has been reset: {detail}"
         );
     }
 
@@ -628,5 +739,63 @@ mod tests {
     fn an_empty_code_is_not_a_stored_code() {
         let verge = verge_with(Some(""), Some("eco"), Some(&"d".repeat(64)));
         assert!(activation_from(&verge, None).is_none());
+    }
+
+    /// A stored usage window round-trips.
+    #[test]
+    fn a_stored_usage_window_decodes() {
+        let stored = crate::locus::usage::Usage {
+            used_bytes: 1234,
+            window_start_ms: 1_700_000_000_000,
+            warned: true,
+        };
+        let raw = serde_json::to_string(&stored).expect("Usage must serialize");
+        assert_eq!(decode_usage(Some(&raw)), stored);
+    }
+
+    /// A corrupt window resets to a fresh one rather than failing.
+    ///
+    /// The safety property: a counter must never block a connection. The student
+    /// gets a fresh allowance, which is the safe direction — the alternative is
+    /// an app that will not connect over bookkeeping.
+    #[test]
+    fn a_corrupt_usage_window_resets_rather_than_failing() {
+        let decoded = decode_usage(Some("{ this is not json"));
+        assert_eq!(decoded, crate::locus::usage::Usage::default());
+        assert_eq!(decoded.used_bytes, 0, "a corrupt count must not be honoured");
+    }
+
+    /// Absent and corrupt reach the same place, and both are safe.
+    ///
+    /// They differ only in that corrupt logs (so it is diagnosable); the reset
+    /// behaviour is deliberately identical, because a student seeing a fresh
+    /// allowance does not care which of the two happened.
+    #[test]
+    fn absent_and_corrupt_usage_both_start_a_fresh_window() {
+        assert_eq!(
+            decode_usage(None),
+            decode_usage(Some("!! not json !!")),
+            "absent and corrupt must not diverge in behaviour"
+        );
+    }
+
+    /// A window with a skew-guarded start survives the round-trip intact.
+    ///
+    /// Decoding must not silently repair: the repair belongs in
+    /// `Usage::window`, which knows `now`. Doing it here would need a clock and
+    /// would make the decode untestable.
+    #[test]
+    fn decoding_does_not_pre_repair_a_skewed_window() {
+        let skewed = crate::locus::usage::Usage {
+            used_bytes: 99,
+            window_start_ms: u64::MAX,
+            warned: false,
+        };
+        let raw = serde_json::to_string(&skewed).expect("Usage must serialize");
+        assert_eq!(
+            decode_usage(Some(&raw)).window_start_ms,
+            u64::MAX,
+            "decoding must be a pure read; the skew repair happens in `window`, which has `now`"
+        );
     }
 }

@@ -145,12 +145,19 @@ log "Applying tc rules to ${IFACE}..."
 # DUPLICATES (observed 2026-08-14: 4 copies of each after repeated runs).
 tc filter del dev "$IFACE" parent 1: 2>/dev/null || true
 # Apply all three tiers (order doesn't matter — different classids)
-apply_tc_now 8443 "1:10" "5mbit"
+#
+# 8443 is the FREE tier. It reuses the legacy Eco slot (port, password,
+# systemd unit) on purpose — see docs/business/04-tiers.md §4.5. New codes
+# minted against the `free` tier row get this 1mbit cap; existing `eco`-tier
+# codes in the field keep it too, which is the intended downgrade (the free
+# tier replaced Eco as a product; it was never a paid tier's promise).
+# The customer-facing name is "Free"; the on-box name stays "eco".
+apply_tc_now 8443 "1:10" "1mbit"
 apply_tc_now 8444 "1:20" "100mbit"
 apply_tc_now 8445 "1:30" "200mbit"
 
 # ── Create systemd services for reboot persistence ──
-create_tc_service "eco"     "1:10" "5mbit"   8443 "shadowsocks-eco.service"
+create_tc_service "eco"     "1:10" "1mbit"   8443 "shadowsocks-eco.service"
 create_tc_service "stealth" "1:20" "100mbit" 8444 "shadowsocks-stealth.service"
 create_tc_service "strike"  "1:30" "200mbit" 8445 "shadowsocks-strike.service"
 

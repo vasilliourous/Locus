@@ -19,6 +19,7 @@ import { useTranslation } from 'react-i18next'
 
 import { TierBadge } from '@/components/connection/tier-badge'
 import { TrafficGraph } from '@/components/connection/traffic-graph'
+import { UsageBar } from '@/components/connection/usage-bar'
 import { useConnection } from '@/components/connection/use-connection'
 import { useTrafficSummary } from '@/components/connection/use-traffic-summary'
 import { useSubscription } from '@/hooks/use-subscription'
@@ -206,6 +207,15 @@ const ConnectionPage = () => {
             Only shown once the user has a tier to show — an unactivated device
             has none, and an empty badge would read as a rendering fault. */}
         {status?.tier && <TierBadge tier={status.tier} />}
+
+        {/* The free tier's allowance, always visible while it applies.
+            This is the decided behaviour from docs/business/04-tiers.md §4.4.4:
+            a throttled student must know *why* the connection is slow and know
+            what fixes it, because a silently slow app reads as a broken product.
+            The component renders nothing at all for a paying tier, so this needs
+            no conditional here — `allowance.state === 'unlimited'` is the
+            component's own early return. */}
+        {status && <UsageBar allowance={status.allowance} />}
 
         <Button
           size="large"

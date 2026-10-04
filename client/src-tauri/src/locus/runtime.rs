@@ -433,6 +433,54 @@ async fn handle_success(response: &crate::locus::heartbeat::HeartbeatResponse) {
         );
     }
 
+    // Cache the free-tier allowance the hub advertised, so a status read can
+    // classify usage without a live beat — the Connection screen polls far more
+    // often than the client beats.
+    //
+    // Written on EVERY beat, and to `None` when the hub sends nothing, because
+    // here the absence is the answer rather than a gap: a code that moved to a
+    // paying tier must stop being metered, and a hub that stops sending the
+    // allowance is the operator switching the quota off. Leaving a stale
+    // allowance in place would throttle a student the hub had released.
+    //
+    // (This is the opposite rule from `expires_at` above, and the difference is
+    // deliberate: an absent expiry means "this hub cannot tell you", where an
+    // absent allowance means "no allowance applies".)
+    if let Some(raw) = response.free_allowance_mb
+        && raw > crate::locus::usage::MAX_SANE_ALLOWANCE_MB
+    {
+        // The hub sent a figure the arithmetic cannot trust. The client clamps
+        // it (see `usage::sane_allowance_mb`), so the student is safe either
+        // way — but this is the ONE place the bad value is still visible, and
+        // an operator seeing it here can fix the row before it reaches anyone
+        // else. Silently clamping would hide a server-side fault that the next
+        // client version might not clamp.
+        logging!(
+            warn,
+            Type::Config,
+            "[locus] the hub advertised an implausible free-tier allowance ({} MB); \
+             clamping to {} MB. The student is unaffected, but the hub's tier row is wrong.",
+            raw,
+            crate::locus::usage::MAX_SANE_ALLOWANCE_MB
+        );
+    }
+    if let Err(error) = store::store_allowance(response.free_allowance_mb).await {
+        logging!(
+            warn,
+            Type::Config,
+            "[locus] could not store the free-tier allowance: {error:#}"
+        );
+    }
+    // …and the speed to drop to once it is spent. Same rule: the hub's latest
+    // word replaces the previous one, including when that word is "nothing".
+    if let Err(error) = store::store_throttle_mbps(response.free_throttle_mbps).await {
+        logging!(
+            warn,
+            Type::Config,
+            "[locus] could not store the free-tier throttle speed: {error:#}"
+        );
+    }
+
     // An update signal is RECORDED, not installed. Installing is the student's
     // decision: doing it silently mid-session would drop their connection
     // without warning, and on a school network that is the worst moment.
@@ -629,6 +677,8 @@ mod tests {
             server_config: None,
             udp_relay: false,
             expires_at: None,
+            free_allowance_mb: None,
+            free_throttle_mbps: None,
             update_available: version.map(str::to_owned),
             update_linux: for_key("linux"),
             update_windows: for_key("windows"),

@@ -424,8 +424,22 @@ if not pw_from_file and os.path.exists(pw_file):
 if pw_from_file:
     uot_enabled = os.environ.get("ENABLE_UOT", "1") != "0"
     uot_port = int(os.environ.get("UOT_PORT", "8446"))
-    for t, port in [("eco", 8443), ("stealth", 8444), ("strike", 8445)]:
-        pw = os.environ.get(f"{t.upper()}_PASS", "")
+    # `free` and `eco` are the SAME endpoint (port 8443, same password, same
+    # 1mbit tc class). Both rows are seeded on purpose:
+    #   * `free` is the tier name new codes are minted against, and what the
+    #     console offers in its dropdown (it lists tier_configs rows).
+    #   * `eco` is the FROZEN legacy name still carried by codes already in the
+    #     field; activation/heartbeat look the tier up by the code's own string,
+    #     so those codes must keep resolving. Deleting this row would strand
+    #     every Eco-era code with a successful activation that carries no
+    #     server_config. See docs/business/04-tiers.md §4.5.
+    # A code's `tier` string is therefore either "free" or "eco"; both map to
+    # 8443. Passwords are the same ECO_PASS for both rows.
+    for t, pw_key, port in [("eco", "ECO_PASS", 8443),
+                            ("free", "ECO_PASS", 8443),
+                            ("stealth", "STEALTH_PASS", 8444),
+                            ("strike", "STRIKE_PASS", 8445)]:
+        pw = os.environ.get(pw_key, "")
         if not pw:
             log(f"  {t}: no password found — skipping")
             continue

@@ -1,5 +1,12 @@
 # 5. Pricing
 
+```
+audience:    human-operator
+status:      live
+authoritative-for: the price ladder, and the reasoning behind each step
+verified-against: docs/STATE.md
+```
+
 > **Status: decided (this session).** The ladder is **$0 / $4 / $7**, or
 > **Free / Stealth / Strike**. The reasoning below is kept so the numbers can
 > be re-justified rather than merely re-stated.

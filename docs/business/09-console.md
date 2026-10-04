@@ -1,5 +1,12 @@
 # 9. The operator console
 
+```
+audience:    human-operator
+status:      live
+authoritative-for: the console's actions, and what it deliberately does not do
+verified-against: server/pb_hooks/admin_console.pb.js
+```
+
 The real operator surface is the **admin console**, not any legacy "admin
 panel" description.
 
@@ -13,17 +20,23 @@ panel" description.
 | Group | Actions |
 |---|---|
 | Overview | `dashboard` |
-| Codes | `codes.list` · `codes.generate` · `codes.suspend` · `codes.unsuspend` · `codes.renew` · `codes.rebind` · `codes.set-term` · `codes.expire` · `codes.unbind` · `codes.history` · `codes.update` · `codes.delete` · `codes.deleteBatch` |
+| Codes | `codes.list` · `codes.generate` · `codes.suspend` · `codes.unsuspend` · `codes.renew` · `codes.set-term` · `codes.expire` · `codes.unbind` · `codes.history` · `codes.update` · `codes.delete` · `codes.deleteBatch` |
 | Middlemen | `middlemen.list` |
+| Devices | `devices.list` |
 | Tiers | `tiers.list` · `tiers.update` |
 | Releases | `releases.get` · `releases.fetchLink` · `releases.publish` · `releases.set` |
 
-**The four that run the business** (`9a91da1`):
+> **`codes.rebind` is retired, not listed.** The action name still exists in
+> `admin_console.pb.js`, but it now returns **HTTP 410** — *"Rebinding is no
+> longer needed: codes are not tied to a device."* It is kept so an operator
+> following an old runbook gets a sentence instead of a silent no-op. See
+> [`../reference/DEVICE-IDENTITY.md`](../reference/DEVICE-IDENTITY.md).
+
+**The three that run the business** (`9a91da1`):
 
 * **`codes.renew`** — the payment operation. Extends from the later of today
   and the existing expiry, so paying early never loses days. Records
   `before → after` in the audit trail.
-* **`codes.rebind`** — move a code to a new device, leaving the expiry alone.
 * **`codes.set-term`** — set how long one purchase lasts, without moving an
   expiry already running.
 * **Search** — `codes.list`'s query now matches `label`/`notes`/`middleman` as

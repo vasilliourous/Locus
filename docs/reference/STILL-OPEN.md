@@ -14,6 +14,75 @@ Ordered by whether I could have validated it here.
 
 ## Open, and blocked in this environment
 
+### The free tier's throttle is decided, stored — and applied to nothing
+
+**Added 2026-10-04, updated for 3.2.26.** This is the largest remaining gap in
+the free tier, and it is worth stating precisely because the field looks wired.
+
+What exists: the hub sends `free_throttle_mbps`; the client parses it (tolerantly
+— a malformed value does not fail the beat), persists it (`store::store_throttle_mbps`)
+and can read it back (`store::throttle_mbps`). `check-consistency.sh` §23 asserts
+that reader exists.
+
+What does **not** exist: anything that lowers a running Core's speed from that
+value. The **decision** to throttle works end to end; the **act** does not.
+
+So today's honest behaviour for a student past their allowance is:
+
+- the usage bar says "slowed until your allowance resets" — which is the
+  committed copy, and is therefore **currently untrue**;
+- the connection is **not** actually slowed, beyond the server's 1 Mbps `tc` cap
+  that applies to the tier regardless.
+
+That is a documentation-shaped problem as much as a code one: 3.2.26 shipped the
+sentence before the mechanism. The `td` cap on the hub means no student is worse
+off than before — 1 Mbps is the free tier's ceiling either way — but the app is
+claiming something it does not do.
+
+**The specific observation that would settle it.** A free code, past its
+allowance, on a machine with a client: measure throughput and compare against a
+fresh free window. They are identical today. Until the applying step exists,
+`04-tiers.md` §4.4.5's "throttled further" is a design intention rather than a
+behaviour, and the banner's wording should be read as aspirational.
+
+---
+
+### The free tier's hub half is not deployed, and no free code has been exercised
+
+**Added 2026-10-04.** The free tier's quota now exists end to end in the tree: a
+1 Mbps `tc` cap, a heartbeat-provided allowance, a client that counts its own
+30-day window (`client/src-tauri/src/locus/usage.rs`), and — as of 3.2.26 —
+clamping and skew guards on the advisory inputs.
+
+**Verified:**
+
+- The rule. Fifteen tests cover the window rollover, the 80% line, the
+  at-allowance boundary, saturation, the skew repair, the allowance clamp, and
+  "no allowance never throttles". `warn_fraction_matches_the_integer_comparison`
+  was **observed failing** when the boundary was moved to 90%, so the integer
+  comparison and the documented fraction cannot drift apart.
+- The wire shape on both sides, tolerantly: a malformed advisory field no longer
+  fails the beat, and a well-formed one (including zero) still parses.
+- 597 lib tests, clippy `-D warnings`, `tsc`, `lint`, 96 frontend tests, the web
+  build and `check-consistency.sh` (101 checks) all pass. Every §23 assertion was
+  observed failing against its defect.
+
+**NOT verified:**
+
+- **That the hub half is live at all.** Nothing was redeployed. `setup.sh` deploys
+  from `/root/server/`, so the `tc` cap, the `free` tier row and the heartbeat
+  keys are **inert until it re-runs**. A heartbeat response that lacks
+  `free_allowance_mb` is proof the hook is still stale.
+- **That a `free`-tier code activates and connects.** No code was minted against
+  the new row; the row was added to the seed, not exercised.
+- **That the guards fire on real data.** The clamp only triggers on a hub sending
+  an implausible value, and no deployed hub sends one — so the failure path is
+  tested but never encountered.
+
+See the entry above for the throttle's store-but-not-apply gap.
+
+---
+
 ### The macOS Gatekeeper bypass is argued from how macOS classifies signatures, never observed on a Mac
 
 **Added 2026-10-03.** The macOS install path changed: the `.dmg` no longer carries

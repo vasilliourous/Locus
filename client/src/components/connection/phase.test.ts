@@ -39,6 +39,11 @@ const status = (
   // Not read by `phaseFromStatus`; required by the type. `false` is the honest
   // default for a helper describing a settled backend status.
   trafficFlowing: false,
+  // Also not read by `phaseFromStatus`. `unlimited` is the honest default for a
+  // helper that is not describing a free-tier student — and note it is the
+  // variant that renders no bar, so a helper that forgets it cannot accidentally
+  // assert metered behaviour.
+  allowance: { state: 'unlimited' },
 })
 
 describe('connection phase from backend status', () => {

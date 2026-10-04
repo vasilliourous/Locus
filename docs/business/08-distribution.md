@@ -1,5 +1,12 @@
 # 8. Distribution — the middleman network
 
+```
+audience:    human-operator
+status:      live
+authoritative-for: how codes reach students, and the middleman's economics
+verified-against: docs/STATE.md
+```
+
 ## 8.1 The model
 
 ```

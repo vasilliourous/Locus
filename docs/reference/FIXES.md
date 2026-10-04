@@ -27,6 +27,152 @@ corrections are marked. For what is *still* broken, read `STILL-OPEN.md`.
 
 ---
 
+## THE FREE TIER'S ADVICE FIELDS COULD BREAK THE WHOLE HEARTBEAT, AND FOUR OTHER PRE-EMPTIVE FIXES (2026-10-04, v3.2.26)
+
+| | |
+|---|---|
+| Severity | 🟠 Advisory free-tier data could fail a beat that carries contract data; three arithmetic edge cases could throttle or un-throttle a student wrongly |
+| **Reported as** | *"Start patching gaps and writing in pre-emptive safety checks/error messages"* |
+| **Files:** | `client/src-tauri/src/locus/{heartbeat.rs,usage.rs,store.rs,runtime.rs}`, `client/src-tauri/src/config/verge.rs`, `client/src/components/connection/usage-bar{,-model}.{tsx,ts}`, `client/src/locales/en/home.json`, `server/scripts/check-consistency.sh` §23 |
+| **Fixed in:** | 3.2.26 (client only — no hook change, so nothing to redeploy) |
+
+### The defects, each a latent failure rather than a reported one
+
+None of these had been observed in the field. Each is a case where a *bad or
+merely unusual* input produces a wrong outcome silently, which is the class this
+project has repeatedly paid for.
+
+1. **An advisory field could fail the whole beat.** `free_allowance_mb` was typed
+   `Option<u64>`, so a hub sending `-1`, `5.5` or `"5120"` made the entire
+   `HeartbeatResponse` fail to parse — which `classify_response` reads as
+   `Unreachable`. The beat is then **discarded**, taking the `server_config`, the
+   `expires_at` and any update signal with it, for a field that does not apply to
+   a paying student at all. Fixed with a tolerant deserializer: the advisory
+   fields degrade to `None`, everything else parses. This is deliberately the
+   **opposite** rule from `uot_port` and the frozen wire names, where a wrong
+   value *should* be loud — advisory data tolerates, contract data does not.
+
+2. **An absurd allowance read as a permanent throttle.** At `u64::MAX` mebibytes
+   the byte conversion saturates, and the saturated value then overflows
+   `used * 10` in `classify` — so `>=` misreads every window as spent. The
+   student is throttled instantly and permanently, on a hub that believes it sent
+   an enormous allowance. Now clamped to 1 PiB (`sane_allowance_mb`), which
+   degrades toward *unlimited* — the safe direction — and the runtime **logs**
+   the bad value, because clamping silently would hide a server-side fault.
+
+3. **A future-dated window underflowed the elapsed-time maths.** A window start
+   ahead of `now` makes `now - start` wrap in release to an enormous value that
+   reads as "the window just rolled" on every call: the quota silently ceases to
+   exist and the student gets a fresh allowance on every poll. Now repaired
+   (`window_start_is_skewed`, five-minute tolerance for ordinary clock noise).
+
+4. **A corrupt counter reset with no trace.** `store::usage` treated an
+   unreadable value as absent — correct, since a counter must never block a
+   connection — but it did so **silently**, so "my free data keeps resetting" was
+   a support report with no diagnosable cause. Now logged, via a pure
+   `decode_usage` that is directly testable.
+
+5. **The upgrade route did not exist.** The throttle state said what happened and
+   that it resets, but offered nowhere to go. Now followed by a sentence naming
+   the action. It deliberately does **not** offer a purchase: there is no
+   self-serve checkout — a code is a physical card bought from a middleman — so a
+   "Buy now" button would have nowhere to go.
+
+### The guard was wrong on its first draft, in the way it warns about
+
+§23's two new hub-key assertions grepped for the key name, and the key also
+appears in the file's own comments and in its enforcement-version note. Deleting
+the assignment therefore left the check **green** — a check that cannot fail,
+which is the exact defect this whole section exists to catch, written by a change
+quoting it. Both now anchor on the assignment (`response.free_allowance_mb =`),
+and were observed failing against a deleted assignment before being kept.
+
+A sixth assertion was added for a subtler no-op: a value that is **stored but
+never read**. `free_throttle_mbps` is exactly that today — parsed, persisted, and
+applied to nothing — so the guard asserts a reader exists, which makes the
+remaining gap explicit and greppable rather than hidden behind a field that looks
+wired.
+
+### Verified / not verified
+
+- **Verified:** 597 lib tests pass (10 new across `usage`, `heartbeat` and
+  `store`); `cargo clippy --all-targets --features clippy -- -D warnings` is
+  clean; `tsc`, `lint`, 96 frontend tests and the web build pass;
+  `check-consistency.sh` exits 0 with 101 checks. Each new guard was **observed
+  failing** against the defect it catches — the removed skew repair, the strict
+  `u64` field, the deleted hub assignment, and the removed store reader — then
+  restored.
+- **Not verified:** that any of this behaves differently on a **live Core**,
+  because none of it was run against one. In particular the throttle is still not
+  applied, and the clamping only triggers on a hub sending a value no deployed
+  hub sends. See `STILL-OPEN.md`.
+
+---
+
+## THE FREE TIER HAD NO ENFORCEMENT, AND THE BUSINESS PLAN READ AS IF IT DID (2026-10-04)
+
+> **Follow-up entry below (3.2.26) covers the safety guards and the upgrade route.
+> Read this one first — it is the build the follow-up hardens.**
+
+| | |
+|---|---|
+| Severity | 🟠 A whole tier was specified in the plan and absent from the tree; the docs read as though it shipped |
+| **Reported as** | *"Let's start getting to work on the undone work mentioned in business(free)"* |
+| **Files:** | `server/modules/04-tc.sh`, `server/scripts/seed-pb.py`, `server/scripts/seed-live.py`, `server/scripts/fix-tier-configs.py`, `server/pb_hooks/heartbeat.pb.js`, `client/src-tauri/src/locus/{usage.rs,heartbeat.rs,store.rs,runtime.rs,mod.rs}`, `client/src-tauri/src/cmd/locus.rs`, `client/src/config/verge.rs`, `client/src/services/locus.ts`, `client/src/components/connection/usage-bar.{tsx,ts}`, `client/src/pages/connection.tsx`, `server/scripts/check-consistency.sh` §23, `docs/business/*` |
+| **Fixed in:** | next tag (client) + the hook and `tc` module, deployed on a `setup.sh` re-run |
+
+### The defect, in one line
+
+`docs/business/04-tiers.md` described a free tier at 1 Mbps with a 5 GB
+client-counted allowance; the tree had `create_tc_service "eco" … "5mbit" 8443`
+and a client that had never heard of an allowance. Nothing was broken by this —
+nothing had been built yet — but the document's own table called itself
+"code-verified" while its §4.5 conceded the cap was "proposed".
+
+### What was built, and the two things that were nearly got wrong
+
+The enforcement now exists end to end: a 1 Mbps `tc` cap on 8443, a `free`
+`tier_configs` row beside the legacy `eco` one, an allowance sent on every
+heartbeat, and a client that counts its own window and renders it.
+
+Two traps, both of which the §23 guard exists to catch:
+
+1. **The cap lives in two places in one file.** `04-tc.sh` applies the class
+   *and* writes the `tc-eco-cap.service` oneshot that rebuilds it at boot. Editing
+   only the first is a change that works until the next reboot — the classic
+   half-applied fix. §23 asserts both, and was observed failing against each.
+2. **The hub key needs a client reader.** This is the UoT failure mode again
+   (`FIXES.md` 29): a wire key with no reader is a *silent no-op*, not an error.
+   The guard's client-side assertion greps the **field declaration**, not a bare
+   mention of the name — the first draft matched the doc comments and would have
+   passed with the field renamed. It was observed failing against exactly that.
+
+### The genuinely soft part, stated rather than hidden
+
+The quota is counted **client-side** and is tamperable. That is a decision, not an
+oversight: the hub has no per-user accounting, because each tier is one
+shadowsocks instance with a single shared password, so free users are
+indistinguishable on the wire. The threat model is a student who wants free fast
+internet, not an adversary. The alternative is P4 in `18-open-items.md`.
+
+The counter is **not** reported back to the hub, deliberately — doing so would
+create the per-user record this product's design refuses to keep.
+
+### Verified / not verified
+
+- **Verified:** 587 client lib tests pass (11 new for `usage`, 3 for the
+  allowance wire shape); `cargo clippy --all-targets --features clippy -- -D warnings`
+  is clean; `pnpm exec tsc --noEmit`, `pnpm lint` and `pnpm test` (95 tests) pass;
+  `pnpm run web:build` succeeds; `check-consistency.sh` exits 0. Every §23
+  assertion was **observed failing** against the defect it catches (the 5 Mbps
+  cap, the missing `free` row, the missing heartbeat key, the ungated allowance,
+  and the renamed client field), then restored.
+- **Not verified:** that the client applies the slower cap to a **live Core** —
+  the classification is tested, the effect on a running tunnel is not. No hub was
+  redeployed, so **none of the server half is live**. Both are in `STILL-OPEN.md`.
+
+---
+
 ## macOS SHIPPED A TERMINAL-ONLY REMEDY: A README THE STUDENT COULD NOT ACT ON (2026-10-03)
 
 | | |
