@@ -123,7 +123,9 @@ onMounted(load)
       Only use this for <strong>the paid tier</strong> (the <code>strike</code>
       row, shown to students as <strong>Full</strong>), and only when a sing-box UoT
       listener is running on this server (normally 8446) — install it with
-      <code>enable-uot.sh</code>; see <code>docs/GAMING-UDP.md</code>. Do not point
+      <code>enable-uot.sh</code>; see <code>docs/business/04-tiers.md</code> §4.1
+      for the live endpoint table (the archived plan that built it is
+      <code>docs/archive/GAMING-UDP.md</code>). Do not point
       it at the ordinary shadowsocks-rust ports (8443/8445): those do not
       implement sing-box's UDP-over-TCP and will refuse the connections.
       <br /><br />

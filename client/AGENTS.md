@@ -23,6 +23,21 @@ Instructions for AI coding agents working in `client/`, the Locus desktop client
 > generated output (`verge-mihomo -t -f <config>`), because a config can pass
 > every test and still be refused by the engine.
 
+## Where to read
+
+| If you are… | Read |
+|---|---|
+| setting up the dev environment, or submitting a change | [`CONTRIBUTING.md`](CONTRIBUTING.md) — the human-facing setup and submission guide |
+| changing anything in `client/` | [`docs/UPSTREAM-CHANGES.md`](docs/UPSTREAM-CHANGES.md) — **authoritative** on what is ours vs upstream's |
+| working on the UI | [`docs/FRONTEND.md`](docs/FRONTEND.md) |
+| adding or changing a translated string | [`docs/CONTRIBUTING_i18n.md`](docs/CONTRIBUTING_i18n.md) |
+| touching the updater or release signing | [`docs/UPDATE-ARCHITECTURE.md`](docs/UPDATE-ARCHITECTURE.md), [`docs/SIGNING.md`](docs/SIGNING.md) |
+| measuring the traffic graph's performance | [`scripts/perf/GUIDE.md`](scripts/perf/GUIDE.md) — the macOS harness (`pnpm perf:build` / `perf:run` / `perf:compare`) |
+| anything else in the project | `../docs/README.md` — the single documentation index |
+
+> **Added 2026-10-05.** Four of these were reachable from nowhere: they were
+> written, correct, and findable only by browsing the filesystem.
+
 ## Traps this client has already paid for
 
 Each of these cost a real report. They are listed here because the *shape* of the

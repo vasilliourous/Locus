@@ -1,5 +1,18 @@
 # Contributing — Locus client
 
+```
+audience:    builder
+status:      live
+authoritative-for: how to set up and submit a change to the Locus client
+verified-against: client/package.json, client/scripts/, client/docs/
+```
+
+> **Front-matter added 2026-10-05.** This file was an orphan: nothing referenced
+> it — not the root `README.md`, not `client/AGENTS.md`, not the documentation
+> index — so nothing checked its links either. It is now indexed from
+> [`docs/README.md`](../docs/README.md) and covered by the link and reachability
+> guards.
+
 This directory is a **fork of Clash Verge Rev v2.5.5**, adapted into the Locus
 desktop client. It is the shipping Locus client. The predecessor Wails client is
 archived at `legacy/wails-client/` and is not the product.
@@ -35,8 +48,8 @@ For contributing translations, see [docs/CONTRIBUTING_i18n.md](docs/CONTRIBUTING
 > **Note:** the fork still contains inherited `Clash Verge` strings, mostly in
 > `src/locales/`. Several name the privileged system service in user-facing error
 > messages. Do not blind find-replace them — a message a student cannot act on is
-> worse than a stale brand name. See `docs/UPSTREAM-CHANGES.md` §4 and
-> `docs/ARCHITECTURE.md`.
+> worse than a stale brand name. See `client/docs/UPSTREAM-CHANGES.md` §4 and
+> `client/docs/ARCHITECTURE.md`.
 
 ## Development Setup
 

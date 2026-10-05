@@ -816,9 +816,45 @@ def md_files(root):
             if fn.endswith('.md'):
                 yield os.path.join(dirpath, fn)
 
+# ── WHAT IS IN SCOPE, AND WHY IT IS NOT "EVERY .md IN THE REPO" ──
+#
+# The doc trees, plus the files a reader enters by. `client/docs/` alone was not
+# enough: `client/CONTRIBUTING.md` sits one level up and carried a live ambiguous
+# reference that nothing checked, while its sibling
+# `client/docs/CONTRIBUTING_i18n.md` was covered. A contributor guide is a
+# document like any other.
+#
+# Deliberately NOT walked, each for a reason:
+#   legacy/                     retired client; its links point into its own tree
+#   .whale/, .aider*            local agent tooling, not part of the project
+#   node_modules, target, dist  generated
+#
+# `docs/archive/` and `docs/history/` ARE walked — retired material may still be
+# linked TO, and a reader who follows one must not hit a dead end.
+def top_level_docs():
+    """Top-level contributor docs and the script indexes people read directly."""
+    out = []
+    for d in ('client', 'scripts', 'server/scripts'):
+        if not os.path.isdir(d):
+            continue
+        for dirpath, _dirs, files in os.walk(d):
+            if any(s in dirpath for s in ('node_modules', 'target', 'dist')):
+                continue
+            for fn in files:
+                if not fn.endswith('.md'):
+                    continue
+                rel = os.path.join(dirpath, fn)
+                # `client/docs/**` is already walked above; take only the rest.
+                if rel.startswith('client/docs/'):
+                    continue
+                # A tool guide under an otherwise-code tree is entered by hand.
+                out.append(rel)
+    return out
+
 docs = [p for p in md_files('docs')] + \
-       [p for p in md_files('client/docs')] + ['README.md']
-docs = [p for p in docs if os.path.exists(p)]
+       [p for p in md_files('client/docs')] + \
+       top_level_docs() + ['README.md', 'AGENTS.md']
+docs = sorted(set(p for p in docs if os.path.exists(p)))
 
 anchors = {}
 for p in docs:
@@ -854,32 +890,93 @@ for p in docs:
 # `.md` file that does not exist there — that is precise enough not to fire on
 # prose ("FIXES.md is a dated log") or on historical citations.
 #
-# Scoped to the basenames the 2026-09 reorg actually moved, so it flags exactly
-# the reorg-rot class and does not cry wolf on incidental mentions or files that
+# Scoped to the basenames the reorgs actually moved, so it flags exactly the
+# reorg-rot class and does not cry wolf on incidental mentions or files that
 # never existed in docs/ (private research notes, the client's own docs).
+#
+# ── CODE FILES ARE SCANNED TOO (added 2026-10-05) ──
+#
+# The first version of this check walked only `docs` — markdown. That is the gap
+# that let TWO live defects survive a full year of green pipelines:
+# `client/src-tauri/src/feat/tun.rs` and `feat/core_upgrade.rs` both carried
+# "see `docs/ARCHITECTURE.md`" long after the 2026-09 reorg moved that file to
+# `docs/archive/ARCHITECTURE-wails.md`. A code comment is a reference a reader
+# follows exactly like a link, and nothing was looking at it.
+#
+# The scan is deliberately the SAME regex and the SAME basename allow-list as the
+# markdown pass, extended over source files rather than widened. That is the §7
+# rule: cover the class, do not broaden the pattern. Two exclusions keep it
+# honest:
+#
+#   * `check-consistency.sh` itself — its comments QUOTE stale paths as examples
+#     of what it catches, and a guard that flags its own documentation is a guard
+#     the next reader disables.
+#   * `docs/history/` and `docs/reference/FIXES.md` — historical logs cite old
+#     paths on purpose; they record what happened.
+#
+# The extensions are the languages that can carry a path in a comment or string.
+# Deliberately NOT included: `.json`/lockfiles (generated, and full of unrelated
+# paths) and `server/console/dist/` (build output, regenerated from src/).
 MOVED_BASENAMES = (
     'DEPLOY.md', 'OPS.md', 'POCKETBASE-SETUP.md', 'SECRETS-MANAGEMENT.md',
     'UPDATE-SYSTEM.md', 'RELEASING.md', 'CI-CD.md', 'API.md', 'FIXES.md',
     'STILL-OPEN.md', 'ARCHITECTURE.md', 'ENGINE-SWAP-ANALYSIS.md',
-    'GAMING-UDP.md', 'CONTEXT.md',
+    'GAMING-UDP.md', 'CONTEXT.md', 'DEVICE-IDENTITY.md', 'EGRESS-READINESS.md',
+    'DEBUGGING-METHOD.md', 'THEMES.md',
 )
 STALE_PATHS = re.compile(r'(?<![A-Za-z0-9/._-])docs/([A-Za-z0-9._/-]+\.md)')
+
+CODE_EXTS = ('.rs', '.ts', '.tsx', '.js', '.mjs', '.py', '.sh', '.yml', '.yaml',
+             '.toml', '.html', '.vue')
+CODE_ROOTS = ('client/src', 'client/src-tauri/src', 'client/src-tauri/tests',
+              'client/src-tauri/scripts', 'client/scripts', 'server', '.github',
+              'scripts')
+# Never walk generated or dependency trees, and never the guard's own quoting.
+CODE_SKIP = ('node_modules', 'target', '.git', '/dist/', 'gen/schemas',
+             '__pycache__', 'console/dist')
+
+def code_files():
+    for root in CODE_ROOTS:
+        for dirpath, _dirs, files in os.walk(root):
+            if any(s in dirpath for s in CODE_SKIP):
+                continue
+            for fn in files:
+                if fn.endswith(CODE_EXTS):
+                    yield os.path.join(dirpath, fn)
+
+def stale_in(path, text):
+    """Yields (lineno, rel) for a stale `docs/…md` reference on a line."""
+    for lineno, line in enumerate(text.splitlines(), 1):
+        for m in STALE_PATHS.finditer(line):
+            rel = m.group(1)
+            if os.path.basename(rel) not in MOVED_BASENAMES:
+                continue
+            if os.path.exists(os.path.join('docs', rel)):
+                continue
+            yield lineno, rel
+
 for p in docs:
     # Historical logs cite old paths on purpose — they record what happened.
     if p.startswith('docs/reference/FIXES.md') or p.startswith('docs/history/') \
             or p.startswith('docs/archive/'):
         continue
     with open(p, encoding='utf-8', errors='replace') as fh:
-        for lineno, line in enumerate(fh, 1):
-            for m in STALE_PATHS.finditer(line):
-                rel = m.group(1)
-                if os.path.basename(rel) not in MOVED_BASENAMES:
-                    continue
-                if os.path.exists(os.path.join('docs', rel)):
-                    continue
-                # A reference into another tree (client/docs/…) is written with
-                # its own prefix and will not match `docs/…` here.
-                bad.append(f"{p}:{lineno}: stale path docs/{rel} (no such file)")
+        for lineno, rel in stale_in(p, fh.read()):
+            # A reference into another tree (client/docs/…) is written with
+            # its own prefix and will not match `docs/…` here.
+            bad.append(f"{p}:{lineno}: stale path docs/{rel} (no such file)")
+
+for p in code_files():
+    if os.path.normpath(p) == 'server/scripts/check-consistency.sh':
+        continue
+    try:
+        with open(p, encoding='utf-8', errors='replace') as fh:
+            text = fh.read()
+    except OSError:
+        continue
+    for lineno, rel in stale_in(p, text):
+        bad.append(f"{p}:{lineno}: stale path docs/{rel} (no such file) — "
+                   f"the file moved; repoint the reference")
 
 for b in sorted(set(bad)):
     print(b)
@@ -3480,6 +3577,26 @@ import os, re
 ARCHIVE_PREFIXES = ('docs/archive/', 'docs/history/',
                     'docs/business/redesign/archive/')
 
+# ── WHAT §28 HOLDS TO THE INDEX, AND WHAT IT DOES NOT ──
+#
+# `docs/**` and `client/docs/**` are project documentation: index them, always.
+#
+# `client/*.md` was added 2026-10-05, when `client/CONTRIBUTING.md` turned out to
+# be a contributor guide that NOTHING referenced — not the root README, not
+# `client/AGENTS.md`, not the index. A document a contributor is expected to read
+# and cannot find is the same defect as an unlinked business file.
+#
+# Deliberately NOT held to the index, with the reason (§7: exclude precisely):
+#   client/AGENTS.md, CLAUDE.md, GEMINI.md   entry points, not documentation —
+#       AGENTS.md is the thing that POINTS AT the docs, and CLAUDE/GEMINI are
+#       one-line shims delegating to it.
+#   client/scripts/**/GUIDE.md, scripts/README.md, server/scripts/README.md
+#       tool manuals. Their reader arrives from the tool, not from the doc index;
+#       indexing them would put "how to run a perf harness" in the same list as
+#       "the API contract", which is how an index stops being worth reading.
+#       They are covered against LINK ROT by §8, which is the risk that matters.
+INDEX_EXEMPT = {'client/AGENTS.md', 'client/CLAUDE.md', 'client/GEMINI.md'}
+
 def md_files(root):
     for dirpath, _dirs, files in os.walk(root):
         if any(part in dirpath for part in ('node_modules', 'target', '.git', 'dist')):
@@ -3487,6 +3604,18 @@ def md_files(root):
         for fn in files:
             if fn.endswith('.md'):
                 yield os.path.join(dirpath, fn).replace(os.sep, '/')
+
+def indexed_scope():
+    """Top-level `client/*.md` that are documentation rather than entry points."""
+    out = []
+    for fn in sorted(os.listdir('client')):
+        if not fn.endswith('.md'):
+            continue
+        rel = 'client/' + fn
+        if not os.path.isfile(rel) or rel in INDEX_EXEMPT:
+            continue
+        out.append(rel)
+    return out
 
 def front_matter(path):
     lines = open(path, encoding='utf-8', errors='replace').read().splitlines()
@@ -3521,7 +3650,8 @@ for m in re.finditer(r'\]\(([^)\s]+?)/\)', index_text):
 
 orphans, contradictions = [], []
 
-for path in sorted(set(md_files('docs')) | set(md_files('client/docs'))):
+for path in sorted(set(md_files('docs')) | set(md_files('client/docs'))
+                   | set(indexed_scope())):
     if path.startswith(ARCHIVE_PREFIXES):
         continue
     if path == 'docs/README.md':

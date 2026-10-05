@@ -129,6 +129,114 @@ action trains the reader to ignore the one that matters.*
 
 ---
 
+## §8 WAS SILENTLY BROKEN, AND THE STALE-PATH SCAN NEVER LOOKED AT CODE (2026-10-05, guards)
+
+| | |
+|---|---|
+| Severity | 🔴 Two live references pointed at files that do not exist; one guard had been dead since the moment it was widened |
+| **Reported as** | *"Fix the gaps accordingly using reasoning to deduce the best option"* — the gaps named in the entry above |
+| **Files:** | `server/scripts/check-consistency.sh` (§8), `server/console/src/views/Tiers.vue`, `client/CONTRIBUTING.md`, `client/AGENTS.md`, `docs/README.md` |
+| **Fixed in:** | docs + guards only — no client change, so nothing to release |
+
+### The headline: I broke §8 while widening it, and it failed silently
+
+Widening §8's file scope, I replaced
+
+```python
+docs = [p for p in md_files('docs')] + [p for p in md_files('client/docs')] + …
+```
+
+with
+
+```python
+docs = md_files('docs') + md_files('client/docs') + top_level_docs() + …
+```
+
+`md_files` is a **generator**, so `generator + generator` raises `TypeError`. The
+heredoc died, `doc_links` came back empty, and §8 printed
+**"OK every documentation link and anchor resolves"** — for every document, on
+every run.
+
+**This is `DEBUGGING-METHOD.md` §3 in its purest form: a check that cannot fail
+reads exactly like a check that passed.** I only caught it because a failure
+proof I expected to go red produced *no output at all*, which was surprising
+enough to investigate instead of accepting. The lesson recorded here is the
+narrow one that generalises: **after changing a guard's scope, prove the guard
+still fails** — widening a check is a change to the check, and a guard that
+crashes looks identical to one that approves.
+
+### The gaps, and how each was closed
+
+1. **The stale-path scan only read `.md` files.** That is why
+   `client/src-tauri/src/feat/{tun,core_upgrade}.rs` carried
+   "see `docs/ARCHITECTURE.md`" for a **full year** after the 2026-09 reorg moved
+   that file to `docs/archive/ARCHITECTURE-wails.md`. The scan now covers `.rs`,
+   `.ts`, `.tsx`, `.js`, `.mjs`, `.py`, `.sh`, `.yml`, `.toml`, `.html` and
+   `.vue` across `client/src`, `client/src-tauri/src`, `client/src-tauri/tests`,
+   `client/scripts`, `server`, `.github` and `scripts`.
+
+   It is the **same regex and the same basename allow-list** as the markdown
+   pass, extended over source files rather than widened — §7's rule, and the
+   reason it does not fire on the ~150 incidental `docs/…` mentions in the tree.
+   Two exclusions keep it honest: `check-consistency.sh` itself (whose comments
+   *quote* stale paths as examples of what it catches) and the historical logs.
+
+2. **The console pointed operators at a file that had been archived.**
+   `Tiers.vue` said *"see `docs/GAMING-UDP.md`"* — a path the previous commit
+   removed. This was a regression from that commit: moving a file means finding
+   its non-markdown consumers too, and nothing was looking. Repointed to
+   `docs/business/04-tiers.md` §4.1 (the live endpoint table) with the archive
+   named second, because the console is an operator surface and the useful
+   instruction is the *current* fact.
+
+3. **Four markdown files were outside §8's scope entirely.** §8 checked links
+   only in `docs/`, `client/docs/` and the root `README.md`, so
+   `client/CONTRIBUTING.md`, `client/scripts/perf/GUIDE.md`, `scripts/README.md`
+   and `server/scripts/README.md` were unchecked. Inside that blind spot,
+   `client/CONTRIBUTING.md` was already wrong: it wrote `docs/UPSTREAM-CHANGES.md`
+   and `docs/ARCHITECTURE.md` where the same file's line 33 correctly wrote
+   `docs/CONTRIBUTING_i18n.md` — two conventions in one file, and the wrong one
+   read as "there are two copies".
+
+4. **Two documents were unreachable.** `client/CONTRIBUTING.md` was referenced by
+   *nothing* — not the root README, not `client/AGENTS.md`, not the index — and
+   `client/scripts/perf/GUIDE.md` documents four `pnpm perf:*` scripts without
+   being linked from anywhere. §28 now holds top-level `client/*.md` to the
+   index, and `client/AGENTS.md` gained a "Where to read" table.
+
+### What is deliberately *not* indexed, and why
+
+`client/AGENTS.md`, `CLAUDE.md` and `GEMINI.md` are entry points, not
+documentation — `AGENTS.md` is the thing that *points at* the docs, and the other
+two are one-line shims delegating to it. The tool manuals
+(`client/scripts/perf/GUIDE.md`, `scripts/README.md`, `server/scripts/README.md`)
+are read from the tool that owns them; putting "how to run a perf harness" in the
+same list as "the API contract" is how an index stops being worth reading. They
+are covered against **link rot** by §8, which is the risk that actually applies.
+Each exclusion is a named constant with its reason, per §7.
+
+### Verified / not verified
+
+- **Verified (ran):** `bash server/scripts/check-consistency.sh` exits **0**, 151
+  OK, no BAD, WARN set identical to the pre-change baseline. The extracted §8
+  Python now executes and reports **101 markdown files** in scope (it was
+  crashing before). `pnpm test` 96 green; `pnpm run lint` clean; `pnpm test`
+  unchanged. The four console SFC blocks and the edited `<code>` region are
+  tag-balanced.
+- **Verified by observation (each guard):** the new code-file scan was watched
+  failing on the **exact** historical defect (restoring `docs/ARCHITECTURE.md` to
+  `tun.rs`); the `.vue` scan was watched failing on the reverted console fix; §8
+  was watched failing on a dead link in `client/CONTRIBUTING.md`; §28 was watched
+  failing on that file as an orphan. All restored afterwards.
+- **Not verified:** that the console still **builds**. `pnpm run build` in
+  `server/console/` could not complete here — it requires a network dependency
+  install, which is unavailable in this environment. The change is text inside a
+  `<code>` element and the template's tag balance is unchanged, so the risk is
+  low, but it is a **structural argument, not a measurement**, and anyone
+  deploying the console should treat the build as unconfirmed by this change.
+
+---
+
 ## THE DOCS DESCRIBED REMOVED MECHANISMS AS LIVE, AND TWO PROSE COPIES OF A CAP WERE WRONG (2026-10-05, docs + guards)
 
 **Not a code defect — a documentation set that had drifted from the code it

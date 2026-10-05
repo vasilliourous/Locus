@@ -140,6 +140,7 @@ that the client keeps in a machine store —
 
 | Document | `status` | What it is |
 |---|---|---|
+| [`client/CONTRIBUTING.md`](../client/CONTRIBUTING.md) | live | **How to set up and submit a change to the client** — the human-facing setup and submission guide. |
 | [`client/docs/UPSTREAM-CHANGES.md`](../client/docs/UPSTREAM-CHANGES.md) | live | **Authoritative** — how the client differs from Clash Verge Rev, and the load-bearing details that look like mistakes. Read before changing anything in `client/`. |
 | [`client/docs/FRONTEND.md`](../client/docs/FRONTEND.md) | live | The shipping two-tab UI, its routing, and the rules each surface obeys. |
 | [`client/docs/SIGNING.md`](../client/docs/SIGNING.md) | live | Key custody, rotation, and the release signing pipeline. |

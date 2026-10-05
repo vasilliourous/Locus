@@ -101,6 +101,29 @@ mechanisms. Every hit was legitimate. §7's rule applied: scope the check to whe
 the defect actually lived (the head), not to everywhere the word could appear. A
 guard that cries wolf is one the reader learns to ignore.
 
+### The follow-up pass, same day — widening §8 broke it silently
+
+Closing the gaps the first pass named exposed two more, and one of them was
+self-inflicted:
+
+- **§8 scanned only `.md` files**, which is why two code comments pointed at
+  `docs/ARCHITECTURE.md` for a year after it moved. The scan now covers the
+  source extensions across `client/src`, `client/src-tauri/src`, `server`,
+  `.github` and `scripts`, using the *same* regex and basename allow-list.
+- **Widening §8 broke it.** `md_files` is a generator; joining two of them with
+  `+` raised `TypeError`, the heredoc died, and §8 reported
+  **"OK — every link and anchor resolves"** for every file while checking none.
+  A guard that crashes reads exactly like a guard that passes. Caught only
+  because an expected failure proof produced no output.
+- **`client/CONTRIBUTING.md` was an orphan** — referenced by nothing at all. §28
+  now holds top-level `client/*.md` to the index (entry points and tool manuals
+  excluded, each with a reason), and `client/AGENTS.md` gained a "Where to read"
+  table naming the four previously unreachable documents.
+
+Recorded here rather than only in `FIXES.md` because the *kind* of mistake —
+editing a guard's scope and not re-proving it can fail — is not specific to
+documentation and will recur wherever a check is widened.
+
 ---
 
 ## 2026-09-23 restructure
