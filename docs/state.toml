@@ -191,11 +191,14 @@ provenance = "derived"
 # The free tier's endpoint, recomputable from the tree — a CLASS B fact, so it
 # does not belong in a sentence in docs/business/04-tiers.md.
 #
-# `free` and `eco` are the SAME endpoint: port 8443, the Eco password, the
-# `shadowsocks-eco.service` unit. Both tier_configs rows are seeded on purpose —
-# `free` for codes minted now, `eco` so codes already in the field keep
-# resolving. The customer-facing name is Free; the on-box name stays eco. See
-# docs/business/04-tiers.md §4.5.
+# ONE tier_configs row: `free`, port 8443, the ECO_PASS credential, the
+# `shadowsocks-eco.service` unit. A second row named `eco` used to be seeded
+# against the same endpoint so codes minted in the Eco era would keep resolving;
+# it was removed 2026-10-06 after the live hub was checked and found to hold no
+# such code, because a duplicate row on one port renders in the console as a
+# second plan. The on-box names (`shadowsocks-eco`, `tc-eco-cap`, `sing-box-uot-eco`,
+# `ECO_PASS`) stay — they are the free plan's infrastructure, not a tier. See
+# docs/business/04-tiers.md §4.1 and §4.5.
 #
 # check-consistency.sh §23 recomputes the cap and the port from 04-tc.sh and
 # compares them here, and separately asserts the seed rows and the heartbeat key
@@ -205,7 +208,7 @@ provenance = "derived"
 # The allowance is NOT a fact here: it lives in heartbeat.pb.js so the operator
 # can change it without a release, and pinning it in this file would make a
 # deliberate, runtime-changeable value look like a build constant.
-value      = { port = 8443, cap = "1mbit", tier_rows = ["eco", "free"] }
+value      = { port = 8443, cap = "1mbit", tier_rows = ["free"] }
 source     = "server/modules/04-tc.sh; server/scripts/seed-pb.py"
 provenance = "derived"
 

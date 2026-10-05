@@ -63,11 +63,19 @@ Source of truth for the caps: `server/modules/04-tc.sh` (the `apply_tc_now` and
 as `free_allowance_mb` (`server/pb_hooks/heartbeat.pb.js`); both are held in
 agreement by `check-consistency.sh` §23.
 
-> **`eco` and `free` are the same endpoint.** The hub seeds **both** names against
-> port 8443 with the Eco password — `free` for codes minted now, `eco` so codes
-> already in the field keep resolving. The customer-facing name is **Free**; the
-> on-box names (`shadowsocks-eco.service`, `tc-eco-cap.service`, `/etc/shadowsocks/eco.json`)
-> stay `eco` on purpose. See §4.5.
+> **There is ONE row for the free plan: `free`.** The hub used to seed a second
+> row named `eco` against the same port 8443, kept in case a code minted in the
+> Eco era still carried that string. That guard was retired on evidence
+> (2026-10-06): the live hub holds **no** code with `tier: "eco"`, so the row was
+> a duplicate of `free` that showed up in the console's tier list as a second
+> plan sharing one port. Removed from `seed-pb.py` and `fix-tier-configs.py`.
+>
+> **The on-box names stay `eco` and that is not an inconsistency.** The free
+> plan's infrastructure — `shadowsocks-eco.service`, `tc-eco-cap.service`,
+> `sing-box-uot-eco.service`, `/etc/shadowsocks/eco.json`, and the `ECO_PASS`
+> credential — keeps its name because renaming it means new ports and new units
+> for no product change. The *tier row* is what went, not the plan's plumbing.
+> See §4.5.
 
 ---
 
@@ -330,7 +338,7 @@ dropped to 1 Mbps.
 | File | What changed | Why |
 |---|---|---|
 | `server/modules/04-tc.sh` | the 8443 cap is `1mbit` (was `5mbit`), in **both** the applied class and the `tc-eco-cap.service` oneshot | a reboot rebuilds the class from the unit; the two must agree or a reboot silently restores the old cap |
-| `server/scripts/seed-pb.py` | seeds **both** `free` and `eco` rows against 8443 | `free` is what new codes carry; `eco` must survive so field codes still resolve |
+| `server/scripts/seed-pb.py` | seeds **one** free row against 8443 (the `eco` duplicate is gone) | a second row on the same port read as a second plan in the console |
 | `server/pb_hooks/heartbeat.pb.js` | sends `free_allowance_mb` for the free/eco tiers | the allowance is server-provided so it changes without a release |
 
 `check-consistency.sh` **§23** asserts the agreement across all of them, and
@@ -354,11 +362,13 @@ tier is called **Free**. That asymmetry is intentional and should be documented
 wherever it could confuse — see [`03-product.md`](03-product.md) on the code
 being the truth.
 
-> **One student-visible consequence.** Existing `eco`-tier codes keep the tier
-> name they were minted with, so they get the 1 Mbps cap too. This is the
-> intended downgrade: the free tier *replaced* Eco as a product, and Eco was never
-> a paid tier's promise. A student on an old Eco code who expected 5 Mbps does not
-> have a bug — they have the free tier.
+> **The `eco` row was removed on 2026-10-06, and no student was affected.**
+> The row existed so that a code minted in the Eco era would still resolve; the
+> live hub was checked and holds no such code. The old note here said an existing
+> `eco`-tier code would keep its 1 Mbps cap — true, and moot, because there are
+> none. If one ever appears it will not resolve, which is a deliberate trade: a
+> duplicate plan in the console costs every operator, every day, while a
+> stranded Eco code costs nobody today.
 
 ---
 

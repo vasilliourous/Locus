@@ -2537,10 +2537,20 @@ else
     else
         bad "seed-pb.py has no \`free\` tier row on port 8443 — the console cannot mint a working free code"
     fi
+    # INVERTED 2026-10-06. This assertion used to REQUIRE the legacy `eco` row,
+    # on the reasoning that a code minted in the Eco era carries that string and
+    # must keep resolving. That reasoning was sound and is now spent: the live
+    # hub holds NO code with `tier = "eco"` (verified 2026-10-06), so the row was
+    # a duplicate of `free` on the same port — which the console renders as a
+    # second plan sharing one port, i.e. a bug every operator sees daily, buying
+    # protection for a code that does not exist.
+    #
+    # Kept as a tombstone rather than deleted, so a reader who remembers the old
+    # rule finds out why it is gone instead of re-adding the row.
     if grep -Eq '\("eco",[[:space:]]*"ECO_PASS",[[:space:]]*8443\)' "$SEED"; then
-        ok "seed-pb.py keeps the legacy \`eco\` row so field codes still resolve"
+        bad "seed-pb.py still seeds the retired \`eco\` row — it duplicates \`free\` on 8443 and shows as a second plan in the console"
     else
-        bad "seed-pb.py dropped the \`eco\` row — codes already in the field would activate with no server_config"
+        ok "seed-pb.py seeds one row per plan (no retired \`eco\` duplicate)"
     fi
 
     # (d) The heartbeat carries the allowance, and only for the free tiers.
@@ -2561,10 +2571,12 @@ else
     else
         bad "heartbeat.pb.js does not send the free-tier throttle speed — the client has nothing to slow to"
     fi
-    if grep -Eq 'tierVal === "free"' "$HB" && grep -Eq 'tierVal === "eco"' "$HB"; then
-        ok "the allowance is gated to the free/eco tiers only"
+    if grep -Eq 'tierVal === "free"' "$HB" && ! grep -Eq 'tierVal === "eco"' "$HB"; then
+        ok "the allowance is gated to the free plan only"
+    elif ! grep -Eq 'tierVal === "free"' "$HB"; then
+        bad "the free allowance is not gated to the free plan at all — a paying tier would be metered"
     else
-        bad "the free allowance is not gated to the free/eco tiers (a paying tier must never see an allowance)"
+        bad "the allowance still accepts the retired \`eco\` tier — the row is gone, so the branch is dead weight"
     fi
 
     # (e) TWO-SIDED: the client must read the same key the hub writes. A hub key

@@ -60,7 +60,10 @@ const worklistDays = ref(0)
 const props = defineProps<{ worklistDays?: number }>()
 
 // Generation form
-const genTier = ref('eco')
+// Defaults to `free`: the retired `eco` row was removed from tier_configs, so
+// minting against it would now fail with a tier that does not resolve. The
+// form is re-hydrated from `tiers.list` on load; this is the pre-load value.
+const genTier = ref('free')
 const genCount = ref(10)
 const genExpires = ref('')
 // The term is the PREFERRED way to mint: the clock starts at activation, so a

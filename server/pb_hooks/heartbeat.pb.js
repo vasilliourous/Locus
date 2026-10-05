@@ -227,9 +227,14 @@ routerAdd("POST", "/api/heartbeat", function(e) {
         //
         // These keys are ADDITIVE. An older client ignores them (it has no
         // allowance logic), so this changes nothing for builds already deployed.
-        if (tierVal === "free" || tierVal === "eco") {
+        // Gated on the FREE plan only. This used to also accept "eco", the
+        // retired duplicate row that shared port 8443; that row is gone
+        // (seed-pb.py) and no live code carries the string, so the second
+        // branch was dead weight that made the free plan look like two plans.
+        if (tierVal === "free") {
             // `free_allowance_mb` — the monthly allowance in MEBIBYTES.
-            response.free_allowance_mb = 5120;   // 5 GiB
+            // 10240 MiB = 10 GiB, matching docs/business/04-tiers.md §4.4.1.
+            response.free_allowance_mb = 10240;
             // `free_throttle_mbps` — speed after the allowance is spent. The
             // client switches its tc-independent local cap to this; the server's
             // 1mbit tc class is the hard ceiling either way. "Throttled further",

@@ -43,11 +43,14 @@ SS_CONFIG_DIR = "/etc/shadowsocks"
 # `source_tier` is the on-box shadowsocks config this row's credentials come
 # from. It exists for `free`, which shares the Eco endpoint (port 8443, same
 # password, same 1mbit tc class) and has no /etc/shadowsocks/free.json of its
-# own. `free` is what new codes are minted against and what the console lists;
-# `eco` stays so codes already in the field keep resolving. See
-# docs/business/04-tiers.md §4.5.
+# own. `free` is what codes are minted against and what the console lists.
+#
+# There is NO `eco` row any more (2026-10-06). It was a duplicate of `free` on
+# the same port, kept only in case a code in the field carried the string; the
+# live hub holds none, so it appeared in the console as a second plan sharing
+# one port. `ECO_PASS` and the on-box `eco` unit names stay — those are the free
+# plan's credentials and infrastructure, not a tier.
 TIERS = [
-    ("eco", 8443, False, "eco"),
     ("free", 8443, False, "eco"),
     ("strike", 8445, False, "strike"),
 ]

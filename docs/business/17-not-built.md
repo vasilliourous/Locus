@@ -55,7 +55,7 @@ The honest summary: the *enforcement* works end to end; the *purchase* does not.
 | Piece | Status |
 |---|---|
 | The 8443 cap at 1 Mbps | **BUILT** — `04-tc.sh`, both the applied class and the reboot unit, held in agreement by `check-consistency.sh` §23. |
-| The `free` tier row | **BUILT** — seeded alongside the legacy `eco` row. |
+| The `free` tier row | **BUILT** — seeded as the free plan's only row. |
 | The allowance, sent by the hub | **BUILT** — `free_allowance_mb` / `free_throttle_mbps` on the heartbeat, gated to the free/eco tiers. |
 | Client-side counting of the 10 GB allowance | **BUILT** — `client/src-tauri/src/locus/usage.rs`, pure and fake-clock tested. The window, the rollover and the 80% line are one implementation. The *number* is the hub's (`free_allowance_mb`), so the 5→10 GB change needed no client release. |
 | The usage bar | **BUILT** — `components/connection/usage-bar.tsx`, wired into the connection screen. Renders nothing for a paying tier. |

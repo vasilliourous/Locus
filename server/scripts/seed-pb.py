@@ -438,17 +438,20 @@ if pw_from_file:
     uot_enabled = os.environ.get("ENABLE_UOT", "1") != "0"
     uot_port = int(os.environ.get("UOT_PORT", "8446"))
     uot_port_free = int(os.environ.get("UOT_PORT_FREE", "8447"))
-    # `free` and `eco` are the SAME endpoint (port 8443, same password, same
-    # 1mbit tc class). Both rows are seeded on purpose:
-    #   * `free` is the tier name new codes are minted against, and what the
-    #     console offers in its dropdown (it lists tier_configs rows).
-    #   * `eco` is the FROZEN legacy name still carried by codes already in the
-    #     field; activation/heartbeat look the tier up by the code's own string,
-    #     so those codes must keep resolving. Deleting this row would strand
-    #     every Eco-era code with a successful activation that carries no
-    #     server_config. See docs/business/04-tiers.md §4.5.
-    # A code's `tier` string is therefore either "free" or "eco"; both map to
-    # 8443. Passwords are the same ECO_PASS for both rows.
+    # ONE ROW PER PLAN. There is no `eco` row any more.
+    #
+    # `eco` was seeded alongside `free` as the same endpoint (port 8443, same
+    # ECO_PASS, same 1mbit class), because codes minted in the Eco era carried
+    # that string. That guard is now retired on evidence: the live hub holds NO
+    # code with `tier = "eco"` (checked 2026-10-06 — the only tier in use is
+    # `strike`), so the row existed solely to appear as a duplicate of `free` in
+    # the console's tier list, where it read as a second plan sharing one port.
+    #
+    # `ECO_PASS` is NOT renamed: it is the free plan's credential, and its name
+    # is on the box, in secrets.env.age and in the running services. The ROW is
+    # what went, not the password. On-box unit names (`shadowsocks-eco`,
+    # `tc-eco-cap`) likewise stay — they are the free plan's infrastructure and
+    # renaming them would mean new ports and units for no product change.
     #
     # `stealth` is RETIRED and deliberately NOT seeded (docs/business/04-tiers.md
     # §4.2.4): it was merged into `strike`, which keeps its name, its password
@@ -462,8 +465,7 @@ if pw_from_file:
     # decision made with the console in front of them — not a side effect of
     # re-running a seed script. The probe that decides it is in
     # docs/operate/CLAIMS.md §5.
-    for t, pw_key, port in [("eco", "ECO_PASS", 8443),
-                            ("free", "ECO_PASS", 8443),
+    for t, pw_key, port in [("free", "ECO_PASS", 8443),
                             ("strike", "STRIKE_PASS", 8445)]:
         pw = os.environ.get(pw_key, "")
         if not pw:
@@ -526,7 +528,10 @@ def verify_end_to_end():
     log("── End-to-end verification ──")
     test_code = make_test_code()
     r = api("POST", "/api/collections/codes/records",
-            {"code": test_code, "tier": "eco", "used": False, "suspended": False})
+            # The FREE row, not `eco`: this exercises a tier a real student can
+            # be on. It also means the end-to-end check fails loudly if the free
+            # row is ever missing, which is the row the whole funnel depends on.
+            {"code": test_code, "tier": "free", "used": False, "suspended": False})
     if not r.get("id"):
         log(f"  ✗ could not create test code: {json.dumps(r)[:200]}")
         return False
