@@ -52,11 +52,13 @@ if [ -n "$IFACE" ] && printf '%s\n' "$TC_NOW" | grep -q "1:30"; then
 else
     warn "tc paid-tier class (1:30) not found — check: systemctl status tc-strike-cap.service"
 fi
-# The retired Stealth class (1:20) must NOT be shaping anything any more. It is
-# a warning rather than a failure: an upgraded box still carries the old unit
-# until an operator removes it (docs/business/14-risks.md §14.8).
-if [ -n "$IFACE" ] && printf '%s\n' "$TC_NOW" | grep -q "1:20"; then
-    warn "retired Stealth class (1:20) is still present — remove the old tc-stealth-cap.service"
+# Class 1:20 is NOW the free plan's UDP cap (port 8447), not the retired Stealth
+# class. It is EXPECTED to exist — see 04-tc.sh. This check previously warned
+# whenever 1:20 was present, which after the UDP change fired on a perfectly
+# correct hub and told the operator to remove a service that no longer exists.
+# A warning that is wrong on a healthy box is how the real one gets ignored.
+if [ -n "$IFACE" ] && ! printf '%s\n' "$TC_NOW" | grep -q "1:20"; then
+    warn "free-plan UDP class (1:20 / port 8447) is MISSING — free UDP is uncapped at the hub"
 fi
 
 # ── 3. Verify BBR is default CC ──
@@ -81,10 +83,11 @@ if [ -n "$IFACE" ]; then
     TC_CLASSES=$(tc class show dev "$IFACE" 2>/dev/null)
     echo "$TC_CLASSES" | grep -q "1:10" && pass "tc free-tier class (1:10) exists" || warn "tc free-tier class not found"
     echo "$TC_CLASSES" | grep -q "1:30" && pass "tc paid-tier class (1:30) exists" || warn "tc paid-tier class (1:30) not found"
-    # 1:20 (Stealth) is retired. Still present => the old unit survived the
-    # merge and only an operator can remove it (04-tc.sh retires it best-effort).
-    if echo "$TC_CLASSES" | grep -q "1:20"; then
-        warn "retired Stealth class (1:20) still present — remove the old tc-stealth-cap.service"
+    # 1:20 is the free plan's UDP cap now (port 8447). Missing => free UDP is
+    # unshaped at the hub, which is the exposure docs/business/04-tiers.md §4.10
+    # accepted ONLY because this class exists.
+    if ! echo "$TC_CLASSES" | grep -q "1:20"; then
+        warn "free-plan UDP class (1:20 / port 8447) missing — free UDP is uncapped"
     fi
 else
     warn "Could not detect primary interface"
@@ -97,7 +100,9 @@ log "Step 5/9: Checking firewall..."
 UFW_NOW=$(ufw status 2>/dev/null || true)
 if printf '%s\n' "$UFW_NOW" | grep -q "Status: active"; then
     pass "UFW is active"
-    for port in 22 80 443 8443 8444 8445 "${UOT_PORT:-8446}"; do
+    # 8444 (retired Stealth) is gone on purpose; 8447 is the free plan's UDP
+    # listener and MUST be open, or the hub advertises a port it refuses.
+    for port in 22 80 443 8443 8445 "${UOT_PORT:-8446}" "${UOT_PORT_FREE:-8447}"; do
         if printf '%s\n' "$UFW_NOW" | grep -q "${port}/tcp"; then
             pass "  Port ${port}/tcp allowed"
         else
@@ -151,7 +156,7 @@ log "Step 8/9: Checking Shadowsocks port reachability..."
 # Only check locally since external access depends on DNS.
 # Capture the listener list once (see the SIGPIPE note in step 2).
 SS_NOW=$(ss -tln 2>/dev/null || true)
-for port in 8443 8444 8445; do
+for port in 8443 8445 "${UOT_PORT:-8446}" "${UOT_PORT_FREE:-8447}"; do
     if printf '%s\n' "$SS_NOW" | grep -q ":${port} "; then
         pass "Shadowsocks port ${port} is listening"
     else
@@ -166,10 +171,15 @@ done
 # falls back to raw UDP.
 if [ "${ENABLE_UOT:-1}" = "1" ]; then
     UOT_PORT="${UOT_PORT:-8446}"
-    if systemctl is-active --quiet sing-box-uot 2>/dev/null; then
-        pass "sing-box-uot is running (Strike UDP-over-TCP)"
+    if systemctl is-active --quiet sing-box-uot-strike 2>/dev/null; then
+        pass "sing-box-uot-strike is running (paid UDP-over-TCP :${UOT_PORT:-8446})"
     else
-        fail "sing-box-uot is NOT running — Strike clients will fail over to raw UDP"
+        fail "sing-box-uot-strike is NOT running — paid clients will fail over to raw UDP"
+    fi
+    if systemctl is-active --quiet sing-box-uot-eco 2>/dev/null; then
+        pass "sing-box-uot-eco is running (free UDP-over-TCP :${UOT_PORT_FREE:-8447})"
+    else
+        fail "sing-box-uot-eco is NOT running — free clients get no UDP at all"
     fi
     SS_UDP=$(ss -uln 2>/dev/null || true)
     if printf '%s\n' "$SS_NOW" | grep -q ":${UOT_PORT} "; then

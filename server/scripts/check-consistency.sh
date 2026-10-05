@@ -2832,6 +2832,73 @@ else
         fi
     fi
 
+    # (i) THE UNIT NAMES `setup.sh` STARTS MUST BE CREATED BY A MODULE.
+    #
+    # WHY THIS EXISTS. `setup.sh` keeps its own SERVICES list, and after the
+    # per-plan UoT split that list still named the retired `sing-box-uot`. The
+    # modules were correct, the listeners worked, and the only symptom was
+    # "sing-box-uot failed to start" in the deploy log and a smoke test failing
+    # on a service that does not exist. That is noise which teaches an operator
+    # to skim deploy output — how a real failure gets missed.
+    #
+    # HOW IT IS CHECKED. The unit names are TEMPLATED (`tc-${name}-cap.service`,
+    # `sing-box-uot-${name}.service`, `shadowsocks-${tier}.service`), so grepping
+    # for the final filename cannot work — the first draft of this check was a
+    # regex that matched everything and therefore could never fail, which is the
+    # defect it exists to catch. Instead each name in SERVICES is decomposed into
+    # the TEMPLATE it must come from plus the ARGUMENT that must have been passed,
+    # and the argument is looked up in the module that owns that template.
+    SETUP="$REPO/server/setup.sh"
+    if [ -f "$SETUP" ]; then
+        # BOTH assignment forms, because the first draft read only
+        # `SERVICES="..."` and silently missed `SERVICES="${SERVICES} ..."` — the
+        # line the UoT units are added on. That is why the check passed while the
+        # retired `sing-box-uot` was still in the list: it was never extracted, so
+        # there was nothing to fail on. A verifier that cannot see the value it
+        # checks is the §23(f) defect again.
+        _svc_list="$(
+            sed -n 's/^[[:space:]]*SERVICES=\(.*\)$/\1/p' "$SETUP" \
+                | sed 's/^"//; s/"$//; s/\${SERVICES}//; s/[{}]//g' \
+                | tr ' ' '\n' | grep -v '^$'
+        )"
+        _unbacked=""
+        for _svc in $_svc_list; do
+            case "$_svc" in
+                tc-*-cap)
+                    _arg="${_svc#tc-}"; _arg="${_arg%-cap}"
+                    grep -qE "create_tc_service[[:space:]]+\"${_arg}\"" "$TC_MOD" \
+                        || _unbacked="$_unbacked $_svc" ;;
+                sing-box-uot-*)
+                    _arg="${_svc#sing-box-uot-}"
+                    grep -qE "write_uot_service[[:space:]]+\"${_arg}\"" \
+                        "$REPO/server/modules/02-shadowsocks.sh" \
+                        || _unbacked="$_unbacked $_svc" ;;
+                shadowsocks-*)
+                    _arg="${_svc#shadowsocks-}"
+                    grep -qE "write_service[[:space:]]+\"${_arg}\"" \
+                        "$REPO/server/modules/02-shadowsocks.sh" \
+                        || _unbacked="$_unbacked $_svc" ;;
+                # ANYTHING ELSE IS A FAILURE, not a skip.
+                #
+                # The first draft used `*) : ;;` here — so a name that did not
+                # match one of the three templates (an old `sing-box-uot`, a
+                # typo, a unit some future module invents) fell through and was
+                # never checked. That is allow-list blindness: the check
+                # confirmed only the names it already understood, which is
+                # precisely the set that cannot be wrong. Observed passing on a
+                # deliberately stale `sing-box-uot`.
+                *)
+                    _unbacked="$_unbacked $_svc" ;;
+            esac
+        done
+        if [ -n "$_unbacked" ]; then
+            bad "setup.sh starts service(s) no module creates:${_unbacked}"
+            bad "  each name must match a write_service / write_uot_service / create_tc_service argument"
+        else
+            ok "every service setup.sh starts is created by a module"
+        fi
+    fi
+
     # (g) THE PROSE ABOUT THE PAID CAP, not just the cap (§23(g)'s lesson one
     #     tier over). Two documents restate it and both are ones a reader meets
     #     first. A prose copy that reintroduces the retired 200 Mbps now fails.

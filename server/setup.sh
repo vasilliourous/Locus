@@ -193,7 +193,18 @@ fi
 # deploy, so a failure warns loudly and the deploy continues. To make it a hard
 # gate, set STRICT_CONSISTENCY=1.
 CONSISTENCY_CHECK="${SCRIPT_DIR}/scripts/check-consistency.sh"
-if [ -f "$CONSISTENCY_CHECK" ]; then
+#
+# The check compares files against EACH OTHER across the whole tree — `docs/`
+# against `client/`, `server/` against `docs/state.toml` — so it can only tell
+# you anything when run from a full checkout. The hub holds `/root/server/`,
+# which has no `docs/`, and running it there reports
+#   "state.toml : <missing>" → "landing hostname could not be read"
+# on a tree that is entirely correct. That false BAD was observed on
+# 2026-10-05 and is worse than no check at all: it makes the one warning that
+# must never be ignored into routine noise (docs/reference/DEBUGGING-METHOD.md
+# §7's lesson). So the pre-flight is SKIPPED where it cannot be conclusive, and
+# the run says which of the two it did.
+if [ -f "$CONSISTENCY_CHECK" ] && [ -d "${SCRIPT_DIR}/../docs" ]; then
     log "Running pre-flight consistency check..."
     if bash "$CONSISTENCY_CHECK" 2>&1 | tee -a "$LOGFILE"; then
         log "✓ Consistency check passed"
@@ -206,6 +217,11 @@ if [ -f "$CONSISTENCY_CHECK" ]; then
         warn "to make this fatal). The BAD lines above are real drift; a value that"
         warn "must agree across languages does not."
     fi
+elif [ -f "$CONSISTENCY_CHECK" ]; then
+    log "Pre-flight consistency check SKIPPED: no docs/ beside ${SCRIPT_DIR}."
+    log "  The check compares the whole tree, so it is only meaningful in a full"
+    log "  checkout. Run it there (bash server/scripts/check-consistency.sh)"
+    log "  before deploying — it is a BUILD gate, not a hub-side one."
 else
     warn "Consistency check not found at ${CONSISTENCY_CHECK} — skipping"
 fi
@@ -303,11 +319,22 @@ for svc in shadowsocks-eco shadowsocks-strike; do
 done
 
 # Start services and verify.
-# sing-box-uot (Strike UDP-over-TCP, port 8446) is part of the default
-# deployment; ENABLE_UOT=0 opts out of it.
-SERVICES="shadowsocks-eco shadowsocks-strike tc-eco-cap tc-strike-cap"
+#
+# ONE UoT UNIT PER PLAN (2026-10): `sing-box-uot-strike` (:8446, paid) and
+# `sing-box-uot-eco` (:8447, free). This list still named the single retired
+# `sing-box-uot` unit after the per-plan split, so a full deploy logged
+#   "sing-box-uot failed to start"
+# on a hub where UDP was in fact working, and then failed the smoke test on a
+# service that no longer exists. A stale service name here is invisible from the
+# repo — it only shows up as noise in deploy output and as a false critical
+# failure, which is how a real failure gets missed later.
+#
+# `tc-eco-udp-cap` is listed with `tc-eco-cap` because the free plan's UDP
+# carries the same 1 Mbps ceiling (04-tc.sh), and both must be applied after a
+# reboot.
+SERVICES="shadowsocks-eco shadowsocks-strike tc-eco-cap tc-eco-udp-cap tc-strike-cap"
 if [ "${ENABLE_UOT:-1}" = "1" ]; then
-    SERVICES="${SERVICES} sing-box-uot"
+    SERVICES="${SERVICES} sing-box-uot-strike sing-box-uot-eco"
 fi
 for svc in $SERVICES; do
     if systemctl start "$svc" 2>/dev/null; then

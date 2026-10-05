@@ -331,17 +331,26 @@ CADDY
     # the remaining three ways a static page can be made to do something it has
     # no script to do voluntarily.
     if [ -n "${LANDING_DOMAIN}" ]; then
-        cat >> "$CADDYFILE" << CADDY
+        # QUOTED delimiter (<< 'CADDY'): this block's comments contain
+        # backticks as PROSE (`default-src`, `script-src`), and an unquoted
+        # heredoc runs command substitution on them — so bash tried to EXECUTE
+        # `default-src` and `script-src`, printing
+        #   "line 334: default-src: command not found"
+        # on every deploy. The Caddyfile itself came out correct (the text
+        # survives), which is why it went unnoticed: a cosmetic error on a
+        # working output is easy to ignore, and it trains an operator to skim
+        # deploy output. The domain is substituted explicitly below instead.
+        cat >> "$CADDYFILE" << 'CADDY'
 
 # ══════════════════════════════════════════════════════════════
-# Landing page — ${LANDING_DOMAIN}
+# Landing page — __LANDING_DOMAIN__
 #
 # Independent of the hub block above. Nothing here is reachable from the
 # hub hostname and nothing on the hub hostname is reachable from here.
 # The document root is /var/www/site, deployed by scripts/deploy-site.sh
 # and verified by deploy_site() below.
 # ══════════════════════════════════════════════════════════════
-${LANDING_DOMAIN} {
+__LANDING_DOMAIN__ {
     root * /var/www/site
     file_server
 
@@ -399,6 +408,23 @@ ${LANDING_DOMAIN} {
     }
 }
 CADDY
+
+        # Substitute the one real value into the block we just appended. Done
+        # here rather than inside the heredoc so the heredoc could be QUOTED and
+        # its prose comments left alone (see the note above it).
+        #
+        # `sed -i` on the whole file is safe: `__LANDING_DOMAIN__` appears only
+        # in this block, and the pattern is a literal placeholder no Caddy
+        # directive could contain.
+        sed -i "s|__LANDING_DOMAIN__|${LANDING_DOMAIN}|g" "$CADDYFILE"
+
+        # Prove the substitution happened. A Caddyfile that still contained the
+        # placeholder would be written, pass syntax as a weird site address, and
+        # silently serve nothing — the same class of silent no-op as the
+        # unquoted-heredoc bug this replaces.
+        if grep -q '__LANDING_DOMAIN__' "$CADDYFILE"; then
+            warn "Caddyfile still contains the __LANDING_DOMAIN__ placeholder — the landing block will not serve"
+        fi
         log "✓ Landing page block added for ${LANDING_DOMAIN}"
     else
         log "LANDING_DOMAIN empty — no landing page block written"
@@ -694,8 +720,25 @@ deploy_site() {
     # And they must be real URLs, not the placeholders the source file ships
     # with. This is the check that could not fail if it only counted attributes:
     # four slots pointing at "#" satisfy the loop above.
+    # COUNT FIRST, TEST SECOND — and the `|| true` is load-bearing, not
+    # defensive noise.
+    #
+    # This is the pipefail trap this repo has paid for before (see
+    # docs/operate/OPS.md on `grep -q` and DEBUGGING-METHOD.md §7). `grep`
+    # returns 1 when it finds NOTHING, and `set -o pipefail` makes the whole
+    # pipeline inherit that 1 — so the assignment fails under `set -e` and the
+    # script dies. Here "found nothing" is the GOOD case (no unwired slots), so
+    # the check killed the deploy precisely when it was passing.
+    #
+    # Observed 2026-10-05: `setup.sh` ran modules 00→04, then died silently
+    # inside module 05 with no message and exit 1, because the landing page had
+    # correctly-wired download buttons. A deploy that aborts when its own
+    # verification SUCCEEDS is the worst shape a guard can have — it was found
+    # only by running the module under `bash -x` and seeing the trace stop at
+    # `unwired=0`.
     local unwired
-    unwired=$(grep -o 'data-download="[a-z_]*" href="#"' "$staging/index.html" | wc -l | tr -d ' ')
+    unwired=$(grep -o 'data-download="[a-z_]*" href="#"' "$staging/index.html" 2>/dev/null | wc -l | tr -d ' ' || true)
+    unwired="${unwired:-0}"
     if [ "$unwired" != "0" ]; then
         find "$staging" -type f -delete 2>/dev/null
         find "$staging" -depth -type d -empty -delete 2>/dev/null
