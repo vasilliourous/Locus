@@ -1,11 +1,4 @@
-# 3. Device binding — the rule, the refusal, and the lifecycle
-
-```
-audience:    builder
-status:      design-record
-authoritative-for: the OLD one-code-per-device rule — REMOVED 2026-10
-verified-against: docs/reference/DEVICE-IDENTITY.md, docs/reference/FIXES.md
-```
+# 3. Device binding — the rule, the refusal, and the lifecycle (REMOVED)
 
 > "One code per device" is enforced by a unique index and a 409 refusal. This
 > file covers how it works, the state machine it creates, and the one bug this
@@ -18,6 +11,10 @@ verified-against: docs/reference/DEVICE-IDENTITY.md, docs/reference/FIXES.md
 > to **no** device (`codes.activated_at` is the whole record), and the *client*
 > keeps the code durably so a reinstall does not lose it. See
 > [`../../../reference/DEVICE-IDENTITY.md`](../../../reference/DEVICE-IDENTITY.md).
+>
+> **ARCHIVED (2026-10-05).** Moved into `redesign/archive/` so the removed
+> mechanism sits apart from the design records that shipped, matching the
+> folder-carries-status rule in [`../../../README.md`](../../../README.md).
 >
 > Kept as the **design record of a path deliberately not taken** — the reasoning
 > is why the shipped decision is the opposite one. Everything below is
@@ -219,4 +216,4 @@ That is the honest trade: the piracy hole is closed, and the false-positive
 support cost is real. The mitigation is the escape hatch — an audited rebind,
 found by the name in `label` — which is why search-by-name is load-bearing
 rather than a nicety. The fingerprint fix itself is deferred; see
-[`05-not-yet-true.md`](05-not-yet-true.md) §5.2.
+[`05-not-yet-true.md`](../implementation/05-not-yet-true.md) §5.2.

@@ -1,4 +1,4 @@
-# Locus logic inventory — the exact modules to write
+# Locus logic inventory — the module map for `locus/`
 
 ```
 audience:    builder
@@ -6,6 +6,12 @@ status:      design-record
 authoritative-for: the module map and the behaviour each Locus module owns
 verified-against: client/src-tauri/src/locus/
 ```
+
+> **Title note (2026-10-05).** This file was called *"the exact modules to write"*,
+> which was true when it was the specification and is false now: the modules were
+> written. The title now says what the document is — a map — and the banner below
+> already carries the part that matters, which is that where this file and the code
+> disagree, the code wins.
 
 > **Design record — only partly a to-do.** `client/src-tauri/src/locus/` exists and
 > carries this behaviour: `contract`, `activation`, `device`, `heartbeat`, `tier`,

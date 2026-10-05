@@ -72,7 +72,7 @@ What is needed to close it:
   in each deployment shape.
 
 Until then, the mitigation is the operator escape hatch
-([`03-device-binding.md`](03-device-binding.md) §3.7), which depends on
+([`../archive/03-device-binding.md`](../archive/03-device-binding.md) §3.7), which depends on
 `label` being filled in at sale.
 
 ## 5.3 Nothing has been exercised end-to-end on real state

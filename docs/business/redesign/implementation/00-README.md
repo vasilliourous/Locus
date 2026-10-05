@@ -27,7 +27,7 @@ Three audiences, three files:
 |---|---|
 | **Implementing against this** — hooks, console, client | [`01-data-model.md`](01-data-model.md), [`02-term-and-renewal.md`](02-term-and-renewal.md) |
 | **Operating it** — the day-to-day job | [`04-operations.md`](04-operations.md) |
-| **Auditing or debugging it** | [`03-device-binding.md`](03-device-binding.md), [`06-verification.md`](06-verification.md) |
+| **Auditing or debugging it** | [`../archive/03-device-binding.md`](../archive/03-device-binding.md), [`06-verification.md`](06-verification.md) |
 | **Deciding whether to ship it** | [`05-not-yet-true.md`](05-not-yet-true.md) |
 
 The **reasoning** behind the model is not repeated here. It is in the design
@@ -59,7 +59,7 @@ needed no changes at all.
 |---|---|---|
 | 1 | [`01-data-model.md`](01-data-model.md) | Every field that was added, what writes it, what reads it, and the invariants |
 | 2 | [`02-term-and-renewal.md`](02-term-and-renewal.md) | The arithmetic, exactly, with the boundary cases and where it is applied |
-| 3 | [`03-device-binding.md`](03-device-binding.md) | The binding index, the 409 refusal, and the lifecycle state machine |
+| 3 | [`../archive/03-device-binding.md`](../archive/03-device-binding.md) | The binding index, the 409 refusal, and the lifecycle state machine |
 | 4 | [`04-operations.md`](04-operations.md) | What the operator actually does, in order, including the migration |
 | 5 | [`05-not-yet-true.md`](05-not-yet-true.md) | **What has not been verified or run.** Read before trusting any of it |
 | 6 | [`06-verification.md`](06-verification.md) | The commands, what they prove, and what they cannot |

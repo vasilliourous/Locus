@@ -79,7 +79,7 @@ release. They are independent beyond the model in phase 1.
       `seed-pb.py`'s `collections` list. **Additive only** — the reconciler at
       the schema reconciler in `seed-pb.py` adds missing columns and never retypes or removes.
 - [ ] Add the `device_bindings` collection (`seed-pb.py`) with a **unique**
-      fingerprint index ([`03-device-binding.md`](03-device-binding.md) §3.1).
+      fingerprint index ([`archive/03-device-binding.md`](archive/03-device-binding.md) §3.1).
 - [ ] Write the **backfill script** as a separate file, with a `--dry-run` that
       prints `old_expires_at → new_expires_at` per code
       ([`05-migration-and-live-data.md`](05-migration-and-live-data.md) §5.4).
@@ -110,7 +110,7 @@ release. They are independent beyond the model in phase 1.
       `price` and `middleman` in the detail. **Must not clear `suspended`**,
       change the binding, or change the tier.
 - [ ] `codes.rebind` — audited, reason required, **must not clear
-      `expires_at`** ([`03-device-binding.md`](03-device-binding.md) §3.2 C).
+      `expires_at`** ([`archive/03-device-binding.md`](archive/03-device-binding.md) §3.2 C).
 - [ ] Uniqueness at activation — a new **409** (not 403) with a
       student-legible message that does **not** contain "suspended"
       ([`07-wire-contract-and-compatibility.md`](07-wire-contract-and-compatibility.md) §7.4).
@@ -159,7 +159,7 @@ release. They are independent beyond the model in phase 1.
 in parallel.
 
 - [ ] Persist the fingerprint to a **machine-scoped, reinstall-surviving**
-      location ([`03-device-binding.md`](03-device-binding.md) §3.2 A).
+      location ([`archive/03-device-binding.md`](archive/03-device-binding.md) §3.2 A).
 - [ ] Widen the degradation chain and make the random fallback durable
       (§3.2 B).
 - [ ] Add a test pinning "the fingerprint is stable across a simulated restart

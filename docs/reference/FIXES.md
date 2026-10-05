@@ -27,6 +27,108 @@ corrections are marked. For what is *still* broken, read `STILL-OPEN.md`.
 
 ---
 
+## THE DOC SET WAS GREEN AND FRAGMENTED: TWO INDEXES, LYING TITLES, RETIRED MATERIAL IN LIVE FOLDERS (2026-10-05, docs + a new guard)
+
+| | |
+|---|---|
+| Severity | 🟡 No code defect. Forty documents were reachable only by browsing the filesystem, and four described themselves wrongly |
+| **Reported as** | *"restructuring and properly labelling the documentation to be clearer, as drift has caused the documentation to be fragmented"* |
+| **Files:** | `docs/README.md`, `docs/STATE.md`, `docs/CONTEXT.md`, `docs/history/LAYOUT.md`, `client/docs/LOGIC-INVENTORY.md`, four moved documents, `server/scripts/check-consistency.sh` (§25 amended, **§28 new**), `client/src-tauri/src/feat/{tun,core_upgrade}.rs` |
+| **Fixed in:** | docs only — no client change, so nothing to release |
+
+### The defect, in one line
+
+**Every guard was green and a reader still could not find or trust the docs.**
+`check-consistency.sh` passed 26 sections; §8 proved every link *resolved*, §25
+proved every live document *had* front-matter. Neither asked the questions that
+had actually gone wrong, which were *"is it reachable?"* and *"does it agree with
+its own label?"*
+
+### Three findings, each invisible to the existing checks
+
+1. **Two indexes, drifted.** `docs/README.md` covered `operate/` and `reference/`
+   and stopped; `docs/STATE.md` carried a second, competing topic map. Between
+   them they missed **39 live documents** — all 19 business files, the whole
+   `redesign/` corpus, `client/docs/CONTRIBUTING_i18n.md`. A reader who trusted
+   the index did not learn they existed. §8 could not see this: an unlinked
+   document has no broken link.
+
+2. **Titles and statuses that lied.** `docs/GAMING-UDP.md` was `status: live`,
+   titled *"Implementation Plan"*, and its **own body** opened with two
+   supersession banners. Nothing connected the front-matter to the prose, so a
+   document could announce its retirement and stay labelled current forever.
+   `CONTEXT.md` carried a `(V5 Reference)` era suffix spanning two eras;
+   `LOGIC-INVENTORY.md` was titled *"the exact modules to write"* while being a
+   `design-record` of modules that were written.
+
+3. **Retired material in live folders.** `operate/DEPLOY-3.2.7.md` was a prepared
+   deployment packet for a deployment that had **already happened** (zero inbound
+   links); `business/redesign/03-device-binding.md` documented a mechanism that
+   was **removed, not shipped**, with no folder-level separation from the half
+   that shipped.
+
+### The fix
+
+- **One index.** `docs/README.md` is now the single map — every live document,
+  one row, `status` shown, `client/docs/` included. `docs/STATE.md` dropped its
+  competing map and answers only *"where does this fact go"*; its ownership table
+  survives as the de-duplication index. Two files answering the same question was
+  the fragmentation.
+- **Retired material in `archive/`**, moved with `git mv` so history follows:
+  `GAMING-UDP.md` and `DEPLOY-3.2.7.md` → `docs/archive/`;
+  the two device-binding records → `business/redesign/archive/`. **The folder
+  carries the status**, so their front-matter was removed rather than corrected.
+- **Four titles renamed** to say what the document *is*.
+- **Both halves guarded — §28.**
+
+### The guard, and the lesson in getting it right
+
+§28 checks the two things that failed: **index completeness** (every live
+document under `docs/` and `client/docs/` must be linked from `docs/README.md`)
+and **head-level self-contradiction** (a `status: live` document whose title or
+first 25 lines say it is superseded).
+
+Both halves were **observed failing** against the defect before being kept —
+a live doc de-linked from the index, and a `SUPERSEDED` title on a `live` file —
+and restored afterwards.
+
+**§28's own first draft had the defect this project keeps re-earning.** It scanned
+the *whole body* for retirement words and fired on **seven healthy documents**:
+`FIXES.md` (a dated log whose heading records that something *else* was removed),
+`STILL-OPEN.md` (whose job is marking superseded items), and five history sections
+about retired mechanisms. Every hit was legitimate. The fix was to **scope the
+check to where the defect actually lived** — the head — not to everywhere the
+word could appear. §7's rule, applied to a new guard: *a warning nobody can
+action trains the reader to ignore the one that matters.*
+
+### Also repaired
+
+- Two **live stale paths in code comments**: `client/src-tauri/src/feat/tun.rs`
+  and `core_upgrade.rs` both pointed at `docs/ARCHITECTURE.md`, which moved to
+  `docs/archive/ARCHITECTURE-wails.md` in the **2026-09** reorg and was never
+  followed. §8's stale-path scan reads only `.md` files, which is why it survived.
+- §25's archive exemption now covers `business/redesign/archive/`, and §10's scan
+  skips it too (retired material is not held to the live-prose rule).
+- The §7 version-basis exclusion and §10 URL-runbook exclusion both named
+  `operate/DEPLOY-3.2.7.md`; repointed. A dead exclusion silently widens a check.
+
+### Verified / not verified
+
+- **Verified (ran):** `bash server/scripts/check-consistency.sh` exits **0**, 27
+  sections, with **no new warning** — the §7 version-basis report is empty again
+  after the index stopped naming a version in prose. `cargo test` 603 lib + 30
+  integration green; `cargo clippy --all-targets --features clippy -- -D warnings`
+  clean; `pnpm test` 96 green. Every markdown link target resolves, and the four
+  moves were confirmed as `git mv` renames.
+- **Verified by observation (the guard):** both §28 halves were watched going red
+  against the exact defect, then restored, per `DEBUGGING-METHOD.md` §3.
+- **Not verified:** that the *reorganised* structure is the right one for a reader
+  — that is a judgement, not a measurement, and only use will settle it. Nothing
+  here was checked against a deployed system; this change touches documentation
+  and one guard, and no runtime behaviour.
+
+---
+
 ## THE DOCS DESCRIBED REMOVED MECHANISMS AS LIVE, AND TWO PROSE COPIES OF A CAP WERE WRONG (2026-10-05, docs + guards)
 
 **Not a code defect — a documentation set that had drifted from the code it

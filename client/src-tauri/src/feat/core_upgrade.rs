@@ -172,7 +172,7 @@ enum ServiceStaging {
 /// The bundled core binary next to the app executable. On macOS development builds the Service
 /// runs a staged copy of this file, so writing here is what makes an upgrade survive the next
 /// start. ("Sidecar" here is the Tauri `externalBin` sense — where the binary lives — not a run
-/// mode; see `docs/ARCHITECTURE.md` decision 5c.)
+/// mode; see `docs/archive/ARCHITECTURE-wails.md` decision 5c.)
 fn managed_core_path(core: &str) -> Result<PathBuf> {
     let extension = if cfg!(windows) { ".exe" } else { "" };
     let path = current_exe()

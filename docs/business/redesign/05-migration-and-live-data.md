@@ -70,7 +70,7 @@ The new fields, all **additive and optional**:
 |---|---|---|---|
 | `codes` | `term_days` | number | Term length. Absent/`0` = never expires. |
 | `codes` | `term_kind` | text | Display label only (`month`/`term`/`year`). Never arithmetic. |
-| *(new)* | `device_bindings` | collection | fingerprint → code index for uniqueness ([`03-device-binding.md`](03-device-binding.md) §3.1) |
+| *(new)* | `device_bindings` | collection | fingerprint → code index for uniqueness ([`archive/03-device-binding.md`](archive/03-device-binding.md) §3.1) |
 
 `device_bindings` is the only *new collection*, and a new collection is the
 safest possible change: it touches no existing row.
@@ -198,6 +198,6 @@ Stated because "we can always roll back" should be a plan, not a hope:
 ## 5.10 Related reading
 
 * The term model being migrated to → [`02-term-and-renewal.md`](02-term-and-renewal.md)
-* The binding this must not disturb → [`03-device-binding.md`](03-device-binding.md) §3.4
+* The binding this must not disturb → [`archive/03-device-binding.md`](archive/03-device-binding.md) §3.4
 * The wire names that must not move → [`07-wire-contract-and-compatibility.md`](07-wire-contract-and-compatibility.md)
 * The verification gates → [`11-phased-implementation.md`](11-phased-implementation.md)

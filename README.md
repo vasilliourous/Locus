@@ -159,7 +159,7 @@ the `locus` binary plus a bundled **`verge-mihomo`** sidecar as the tunnel engin
 > All tiers are **BBR + tc**: no kernel modules to maintain, caps enforced with
 > HTB classes plus `fq_codel` leaf qdiscs to keep latency flat under load.
 > The paid tier's UDP-over-TCP endpoint (8446) is live on the hub — see
-> [`docs/GAMING-UDP.md`](docs/GAMING-UDP.md).
+> [`docs/archive/GAMING-UDP.md`](docs/archive/GAMING-UDP.md).
 
 Activation codes are **`RQ-XXXX-XXXX-XXXX-C`** (15 chars, Luhn-mod-N checksum,
 charset `ABCDEFGHJKLMNPQRSTUVWXYZ23456789`). The `MYVPN-` form was retired in the

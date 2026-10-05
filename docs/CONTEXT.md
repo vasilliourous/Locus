@@ -1,4 +1,4 @@
-# Locus — Project Context (V5 Reference)
+# Locus — project context: history, philosophy and layout
 
 ```
 audience:    all
@@ -6,6 +6,12 @@ status:      live
 authoritative-for: project history, philosophy, repo layout, and agent guidance
 verified-against: docs/state.toml
 ```
+
+> **Title note (2026-10-05).** This file was called *"Locus — Project Context (V5
+> Reference)"*. The `(V5 Reference)` suffix described the era the document *began*
+> in, and the document spans two of them — which its own banner below has to
+> explain. The title now says what the file is instead of which era named it.
+> "V5" survives in the body as history, which is what it is.
 
 > **Purpose:** Everything a future agent needs to understand this project without
 > searching across the entire repository. Read this first before touching any code

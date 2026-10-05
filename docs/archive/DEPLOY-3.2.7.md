@@ -1,23 +1,21 @@
-# Deploying the 3.2.7 update + connection fixes
+# Retired — the 3.2.7 deployment packet
 
-```
-audience:    human-operator
-status:      reference
-authoritative-for: the step-by-step to ship the two 3.2.7 fixes and repair the live update row
-verified-against: docs/reference/FIXES.md (2026-10-01)
-```
-
-> **Status: a prepared deployment packet, NOT a record of a deployment** —
-> prepared 2026-09-29, and the hub was offline at the time. (This was previously
-> written into the `status:` field itself, which the front-matter rule does not
-> allow: `status:` names the document's KIND — `live` / `reference` /
-> `design-record` — and the deployment state is body prose, as it is here.)
-
-> **This is a prepared deployment packet, not a record of a deployment.** The
-> changes are committed and locally verified; nothing here has been pushed, tagged
-> or applied to the live host. Work the checklist top to bottom when the hub is
-> back. Read `UPDATE-SYSTEM.md` (pipeline) and `../reference/FIXES.md` (what broke)
-> alongside it.
+> **ARCHIVED (2026-10-05).** This was a *prepared deployment packet* for the
+> 3.2.7 update and connection fixes, written 2026-09-29 while the hub was
+> offline. **It has done its job** — 3.2.7 shipped, and the project is now on the
+> version in [`../state.toml`](../state.toml) `[client.version]` — so what follows
+> is a record of how those two fixes were sequenced, not an instruction to follow
+> today.
+>
+> **Do not run this checklist.** Its commands target files, a schema and an
+> `update_config` row as they were at 3.2.7. For the current procedure read
+> [`../operate/RELEASING.md`](../operate/RELEASING.md) (cutting and publishing a
+> release), [`../operate/UPDATE-SYSTEM.md`](../operate/UPDATE-SYSTEM.md) (the
+> pipeline end to end) and [`../reference/FIXES.md`](../reference/FIXES.md) (what
+> actually broke).
+>
+> It is kept because the *ordering* argument — code fix plus data fix, neither
+> sufficient alone — is still the shape of an update-row repair.
 
 ---
 

@@ -100,10 +100,10 @@ clients, pinned by `activation_contract_test`
 (`client/src-tauri/tests/activation_contract.rs`).
 
 > **Correction (2026-10-01).** That test did not exist when this file was
-> written — see the note in [`03-device-binding.md`](03-device-binding.md) §3.3.
+> written — see the note in [`archive/03-device-binding.md`](archive/03-device-binding.md) §3.3.
 > It was added on 2026-10-01 by the durable-device-identity work.
 
-**Rules for the new `DeviceAlreadyActivated` refusal** ([`03-device-binding.md`](03-device-binding.md) §3.1)
+**Rules for the new `DeviceAlreadyActivated` refusal** ([`archive/03-device-binding.md`](archive/03-device-binding.md) §3.1)
 — **all four followed** in `9a91da1`:
 
 1. **Use a status code that is not 403.** `409 Conflict` is the natural choice
@@ -153,4 +153,4 @@ That is the guard working as intended, not an obstacle.
 
 * The term model that keeps the instant → [`02-term-and-renewal.md`](02-term-and-renewal.md) §2.2
 * The migration this constrains → [`05-migration-and-live-data.md`](05-migration-and-live-data.md) §5.5
-* The refusal being specified → [`03-device-binding.md`](03-device-binding.md) §3.1
+* The refusal being specified → [`archive/03-device-binding.md`](archive/03-device-binding.md) §3.1

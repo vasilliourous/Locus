@@ -1,11 +1,16 @@
-# Gaming UDP — Implementation Plan (Consolidated 2026-08-14)
+# Retired — Gaming UDP implementation plan (2026-08-14)
 
-```
-audience:    builder
-status:      live
-authoritative-for: the UoT (UDP-over-TCP) transport for the paid tier, server side
-verified-against: server/modules/02-shadowsocks.sh, server/modules/08-firewall.sh, server/scripts/seed-pb.py
-```
+> **ARCHIVED (2026-10-05).** This is the **plan** that built the UDP-over-TCP
+> transport, kept as a design record of how it was reasoned about — not as a
+> description of the live system. Its own body already carried two supersession
+> banners, which is what the front-matter could not express.
+>
+> **Live UoT facts are owned elsewhere.** For the current transport read
+> [`../business/04-tiers.md`](../business/04-tiers.md) §4.1 (the tier table: both
+> plans carry UDP — free on 8447 capped 1 Mbps, Full on 8446 uncapped) and §4.3.1.
+>
+> Read it for *why the design is shaped this way*. Do not read it for what the hub
+> runs today.
 
 > **Naming, as of the Free/Full merge (2026-10).** This document says "Strike"
 > throughout because that is the **frozen on-box name** — the `tier_configs`
@@ -15,7 +20,7 @@ verified-against: server/modules/02-shadowsocks.sh, server/modules/08-firewall.s
 > it is now the *only* paid plan: Stealth was retired into it, and the paid `tc`
 > cap is 100 Mbps rather than 200. Read every "Strike" below as "the paid tier,
 > on-box name `strike`". See
-> [`business/04-tiers.md`](business/04-tiers.md) §4.6.
+> [`business/04-tiers.md`](../business/04-tiers.md) §4.6.
 >
 > **Superseded in part (2026-10): UoT is no longer paid-only.** There are now TWO
 > sing-box listeners — `sing-box-uot-strike.service` on 8446 (uncapped) and
@@ -23,7 +28,7 @@ verified-against: server/modules/02-shadowsocks.sh, server/modules/08-firewall.s
 > statement below about UoT being "the Strike tier's" describes the *original*
 > single-listener design; the mechanism is unchanged and is simply instantiated
 > once per plan now, each with its own credentials. See
-> [`business/04-tiers.md`](business/04-tiers.md) §4.3.1.
+> [`business/04-tiers.md`](../business/04-tiers.md) §4.3.1.
 
 > **Engine note — read before trusting any "sing-box client" claim below.** The
 > **server** half of this document is current. The **client** was the Go + Wails +
@@ -36,7 +41,7 @@ verified-against: server/modules/02-shadowsocks.sh, server/modules/08-firewall.s
 > **Status: the CODE is live (default-on); the deployment is a world claim.**
 >
 > Two different statements were run together here, and they are different kinds
-> of fact — see [`operate/CLAIMS.md`](operate/CLAIMS.md) §2:
+> of fact — see [`operate/CLAIMS.md`](../operate/CLAIMS.md) §2:
 >
 > - **In this tree (derivable, so not prose):** `02-shadowsocks.sh` and `setup.sh`
 >   build the UoT endpoint unless `ENABLE_UOT=0`, `08-firewall.sh` opens the UoT
@@ -71,7 +76,7 @@ verified-against: server/modules/02-shadowsocks.sh, server/modules/08-firewall.s
 >
 > **Historically:** the code landed and the UoT transport was first validated
 > 2026-08-14 on the then-live VPS (since retired and offline; its address is not
-> recorded here — see [`operate/CLAIMS.md`](operate/CLAIMS.md) §6). The current
+> recorded here — see [`operate/CLAIMS.md`](../operate/CLAIMS.md) §6). The current
 > hub was deployed while UoT was still opt-in, which is why this needed enabling
 > by hand.
 >
@@ -136,7 +141,7 @@ is now mihomo and the framing match is cross-engine rather than same-engine.
 ### P0 — Transport fix: UDP-over-TCP on a server that implements it (the core change)
 
 ✅ **Code landed and transport validated — 2026-08-14** (on the then-live VPS,
-since retired — address deliberately not recorded; [`operate/CLAIMS.md`](operate/CLAIMS.md) §6).
+since retired — address deliberately not recorded; [`operate/CLAIMS.md`](../operate/CLAIMS.md) §6).
 What landed and still exists in the repo:
 
 | Piece | Where | Detail |

@@ -23,6 +23,15 @@ verified-against: docs/reference/DEVICE-IDENTITY.md, docs/reference/FIXES.md
 > the live model. The **term model and renewal** parts of this corpus remain
 > accurate and are still authoritative.
 >
+> **The removed half now lives in [`archive/`](archive/).** Files whose subject
+> was device binding — [`archive/03-device-binding.md`](archive/03-device-binding.md)
+> and
+> [`archive/implementation-03-device-binding.md`](archive/implementation-03-device-binding.md)
+> — were moved there on 2026-10-05 so the *retired* part of this design is
+> separated by folder from the part that shipped, exactly as `docs/archive/`
+> separates the retired client. The folder carries the status. The live records
+> below link into them at their new paths.
+>
 > **What is built:** `term_days` on codes with the expiry materialised into
 > `expires_at`; `codes.renew`, `codes.set-term`; the console's Renew button, Set
 > term and name search; the backfill script.
@@ -143,9 +152,9 @@ column says whether the decision is now in the code.
 |---|---|---|---|
 | Expiry representation | **Term length, relative to activation** | **BUILT** — `term_days`, materialised into `expires_at` | [`02-term-and-renewal.md`](02-term-and-renewal.md) |
 | Renewal arithmetic | **Extend from the existing expiry** (paying early never loses days) | **BUILT** — `codes.renew` | [`02-term-and-renewal.md`](02-term-and-renewal.md) §2.4 |
-| A second code on a bound device | **Refuse outright**, with the audited unbind path as the escape hatch | **BUILT** — 409 + `device_bindings` unique index | [`03-device-binding.md`](03-device-binding.md) §3.2 |
+| A second code on a bound device | **Refuse outright**, with the audited unbind path as the escape hatch | **BUILT** — 409 + `device_bindings` unique index | [`archive/03-device-binding.md`](archive/03-device-binding.md) §3.2 |
 | Customer identity | **No PII in the hub.** Paper records plus the console's `label`/`notes` fields are the system of record | **BUILT** — and `codes.list` now searches them | [`01-identity-without-pii.md`](01-identity-without-pii.md) |
-| Fingerprint stability across reinstall | Persist it somewhere durable; make re-binding explicit | **DEFERRED** — needs real Windows/macOS hardware | [`03-device-binding.md`](03-device-binding.md) §3.5 |
+| Fingerprint stability across reinstall | Persist it somewhere durable; make re-binding explicit | **DEFERRED** — needs real Windows/macOS hardware | [`archive/03-device-binding.md`](archive/03-device-binding.md) §3.5 |
 | Card vs credential | Fingerprint-anchored entitlement; operator recovers the rest | **BUILT** (the parts the hub owns) | [`04-card-and-credential.md`](04-card-and-credential.md) |
 
 The identity decision has a consequence worth stating plainly, because it
@@ -171,7 +180,7 @@ runbooks, and an explicit list of what has not been verified.
 | 0 | this file | The brief, the root cause, and the settled decisions |
 | 1 | [`01-identity-without-pii.md`](01-identity-without-pii.md) | How the hub identifies a customer with no PII, and why lookup-by-name is load-bearing |
 | 2 | [`02-term-and-renewal.md`](02-term-and-renewal.md) | The term model, exact renewal arithmetic, and the renew operation |
-| 3 | [`03-device-binding.md`](03-device-binding.md) | Uniqueness, explicit re-binding, and fingerprint stability |
+| 3 | [`archive/03-device-binding.md`](archive/03-device-binding.md) | Uniqueness, explicit re-binding, and fingerprint stability |
 | 4 | [`04-card-and-credential.md`](04-card-and-credential.md) | Separating proof-of-purchase from proof-of-entitlement |
 | 5 | [`05-migration-and-live-data.md`](05-migration-and-live-data.md) | The safety file: changing schema around live paying codes |
 | 6 | [`06-console-and-operator.md`](06-console-and-operator.md) | The operator surface, including the renew button and search |

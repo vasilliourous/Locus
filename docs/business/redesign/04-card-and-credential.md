@@ -85,7 +85,7 @@ Concretely:
 | Actor | Holds | If lost |
 |---|---|---|
 | **The card** | The code string, once | Nothing is lost *after* first activation — it is a spent voucher |
-| **The device** | Its fingerprint, persisted durably ([`03-device-binding.md`](03-device-binding.md) §3.2 Part A) | Recoverable: see below |
+| **The device** | Its fingerprint, persisted durably ([`archive/03-device-binding.md`](archive/03-device-binding.md) §3.2 Part A) | Recoverable: see below |
 | **The hub** | The subscription, keyed by *fingerprint*, with its term and history | Recoverable by an operator |
 | **The operator/middleman** | The paper/`label` link from person → code | Copyable, and the fallback |
 
@@ -93,7 +93,7 @@ The critical change is the third row. In the current model, the hub's record of
 "who is entitled" is a field *on the code*, so losing the code loses the
 pointer. In this design the entitlement is addressed by **fingerprint** — a
 value the device keeps producing on its own, independently of any card. A
-student who reinstalls and whose fingerprint is stable ([`03-device-binding.md`](03-device-binding.md))
+student who reinstalls and whose fingerprint is stable ([`archive/03-device-binding.md`](archive/03-device-binding.md))
 is recognised immediately, **with no card and no operator involvement.**
 
 ## 4.4 What "forever bound" should actually mean
@@ -174,6 +174,6 @@ middleman's operating routine.
 
 ## 4.8 Related reading
 
-* The binding this depends on → [`03-device-binding.md`](03-device-binding.md)
+* The binding this depends on → [`archive/03-device-binding.md`](archive/03-device-binding.md)
 * The identity decision → [`01-identity-without-pii.md`](01-identity-without-pii.md)
 * Where the operator does the recovery → [`06-console-and-operator.md`](06-console-and-operator.md)

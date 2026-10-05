@@ -396,7 +396,7 @@ one is decided for us:
   no code edit**.
 - The survivor has to be the tier with the **UoT listener and its credentials**.
   The sing-box UoT endpoint serves the strike tier's password
-  ([`../GAMING-UDP.md`](../GAMING-UDP.md)), so keeping `strike` keeps that pair
+  ([`../archive/GAMING-UDP.md`](../archive/GAMING-UDP.md)), so keeping `strike` keeps that pair
   intact. Choosing `stealth` would mean re-pointing UoT credentials, which is the
   one change that could break gaming without breaking anything visible.
 

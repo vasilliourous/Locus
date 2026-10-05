@@ -19,7 +19,7 @@ verified-against: docs/state.toml
 - **Shadowsocks over TCP** has no TLS fingerprint for the Palo Alto to match,
   and game/voice UDP rides *inside* that TCP stream via UDP-over-TCP rather than
   depending on the network admitting raw UDP
-  ([`02-market.md`](02-market.md#23-the-wedge), [`../GAMING-UDP.md`](../GAMING-UDP.md)).
+  ([`02-market.md`](02-market.md#23-the-wedge), [`../archive/GAMING-UDP.md`](../archive/GAMING-UDP.md)).
 - **The VPS IP is fresh and unlisted**, unlike the public blocklists free
   VPNs sit on.
 - **A dedicated VPS** is not oversold.

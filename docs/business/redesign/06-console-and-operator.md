@@ -156,7 +156,7 @@ renewals actually happen.
 
 ## 6.5 The device view — what a machine holds
 
-`device_bindings` ([`03-device-binding.md`](03-device-binding.md) §3.1) gives
+`device_bindings` ([`archive/03-device-binding.md`](archive/03-device-binding.md) §3.1) gives
 the console something it has never had: **the ability to answer "what is this
 device entitled to?"** Add:
 
@@ -211,5 +211,5 @@ as a proposal rather than a requirement, in
 
 * Why identity forces operator-initiated renewal → [`01-identity-without-pii.md`](01-identity-without-pii.md)
 * The action being surfaced → [`02-term-and-renewal.md`](02-term-and-renewal.md)
-* The binding integrity the device view checks → [`03-device-binding.md`](03-device-binding.md)
+* The binding integrity the device view checks → [`archive/03-device-binding.md`](archive/03-device-binding.md)
 * The metrics this makes measurable → [`08-metrics-and-instrumentation.md`](08-metrics-and-instrumentation.md)

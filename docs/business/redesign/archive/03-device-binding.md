@@ -1,11 +1,4 @@
-# 3. Device binding — SUPERSEDED
-
-```
-audience:    human-operator
-status:      design-record
-authoritative-for: the device-binding design — REMOVED, not shipped; see the banner
-verified-against: docs/reference/DEVICE-IDENTITY.md, docs/reference/FIXES.md
-```
+# 3. Device binding — SUPERSEDED (design record)
 
 > **SUPERSEDED 2026-10.** Everything in this file — one-code-per-device, the
 > `device_bindings` index, explicit re-binding, fingerprint stability — was
@@ -14,10 +7,14 @@ verified-against: docs/reference/DEVICE-IDENTITY.md, docs/reference/FIXES.md
 > re-activating a code restores a student's access on a new machine. The client
 > keeps its code durably so a reinstall does not lose it.
 >
-> Read [`../../reference/DEVICE-IDENTITY.md`](../../reference/DEVICE-IDENTITY.md)
+> Read [`../../../reference/DEVICE-IDENTITY.md`](../../../reference/DEVICE-IDENTITY.md)
 > for the live model. This file is kept as the design record of a decision that
 > was made and then reversed, because the reasoning about *why* binding was
 > attractive is still useful.
+>
+> **ARCHIVED (2026-10-05).** Moved to `redesign/archive/` so the retired half of
+> this design sits apart from the parts that shipped, matching the
+> folder-carries-status rule in [`../../README.md`](../../README.md).
 
 > **Decisions (operator):** fix all three defects — one code per device,
 > explicit re-binding, and fingerprint stability. A second code activated on an
@@ -64,7 +61,7 @@ entitlements, and the hub has no idea.
   (the `dashboard` counts in `admin_console.pb.js`). Three codes on one machine read as three
   activated devices, so the operator's own headcount is inflated.
 * **The free tier makes it worse.** If free codes are handed out
-  ([`../04-tiers.md`](../04-tiers.md) §4.4), the same machine can farm them.
+  ([`../04-tiers.md`](../../04-tiers.md) §4.4), the same machine can farm them.
 
 ### The fix: uniqueness, enforced at bind
 
@@ -93,18 +90,18 @@ Two options, with a real trade-off:
 
 **Recommendation: the index table. BUILT as recommended** — the collection is
 `device_bindings` with a UNIQUE `fingerprint` field
-([`implementation/01-data-model.md`](implementation/01-data-model.md) §1.3,
-[`implementation/03-device-binding.md`](implementation/03-device-binding.md)).
+([`implementation/01-data-model.md`](../implementation/01-data-model.md) §1.3,
+[`implementation-03-device-binding.md`](implementation-03-device-binding.md)).
 Note the `subscription` field in the sketch above was **not** built; the row
 carries `tier` instead, because there is no subscription table to reference
-([`implementation/01-data-model.md`](implementation/01-data-model.md) §1.6).
+([`implementation/01-data-model.md`](../implementation/01-data-model.md) §1.6).
 
 The scan is tempting, but it cannot
 express the state we actually need — "this fingerprint is bound, and to which
 code *by id*" — and it breaks the moment a code is deleted
 (`codes.delete` exists, `codes.delete` in `admin_console.pb.js`) because the binding
 evaporates with it. The index also gives
-[`06-console-and-operator.md`](06-console-and-operator.md) its "what does this
+[`06-console-and-operator.md`](../06-console-and-operator.md) its "what does this
 device hold?" view, which is otherwise unanswerable.
 
 Note the schema caution: a *unique* index on `fingerprint` is what actually
@@ -258,7 +255,7 @@ implementation must be clear about the consequence:
 
 So this decision is only safe if the re-bind/unbind path is **fast and
 trustworthy** — searchable by name
-([`01-identity-without-pii.md`](01-identity-without-pii.md) §1.3), audited, and
+([`01-identity-without-pii.md`](../01-identity-without-pii.md) §1.3), audited, and
 not silently destructive (§3.4). Documenting that dependency is part of the
 design, not a caveat to it.
 
@@ -315,10 +312,10 @@ and it must be called out explicitly:
 > recomputed from a fresh `activated_at`.** A student moved to a new laptop
 > must keep their existing `expires_at` untouched.
 
-This is why §3.3 of [`02-term-and-renewal.md`](02-term-and-renewal.md) insists
+This is why §3.3 of [`02-term-and-renewal.md`](../02-term-and-renewal.md) insists
 `expires_at` is *materialised* rather than derived on read. Materialisation
 means an `activated_at` reset cannot silently reset a paid term. The requirement
-is restated in [`05-migration-and-live-data.md`](05-migration-and-live-data.md)
+is restated in [`05-migration-and-live-data.md`](../05-migration-and-live-data.md)
 as a migration invariant, because it is the most likely way a live student loses
 time.
 
@@ -334,13 +331,13 @@ Stated plainly, because this is the part most likely to be assumed working:
 * **That `machine_id`-based identity is stable** across the specific
   virtualisation and dual-boot situations students actually have.
 
-These go in [`10-open-questions.md`](10-open-questions.md) as hardware-gated,
+These go in [`10-open-questions.md`](../10-open-questions.md) as hardware-gated,
 and the implementation plan sequences them as a phase that cannot be closed
 without a real machine.
 
 ## 3.6 Related reading
 
-* Why identity is not stored → [`01-identity-without-pii.md`](01-identity-without-pii.md)
-* The term invariant unbind must not break → [`02-term-and-renewal.md`](02-term-and-renewal.md) §2.3
-* The migration that protects live bindings → [`05-migration-and-live-data.md`](05-migration-and-live-data.md)
-* The operator surface for rebind → [`06-console-and-operator.md`](06-console-and-operator.md)
+* Why identity is not stored → [`01-identity-without-pii.md`](../01-identity-without-pii.md)
+* The term invariant unbind must not break → [`02-term-and-renewal.md`](../02-term-and-renewal.md) §2.3
+* The migration that protects live bindings → [`05-migration-and-live-data.md`](../05-migration-and-live-data.md)
+* The operator surface for rebind → [`06-console-and-operator.md`](../06-console-and-operator.md)

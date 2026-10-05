@@ -21,8 +21,8 @@ static DISABLING_TUN: AtomicBool = AtomicBool::new(false);
 /// student would see a core error for a problem that is about privileges.
 ///
 /// Note it only turns the preference off — it does not start anything. Nothing
-/// starts a Core without a usable Service any more (see `docs/ARCHITECTURE.md`
-/// decision 5c).
+/// starts a Core without a usable Service any more (see
+/// `docs/archive/ARCHITECTURE-wails.md` decision 5c).
 pub async fn reconcile_startup_tun_availability() {
     // Read fresh state after prior config writes complete.
     let _config_write = Config::lock_config_write().await;

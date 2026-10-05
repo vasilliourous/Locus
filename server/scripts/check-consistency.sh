@@ -704,7 +704,7 @@ else
     #   docs/reference/THEMES.md     "what changed in 3.3.0" — the milestone the
     #                                theme layer landed in, cited as a version
     #   docs/reference/DEBUGGING-METHOD.md, docs/operate/CLAIMS.md,
-    #   docs/operate/DEPLOY-3.2.7.md, docs/operate/UPDATE-SYSTEM.md,
+    #   docs/archive/DEPLOY-3.2.7.md, docs/operate/UPDATE-SYSTEM.md,
     #   docs/operate/RELEASING.md, docs/operate/RECOVER-*.md
     #                                dated incident/example/basis citations
     #   docs/business/1*-*.md, docs/business/redesign/**
@@ -715,7 +715,7 @@ else
     #
     # If you add a file here, add the reason. A path with no reason is the next
     # reader's guess, and this list only stays honest if it is specific.
-    TRIAGED_BASIS='^(docs/CONTEXT\.md|docs/reference/THEMES\.md|docs/reference/DEBUGGING-METHOD\.md|docs/operate/CLAIMS\.md|docs/operate/DEPLOY-3\.2\.7\.md|docs/operate/UPDATE-SYSTEM\.md|docs/operate/RELEASING\.md|docs/operate/RECOVER-WINDOWS-UPDATE\.md|docs/operate/RECOVER-MACOS-UPDATE\.md|docs/business/1[0-9]-.*\.md|docs/business/redesign/.*\.md|client/docs/UPSTREAM-CHANGES\.md)$'
+    TRIAGED_BASIS='^(docs/CONTEXT\.md|docs/reference/THEMES\.md|docs/reference/DEBUGGING-METHOD\.md|docs/operate/CLAIMS\.md|docs/archive/DEPLOY-3\.2\.7\.md|docs/operate/UPDATE-SYSTEM\.md|docs/operate/RELEASING\.md|docs/operate/RECOVER-WINDOWS-UPDATE\.md|docs/operate/RECOVER-MACOS-UPDATE\.md|docs/business/1[0-9]-.*\.md|docs/business/redesign/.*\.md|client/docs/UPSTREAM-CHANGES\.md)$'
     stale=$(
         cd "$REPO" && grep -rEl --include=*.md '3\.[0-9]+\.[0-9]+' \
             README.md docs client/docs 2>/dev/null \
@@ -1285,7 +1285,7 @@ echo "10. No volatile fact (IP address / hub URL) inlined in live documentation"
 #                                  (its §5 register and §1 worked example)
 #   docs/state.toml                the derived-facts data file itself
 DOCS_TO_SCAN=$(cd "$REPO" && find docs client/docs -name '*.md' 2>/dev/null \
-    | grep -vE '^docs/reference/FIXES\.md$|^docs/history/|^docs/archive/|^docs/operate/CLAIMS\.md$' \
+    | grep -vE '^docs/reference/FIXES\.md$|^docs/history/|^docs/archive/|^docs/business/redesign/archive/|^docs/operate/CLAIMS\.md$' \
     | sort)
 
 # An IPv4 literal. Deliberately does NOT flag addresses that are provably NOT the
@@ -1335,7 +1335,7 @@ URL_HITS=$(cd "$REPO" && printf '%s\n' "$DOCS_TO_SCAN" | while read -r f; do
     [ -n "$f" ] || continue
     # Exclude the operator runbooks, whose whole job is copy-pasteable commands.
     case "$f" in
-        docs/operate/OPS.md|docs/operate/POCKETBASE-SETUP.md|docs/operate/RELEASING.md|docs/operate/DEPLOY.md|docs/operate/SECRETS-MANAGEMENT.md|docs/operate/DEPLOY-3.2.7.md|docs/operate/UPDATE-SYSTEM.md|docs/reference/API.md)
+        docs/operate/OPS.md|docs/operate/POCKETBASE-SETUP.md|docs/operate/RELEASING.md|docs/operate/DEPLOY.md|docs/operate/SECRETS-MANAGEMENT.md|docs/operate/UPDATE-SYSTEM.md|docs/reference/API.md)
             continue ;;
     esac
     grep -nE 'https?://[a-z0-9.-]*duckdns\.org' "$f" 2>/dev/null | sed "s|^|$f:|"
@@ -3379,8 +3379,12 @@ def front_matter(path):
 for root in ("docs", "client/docs"):
     for path in md_files(root):
         rel = path.replace(os.sep, "/")
-        # Archived/historical material: the folder carries the status.
-        if rel.startswith("docs/archive/") or rel.startswith("docs/history/"):
+        # Archived/historical material: the folder carries the status. This is the
+        # rule §25 enforces for `docs/archive/` and `docs/history/`, and
+        # `docs/business/redesign/archive/` follows it too — added 2026-10-05 when
+        # the removed device-binding design moved there.
+        if rel.startswith("docs/archive/") or rel.startswith("docs/history/") \
+                or rel.startswith("docs/business/redesign/archive/"):
             continue
         keys = front_matter(path)
         if keys is None:
@@ -3413,6 +3417,168 @@ $fm_report
 EOF
     bad "Fix: give each file a fenced block after its H1 with \`audience:\` and"
     bad "\`status: live|reference|design-record\` — or move it to archive/history."
+fi
+
+# ─────────────────────────────────────────────────────────────
+# 28. The documentation index is COMPLETE, and no live document lies about itself.
+#
+# WHY THIS EXISTS
+#
+# The 2026-10-05 audit found the doc set green but fragmented, in a way no
+# existing guard could see. §8 checks that a link RESOLVES, §25 that front-matter
+# EXISTS. Neither asks the two questions that had actually gone wrong:
+#
+#   (a) IS EVERY LIVE DOCUMENT REACHABLE? docs/README.md covered the operate/ and
+#       reference/ trees and stopped. All 19 business files, the whole redesign
+#       corpus and client/docs/CONTRIBUTING_i18n.md had no entry — reachable only
+#       by browsing the filesystem. A reader who trusts the index does not learn
+#       those documents exist, and a document nobody can find is one nobody
+#       maintains. There were also TWO indexes (README.md and STATE.md) whose
+#       contents had drifted apart, which is worse than one incomplete one.
+#
+#   (b) DOES THE DOCUMENT AGREE WITH ITS OWN LABEL? docs/GAMING-UDP.md was
+#       `status: live`, titled "Implementation Plan", and its OWN BODY opened
+#       with two banners saying it was superseded. The front-matter was not
+#       wrong by accident — nothing connected the two, so a document could
+#       announce its own retirement and stay labelled current forever.
+#
+# WHAT THIS CHECKS, AND WHAT IT DELIBERATELY DOES NOT
+#
+#   (a) Every live .md under docs/ and client/docs/ is linked from docs/README.md.
+#       Exit is by FILE, not by heading, so a document may be covered by a
+#       directory entry (the retired `redesign/archive/` is one) as long as
+#       something on the index names it.
+#   (b) A document whose TITLE OR OPENING says it is retired — while its
+#       front-matter says `status: live` — is a contradiction. The fix is one of:
+#       move it to archive/ (folder carries the status), correct the opening, or
+#       correct the status.
+#
+#   (b) IS SCOPED TO THE HEAD ON PURPOSE, and the first draft was not. A whole-body
+#       scan for words like REMOVED/retired fired on seven healthy documents, and
+#       every hit was legitimate: FIXES.md is a log whose heading records that
+#       something *else* was removed; STILL-OPEN.md's job is to mark superseded
+#       items; CONTEXT.md and the tier docs describe retired mechanisms in their
+#       history sections. That is §7's lesson exactly — a guard that cries wolf
+#       trains the reader to ignore the one that matters. What actually went wrong
+#       in GAMING-UDP.md was that the retirement was announced in the head of the
+#       document while the head's own status field said `live`. So that is what
+#       this checks: the first 25 lines, and the title.
+#
+# It does NOT check that a declared status is TRUE — a guard cannot read a design
+# record and know it is stale (§25 says the same). It catches the case where the
+# document states the contradiction ITSELF, in the place a reader looks first.
+#
+# Every exclusion below is a closed set with a reason, per §7's lesson: a warning
+# nobody can action trains the reader to ignore the ones that matter.
+# ─────────────────────────────────────────────────────────────
+echo
+echo "28. The documentation index is complete, and live documents do not contradict themselves"
+
+doc_index_report=$(cd "$REPO" && python3 - <<'PY'
+import os, re
+
+ARCHIVE_PREFIXES = ('docs/archive/', 'docs/history/',
+                    'docs/business/redesign/archive/')
+
+def md_files(root):
+    for dirpath, _dirs, files in os.walk(root):
+        if any(part in dirpath for part in ('node_modules', 'target', '.git', 'dist')):
+            continue
+        for fn in files:
+            if fn.endswith('.md'):
+                yield os.path.join(dirpath, fn).replace(os.sep, '/')
+
+def front_matter(path):
+    lines = open(path, encoding='utf-8', errors='replace').read().splitlines()
+    i = 0
+    while i < len(lines) and not lines[i].strip():
+        i += 1
+    if i < len(lines) and lines[i].startswith('# '):
+        i += 1
+    while i < len(lines) and not lines[i].strip():
+        i += 1
+    if i >= len(lines) or not lines[i].startswith('```'):
+        return {}
+    i += 1
+    keys = {}
+    while i < len(lines) and not lines[i].startswith('```'):
+        m = re.match(r'^([a-z-]+):\s*(.*)$', lines[i].strip())
+        if m:
+            keys[m.group(1)] = m.group(2).strip()
+        i += 1
+    return keys
+
+index_text = open('docs/README.md', encoding='utf-8').read()
+
+# Everything the index links to, as normalised repo-relative paths.
+linked = set()
+for m in re.finditer(r'\]\(([^)\s]+?\.md)(#[^)\s]+)?\)', index_text):
+    linked.add(os.path.normpath(os.path.join('docs', m.group(1))))
+# Directory links: a link to `dir/` covers every file beneath it.
+for m in re.finditer(r'\]\(([^)\s]+?)/\)', index_text):
+    d = os.path.normpath(os.path.join('docs', m.group(1)))
+    linked.add(d + '/')
+
+orphans, contradictions = [], []
+
+for path in sorted(set(md_files('docs')) | set(md_files('client/docs'))):
+    if path.startswith(ARCHIVE_PREFIXES):
+        continue
+    if path == 'docs/README.md':
+        continue
+    keys = front_matter(path)
+    status = keys.get('status', '')
+
+    # (a) reachability — the index must name the file, or a directory above it.
+    covered = path in linked or any(
+        path.startswith(d) for d in linked if d.endswith('/'))
+    if not covered:
+        orphans.append(f"{path}  (status: {status or 'none'})")
+
+    # (b) a live document may not announce its own retirement in its HEAD.
+    #
+    # Scoped to the title plus the first 25 lines, and to a closed marker set.
+    # A whole-body scan was the first draft and it produced seven false positives,
+    # all of them healthy documents describing someone else's retirement (see the
+    # section header). The head is where the GAMING-UDP defect lived.
+    if status != 'live':
+        continue
+    lines = open(path, encoding='utf-8', errors='replace').read().splitlines()
+    head = '\n'.join(lines[:25])
+    # Quoted markers inside a fenced block are exposition, not a claim.
+    head = re.sub(r'```.*?```', '', head, flags=re.S)
+    # Only UNAMBIGUOUS self-retirement words. `was retired` / `is retired` were
+    # in the first draft and fired on `STILL-OPEN.md`'s own heading, which says
+    # the *Stealth tier* was retired — ordinary prose about a different thing.
+    for marker in ('SUPERSEDED', 'ARCHIVED', 'NOT SHIPPED', 'RETIRED'):
+        if marker in head:
+            contradictions.append(
+                f"{path}  (status: live, but the head says {marker!r})")
+            break
+
+for f in orphans:
+    print("ORPHAN\t" + f)
+for f in contradictions:
+    print("CONTRADICTION\t" + f)
+PY
+)
+
+if [ -z "$doc_index_report" ]; then
+    ok "every live document is linked from docs/README.md, and none contradicts its own status"
+else
+    while IFS="$(printf '\t')" read -r kind detail; do
+        case "$kind" in
+            ORPHAN)
+                bad "live document not reachable from docs/README.md: $detail"
+                bad "  Add it to the index. A document nobody can find is one nobody maintains." ;;
+            CONTRADICTION)
+                bad "a live document announces its own retirement: $detail"
+                bad "  Either move it to archive/ (the folder carries the status), or fix" ;;
+        esac
+    done <<EOF
+$doc_index_report
+EOF
+    bad "  the front-matter — §25. Do not leave the two disagreeing."
 fi
 
 echo

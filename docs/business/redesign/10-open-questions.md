@@ -70,7 +70,7 @@ The alternative, if it proves unworkable:
 
 ### Q4 — Should a second code stack, or refuse?
 
-**Decided: refuse** ([`03-device-binding.md`](03-device-binding.md) §3.2). The
+**Decided: refuse** ([`archive/03-device-binding.md`](archive/03-device-binding.md) §3.2). The
 consequence is restated here because it is a live support burden: a student with
 two legitimately-bought codes, or a student who replaces a laptop, needs an
 operator. The escape hatch (`codes.rebind`, searchable by name) is therefore not
@@ -127,9 +127,9 @@ Not blocking, but each would improve a specific file:
 | Fact | Would sharpen |
 |---|---|
 | How many codes are on the live hub today | [`05-migration-and-live-data.md`](05-migration-and-live-data.md) — whether the backfill is a 5-row or 500-row operation |
-| How many are bound | `03-device-binding.md` — the real impact of uniqueness enforcement |
+| How many are bound | `archive/03-device-binding.md` — the real impact of uniqueness enforcement |
 | Whether any paying code is near expiry | The urgency of the term model: if a live code lapses during the migration window, that is a customer lost to a design change |
-| How often the operator has had to unbind | `03-device-binding.md` — whether fingerprint drift is common or rare |
+| How often the operator has had to unbind | `archive/03-device-binding.md` — whether fingerprint drift is common or rare |
 | The actual price each code was sold at | [`08-metrics-and-instrumentation.md`](08-metrics-and-instrumentation.md) §8.4 |
 
 ## 10.5 Related reading
