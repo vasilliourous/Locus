@@ -29,6 +29,34 @@
     <link rel="stylesheet" href="./style.css" />
 
     <!--
+      How the page is represented when it is LINKED rather than visited.
+
+      Google does not use these for ranking, and they add nothing to the page a
+      visitor sees. They exist because the two things that make a new page
+      discoverable both run through them: a shared link renders as a titled card
+      rather than a bare URL (so someone is more likely to click it and link it),
+      and chat/social unfurls carry the description that says what the product is.
+
+      `og:image` points at icon.svg. That is a deliberate limitation, not an
+      oversight: several platforms will not render SVG in a preview card, so the
+      image may not appear. A raster 1200x630 card would fix it and is the obvious
+      next step — it is not included because it would mean adding a binary asset
+      to a page that currently ships six small text files, and a half-working
+      preview is better than a fabricated one. Do not add a URL you have not
+      verified renders.
+    -->
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="Locus" />
+    <meta property="og:title" content="Locus VPN" />
+    <meta property="og:description" content="A lightweight VPN client for Windows, macOS and Linux." />
+    <meta property="og:url" content="https://locusvpn.jadedns.uk/" />
+    <meta property="og:image" content="https://locusvpn.jadedns.uk/icon.svg" />
+    <meta name="twitter:card" content="summary" />
+    <meta name="twitter:title" content="Locus VPN" />
+    <meta name="twitter:description" content="A lightweight VPN client for Windows, macOS and Linux." />
+    <meta name="twitter:image" content="https://locusvpn.jadedns.uk/icon.svg" />
+
+    <!--
       Structured data. This is what lets Google show the product name in the
       result rather than guessing it from the URL. It is deliberately minimal:
       name, description, platform list. No offers, no ratings, no price —

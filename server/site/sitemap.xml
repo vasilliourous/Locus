@@ -1,21 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!--
-  One URL, because there is one page.
-
-  This is the file that turns "the page is crawlable" into "Google has been told
-  the page exists" — it is submitted in Search Console, and it is why the page's
-  own indexability (no X-Robots-Tag, no noindex) is a deployment assertion
-  rather than a hope. See deploy_site() in modules/05-caddy.sh.
-
-  The host is rewritten at deploy time by deploy-site.sh, from the same
-  LANDING_DOMAIN the Caddyfile block is generated with. Do not hand-edit it here:
-  a sitemap naming a host the block does not serve is a silent 404 for the one
-  file whose entire job is to be found.
--->
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
   <url>
     <loc>https://locusvpn.jadedns.uk/</loc>
-    <changefreq>monthly</changefreq>
-    <priority>1.0</priority>
   </url>
 </urlset>

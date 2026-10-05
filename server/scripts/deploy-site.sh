@@ -171,6 +171,54 @@ for key in SLOTS:
         )
     print("    %-12s -> %s" % (key, url))
 
+# ── The sitemap ──
+#
+# sitemap.xml in the source tree carries NO comments and only <loc>. That is
+# deliberate on both counts:
+#
+#   * COMMENTS. The file had a long explanatory comment block. It was valid XML
+#     and a crawler ignores it — but it made a 3-line file 724 bytes, and it made
+#     the file confusing to read and to paste. A sitemap is a machine artifact;
+#     the explanation belongs in the code that produces it (here), not in the
+#     output. Same reasoning as robots.txt below.
+#   * CHANGEFREQ and PRIORITY were here and were DROPPED, on purpose. Google has
+#     stated for years that it ignores both. Keeping them would have implied they
+#     do something, which is the kind of fact-shaped decoration this repo's
+#     CLAIMS.md rules exist to keep out. <lastmod> is the one hint Google has
+#     said it uses, so that is the one worth injecting.
+#
+# <lastmod> is written HERE rather than stored in the source file: it is a fact
+# about the deployed copy, and a date committed into a template is stale the
+# moment anyone edits the page without remembering to bump it.
+#
+# The date comes from the index.html being shipped, not from the wall clock at
+# render time, so re-deploying unchanged content does not claim the page changed.
+# A sitemap that says "modified today" on every deploy is noise Google learns to
+# discount.
+import datetime as _dt
+
+sm = pathlib.Path(stage) / "sitemap.xml"
+if sm.exists():
+    # timezone-aware, and NOT utcfromtimestamp(): that is deprecated and scheduled
+    # for removal, and a sitemap date is exactly the kind of thing nobody
+    # re-tests until it breaks in production. strftime on an aware UTC datetime
+    # yields the same YYYY-MM-DD without the deprecation.
+    lastmod = _dt.datetime.fromtimestamp(
+        index.stat().st_mtime, _dt.timezone.utc
+    ).strftime("%Y-%m-%d")
+    text = sm.read_text()
+    if "<loc>" not in text:
+        raise SystemExit("sitemap.xml has no <loc> element — nothing to date")
+    # Anchored on the <loc> line so this works whether or not <lastmod> is
+    # already present.
+    text = re.sub(
+        r"(<loc>[^<]*</loc>)",
+        lambda m: m.group(1) + "\n    <lastmod>%s</lastmod>" % lastmod,
+        text,
+    )
+    sm.write_text(text)
+    print("    sitemap lastmod -> %s" % lastmod)
+
 # The canonical link and the sitemap both name the landing host. Rendered rather
 # than hardcoded so that changing LANDING_DOMAIN changes every mention at once,
 # and check-consistency.sh still asserts the result matches the Caddyfile.
@@ -188,6 +236,10 @@ for path in ("index.html", "sitemap.xml"):
 
 # robots.txt carries an absolute Sitemap: URL, which the same regex would miss
 # (it is followed by a newline, not a quote).
+#
+# robots.txt is likewise comment-free in the source: its directives are three
+# lines, and the rule about what must NOT be indexed on the hub hostname is
+# enforced by the Caddyfile block (modules/05-caddy.sh), which is where it lives.
 rb = pathlib.Path(stage) / "robots.txt"
 if rb.exists():
     rb.write_text(
@@ -229,7 +281,24 @@ TARBALL="$(mktemp -t locus-site-tar-XXXXXX.tar.gz)"
 # directory leaks on every run.
 trap 'rm -f "$TARBALL"; rm -rf "$WORK"' EXIT
 tar czf "$TARBALL" -C "$STAGE" .
-tar tzf "$TARBALL" | grep -qx './index.html' \
+
+# The listing is captured ONCE into a variable, and matched with `grep -qx` on a
+# here-string — deliberately NOT `tar tzf ... | grep -qx ...`.
+#
+# WHY, because this failed in a way that is genuinely hard to see:
+#
+#   grep -q exits as soon as it finds a match, which closes the pipe and sends
+#   SIGPIPE to `tar`. Under `set -o pipefail` a pipeline reports the FIRST
+#   non-zero status — and tar dying of SIGPIPE is exactly that. The result is a
+#   check that fails intermittently: it passed when run directly from a terminal
+#   and failed when deploy.sh invoked this script with stdout redirected to a log
+#   file, because the redirection changes when tar notices the closed pipe.
+#
+# A guard that passes or fails depending on who is watching is worse than no
+# guard, because it trains people to re-run until it is green. Capturing first
+# removes the race entirely: tar runs to completion with no reader to lose.
+BUNDLE_LISTING="$(tar tzf "$TARBALL")"
+grep -qx './index.html' <<< "$BUNDLE_LISTING" \
     || fail "packed bundle has no ./index.html at its root — wrong directory level.
      Expected: tar czf BUNDLE -C STAGE .   (NOT: tar czf BUNDLE STAGE)"
 log "✓ Packaged ($(du -sh "$STAGE" | cut -f1), index.html at root)"
