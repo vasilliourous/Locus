@@ -32,7 +32,7 @@
 # Added 2026-09-29.
 
 [client.version]
-value      = "3.2.29"
+value      = "3.2.30"
 source     = "client/package.json, client/src-tauri/Cargo.toml, client/src-tauri/tauri.conf.json"
 provenance = "derived"
 
