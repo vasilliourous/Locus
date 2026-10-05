@@ -4,7 +4,7 @@
 audience:    human-operator
 status:      live
 authoritative-for: deploying the hub to a blank VPS
-verified-against: docs/STATE.md
+verified-against: server/setup.sh, server/modules/
 ```
 
 > Deploy the complete Locus server infrastructure on a blank Ubuntu 22.04 VPS.
@@ -101,19 +101,24 @@ it:
 | Path on the VPS | Required by | Produce it with |
 |---|---|---|
 | `/root/server/console-dist.tar.gz` | `05-caddy.sh` → `deploy_console()` | `server/scripts/deploy-console.sh` (builds the SPA with npm, uploads the tarball) |
+| `/root/server/site-dist.tar.gz` | `05-caddy.sh` → `deploy_site()` | `server/scripts/deploy-site.sh` (renders the download URLs from the release manifest, uploads the tarball) |
 | `/root/server/scripts/fetch-release.py` | `05-caddy.sh` → `install_fetch_service()` | already in the repo — it arrives with `scp -r server` |
 
 So on a **fresh** host the order is:
 
 ```bash
-# 1. Stage the server tree (fetch-release.py comes along; the console bundle does not)
+# 1. Stage the server tree (fetch-release.py comes along; the bundles do not)
 scp -r server age-key.txt root@your-vps:/root/server/
 
 # 2. Build + upload the console bundle to /root/server/console-dist.tar.gz
 VPS=root@your-vps DOMAIN=hub.example.com \
   server/scripts/deploy-console.sh
 
-# 3. Deploy
+# 3. Render + upload the landing page to /root/server/site-dist.tar.gz
+VPS=root@your-vps \
+  server/scripts/deploy-site.sh
+
+# 4. Deploy
 ssh root@your-vps "/root/server/setup.sh"
 ```
 
@@ -128,6 +133,45 @@ MUST be set explicitly: the script has no usable default for a new host.
 > is safely staged at `/root/server/console-dist.tar.gz`; the console goes live
 > during `setup.sh`. If you are running it against a host whose hub is **already
 > up**, a non-200 is a real fault and should be investigated.
+
+The same nuance applies to `deploy-site.sh`'s final check on the landing
+hostname, and for the same reason.
+
+### The landing page (`site-dist.tar.gz`)
+
+The public landing page lives on a **second hostname** on the same box —
+`[site.domain]` in [`../state.toml`](../state.toml), currently
+`locusvpn.jadedns.uk`. It is the one hostname here that is meant to be indexed;
+the hub keeps its own name because that name is baked into every deployed client.
+
+| Piece | Where |
+|---|---|
+| Source | `server/site/` — one page, no build step |
+| Renderer | `server/scripts/deploy-site.sh` |
+| Host-side extractor | `05-caddy.sh` → `deploy_site()` |
+| Document root | `/var/www/site/` (`[site.document_root]`) |
+| Caddy block | the second site block in `05-caddy.sh` (`LANDING_DOMAIN`) |
+
+**The download URLs are rendered, never hand-written.** The four buttons point
+at the hub's own `/updates/<version>/<file>` path, and the version comes from the
+release manifest over the same `platforms` map that `publish-release.sh` and
+`fetch-release.py` resolve against. That makes the buttons a **derived fact**:
+editing one by hand would leave the page offering a version the hub does not
+serve, and nothing would fail — a stale link looks exactly like a correct one
+until someone clicks it. Section 26 of `check-consistency.sh` guards the
+agreement.
+
+> **Why the buttons point at the hub and not at GitHub.** GitHub only serves a
+> release asset from a URL on the repository
+> (`/releases/download/<tag>/<file>`, or `/releases/latest/download/<file>`), so
+> a link to a GitHub asset lands the visitor on the repo's download page. The hub
+> already serves the identical files for the in-app updater, so the page links
+> there instead and the visitor gets the file directly.
+
+**To disable the landing page on a host**, set `LANDING_DOMAIN=` (empty). That
+skips both the Caddy block and the bundle requirement — the two are gated
+together on purpose, because a block with no page and a page with no block are
+both half-deployed states that look finished.
 
 **Hand-packing the bundle (only if you are not using `deploy-console.sh`).**
 The tarball must contain the **contents** of `server/console/dist/`, with
@@ -154,16 +198,18 @@ bundle if it is present).
 ### Routine changes to a running hub: `deploy.sh`
 
 `setup.sh` is the blank-box path. For changes to an **already-running** hub, use
-`server/scripts/deploy.sh` instead — one command for hooks + console + staging +
-verify, **idempotent and diff-based** (unchanged hooks are not uploaded and
-nothing is restarted unless something changed). It never writes a record, so
-deploying code cannot withdraw a release or reset a rollout.
+`server/scripts/deploy.sh` instead — one command for hooks + console + landing
+page + staging + verify, **idempotent and diff-based** (unchanged hooks are not
+uploaded and nothing is restarted unless something changed). It never writes a
+record, so deploying code cannot withdraw a release or reset a rollout.
 
 ```bash
-server/scripts/deploy.sh              # hooks + console + staging + verify
+server/scripts/deploy.sh              # hooks + console + site + staging + verify
 server/scripts/deploy.sh --check      # dry run, changes nothing
 server/scripts/deploy.sh --hooks      # hooks only
 server/scripts/deploy.sh --console    # console only
+server/scripts/deploy.sh --site       # landing page only
+server/scripts/deploy.sh --no-site    # everything except the landing page
 ```
 
 It relies on the installed SSH key (see below); it probes for the `locus-hub`

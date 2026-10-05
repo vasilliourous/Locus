@@ -1,0 +1,16 @@
+# Locus VPN landing page.
+#
+# Everything under / is a single public page and is meant to be indexed.
+#
+# This file exists as much to make the crawlable surface EXPLICIT as to permit
+# it: there is no admin path, no build tree and no API on this hostname, and it
+# is worth being able to see at a glance that this file only ever has to change
+# if that stops being true. Do not copy this file to the hub hostname — the hub
+# serves the operator console and a published-build tree at /updates/, and
+# nothing there should be indexed. The console carries its own X-Robots-Tag
+# header for that reason (see the Caddyfile block in modules/05-caddy.sh).
+
+User-agent: *
+Allow: /
+
+Sitemap: https://locusvpn.jadedns.uk/sitemap.xml

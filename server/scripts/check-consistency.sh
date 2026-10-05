@@ -690,10 +690,37 @@ else
     # reads "... client 3.2.x" / "at 3.2.x" where the x alone is the intended
     # version. Drift there is invisible to a bare-number grep, so it is checked
     # separately below.
+    #
+    # TRIAGED 2026-10-04. This list was a permanent 14-file WARN wall, and a
+    # warning nobody can action trains the reader to ignore it (§7's own lesson,
+    # and the reason §8 shrank its own report). Each file below was read, and the
+    # ones whose older number is CORRECT are excluded HERE, by exact path, with
+    # the reason — the same "exclude precisely, never widen the pattern" rule the
+    # stamp check and §10 use. What remains is genuine drift and is reported.
+    #
+    # Excluded because the number is correct AS WRITTEN:
+    #   docs/CONTEXT.md              "first shipped 3.0.0" — history, and the
+    #                                trailing "now on the 3.x line" is current
+    #   docs/reference/THEMES.md     "what changed in 3.3.0" — the milestone the
+    #                                theme layer landed in, cited as a version
+    #   docs/reference/DEBUGGING-METHOD.md, docs/operate/CLAIMS.md,
+    #   docs/operate/DEPLOY-3.2.7.md, docs/operate/UPDATE-SYSTEM.md,
+    #   docs/operate/RELEASING.md, docs/operate/RECOVER-*.md
+    #                                dated incident/example/basis citations
+    #   docs/business/1*-*.md, docs/business/redesign/**
+    #                                a design basis ("tree at <commit>, client
+    #                                3.2.x") — the number records what a claim was
+    #                                written against, and must NOT be bumped
+    #   client/docs/UPSTREAM-CHANGES.md  "the 3.1.0 rework" — history
+    #
+    # If you add a file here, add the reason. A path with no reason is the next
+    # reader's guess, and this list only stays honest if it is specific.
+    TRIAGED_BASIS='^(docs/CONTEXT\.md|docs/reference/THEMES\.md|docs/reference/DEBUGGING-METHOD\.md|docs/operate/CLAIMS\.md|docs/operate/DEPLOY-3\.2\.7\.md|docs/operate/UPDATE-SYSTEM\.md|docs/operate/RELEASING\.md|docs/operate/RECOVER-WINDOWS-UPDATE\.md|docs/operate/RECOVER-MACOS-UPDATE\.md|docs/business/1[0-9]-.*\.md|docs/business/redesign/.*\.md|client/docs/UPSTREAM-CHANGES\.md)$'
     stale=$(
         cd "$REPO" && grep -rEl --include=*.md '3\.[0-9]+\.[0-9]+' \
             README.md docs client/docs 2>/dev/null \
             | grep -vE '^(docs/reference/FIXES\.md|docs/reference/STILL-OPEN\.md|docs/history/.*|docs/archive/.*|client/docs/FRONTEND\.md)$' \
+            | grep -vE "$TRIAGED_BASIS" \
             | while read -r f; do
                 # Any 3.x.y in the file that is not the current version.
                 #
@@ -975,6 +1002,50 @@ def platform_keys():
                        read("client/src-tauri/src/locus/contract.rs"))
     return found or None
 
+def landing_domain():
+    """The landing page hostname, from the Caddyfile generator.
+
+    modules/05-caddy.sh is what actually writes the site block, so its
+    LANDING_DOMAIN default is the source. The template and the page's canonical
+    link are checked for AGREEMENT with this in section 26 — this function only
+    answers "what does the deployed config say".
+    """
+    m = re.search(r'LANDING_DOMAIN="\$\{LANDING_DOMAIN:-([^}]+)\}"',
+                  read("server/modules/05-caddy.sh"))
+    return m.group(1) if m else None
+
+def landing_docroot():
+    """The landing page document root, from deploy_site()'s own target.
+
+    Scoped to the deploy_site() function deliberately. A bare search for
+    `local target="/var/www/..."` matches deploy_console()'s `/var/www/admin`
+    FIRST (it appears earlier in the file), so the recorded root would silently
+    have been the console's — a checker that returns a plausible wrong answer is
+    worse than one that returns None, because it reports OK on a wrong fact.
+    """
+    src = read("server/modules/05-caddy.sh")
+    i = src.find("deploy_site() {")
+    if i < 0:
+        return None
+    end = src.find("\n# ", i)          # the next section comment ends the function
+    body = src[i:end if end > 0 else len(src)]
+    m = re.search(r'^\s*local target="(/var/www/[a-z]+)"', body, re.M)
+    return m.group(1) + "/" if m else None
+
+def landing_download_path():
+    """The shape of a download URL, from the renderer's own format string.
+
+    Reconstructed rather than stored, so the recorded fact cannot survive a
+    change to how deploy-site.sh builds the URL — which is the only thing that
+    can make the documented shape wrong.
+    """
+    src = read("server/scripts/deploy-site.sh")
+    if '"%s/updates/%s/%s"' not in src:
+        return None
+    m = re.search(r'HUB_BASE:-(\S+?)\}', src)
+    if not m:
+        return None
+    return m.group(1) + "/updates/<version>/<file>"
 def free_tier():
     """The free tier's port, cap and tier-row names, from the tree.
 
@@ -1034,9 +1105,38 @@ def theme_ids():
         return None
     return re.findall(r"^  '?([a-z0-9-]+)'?:", m.group(1), re.MULTILINE) or None
 
+def version_sites():
+    """The files `pnpm release-version` rewrites, from the bump script itself.
+
+    Derived by scanning `release-version.mjs` for the path each `update*Version()`
+    call targets, so the list cannot be restated into state.toml and drift. §17
+    asserts the same set from the other direction (that every site has a live
+    call); this is what the data file is checked against, so prose that links
+    here ("ALL FIVE version sites") can never disagree with the code.
+
+    Sorted, because the order the script happens to call the updaters in carries
+    no meaning and comparing by position would fail on a harmless reorder.
+    """
+    src = read("client/scripts/release-version.mjs")
+    # Each updater call names its target as a repo-relative path literal. Match
+    # the call sites, not the definitions, so a renamed-but-uncalled helper is
+    # not counted (the same distinction §17 makes and documents).
+    found = set()
+    for fn, rel in (
+        ("updatePackageVersion",      "client/package.json"),
+        ("updateCargoVersion",        "client/src-tauri/Cargo.toml"),
+        ("updateTauriConfigVersion",  "client/src-tauri/tauri.conf.json"),
+        ("updateCargoLockVersion",    "client/Cargo.lock"),
+        ("updateStateTomlVersion",    "docs/state.toml"),
+    ):
+        if re.search(re.escape(fn) + r'\s*\(', src):
+            found.add(rel)
+    return sorted(found) or None
+
 # Map fact -> callable returning the recomputed value, or None if not checkable.
 CHECKERS = {
     "client.version":       manifest_version,
+    "client.version_sites": version_sites,
     "hub.domain":           setup_domain,
     "hub.api_base":         publish_api_base,
     "hub.console_path":     lambda: setup_log_path("Admin console"),
@@ -1045,6 +1145,9 @@ CHECKERS = {
     "licence.client":       licence_client,
     "client.theme_ids":     theme_ids,
     "tiers.free":           free_tier,
+    "site.domain":           landing_domain,
+    "site.document_root":    landing_docroot,
+    "site.download_path":    landing_download_path,
 }
 
 for path, entry in sorted(facts.items()):
@@ -2472,6 +2575,42 @@ else
             bad "the client stores the throttle speed with no reader — the value would be persisted and never used"
         fi
     fi
+
+    # (g) THE PROSE ABOUT THE CAPS, not just the caps.
+    #
+    # WHY THIS EXISTS. The (a)–(f) checks all passed while two DOCUMENTS
+    # restated the caps wrongly: the root `README.md` said "Eco 5Mbit ... tc caps
+    # (5/100/200 Mbps)" — the pre-rename value the cap was CHANGED FROM — and
+    # `04-tc.sh`'s own header comment said "Eco (port 8443): 5 Mbps" above code
+    # that applies 1mbit. The guard checked the code and the docs drifted in
+    # silence, which is the §7 lesson one level out: verifying the value is not
+    # verifying what the documents SAY about it.
+    #
+    # The value is in `state.toml` ([tiers.free].cap). These two files are the
+    # ones a reader meets first (the front door, and the module that owns the
+    # cap), so they are the ones pinned here. A prose copy that reintroduces the
+    # old number now fails the build rather than shipping.
+    README_MD="$REPO/README.md"
+    if [ -f "$README_MD" ]; then
+        if grep -Eq 'tc caps \(1/100/200 Mbps\)' "$README_MD"; then
+            ok "README.md's tier-cap summary agrees with state.toml (1/100/200 Mbps)"
+        else
+            bad "README.md restates the tier caps and disagrees with state.toml — expected 'tc caps (1/100/200 Mbps)'"
+        fi
+        if grep -Eq 'Eco 5Mbit' "$README_MD"; then
+            bad "README.md still calls the free/Eco tier '5Mbit' — the cap was lowered to 1mbit"
+        else
+            ok "README.md does not restate the retired 5Mbit free-tier cap"
+        fi
+    fi
+    # The module header comment must not contradict the code below it. Match the
+    # "Eco (port 8443): 5 Mbps" line specifically; the numeric detail line in the
+    # cap table is checked by (a) above.
+    if grep -Eq 'Eco \(port 8443\): 5 Mbps' "$TC_MOD"; then
+        bad "04-tc.sh's header comment says 'Eco (port 8443): 5 Mbps' but the code below applies 1mbit"
+    else
+        ok "04-tc.sh's header comment does not contradict its own applied cap"
+    fi
 fi
 
 echo
@@ -2642,8 +2781,322 @@ if [ -f "$INSTALL_RS" ]; then
     else
         bad "the update-* upload (line $upload_line) is ABOVE the macOS packaging step (line $pack_line) — the .app.tar.gz would not exist yet, and the release would refuse to publish"
     fi
+
+    # (h) THE SILENT FALLBACK MUST NOT EXIST.
+    #
+    #     `resolve_platform_names(available=…)` used to return the pre-fix bare
+    #     Mach-O when a release carried no `.app.tar.gz`, log a WARNING, and
+    #     carry on. It therefore PUBLISHED a live `update_config` row pointing a
+    #     macOS slot at a payload no macOS client can install — which is exactly
+    #     how v3.2.26 reached the live hub, and why a student on 3.2.24 was
+    #     offered an update that failed with "not an installer (48150583 bytes)".
+    #
+    #     Sections §24(a)–(g) all check that the *declarations* agree. Not one
+    #     of them could see this, because the declarations were correct — the
+    #     defect was a runtime branch that DOWNGRADED a correct declaration into
+    #     a broken artifact. So this asserts the branch is a REFUSAL, not a
+    #     fallback: inside the macOS arm of `resolve_platform_names`, the legacy
+    #     name may only appear in a `raise FetchError(…)`, never as an assignment
+    #     to `resolved`.
+    #
+    #     Scoped to the function body and to the assignment shape on purpose:
+    #     `LEGACY_MACOS_NAMES` is a legitimate map and its *name* appears in
+    #     comments and the allow-list, so a whole-file grep (or a grep for the
+    #     identifier alone) stays green with the fallback restored. This checks
+    #     the thing that does the damage — `resolved = legacy`.
+    if [ -f "$FETCH" ]; then
+        fetch_body=$(sed -n '/^def resolve_platform_names/,/^def /p' "$FETCH")
+        if printf '%s\n' "$fetch_body" | grep -Eq '^[[:space:]]*resolved[[:space:]]*=[[:space:]]*legacy'; then
+            bad "fetch-release.py silently downgrades a macOS slot to the bare Mach-O (resolved = legacy) — a release with no .app.tar.gz would publish an uninstallable row instead of refusing"
+        else
+            ok "fetch-release.py refuses a macOS slot with no .app.tar.gz instead of silently serving the bare Mach-O"
+        fi
+        #     The refusal must be a FetchError that says WHY, or the operator is
+        #     back to "no updates, and nothing says why".
+        if printf '%s\n' "$fetch_body" | grep -q 'raise FetchError('; then
+            ok "fetch-release.py's macOS refusal raises FetchError (visible at publish time)"
+        else
+            bad "fetch-release.py's macOS slot-refusal path does not raise FetchError — the operator would see a crash, not a reason"
+        fi
+    fi
+
+    # (i) ONE ANSWER, NOT TWO.
+    #
+    #     The manifest cross-check must compare against the SAME list the staging
+    #     loop fetched — `resolved`, built with `available=set(assets)`. It used
+    #     to re-call `resolve_platform_names(version)` with NO `available=`,
+    #     which answers "what does the hub *prefer*"; staging asked "what will
+    #     the hub *fetch*". The two agreed only while every release carried every
+    #     preferred name, so the check could pass while a different file was
+    #     served — the "two sources of truth with no reconciliation" shape this
+    #     whole script exists to catch.
+    #
+    #     The invariant is narrow and stated as AGREEMENT, not shape: the loop
+    #     that builds `mismatches` iterates the list staging produced. Not a
+    #     "zero calls" rule — `verify_and_report` and the signature-fold resolve
+    #     the *preferred* names on purpose, to look up platform KEYS (which are
+    #     version-independent) and to read the staged filename back out of
+    #     `results`. Asserting "no second call" would fail intent-correct code,
+    #     which is how a guard gets bypassed (§24's own recurring lesson).
+    #
+    #     Scoped to the block between the staged-list binding and the signature
+    #     fold: that is the cross-check, and `mismatches.append` is inside it.
+    if [ -f "$FETCH" ]; then
+        if grep -q 'resolved = resolve_platform_names(version, available=set(assets))' "$FETCH"; then
+            ok "fetch-release.py binds the staged platform list from the release's own assets"
+        else
+            bad "fetch-release.py no longer binds \`resolved\` from available=set(assets) — staging and the cross-check can disagree again"
+        fi
+        # The cross-check iterating anything other than the staged `resolved`
+        # list is the bug. Anchored on the loop that feeds `mismatches`.
+        xcheck=$(sed -n '/mismatches = \[\]/,/mismatches.append/p' "$FETCH")
+        if printf '%s\n' "$xcheck" | grep -Eq 'for key, name, _ in resolved:'; then
+            ok "fetch-release.py's manifest cross-check compares against the staged list (what is served is what is checked)"
+        else
+            bad "fetch-release.py's manifest cross-check does not iterate the staged \`resolved\` list — it re-resolves the names and can pass while a different file is served"
+        fi
+    fi
+
+    # (j) THE BEHAVIOUR, not the text.
+    #
+    #     (h) and (i) above are greps — fast, but they can only prove the code
+    #     LOOKS right. The property that matters is behavioural: a pre-fix
+    #     release is REFUSED, not served. `smoke-macos-payload-resolution.sh`
+    #     imports the shipped `resolve_platform_names` and asserts exactly that,
+    #     so a rewrite that keeps the identifiers but restores the fallback
+    #     fails here even if every grep above is satisfied.
+    #
+    #     Run from the fast gate so it is enforced, not merely available: the
+    #     other smoke scripts are documented manual tools and nothing in CI ran
+    #     them, so a rule they asserted could be broken with every check green.
+    #     This one is wired in. It is offline and deterministic (it imports the
+    #     module and calls one function), so it costs a Python start-up.
+    SMOKE_MACOS="$SCRIPTS/smoke-macos-payload-resolution.sh"
+    if [ -f "$SMOKE_MACOS" ]; then
+        if smoke_out=$(bash "$SMOKE_MACOS" 2>&1); then
+            ok "the macOS payload resolution refuses a pre-fix release and serves the tarball otherwise (behavioural)"
+        else
+            bad "smoke-macos-payload-resolution.sh FAILED — a macOS slot could be served a payload no client can install:"
+            printf '%s\n' "$smoke_out" | sed 's/^/        /' >&2
+        fi
+    else
+        warn "no smoke-macos-payload-resolution.sh — the behavioural half of this contract is unenforced"
+    fi
 else
     warn "no install.rs — cannot check the client side of the macOS payload contract"
+fi
+
+# ─────────────────────────────────────────────────────────────
+# 25. Front-matter conformance — status is structure, not a banner.
+#
+# WHY THIS EXISTS
+#
+# `docs/README.md` rule 1 and `docs/STATE.md` rule 3 both say a document's status
+# is a front-matter FIELD (`audience:` / `status:`), not a prose banner, and that
+# a retired document lives in `archive/`/`history/`, where the FOLDER carries the
+# status. Nothing enforced it, so the rule held only where someone remembered it.
+#
+# It came apart in the redesign corpus: 17 files under `docs/business/redesign/`
+# and its `implementation/` subdirectory had a banner but no `status:` field, so
+# a reader — and any guard — had to parse prose to learn whether a file described
+# live code or a removed design. Three of them described the *removed* device
+# binding as if live. That is exactly the `dev-vs-code-drift` class this repo
+# keeps re-learning: the doc was right when written and the world moved.
+#
+# WHAT IT ENFORCES, and why each is safe to require:
+#   * Every `.md` under `docs/` and `client/docs/` EXCEPT `archive/` and
+#     `history/` opens with a fenced front-matter block carrying `audience:` and
+#     `status:`.
+#   * A file under `archive/` or `history/` need NOT (the folder is the status) —
+#     but if it DOES, that is fine (LAYOUT.md keeps its own).
+#   * `status:` is one of the three values the rule names.
+#   * Also: `README.md`, `AGENTS.md`, `CLAUDE.md`, `GEMINI.md` at the repo root are
+#     exempt by path — they are the entry points and predate the convention.
+#
+# ─────────────────────────────────────────────────────────────
+# 26. The landing page: one hostname, four download slots, two sides agreeing.
+#
+# WHY THIS EXISTS
+#
+# The landing page is a second hostname on the hub box, and it introduces exactly
+# the class of drift this script is for. Two things must agree and NOTHING in
+# the tree made them:
+#
+#   (a) THE HOSTNAME. It is written in four places with four different jobs:
+#       the Caddyfile generator (which block to serve), the manual-reference
+#       template (so a hand-built hub matches), docs/state.toml (the recorded
+#       fact), and the page itself (the canonical link, which is what a search
+#       engine treats as the page's identity). Three of those can be edited
+#       without the fourth, and the failure is quiet: a canonical link naming a
+#       host that serves nothing tells Google the real page is elsewhere.
+#
+#   (b) THE DOWNLOAD FILENAMES. The page's four buttons are rendered from the
+#       release manifest's platforms map — the same map publish-release.sh's
+#       PLATFORMS list and fetch-release.py resolve against. The macOS entries
+#       name .app.tar.gz tarballs, and the Windows entry is the NSIS installer
+#       rather than the raw .exe. Getting one wrong is not a visible break: the
+#       button renders, the page loads, and the download 404s.
+#
+# THIS SECTION CHECKS THE AGREEMENT, NOT EACH SIDE. That is section 24's lesson,
+# applied here: a check that each half is individually valid passes happily while
+# the two halves disagree — which is how the v3.2.12 Windows outage shipped.
+# ─────────────────────────────────────────────────────────────
+echo
+echo "26. The landing page — hostname and download slots agree everywhere"
+
+# Read the entry by scanning from its header to the next header, NOT a fixed
+# number of lines: this entry carries a long comment block, and a fixed offset
+# silently returned nothing (the guard fired with "<missing>" on its first run,
+# which is how the bug was found — worth keeping the shape that exposed it).
+#
+# The value is taken with an explicit quote split rather than a greedy gsub: the
+# first attempt used `gsub(/.*"|".*/,"")`, which strips the whole line because
+# the second alternative matches a quote followed by anything, including the
+# closing quote and the value between them.
+LANDING_TOML=$(awk '/^\[site\.domain\]/{f=1;next} /^\[/{f=0} f && /^value/{n=split($0,a,"\"");print a[2];exit}' \
+    "$REPO/docs/state.toml" 2>/dev/null)
+LANDING_MODULE=$(grep -oE 'LANDING_DOMAIN="\$\{LANDING_DOMAIN:-[^}]*\}"' "$REPO/server/modules/05-caddy.sh" 2>/dev/null \
+    | sed 's/.*:-\(.*\)}"/\1/' | head -1)
+LANDING_TEMPLATE=$(grep -oE '^[a-z0-9.-]+ \{' "$REPO/server/templates/Caddyfile" 2>/dev/null \
+    | grep -vi 'domain' | sed 's/ {//' | head -1)
+LANDING_PAGE=$(grep -oE '<link rel="canonical" href="https://[^/"]+' "$REPO/server/site/index.html" 2>/dev/null \
+    | sed 's|.*https://||' | head -1)
+
+echo "  state.toml      : ${LANDING_TOML:-<missing>}"
+echo "  05-caddy.sh     : ${LANDING_MODULE:-<missing>}"
+echo "  templates/      : ${LANDING_TEMPLATE:-<missing>}"
+echo "  site/index.html : ${LANDING_PAGE:-<missing>}"
+
+if [ -z "$LANDING_TOML" ] || [ -z "$LANDING_MODULE" ] || [ -z "$LANDING_TEMPLATE" ] || [ -z "$LANDING_PAGE" ]; then
+    bad "landing hostname could not be read from all four sites — one is missing"
+else
+    LAND_OK=1
+    [ "$LANDING_MODULE" = "$LANDING_TOML" ]   || { bad "05-caddy.sh LANDING_DOMAIN='${LANDING_MODULE}' != state.toml site.domain='${LANDING_TOML}'"; LAND_OK=0; }
+    [ "$LANDING_TEMPLATE" = "$LANDING_TOML" ] || { bad "templates/Caddyfile block '${LANDING_TEMPLATE}' != state.toml site.domain='${LANDING_TOML}'"; LAND_OK=0; }
+    [ "$LANDING_PAGE" = "$LANDING_TOML" ]     || { bad "site/index.html canonical '${LANDING_PAGE}' != state.toml site.domain='${LANDING_TOML}'"; LAND_OK=0; }
+    [ "$LAND_OK" = "1" ] && ok "landing hostname agrees across all four sites"
+fi
+
+# The four slots must exist in the page, one per FROZEN platform key. A missing
+# slot is three buttons instead of four, which no other check would notice.
+MISSING_SLOTS=""
+for k in linux windows macos_intel macos_arm; do
+    grep -q "data-download=\"${k}\"" "$REPO/server/site/index.html" 2>/dev/null \
+        || MISSING_SLOTS="$MISSING_SLOTS $k"
+done
+if [ -n "$MISSING_SLOTS" ]; then
+    bad "server/site/index.html is missing download slot(s):${MISSING_SLOTS}"
+    bad "  Each platform key needs one — they are the keys section 1 pins."
+else
+    ok "index.html carries all four download slots"
+fi
+
+# And the renderer must cover the same set. A slot the renderer does not know
+# about ships as href="#" — a dead button on a page that otherwise looks right.
+RENDER_SLOTS=$(grep -oE '^SLOTS = \[.*\]' "$REPO/server/scripts/deploy-site.sh" 2>/dev/null \
+    | grep -oE '"[a-z_]+"' | tr -d '"' | sort | tr '\n' ' ')
+EXPECT_SLOTS="linux macos_arm macos_intel windows "
+if [ "$RENDER_SLOTS" != "$EXPECT_SLOTS" ]; then
+    bad "deploy-site.sh SLOTS='${RENDER_SLOTS:-<missing>}' != expected '${EXPECT_SLOTS}'"
+    bad "  The renderer and the page must cover the same four platform keys."
+else
+    ok "deploy-site.sh renders the same four slots the page carries"
+fi
+
+# The landing block must never serve the hub's surfaces. This is the property a
+# future "just add a handle" edit removes with no symptom on the page itself.
+if awk '/^locusvpn\.jadedns\.uk \{/,/^\}/' "$REPO/server/templates/Caddyfile" 2>/dev/null \
+    | grep -qE '^[[:space:]]*(handle|handle_path|reverse_proxy|try_files)'; then
+    bad "the landing block in templates/Caddyfile contains a handle/proxy directive"
+    bad "  It must be a bare file_server: the hub's /updates/, /api/* and /admin/"
+    bad "  must not be reachable from the indexable hostname."
+else
+    ok "landing block serves static files only (no handle, no proxy)"
+fi
+
+# ─────────────────────────────────────────────────────────────
+# 25. Front-matter conformance (status is structure, not a banner)
+#
+# WHAT IT DOES NOT ENFORCE: that the declared status is TRUE. A guard cannot read
+# a design record and know it is superseded. This catches the missing field and
+# the invented value; the honest value is still a human's job.
+# ─────────────────────────────────────────────────────────────
+echo
+echo "25. Front-matter conformance (status is structure, not a banner)"
+fm_report=$(cd "$REPO" && python3 - <<'PY'
+import os, re, sys
+
+ALLOWED_STATUS = {"live", "reference", "design-record"}
+missing, badvalue = [], []
+
+def md_files(root):
+    for dirpath, dirs, files in os.walk(root):
+        if any(part in dirpath for part in ('node_modules', 'target', '.git', 'dist')):
+            continue
+        for fn in files:
+            if fn.endswith('.md'):
+                yield os.path.join(dirpath, fn)
+
+def front_matter(path):
+    """The keys in the leading fenced block, or None if there is no block."""
+    with open(path, encoding="utf-8", errors="replace") as fh:
+        lines = fh.read().splitlines()
+    # Skip a leading H1 (the docs put the front-matter block AFTER the title).
+    i = 0
+    while i < len(lines) and not lines[i].strip():
+        i += 1
+    if i < len(lines) and lines[i].startswith("# "):
+        i += 1
+    while i < len(lines) and not lines[i].strip():
+        i += 1
+    if i >= len(lines) or not lines[i].startswith("```"):
+        return None
+    i += 1
+    keys = {}
+    while i < len(lines) and not lines[i].startswith("```"):
+        m = re.match(r'^([a-z-]+):\s*(.*)$', lines[i].strip())
+        if m:
+            keys[m.group(1)] = m.group(2).strip()
+        i += 1
+    return keys
+
+for root in ("docs", "client/docs"):
+    for path in md_files(root):
+        rel = path.replace(os.sep, "/")
+        # Archived/historical material: the folder carries the status.
+        if rel.startswith("docs/archive/") or rel.startswith("docs/history/"):
+            continue
+        keys = front_matter(path)
+        if keys is None:
+            missing.append(rel)
+            continue
+        if "audience" not in keys:
+            missing.append(rel + "  (no `audience:`)")
+        if "status" not in keys:
+            missing.append(rel + "  (no `status:`)")
+        elif keys["status"] not in ALLOWED_STATUS:
+            badvalue.append(f"{rel}  status = {keys['status']!r} (allowed: {sorted(ALLOWED_STATUS)})")
+
+for f in sorted(set(missing)):
+    print("MISSING\t" + f)
+for f in sorted(set(badvalue)):
+    print("BADVALUE\t" + f)
+PY
+)
+
+if [ -z "$fm_report" ]; then
+    ok "every live document declares audience: and status: in its front-matter"
+else
+    while IFS="$(printf '\t')" read -r kind detail; do
+        case "$kind" in
+            MISSING)  bad "no front-matter (or a missing key): $detail" ;;
+            BADVALUE) bad "invalid status: $detail" ;;
+        esac
+    done <<EOF
+$fm_report
+EOF
+    bad "Fix: give each file a fenced block after its H1 with \`audience:\` and"
+    bad "\`status: live|reference|design-record\` — or move it to archive/history."
 fi
 
 echo

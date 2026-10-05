@@ -4,7 +4,7 @@
 audience:    human-operator
 status:      live
 authoritative-for: day-to-day operation of the hub (health, backups, restore)
-verified-against: docs/STATE.md
+verified-against: server/scripts/, server/setup.sh
 ```
 
 > Day-to-day management of the Locus server.
@@ -345,16 +345,17 @@ ssh $VPS "systemctl restart tc-eco-cap tc-stealth-cap tc-strike-cap"
 ### One-command deploy (`server/scripts/deploy.sh`)
 
 `setup.sh` is the *blank-box* path. For routine changes to a running hub, use
-**`server/scripts/deploy.sh`** — it does hooks + console + staging + verify in one
-command, and it is **idempotent and diff-based** (unchanged hooks are not
+**`server/scripts/deploy.sh`** — it does hooks + console + site + staging + verify
+in one command, and it is **idempotent and diff-based** (unchanged hooks are not
 uploaded, nothing is restarted unless something changed). It never writes a
 record, so deploying code cannot withdraw a release or reset a rollout.
 
 ```bash
-server/scripts/deploy.sh              # hooks + console + staging + verify
+server/scripts/deploy.sh              # hooks + console + site + staging + verify
 server/scripts/deploy.sh --check      # dry run, changes nothing
 server/scripts/deploy.sh --hooks      # hooks only
 server/scripts/deploy.sh --console    # console only
+server/scripts/deploy.sh --site       # landing page only
 ```
 
 What each step covers, and why:
@@ -363,9 +364,10 @@ What each step covers, and why:
 |---|---|---|
 | hooks | `/opt/pocketbase/pb_hooks/` | uploaded to `.new`, hash-verified, then `install -o pocketbase`. A NEW hook needs a restart to register, so it restarts. |
 | console | `/var/www/admin/` | built, tarred, uploaded, extracted, and **served-verified** (`/admin/` must 200). |
+| site | `/var/www/site/` | the public landing page. Rendered from the release manifest's `platforms` map (so its four download URLs name the version the hub actually serves), tarred, uploaded, and **served-verified** — including that `/updates/` is NOT reachable on the landing host. |
 | staging | `/root/server/` | `setup.sh` deploys FROM here, not from the repo. Leaving it stale is how a re-run reverts hooks. |
 | locus-fetch | restart | it runs FROM the staging copy, so a changed script has no effect until the process is recycled. |
-| verify | — | health, `/api/update`, `/api/release`, heartbeat, hook-drift. |
+| verify | — | health, `/api/update`, `/api/release`, heartbeat, hook-drift, and the landing page's four download links. |
 
 **SSH access.** Key auth is installed; nothing prompts. `~/.ssh/config` defines a
 `Host locus-hub` alias (HostName = the hub domain, User root, IdentityFile the

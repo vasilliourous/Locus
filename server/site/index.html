@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+    <!--
+      THE DOWNLOAD URLS BELOW ARE RENDERED AT DEPLOY TIME.
+
+      `data-download` carries the platform key, which is FROZEN (it is the same
+      four-key vocabulary the hub, the client and manifest.json use — see
+      check-consistency.sh §1). `deploy-site.sh` rewrites each `href` from
+      `release-artifacts/manifest.json` so the page cannot advertise a filename
+      that the current release does not contain.
+
+      Do NOT hand-edit an href to a literal filename, and do NOT hardcode a
+      version here. Both are Class B derived facts that go stale silently — the
+      page would keep offering 3.2.25 after 3.2.26 shipped, and the buttons
+      would 404 with nothing failing the build.
+    -->
+    <title>Locus VPN</title>
+    <meta
+      name="description"
+      content="Locus VPN is a lightweight VPN client for Windows, macOS and Linux. Download Locus VPN for your platform and connect with your code."
+    />
+    <link rel="canonical" href="https://locusvpn.jadedns.uk/" />
+    <link rel="icon" href="./favicon.ico" sizes="any" />
+    <link rel="icon" href="./icon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="./style.css" />
+
+    <!--
+      Structured data. This is what lets Google show the product name in the
+      result rather than guessing it from the URL. It is deliberately minimal:
+      name, description, platform list. No offers, no ratings, no price —
+      claiming any of those would be a fabricated fact on a page whose whole
+      job is to be trustworthy.
+    -->
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "SoftwareApplication",
+        "name": "Locus VPN",
+        "alternateName": "Locus",
+        "applicationCategory": "SecurityApplication",
+        "operatingSystem": "Windows, macOS, Linux",
+        "description": "Locus VPN is a lightweight VPN client for Windows, macOS and Linux.",
+        "url": "https://locusvpn.jadedns.uk/"
+      }
+    </script>
+  </head>
+  <body>
+    <main>
+      <header class="brand">
+        <img class="brand__mark" src="./icon.svg" alt="" width="56" height="56" />
+        <h1>Locus VPN</h1>
+      </header>
+
+      <p class="lede">
+        A lightweight VPN client for Windows, macOS and Linux.
+      </p>
+
+      <!--
+        THE ACCESS NOTE IS NOT DECORATION.
+
+        Locus is not a free public VPN — a code is required to sign in. Saying so
+        on the page keeps the audience we can actually serve, and avoids inviting
+        the traffic every one of whose visits the hub rejects. A visitor who
+        bounces because they were honestly told they need a code is a better
+        outcome than one who installs, fails, and leaves.
+      -->
+      <p class="note">
+        You need a Locus code to sign in. The client installs without one, but
+        will not connect until a code is entered.
+      </p>
+
+      <section aria-labelledby="download-heading">
+        <h2 id="download-heading">Download</h2>
+
+        <ul class="downloads">
+          <li>
+            <a class="dl" data-download="windows" href="#">
+              <span class="dl__os">Windows</span>
+              <span class="dl__meta">Windows 10 and 11, 64-bit &middot; installer</span>
+            </a>
+          </li>
+          <li>
+            <a class="dl" data-download="linux" href="#">
+              <span class="dl__os">Linux</span>
+              <span class="dl__meta">x86_64 &middot; executable</span>
+            </a>
+          </li>
+          <li>
+            <a class="dl" data-download="macos_arm" href="#">
+              <span class="dl__os">macOS</span>
+              <span class="dl__meta">Apple Silicon (M-series) &middot; .app</span>
+            </a>
+          </li>
+          <li>
+            <a class="dl" data-download="macos_intel" href="#">
+              <span class="dl__os">macOS</span>
+              <span class="dl__meta">Intel &middot; .app</span>
+            </a>
+          </li>
+        </ul>
+
+        <p class="verify">
+          Verify your download against the published
+          <a href="https://github.com/vasilliourous/Locus/releases/latest/download/manifest.json">manifest</a>.
+        </p>
+      </section>
+
+      <section aria-labelledby="how-heading">
+        <h2 id="how-heading">How it works</h2>
+        <ol class="steps">
+          <li>Download the build for your platform.</li>
+          <li>Install it, and open Locus.</li>
+          <li>Enter your code, then connect.</li>
+        </ol>
+      </section>
+    </main>
+
+    <footer>
+      <p>Locus VPN</p>
+    </footer>
+  </body>
+</html>

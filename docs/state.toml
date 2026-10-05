@@ -36,6 +36,29 @@ value      = "3.2.28"
 source     = "client/package.json, client/src-tauri/Cargo.toml, client/src-tauri/tauri.conf.json"
 provenance = "derived"
 
+[client.version_sites]
+# Every file `pnpm release-version` rewrites — the FIVE sites a release must keep
+# in agreement. This is here so no document has to restate the count: four
+# documents ("three version sites", "five version sites", "ALL FIVE version
+# sites") drifted against each other, and one of them contradicted the others in
+# prose. A count in a sentence is a Class B fact and cannot be recomputed; this
+# list can, and §17 recomputes it.
+#
+# WHY FIVE AND NOT THREE. Three sites must agree at RUNTIME and are guarded by
+# `client/src-tauri/tests/version_consistency.rs` (Cargo.toml, package.json,
+# tauri.conf.json). The bump script additionally writes Cargo.lock (guarded by
+# `cargo fetch --locked` in CI) and this file's `[client.version]` (guarded by §7
+# and §9). Both statements are true of different sets; the list below is the
+# union, i.e. what a bump must touch.
+#
+# §17 asserts this list equals the sites it finds in release-version.mjs, so a
+# sixth site added to the script — and not here, and not in the prose that links
+# here — fails the build. The order is the checker's (sorted), not the script's,
+# so a harmless reorder of the updater calls cannot fail the build.
+value      = ["client/Cargo.lock", "client/package.json", "client/src-tauri/Cargo.toml", "client/src-tauri/tauri.conf.json", "docs/state.toml"]
+source     = "client/scripts/release-version.mjs (the five update*Version() calls)"
+provenance = "derived"
+
 [client.first_shipped]
 value      = "3.0.0"
 source     = "docs/reference/FIXES.md (release history)"
@@ -92,6 +115,41 @@ provenance = "derived"
 [hub.pocketbase_ui]
 value      = "/_/"
 source     = "server/setup.sh (log line: 'PocketBase UI: https://${DOMAIN}/_/')"
+provenance = "derived"
+
+[site.domain]
+# The PUBLIC landing page, a second hostname on the SAME box as the hub.
+#
+# It is deliberately not the hub's hostname and must never become it. The hub
+# serves /updates/ (every published build), /api/* and /admin/; the landing page
+# is the one hostname here that is INDEXED. Serving them from one name would
+# publish the build tree and the API surface on a page whose whole purpose is to
+# be crawled. modules/05-caddy.sh generates a separate site block for it, and the
+# landing block contains no `handle` at all.
+#
+# The hub keeps its own name because that name is baked into every deployed
+# client (the activation response hands out `server`, the updater resolves
+# `update_url`) — renaming it would strand the fleet.
+value      = "locusvpn.jadedns.uk"
+source     = "server/modules/05-caddy.sh (LANDING_DOMAIN default)"
+provenance = "derived"
+
+[site.document_root]
+value      = "/var/www/site/"
+source     = "server/modules/05-caddy.sh (deploy_site target)"
+provenance = "derived"
+
+[site.download_path]
+# Where the four download buttons point. The hub's own release path — chosen
+# because GitHub will only serve an asset from a URL on the repository
+# (/releases/download/<tag>/<file>), so a link to a GitHub asset lands the
+# visitor on the repo's download page, which is what the page must not do.
+#
+# `%s` is the version, from the release manifest. The page is NOT linked to
+# "latest": the version is rendered at deploy time from manifest.json, because a
+# button pointing at a version the hub does not serve 404s silently.
+value      = "https://networkingguides.duckdns.org/updates/<version>/<file>"
+source     = "server/scripts/deploy-site.sh; server/scripts/publish-release.sh (PLATFORMS)"
 provenance = "derived"
 
 [hub.deploy_staging]

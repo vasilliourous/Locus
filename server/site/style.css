@@ -1,0 +1,204 @@
+/*
+ * Locus landing page.
+ *
+ * The palette is the CLIENT's, copied by value from
+ * `client/src/pages/_theme.tsx` (LOCUS_COLORS / LOCUS_LIGHT) and the first
+ * frame of `client/src/index.html`. It is duplicated rather than imported
+ * because this page is served as a static file by Caddy and has no build step —
+ * importing across the tree would mean this page acquiring a bundler, which is
+ * the complexity the static-file approach exists to avoid.
+ *
+ * If those values change, this file changes with them. It is a copy of a
+ * derived fact, not a second source of truth — the client owns the palette.
+ *
+ * No web fonts, no CDN, no external requests of any kind: the hub's landing
+ * block sets a strict CSP (`default-src 'none'`), so anything fetched from
+ * elsewhere would simply be blocked. The font stack is the client's own.
+ */
+
+:root {
+  --bg: #edf1ef;
+  --surface: #f2f6f4;
+  --surface-hover: #dfe6e2;
+  --border: #c3d0c9;
+  --text: #0b1f14;
+  --text-secondary: #4a6356;
+  --accent: #2a6e4c;
+  --accent-hover: #215839;
+  color-scheme: light;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0d1512;
+    --surface: #1b2a24;
+    --surface-hover: #22332c;
+    --border: #2c3f35;
+    --text: #e4ede7;
+    --text-secondary: #9bafa3;
+    --accent: #4fbf84;
+    --accent-hover: #6ed29c;
+    color-scheme: dark;
+  }
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  padding: 2rem 1.25rem 3rem;
+  background: var(--bg);
+  color: var(--text);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+    "Helvetica Neue", Arial, sans-serif;
+  font-size: 16px;
+  line-height: 1.55;
+  -webkit-font-smoothing: antialiased;
+}
+
+main,
+footer {
+  max-width: 34rem;
+  margin: 0 auto;
+}
+
+/* ── Brand ─────────────────────────────────────────────────────────── */
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 1.25rem;
+}
+
+/* The icon is `currentColor`, the same as in the app, so it inherits the
+   theme here too rather than needing a second file per mode. */
+.brand__mark {
+  width: 3.5rem;
+  height: 3.5rem;
+  color: var(--accent);
+  flex: none;
+}
+
+h1 {
+  margin: 0;
+  font-size: 1.75rem;
+  font-weight: 650;
+  letter-spacing: -0.015em;
+}
+
+h2 {
+  margin: 2.25rem 0 0.75rem;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-secondary);
+}
+
+.lede {
+  margin: 0 0 0.75rem;
+  font-size: 1.0625rem;
+}
+
+.note {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 0.9375rem;
+}
+
+/* ── Download buttons ──────────────────────────────────────────────── */
+
+.downloads {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.625rem;
+}
+
+.dl {
+  display: flex;
+  flex-direction: column;
+  gap: 0.125rem;
+  padding: 0.875rem 1.125rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  color: inherit;
+  text-decoration: none;
+  transition: background-color 0.12s ease, border-color 0.12s ease;
+}
+
+.dl:hover,
+.dl:focus-visible {
+  background: var(--surface-hover);
+  border-color: var(--accent);
+}
+
+.dl:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.dl__os {
+  font-weight: 600;
+  font-size: 1.0625rem;
+}
+
+.dl__meta {
+  color: var(--text-secondary);
+  font-size: 0.875rem;
+}
+
+@media (min-width: 30rem) {
+  .downloads {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .dl__meta {
+    font-size: 0.8125rem;
+  }
+}
+
+/* ── Supporting text ───────────────────────────────────────────────── */
+
+.verify {
+  margin: 0.75rem 0 0;
+  color: var(--text-secondary);
+  font-size: 0.8125rem;
+}
+
+.steps {
+  margin: 0;
+  padding-left: 1.25rem;
+  color: var(--text-secondary);
+}
+
+.steps li {
+  margin-bottom: 0.25rem;
+}
+
+a {
+  color: var(--accent);
+}
+
+a:hover {
+  color: var(--accent-hover);
+}
+
+footer {
+  margin-top: 3rem;
+  padding-top: 1.25rem;
+  border-top: 1px solid var(--border);
+  color: var(--text-secondary);
+  font-size: 0.8125rem;
+}
+
+footer p {
+  margin: 0;
+}
