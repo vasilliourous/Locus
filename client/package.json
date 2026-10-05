@@ -35,7 +35,10 @@
     "perf:build": "node scripts/perf/build.mjs",
     "perf:run": "node scripts/perf/run.mjs",
     "perf:compare": "node scripts/perf/compare.mjs",
-    "perf:test": "node --test scripts/perf/report.test.mjs"
+    "perf:test": "node --test scripts/perf/report.test.mjs",
+    "rust:lint": "cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets --features clippy -- -D warnings",
+    "rust:test": "cargo test --manifest-path src-tauri/Cargo.toml --lib",
+    "check:release": "pnpm rust:lint && pnpm rust:test && pnpm web:build && bash ../server/scripts/check-consistency.sh"
   },
   "dependencies": {
     "@dnd-kit/collision": "^0.5.0",
