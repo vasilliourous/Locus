@@ -2,10 +2,16 @@
 
 ```
 audience:    human-operator
-status:      ready — prepared 2026-09-29, NOT deployed (hub was offline)
+status:      reference
 authoritative-for: the step-by-step to ship the two 3.2.7 fixes and repair the live update row
-verified-against: docs/STATE.md
+verified-against: docs/reference/FIXES.md (2026-10-01)
 ```
+
+> **Status: a prepared deployment packet, NOT a record of a deployment** —
+> prepared 2026-09-29, and the hub was offline at the time. (This was previously
+> written into the `status:` field itself, which the front-matter rule does not
+> allow: `status:` names the document's KIND — `live` / `reference` /
+> `design-record` — and the deployment state is body prose, as it is here.)
 
 > **This is a prepared deployment packet, not a record of a deployment.** The
 > changes are committed and locally verified; nothing here has been pushed, tagged

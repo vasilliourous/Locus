@@ -4,7 +4,7 @@
 audience:    builder
 status:      live
 authoritative-for: the dated defect log (append-only; newest first)
-verified-against: docs/STATE.md
+verified-against: docs/state.toml (version/release facts)
 ```
 
 Everything below is a dated, append-only log of real defects and their fixes, in
@@ -24,6 +24,155 @@ corrections are marked. For what is *still* broken, read `STILL-OPEN.md`.
 > are active as soon as the matching version installs. A heartbeat that lacks
 > `enforcement_version` in its response is proof the hook is still stale — see
 > `STILL-OPEN.md`.
+
+---
+
+## THE DOCS DESCRIBED REMOVED MECHANISMS AS LIVE, AND TWO PROSE COPIES OF A CAP WERE WRONG (2026-10-05, docs + guards)
+
+**Not a code defect — a documentation set that had drifted from the code it
+described, in the specific class the doc architecture exists to prevent.** The
+tree's own guards were all green throughout: `check-consistency.sh` passed 24
+sections, every link and anchor resolved, and every *value* it recomputed agreed.
+What it could not see was the prose.
+
+The audit that found this, and the fixes:
+
+1. **The claim register contradicted itself.** `operate/CLAIMS.md` §5 A1 ("the
+   hub answers `/api/health`") was marked `unverified`, and the file's own closing
+   paragraph said the environment had *"no route to the hub"* — while
+   `verify-live.sh` returned `A1 PASS` and `/api/health` returned 200. A1 was
+   advanced to a dated verification and the paragraph was re-scoped from a
+   present-tense claim to dated history.
+
+2. **The verifier's date disagreed with the project's dateline.**
+   `verify-live.sh` suggested `today's date` from `date -u` (UTC), but every
+   register entry is written in the operator's NZ dateline (see `git log`), which
+   is up to a day ahead. A date copied from the script would have been a day
+   behind its neighbours. The script now prints the register's date, and A1 uses
+   it (2026-10-05).
+
+3. **Two prose copies of the free-tier cap were wrong.** The root `README.md`
+   said `Eco 5Mbit ... tc caps (5/100/200 Mbps)` and `04-tc.sh`'s own header
+   comment said `Eco (port 8443): 5 Mbps` — both the **pre-rename** value, above
+   code that applies `1mbit`, for months, with every value-check green. Fixed, and
+   **§23(g)** now pins those two restatements against `state.toml`. *A check on a
+   value is not a check on what a document says about it.*
+
+4. **The `uot_port` contract was documented backwards.** `client/docs/LOGIC-INVENTORY.md`
+   claimed *"the hub hook renames on the way out"*; the hook passes the tier
+   config **verbatim** and it is the **client** that tolerates both spellings
+   (`contract.rs`). The doc is the bug; corrected.
+
+5. **Three documents named a "client is 3.0.0" / "three version sites" fact in
+   present tense**, contradicting the five-site rule the release path enforces.
+   The count moved into `docs/state.toml` `[client.version_sites]` (derived, §9),
+   and the prose links it, so a sixth site fails the build.
+
+6. **The redesign corpus described removed device binding as live.** 17 files
+   under `docs/business/redesign/**` had banners but no front-matter `status:`;
+   three presented the removed one-code-per-device rule as current. All now carry
+   front-matter, the removed mechanisms are marked in-place, and **§25** fails the
+   build on a live document with no `audience:`/`status:` or an invented value —
+   which immediately caught a seventh (`DEPLOY-3.2.7.md` had prose in its
+   `status:` field).
+
+7. **A permanent 14-file WARN wall was read as green.** §7 reported every
+   document naming a non-current 3.x version, with a note that *"some are
+   legitimately historical"* — and nobody triaged it. The historical ones are now
+   excluded by exact path with a reason, so §7 is a real check: it reports only
+   genuine drift and was observed failing against a seeded one.
+
+Each new guard (§23(g), §25, the §9 `version_sites` fact, §7's triage) was
+**observed failing** against the defect it catches before being kept, and the
+suite is green after each fix.
+
+
+| | |
+|---|---|
+| **Reported as** | *"the update to 3.2.26 is not an installer (48150583 bytes); refusing to execute it — this build cannot install a raw executable, and neither can the platform installer"*, from a client on 3.2.24. Concurrently, the admin console's *Fetch & publish* refused a **v3.2.28** publish with *"the hub's platform filenames disagree with CI's manifest … macos_intel: the hub would serve `locus-darwin-amd64`, but CI's manifest advertises `locus-darwin-amd64.app.tar.gz`"* |
+| **Files** | `server/scripts/fetch-release.py` (`resolve_platform_names`, `fetch_release`), `server/scripts/check-consistency.sh` §24 (h)/(i)/(j), `server/scripts/smoke-macos-payload-resolution.sh` (new), `docs/operate/RECOVER-MACOS-UPDATE.md` (new) |
+
+### The client was right; the hub served the wrong file
+
+The error is precise, and every figure matches the live hub:
+
+| Fact | Value |
+|---|---|
+| Error reports | `48150583 bytes` |
+| `locus-darwin-arm64` `Content-Length` | `48150584` (48150583 == its exact byte count) |
+| First bytes of that file | `cf fa ed fe 0c 00 00 01` — a **Mach-O 64-bit arm64** |
+| `/api/update?version=3.2.24&platform=macos_arm` | `"version":"3.2.26"`, url `…/locus-darwin-arm64` |
+| `…/locus-darwin-arm64.app.tar.gz` | **HTTP 404** |
+
+`tauri_plugin_updater`'s macOS path is `GzDecoder` + `tar::Archive` over an
+`.app` bundle. It cannot apply a bare Mach-O. The client's `is_installer_payload`
+refused it — correctly — and **the hub had published an artifact no macOS client
+could install**.
+
+### Two defects, not one
+
+**(1) The silent fallback published it.** `resolve_platform_names(available=…)`
+returned the pre-fix bare Mach-O when a release carried no `.app.tar.gz`, logged
+a WARNING at a level nobody reads, and carried on. v3.2.26 genuinely predates the
+macOS packaging step (see the 2026-10-04 entry below), so the fallback fired and
+wrote a live `update_config` row pointing every macOS client at a payload its
+installer can never apply. **Degrading to an uninstallable payload is worse than
+refusing:** a refusal is visible at publish time; a broken row looks healthy from
+the operator's seat. This is the retired client's worst failure mode — *an update
+advertised and then unable to install, with nothing saying why* — re-created on
+the hub side.
+
+**(2) The cross-check answered a different question from staging.** The staging
+loop resolved the names *with* `available=set(assets)` ("what will the hub
+fetch?"), while the manifest cross-check re-called `resolve_platform_names(version)`
+*without* it ("what does the hub prefer?"). The two agreed only while every
+release carried every preferred name, so the check could pass while a different
+file was served — the "two sources of truth with no reconciliation" shape this
+project keeps paying for.
+
+### Why three existing guards passed
+
+- §24's six assertions check that the **declarations agree** (CI's map, the hub's
+  `NEW_PLATFORMS`, `publish-release.sh`'s `PLATFORMS`, the doc). They did agree.
+  The defect was a **runtime branch that downgraded a correct declaration into a
+  broken artifact** — invisible to a declaration-only check.
+- `publish-release.sh` (the CLI route) was already safe: it hard-codes the
+  tarball names and refuses a partial publish. Only the **fetch** route had the
+  fallback. The console error was the CLI-shaped guard firing on a version whose
+  release genuinely lacked the tarball.
+- The macOS hash cross-check hashed whichever file the *manifest* named, so it
+  agreed with itself by construction — the 2026-10-01 lesson, unlearned for a
+  second slot.
+
+### The fix
+
+1. **The fallback is gone.** `resolve_platform_names(available=…)` now **raises
+   `FetchError`** for a macOS slot with no `.app.tar.gz`, naming the platform, the
+   missing file, and the pre-fix binary it refused to serve.
+2. **One answer.** The manifest cross-check iterates the *staged* `resolved` list,
+   so what is verified is what is served. The mismatch message now points at the
+   real remedy first — *almost always a stale deployed `fetch-release.py`* — and
+   `hooks-sync.sh --fetch-service`.
+3. **Guards, each shown to fail** against the code it catches (the repository's
+   rule):
+   - §24(h) — `resolved = legacy` must not exist; the refusal must `raise FetchError`.
+   - §24(i) — staging binds `resolved` from `available=set(assets)`; the
+     cross-check iterates that list.
+   - §24(j) — runs `smoke-macos-payload-resolution.sh`, which **imports the
+     shipped function** and asserts the behaviour. Proven necessary: an evasive
+     rewrite (`resolved = (legacy)`) slips past the (h) grep and is caught only
+     by (j).
+
+### Verified / not verified
+
+| | Status |
+|---|---|
+| The live hub serves a bare Mach-O for `3.2.26` macOS slots | **Verified** (read-only `curl`; bytes and length match the report) |
+| v3.2.26 predates the packaging step; v3.2.28 carries the tarballs + `.sig` | **Verified** (GitHub Release asset lists and both manifests) |
+| The fallback, reproduced, published a bare Mach-O | **Verified** (imported the module; before/after in the session) |
+| Each new guard fails against the pre-fix code | **Verified** (§24 (h)/(i)/(j) each shown red on a reverted copy) |
+| The deployed host's `fetch-release.py` is the stale half | **Not verified** — needs `hooks-sync.sh --fetch-service --dry-run` on the host |
+| A real end-to-end macOS update installs | **Not verified** — needs macOS hardware; recovery is `RECOVER-MACOS-UPDATE.md` |
 
 ---
 

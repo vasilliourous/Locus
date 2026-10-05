@@ -73,7 +73,8 @@ age-keygen -o age-key.txt
 
 # 3. Create .secrets.env with all credentials:
 #    DOMAIN, ADMIN_API_TOKEN, B2_APPLICATION_KEY_ID/KEY, B2_BUCKET,
-#    ECO_PASS, STEALTH_PASS, STRIKE_PASS, PB_ADMIN_EMAIL, PB_ADMIN_PASS
+#    ECO_PASS, STRIKE_PASS, STEALTH_PASS (retired port, still validated),
+#    PB_ADMIN_EMAIL, PB_ADMIN_PASS
 #    (See SECRETS-MANAGEMENT.md for the full template)
 
 # 4. Encrypt it
@@ -270,10 +271,10 @@ ssh root@your-vps 'bash -s' < server/setup.sh
 The setup script does **everything** automatically:
 1. Validates environment (OS, arch, root, disk, memory, DNS)
 2. Enables BBR + TCP kernel tuning
-3. Installs 3 ssserver instances (eco:8443, stealth:8444, strike:8445)
-4. Applies tc traffic shaping (Eco 5 Mbps, Stealth 100 Mbps, Strike 200 Mbps,
+3. Installs 2 ssserver instances (eco:8443 the free plan, strike:8445 the paid one)
+4. Applies tc traffic shaping (Free 1 Mbps, Full 100 Mbps,
    each with an `fq_codel` leaf qdisc to keep latency flat under load)
-5. Installs **sing-box UDP-over-TCP on :8446** for the Strike gaming tier
+5. Installs **sing-box UDP-over-TCP on :8446** for the paid tier
    (open the firewall for it too; `ENABLE_UOT=0` opts out)
 6. Installs Caddy with rate limiting, Let's Encrypt TLS, `/admin/` and `/updates/`
 7. Installs PocketBase with JS hooks and SQLite WAL mode, **creates the admin,
@@ -301,8 +302,8 @@ FIRST_BATCH=50 FIRST_BATCH_MIDDLEMAN=Sarah \
 
 | Variable | Meaning |
 |----------|---------|
-| `FIRST_BATCH` | Codes per tier (applies to all three) |
-| `FIRST_BATCH_ECO` / `_STEALTH` / `_STRIKE` | Per-tier overrides |
+| `FIRST_BATCH` | Codes per plan (applies to both) |
+| `FIRST_BATCH_FREE` / `_STRIKE` | Per-plan overrides (`strike` is the paid row) |
 | `FIRST_BATCH_MIDDLEMAN` | Recorded against every code in the batch |
 | `FIRST_BATCH_EXPIRES` | Optional expiry, `YYYY-MM-DD` |
 
@@ -326,10 +327,12 @@ After deployment, verify:
 - [ ] `systemctl is-active caddy` → active
 - [ ] `systemctl is-active pocketbase` → active
 - [ ] `systemctl is-active shadowsocks-eco` → active
-- [ ] `systemctl is-active shadowsocks-stealth` → active
 - [ ] `systemctl is-active shadowsocks-strike` → active
 - [ ] `sysctl net.ipv4.tcp_congestion_control` → bbr
-- [ ] `tc -s class show dev eth0` → classes 1:10 (Eco 5 Mbps), 1:20 (Stealth 100 Mbps), 1:30 (Strike 200 Mbps)
+- [ ] `tc -s class show dev eth0` → classes 1:10 (Free 1 Mbps), 1:30 (Full 100 Mbps)
+      — and **no** 1:20 class
+- [ ] `systemctl is-enabled shadowsocks-stealth 2>&1` → **not-found / disabled** on an
+      upgraded box (retired; remove by hand — `business/14-risks.md` §14.8)
 - [ ] `systemctl is-active pocketbase-backup.timer` → active (hourly B2 backups; setup auto-runs the first backup)
 - [ ] `tail -5 /var/log/myvpn-backup.log` → last line "Backup completed (exit 0)"
 - [ ] `systemctl is-active locus-fetch` → active (only if publishing releases)
@@ -420,17 +423,15 @@ token. Note `05-caddy.sh` extracts `console-dist.tar.gz` if present, so a full
 # /root/.pb_admin_creds — NOT /root/.admin_api_token, which PocketBase 0.22
 # rejects with 401)
 PB_TOKEN=$(ssh root@your-vps "grep PB_TOKEN /root/.pb_admin_creds | cut -d= -f2")
-./scripts/generate_codes.sh https://networkingguides.duckdns.org "$PB_TOKEN" eco 50
-./scripts/generate_codes.sh https://networkingguides.duckdns.org "$PB_TOKEN" stealth 30
+./scripts/generate_codes.sh https://networkingguides.duckdns.org "$PB_TOKEN" free 50
 ./scripts/generate_codes.sh https://networkingguides.duckdns.org "$PB_TOKEN" strike 20
 ```
 
 ### Print Code Cards
 
 ```bash
-./scripts/print_codes.sh eco-codes.txt eco-cards.pdf
-./scripts/print_codes.sh stealth-codes.txt stealth-cards.pdf
-./scripts/print_codes.sh strike-codes.txt strike-cards.pdf
+./scripts/print_codes.sh free-codes.txt free-cards.pdf
+./scripts/print_codes.sh strike-codes.txt full-cards.pdf
 ```
 
 ---
@@ -478,7 +479,7 @@ ssh root@new-vps 'bash -s' < server/restore.sh
 ```
 
 This will:
-1. Provision the new VPS from scratch (runs full `setup.sh` — BBR, 3× Shadowsocks, tc caps 5/100/200 Mbps, Caddy + TLS, PocketBase, backups, UFW)
+1. Provision the new VPS from scratch (runs full `setup.sh` — BBR, 2× Shadowsocks, tc caps 1/100 Mbps, Caddy + TLS, PocketBase, backups, UFW)
 2. Install the b2 CLI and authenticate with the secrets' B2 key
 3. Find the **latest** backup in `b2://<bucket>/backups/` (or use `BACKUP_PATH=...` to pick a specific one)
 4. Download + verify the SHA256 checksum (aborts on mismatch)

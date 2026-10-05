@@ -1,5 +1,12 @@
 # 4. The card and the credential
 
+```
+audience:    human-operator
+status:      design-record
+authoritative-for: the card/credential design (client half built; binding half removed)
+verified-against: docs/reference/DEVICE-IDENTITY.md, docs/reference/FIXES.md
+```
+
 > **SUPERSEDED IN PART 2026-10.** The requirement this file opened with — *"the
 > code needs to be stored somewhere"* so a student who threw the card away stays
 > logged in — is **built**: the client mirrors the code to a machine-scoped store

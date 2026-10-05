@@ -236,7 +236,10 @@ pub struct IVerge {
     /// never send the full value to the frontend — see `cmd::locus`.
     pub activation_code: Option<String>,
 
-    /// The tier the hub granted (`eco`, `stealth`, `strike`).
+    /// The tier the hub granted (`free`/`eco` for the free plan, `strike` for
+    /// the paid one). A **frozen wire name**: the hub resolves it against
+    /// `tier_configs`, so it is never renamed to match what the UI displays.
+    /// The student-visible label lives in one place (`tier-badge.tsx`).
     pub locus_tier: Option<String>,
 
     /// The device fingerprint this code is bound to.

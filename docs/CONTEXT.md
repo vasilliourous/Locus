@@ -4,7 +4,7 @@
 audience:    all
 status:      live
 authoritative-for: project history, philosophy, repo layout, and agent guidance
-verified-against: docs/STATE.md
+verified-against: docs/state.toml
 ```
 
 > **Purpose:** Everything a future agent needs to understand this project without
@@ -31,7 +31,7 @@ verified-against: docs/STATE.md
 > | anything saying "the client code lives in `legacy/wails-client/`" | **wrong** — that is pre-Tauri and predates the fork |
 >
 > **The shipping client is `client/`**, first shipped 3.0.0 and now on the 3.x
-> line (current version in `docs/STATE.md`). Where
+> line (current version: `[client.version]` in [`state.toml`](state.toml)). Where
 > this file and the code disagree, the code is right and this file is a bug
 > (`docs/README.md` rule 3).
 
@@ -87,14 +87,15 @@ The docs use these words; this is what each one means, and which word to prefer.
 
 | Term | Meaning | Notes |
 |---|---|---|
-| **hub** | The deployed server: the VPS running PocketBase hooks, Caddy and the three Shadowsocks services. | **Prefer "hub"** in prose. "server" means the same thing and survives in older text; `server/` is the code directory. |
+| **hub** | The deployed server: the VPS running PocketBase hooks, Caddy and the two Shadowsocks services. | **Prefer "hub"** in prose. "server" means the same thing and survives in older text; `server/` is the code directory. |
 | **client** | The shipping desktop app at `client/` — a Tauri 2 fork of Clash Verge Rev tunnelling through mihomo. | Old text that says "client" about the Wails build is retired; see `legacy/wails-client/`. |
-| **tier** | A service level: Free (planned) / Eco (deployed), Stealth, Strike. A tier fixes a port, a tc cap, and whether UoT is on. | Canonical table: `business/04-tiers.md` §4.1. |
-| **code** | A student's activation code, `RQ-XXXX-XXXX-XXXX-C`. | The unit of entitlement; one code binds to one device. |
+| **tier** | A service level, rendered as a *plan*: **Free** (TCP 8443, UDP 8447, the `eco` row) or **Full** (TCP 8445, UDP 8446, the `strike` row). A tier fixes its ports and its tc cap. **Both plans carry UDP**; the differentiator is rate. | Canonical table: `business/04-tiers.md` §4.1. The row names are frozen wire names; the labels are not. |
+| **code** | A student's activation code, `RQ-XXXX-XXXX-XXXX-C`. | The unit of entitlement. **Single-use and tied to no device** — device binding was removed (2026-10); the client keeps the code in a machine-scoped store, so a reinstall usually restores access with no re-entry. See `reference/DEVICE-IDENTITY.md`. |
+| **plan** | What a student calls a tier: **Free** or **Full**. | The customer-facing name. The hub still sends the row name (`eco`, `strike`); one component maps wire name → label, so the two cannot drift. |
 | **term** | A length of access bought once and measured from **activation** (not purchase), materialised into `expires_at` when a device binds. | Distinct from a calendar expiry date set at mint, which is what the hub used before the redesign. |
 | **renew** | Extending a code's `expires_at` from the **later of now and the current expiry**. | Paying early never loses days. |
 | **bind / unbind** | Attaching a code to a device fingerprint / releasing it. | **Suspend** (not delete) revokes; **Unbind** moves a student to a new laptop. |
-| **UoT** | UDP-over-TCP — carrying game UDP inside the TCP tunnel (Strike only, port 8446). | See `GAMING-UDP.md`. |
+| **UoT** | UDP-over-TCP — carrying game UDP inside the TCP tunnel. **Both plans have it**, each on its own listener (free 8447 capped 1 Mbps, paid 8446 uncapped). | See `GAMING-UDP.md` and `business/04-tiers.md` §4.3.1. |
 | **FIXES / STILL-OPEN** | Two dated docs: what was broken and fixed, and what is still unfinished. | `reference/FIXES.md`, `reference/STILL-OPEN.md`. |
 
 ---
@@ -105,19 +106,19 @@ A commercial VPN service for students at N4L-managed NZ schools (Macleans Colleg
 It bypasses Palo Alto firewalls using **Shadowsocks TCP** — the only protocol that
 consistently passes through N4L's detection (no TLS fingerprint, no UDP dependency).
 
-The service has three tiers:
+The service has two plans:
 
 | Tier | Price | Port | CC | Cap | Transport | Use case |
 |------|-------|:----:|:---:|:---:|:---------:|----------|
-| Eco | $2/mo | 8443 | BBR | 5 Mbps tc | TCP only | Text, browsing |
-| Stealth | $4/mo | 8444 | BBR | 100 Mbps tc | TCP only | Streaming |
-| Strike | $8/mo | 8445 | BBR | 200 Mbps tc | TCP+UDP (raw) | Gaming |
+| Free (`eco` on the box) | $0/mo | 8443 | BBR | 1 Mbps tc | TCP only | 10 GB/mo of chat and browsing |
+| Full (`strike` on the box) | $5/mo | 8445 | BBR | 100 Mbps tc | TCP+UDP (UoT) | Streaming, downloads and gaming |
 
-> **This is the deployed system** (`server/modules/04-tc.sh`). The commercial
-> plan replaces Eco with a free 1 Mbps tier and drops the ladder to $0/$4/$7 —
-> **proposed, not yet in the tree**. Canonical comparison:
-> [`business/04-tiers.md`](business/04-tiers.md) §4.1 and
-> [`business/17-not-built.md`](business/17-not-built.md).
+> **Two plans, and the on-box names differ from the customer-facing ones.**
+> Both row names are FROZEN wire names because a code in the field carries its
+> tier string and the hub resolves it by that string; the labels live in one
+> place (`client/src/components/connection/tier-badge.tsx`). Stealth (8444) was
+> retired when the two paid tiers were merged. Canonical table:
+> [`business/04-tiers.md`](business/04-tiers.md) §4.1, §4.2.4 and §4.6.
 
 **Activation codes are `RQ-XXXX-XXXX-XXXX-C`** (15 chars: `RQ` prefix + 3×4
 random charset chars + 1 Luhn check char; charset
@@ -275,8 +276,8 @@ and the memory guard in `00-env.sh` is deliberately tuned for it.
 |--------|:------:|-------|
 | 00-env | ✅ | OS, arch, root, disk, memory all validated (**memory guard fixed** — it rejected 512MB droplets) |
 | 01-bbr | ✅ | BBR active, TCP tuning params set |
-| 02-shadowsocks | ✅ | 3 instances installed and enabled |
-| 04-tc | ✅ | Eco 5Mbit, Stealth 100Mbit, Strike 200Mbit classes active (+ fq_codel leaf qdiscs) |
+| 02-shadowsocks | ✅ | 2 instances installed and enabled |
+| 04-tc | ✅ | Free 1Mbit, Full 100Mbit classes active (+ fq_codel leaf qdiscs) |
 | 05-caddy | ✅ | Caddy with ratelimit plugin; now also `/admin/` SPA + `/updates/` file server. Console bundle is a **required** deploy input |
 | 06-pocketbase | ✅ | 0.22.21 installed; bootstrap failure is now **fatal**, not a warning |
 | 07-backups | ✅ | Timer enabled; verification now hashes the **downloaded** artifact |
@@ -452,7 +453,7 @@ client in `v4/`; removed files recoverable from git history)
 | Metric | Value |
 |--------|-------|
 | Total lines (Go) | ~9,500 across 48 files (measured 2026-09-29) |
-| Client version | the Wails client is **frozen** (its `VERSION`/`bump.sh` tooling is deleted). The **shipping fork versions itself** across three sites, asserted equal by a test — current value in `docs/STATE.md` |
+| Client version | the Wails client is **frozen** (its `VERSION`/`bump.sh` tooling is deleted). The **shipping fork versions itself** in its own manifests, asserted equal by a test — current value: `[client.version]` in [`state.toml`](state.toml) |
 | Engine | sing-box 1.12.1 (client bundle + optional server UoT both pin 1.12.1) |
 | Min Go version | 1.22 |
 | Platforms | Linux, macOS (Intel+ARM, unsigned), Windows |
@@ -491,16 +492,16 @@ client in `v4/`; removed files recoverable from git history)
 │              └──────────────────────┘                      │
 └──────────────────────────┼───────────────────────────────┘
                            │ Shadowsocks TCP (AES-256-GCM)
-                           │ :8443 / :8444 / :8445
+                           │ :8443 (free) / :8445 (paid)
                            ▼
 ┌──────────────────────────────────────────────────────┐
 │                   VPS (Ubuntu 22.04)                    │
 │                                                        │
 │  ┌──────────┐  ┌──────────┐  ┌──────────────────────┐  │
-│  │  Caddy   │  │PocketBase│  │  ssserver × 3        │  │
-│  │  TLS +   │  │ SQLite   │  │  Eco/Stealth/Strike   │  │
-│  │  rate    │  │ JS hooks │  │  BBR/BBR/BBR          │  │
-│  │  limit   │  │          │  │  5/100/200 Mbps       │  │
+│  │  Caddy   │  │PocketBase│  │  ssserver × 2        │  │
+│  │  TLS +   │  │ SQLite   │  │  Free / Full          │  │
+│  │  rate    │  │ JS hooks │  │  BBR / BBR            │  │
+│  │  limit   │  │          │  │  1 / 100 Mbps         │  │
 │  └──────────┘  └──────────┘  └──────────────────────┘  │
 └──────────────────────────────────────────────────────┘
 ```
@@ -561,9 +562,9 @@ client in `v4/`; removed files recoverable from git history)
 4. **The JS hooks have been rewritten for PocketBase 0.22+.** If activation
    returns a generic 400 error after a fresh deploy, check `journalctl -u pocketbase`
    for hook load errors.
-5. **All tiers use BBR — no kernel modules to maintain.** Bandwidth caps are tc-based
-   (Eco 5 / Stealth 100 / Strike 200 Mbps); after a kernel update, re-apply with
-   `systemctl restart tc-eco-cap tc-stealth-cap tc-strike-cap`.
+5. **Both tiers use BBR — no kernel modules to maintain.** Bandwidth caps are tc-based
+   (Free 1 / Full 100 Mbps); after a kernel update, re-apply with
+   `systemctl restart tc-eco-cap tc-strike-cap`.
 6. **The hub's stable identifier is its domain**, recorded in `state.toml`
    (DigitalOcean, Sydney; the OS/spec line there is marked unverified).
    **The address behind it is NOT stable and is deliberately not written down** —

@@ -4,7 +4,7 @@
 audience:    builder
 status:      live
 authoritative-for: how a released build reaches an installed client, end to end
-verified-against: docs/STATE.md
+verified-against: server/pb_hooks/release.pb.js, client/src-tauri/src/locus/update/
 ```
 
 > How a released build reaches an installed client, end to end. Read this with
@@ -85,9 +85,17 @@ updater can install, and the two are not interchangeable:
 > **The macOS row is a fix, not a detail (2026-10-04).** Both the CI manifest and
 > the hub named the bare `locus-darwin-arm64` for the macOS slots, so a macOS
 > client downloaded and verified an artifact its installer could never apply.
-> macOS auto-update had therefore never worked. Three sites name this payload and
+> macOS auto-update had therefore never worked. Four sites name this payload and
 > `check-consistency.sh` **§24** asserts they agree — nothing checked it before,
 > which is why the mismatch survived every green pipeline.
+>
+> **A release that predates that fix is now refused, not degraded (2026-10-05).**
+> The fetch route used to fall back to the bare Mach-O when a release carried no
+> `.app.tar.gz`, log a WARNING and publish anyway — which is how `v3.2.26` reached
+> the live hub pointing `macos_arm` at a payload no macOS client can install. It
+> now raises `FetchError`. Degrading to an uninstallable payload is worse than
+> refusing: a refusal is visible at publish time, a broken row is not. See
+> `../reference/FIXES.md`, 2026-10-05, and `RECOVER-MACOS-UPDATE.md`.
 
 ### There is no rollout percentage
 

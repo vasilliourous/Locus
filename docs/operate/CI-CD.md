@@ -4,7 +4,7 @@
 audience:    human-operator
 status:      live
 authoritative-for: the client CI pipeline (.github/workflows/client.yml)
-verified-against: docs/STATE.md
+verified-against: .github/workflows/client.yml
 ```
 
 > **Note:** the archived client's pipeline was removed and replaced. `build.yml`

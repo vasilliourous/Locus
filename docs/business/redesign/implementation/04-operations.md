@@ -1,5 +1,12 @@
 # 4. Operations — the job, in order
 
+```
+audience:    builder
+status:      design-record
+authoritative-for: the operator runbook
+verified-against: docs/reference/DEVICE-IDENTITY.md, docs/reference/FIXES.md
+```
+
 > What an operator actually does with this. Written as a runbook, because the
 > reasoning is elsewhere and the sequence is what gets forgotten.
 

@@ -1,7 +1,8 @@
 import { LOCUS_COLORS, LOCUS_LIGHT } from '@/pages/_theme'
 
 /**
- * The theme registry — the six looks a student can pick between.
+ * The theme registry — the named looks a student can pick between (nine today;
+ * this comment deliberately does not restate the count — see `THEMES` below).
  *
  * `docs/reference/THEMES.md` is the design record and the authority on *why*
  * each theme exists; this file is the authority on *what* each theme is.

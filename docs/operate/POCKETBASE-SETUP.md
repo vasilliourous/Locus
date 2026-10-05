@@ -4,7 +4,7 @@
 audience:    human-operator
 status:      live
 authoritative-for: PocketBase collections, hooks and the /admin/ console setup
-verified-against: docs/STATE.md
+verified-against: server/pb_hooks/, server/console/
 ```
 
 > After the server modules run, PocketBase is installed and running — but it
@@ -64,7 +64,7 @@ In PocketBase admin UI, go to **Settings → Collections** and create these:
 | Field | Type | Required | Unique | Notes |
 |-------|------|:--------:|:------:|-------|
 | `code` | text (plain) | ✅ | ✅ | Full code: `RQ-ABCD-EFGH-JKMN-T` |
-| `tier` | select | ✅ | ❌ | Options: `eco`, `stealth`, `strike` |
+| `tier` | text | ✅ | ❌ | The on-box row name: `free`/`eco` or `strike`. **`text`, not `select`** — see the note below. |
 | `used` | bool | ❌ | ❌ | Default: false |
 | `suspended` | bool | ❌ | ❌ | Default: false |
 | ~~`bound_fingerprint`~~ | text (plain) | ❌ | ❌ | **Retired.** Kept on an existing hub, never read or written |
@@ -90,12 +90,33 @@ Update: @request.auth.admin = true
 Delete: @request.auth.admin = true
 ```
 
+### Why `tier` is `text` and not a `select`
+
+This document described it as a `select` with `["eco", "stealth", "strike"]` for
+a long time, and that is **wrong on both axes**:
+
+* **The type.** `server/scripts/seed-pb.py` creates it as `text`. A `select`
+  would have been an allow-list enforced by PocketBase on every write, which
+  sounds safer than it is: the hub resolves a code's tier by looking the
+  **code's own string** up in `tier_configs`, so a value the allow-list rejects
+  is a code that cannot be minted at all, while a value it *accepts* but no row
+  matches is a code that activates and then carries no `server_config` — a
+  "connected" app that cannot reach the internet, which is the failure class
+  `FIXES.md` records. `text` plus the guards in `check-consistency.sh` §23/§27 is
+  the shape that actually holds the agreement.
+* **The options.** There are two tiers now. `stealth` was retired when the paid
+  ladder merged; `free` and `eco` are the same free endpoint and both resolve.
+
+If you are creating these collections by hand rather than by running the seed,
+match the seed's types — a hub whose `tier` column is a three-value `select`
+will refuse to mint a `free` code.
+
 ### Collection: `tier_configs`
 
 | Field | Type | Required | Unique | Notes |
 |-------|------|:--------:|:------:|-------|
-| `tier` | select | ✅ | ✅ | Options: `eco`, `stealth`, `strike` |
-| `config` | json | ✅ | ❌ | Shadowsocks server config object |
+| `tier` | text | ✅ | ✅ | The on-box row name. **`text`, not `select`** — see the note below. |
+| `config` | text | ✅ | ❌ | Shadowsocks server config **as a JSON string** |
 | `active` | bool | ❌ | ❌ | Default: true |
 | `udp_relay` | bool | ❌ | ❌ | Default: false |
 
@@ -222,18 +243,22 @@ ssh root@networkingguides.duckdns.org "cat /root/.tier_passwords"
 
 This will output:
 ```bash
-ECO_PASS=abc123...
-STEALTH_PASS=def456...
-STRIKE_PASS=ghi789...
+ECO_PASS=abc123...        # the free plan
+STEALTH_PASS=def456...    # retired; still present in the file on an upgraded box
+STRIKE_PASS=ghi789...     # the paid plan
 ```
 
 ### Create Tier Config Records
 
 In PocketBase admin UI → `tier_configs` collection → **Create new** for each tier:
 
-**Eco:**
+Do not do this by hand if you can avoid it — `seed-pb.py` seeds all of these
+rows idempotently. If you must, the two rows are:
+
+**Free** (the `eco` row is the same endpoint; seed both so codes minted either
+way resolve):
 ```
-tier:   eco
+tier:   free
 active: ✅ (checked)
 udp_relay: ❌ (unchecked)
 config:
@@ -245,21 +270,7 @@ config:
 }
 ```
 
-**Stealth:**
-```
-tier:   stealth
-active: ✅ (checked)
-udp_relay: ❌ (unchecked)
-config:
-{
-  "server": "networkingguides.duckdns.org",
-  "server_port": 8444,
-  "password": "<STEALTH_PASS from above>",
-  "method": "2022-blake3-aes-256-gcm"
-}
-```
-
-**Strike:**
+**Full** (on-box row name `strike`; the card says "Full"):
 ```
 tier:   strike
 active: ✅ (checked)
@@ -269,9 +280,14 @@ config:
   "server": "networkingguides.duckdns.org",
   "server_port": 8445,
   "password": "<STRIKE_PASS from above>",
-  "method": "2022-blake3-aes-256-gcm"
+  "method": "2022-blake3-aes-256-gcm",
+  "uot_port": 8446
 }
 ```
+
+> `udp_relay` **and** `uot_port` must both be present for the paid tier — the
+> client only creates the UoT outbound when both are set. `stealth` (8444) is
+> retired; do not recreate it.
 
 ---
 
@@ -381,17 +397,12 @@ hashes and signatures are missing or name a different version.
 ./scripts/generate_codes.sh \
   https://networkingguides.duckdns.org \
   YOUR_ADMIN_TOKEN \
-  eco 50
+  free 50
 
 ./scripts/generate_codes.sh \
   https://networkingguides.duckdns.org \
   YOUR_ADMIN_TOKEN \
-  stealth 30
-
-./scripts/generate_codes.sh \
-  https://networkingguides.duckdns.org \
-  YOUR_ADMIN_TOKEN \
-  strike 20
+  strike 20   # the paid plan; prints as "Full" on the cards
 ```
 
 ---

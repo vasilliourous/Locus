@@ -4,7 +4,7 @@
 audience:    human-operator
 status:      live
 authoritative-for: question → file, and the one canonical home per topic
-verified-against: docs/STATE.md
+verified-against: docs/ (the link graph itself)
 ```
 
 ## By question
@@ -49,8 +49,10 @@ status.
 | Decision | Where it is justified |
 |---|---|
 | Free replaces Eco | [`04-tiers.md`](04-tiers.md#422-eco-is-replaced-by-free) |
-| The ladder is $0 / $4 / $7 | [`05-pricing.md`](05-pricing.md#52-the-ladder) |
-| The paid gap is small on purpose | [`05-pricing.md`](05-pricing.md#53-the-decisive-principles) |
+| Stealth and Strike merge into one paid plan | [`04-tiers.md`](04-tiers.md#424-stealth-and-strike-are-merged-into-one-paid-tier) |
+| The plan is $0 / $5, with no ladder | [`05-pricing.md`](05-pricing.md#52-the-offer) |
+| The survivor is called `strike` on the box | [`04-tiers.md`](04-tiers.md#46-the-same-choice-made-again-for-stealth--merged-into-full) |
+| The free allowance is 10 GB | [`05-pricing.md`](05-pricing.md#55-why-the-free-allowance-is-10-gb-and-not-5) |
 | Free is a data cap, not a user cap | [`04-tiers.md`](04-tiers.md#442-why-a-data-allowance-not-a-user-cap) |
 | Free quota is enforced client-side | [`04-tiers.md`](04-tiers.md#443-why-enforcement-is-client-side-and-what-that-means) |
 | Free throttles, it does not cut off | [`04-tiers.md`](04-tiers.md#445-what-throttled-further-means) |

@@ -162,8 +162,13 @@ export const TIER_COLORS: Record<
   string,
   { color: string; background: string }
 > = {
+  // The merged paid tier. The KEY is `strike` because that is the frozen wire
+  // name / `tier_configs` row the hub resolves a paid code against; the LABEL
+  // shown to the student is "Full" and lives in `tier-badge.tsx`.
   strike: { color: '#EAB308', background: 'rgba(234, 179, 8, 0.20)' },
-  stealth: { color: '#46C186', background: 'rgba(70, 193, 134, 0.18)' },
+  // The free tier. `eco` is retained beside `free` because a code in the field
+  // may still carry the legacy string; both render as the same Free plan.
+  free: { color: '#7FB48F', background: 'rgba(127, 180, 143, 0.18)' },
   eco: { color: '#7FB48F', background: 'rgba(127, 180, 143, 0.18)' },
 }
 

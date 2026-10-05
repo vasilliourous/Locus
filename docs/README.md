@@ -4,7 +4,7 @@
 audience:    all
 status:      live
 authoritative-for: the map of the doc set (what each document is)
-verified-against: docs/STATE.md
+verified-against: docs/state.toml, docs/operate/CLAIMS.md
 ```
 
 `docs/` holds the **live** documentation, organised by what you are trying to do.
@@ -60,6 +60,7 @@ Retired material is separated into [`archive/`](archive/) (the Wails client) and
 | [`operate/UPDATE-SYSTEM.md`](operate/UPDATE-SYSTEM.md) | How an update reaches a client, end to end, and what is verified vs not. |
 | [`operate/RELEASING.md`](operate/RELEASING.md) | **Cutting a client release** (bump → commit → tag → CI) and publishing it to the hub. |
 | [`operate/RECOVER-WINDOWS-UPDATE.md`](operate/RECOVER-WINDOWS-UPDATE.md) | **When Windows clients cannot update** — the hub serving the raw PE instead of the installer, and the ordered recovery (sign → deploy → publish). |
+| [`operate/RECOVER-MACOS-UPDATE.md`](operate/RECOVER-MACOS-UPDATE.md) | **When macOS clients cannot update** — the hub serving a bare Mach-O instead of the `.app.tar.gz`, and the ordered recovery (sign → deploy → publish). |
 | [`operate/CI-CD.md`](operate/CI-CD.md) | The client CI pipeline (`.github/workflows/client.yml`). |
 | [`../server/scripts/README.md`](../server/scripts/README.md) | Index of every script in `server/scripts/` — what it does, and whether it is safe to re-run. |
 
@@ -74,7 +75,7 @@ Retired material is separated into [`archive/`](archive/) (the Wails client) and
 | [`reference/THEMES.md`](reference/THEMES.md) | **The theme registry** — what a theme may and may not change, the six themes, how a selection resolves against the legacy colour fields, and the checklist for adding one. Read before touching `_themes.ts`. |
 | [`reference/FIXES.md`](reference/FIXES.md) | Append-only dated log of every real defect and its fix. **Historical** — later entries sometimes correct earlier ones. |
 | [`reference/STILL-OPEN.md`](reference/STILL-OPEN.md) | What is unfinished or unvalidated. |
-| [`GAMING-UDP.md`](GAMING-UDP.md) | The UoT (UDP-over-TCP) work for the gaming tier. Server side is live. |
+| [`GAMING-UDP.md`](GAMING-UDP.md) | The UoT (UDP-over-TCP) transport, now on **both** plans (free 8447, paid 8446). Server side is live. |
 
 ## Business — `docs/business/`
 

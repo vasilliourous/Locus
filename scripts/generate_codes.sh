@@ -12,9 +12,13 @@
 #   ./scripts/generate_codes.sh <hub_url> <admin_token> <tier> <count>
 #
 # Examples:
-#   ./scripts/generate_codes.sh https://networkingguides.duckdns.org my-token eco 50
-#   ./scripts/generate_codes.sh https://networkingguides.duckdns.org my-token stealth 30
+#   ./scripts/generate_codes.sh https://networkingguides.duckdns.org my-token free 50
 #   ./scripts/generate_codes.sh https://networkingguides.duckdns.org my-token strike 20
+#
+# `free` is the customer-facing Free plan's row; `strike` is the paid plan
+# (called "Full" on the card — the row name is frozen, see
+# docs/business/04-tiers.md §4.6). `eco` still resolves for codes already in the
+# field and is not sold.
 #
 # Output: Prints codes to stdout AND saves to <tier>-codes.txt
 #   Also creates a JSON array for PocketBase import if requested.
@@ -136,7 +140,7 @@ if [ -z "$HUB_URL" ] || [ -z "$ADMIN_TOKEN" ] || [ -z "$TIER" ] || [ -z "$COUNT"
     echo "               (NOT /root/.admin_api_token — that is the app-level"
     echo "               ADMIN_API_TOKEN used by the unbind hook, rejected by"
     echo "               PocketBase 0.22 with 401)"
-    echo "  tier         eco | stealth | strike"
+    echo "  tier         free | strike   (free = the Free plan; strike = the paid plan, shown as Full)"
     echo "  count        Number of codes to generate"
     echo ""
     echo "Environment:"
@@ -146,8 +150,8 @@ if [ -z "$HUB_URL" ] || [ -z "$ADMIN_TOKEN" ] || [ -z "$TIER" ] || [ -z "$COUNT"
 fi
 
 # Validate tier
-if [ "$TIER" != "eco" ] && [ "$TIER" != "stealth" ] && [ "$TIER" != "strike" ]; then
-    echo "Error: Tier must be 'eco', 'stealth', or 'strike'"
+if [ "$TIER" != "free" ] && [ "$TIER" != "strike" ]; then
+    echo "Error: Tier must be 'free' or 'strike' (the paid row is 'strike', shown as Full)"
     exit 1
 fi
 
@@ -225,7 +229,7 @@ if [ "$DRY_RUN" = "0" ] && [ -n "$ADMIN_TOKEN" ]; then
                 "type": "base",
                 "schema": [
                     {"name": "code", "type": "text", "required": true, "unique": true},
-                    {"name": "tier", "type": "select", "required": true, "values": ["eco", "stealth", "strike"]},
+                    {"name": "tier", "type": "select", "required": true, "values": ["free", "strike"]},
                     {"name": "middleman", "type": "text"},
                     {"name": "bound_fingerprint", "type": "text"},
                     {"name": "activated_at", "type": "date"},

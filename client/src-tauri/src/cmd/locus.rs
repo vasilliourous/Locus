@@ -61,7 +61,10 @@ fn take_cancellation() -> bool {
 pub struct LocusStatus {
     /// Whether this device has a code bound and accepted.
     pub activated: bool,
-    /// The tier name (`eco`, `stealth`, `strike`), when known.
+    /// The tier name as the hub sent it (`free`/`eco`, or `strike`), when known.
+    /// This is the WIRE name, not the label the student reads — the frontend
+    /// maps it in `tier-badge.tsx`, which is the single place that mapping
+    /// lives, so the two can never disagree.
     pub tier: Option<String>,
     /// The device fingerprint, **truncated** — enough for support to correlate,
     /// not enough to be a useful identifier if someone screenshots it.
@@ -924,8 +927,13 @@ pub async fn locus_connect() -> CmdResult<ConnectionResult> {
     // "still starting" and keep the cancel affordance alive.
     let started = tokio::time::Instant::now();
     loop {
-        match CoreManager::global().start_core().await {
-            Ok(()) => {}
+        // The port-fallback variant, not the bare `start_core`: the mixed-port
+        // retry used to live in the launch-time `CoreManager::init`, which this
+        // app no longer calls because a launch-time start is an auto-connect. A
+        // student whose mixed port is taken would otherwise get a hard
+        // `LOCUS_CONNECT_FAILED` where they used to get a silent fallback.
+        match CoreManager::global().start_core_with_port_fallback().await {
+            Ok(_) => {}
             Err(error) => {
                 return Err(super::coded_error("LOCUS_CONNECT_FAILED", format!("{error:#}")));
             }

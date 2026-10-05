@@ -4,7 +4,7 @@
 audience:    human-operator
 status:      live
 authoritative-for: how codes reach students, and the middleman's economics
-verified-against: docs/STATE.md
+verified-against: docs/state.toml
 ```
 
 ## 8.1 The model
@@ -58,7 +58,7 @@ this can be done for a whole batch, and `codes.update` can amend it later.
 
 ## 8.4 Middleman economics
 
-- Typical cut: **20–30%** ([`05-pricing.md`](05-pricing.md#56-the-middleman-cut)).
+- Typical cut: **20–30%** ([`05-pricing.md`](05-pricing.md#57-the-middleman-cut)).
 - **Revenue concentration is the structural risk** — if 80% of revenue comes
   from 2–3 people, losing one (graduation, moving, getting caught) cuts
   revenue 30–40%.
@@ -76,7 +76,13 @@ This is new, and it is important.
   and the middleman should only ever hold *paid* stock.
 - **A free code in a middleman's hands is a foot-in-the-door for the paid
   sale.** The natural pitch is: *"try it free; when you want it fast, it's
-  $4."* The middleman converts, they do not seed.
+  $5."* The middleman converts, they do not seed.
+- **The merge makes that pitch shorter, and shorter is the point.** There is now
+  exactly **one** paid product, so a middleman has one number to remember and one
+  sentence to say, and nothing in the offer needs a comparison table. The
+  previous ladder required them to explain a difference between Stealth and
+  Strike that the business itself struggled to articulate
+  ([`04-tiers.md`](04-tiers.md#424-stealth-and-strike-are-merged-into-one-paid-tier)).
 - **The post-block window is the operator's moment, not the middleman's.**
   When a free VPN dies, free codes should flow immediately and centrally
   ([`02-market.md`](02-market.md#24-the-timing-window), [`11-growth.md`](11-growth.md)).
@@ -85,7 +91,8 @@ This is new, and it is important.
 > middleman can sell into, while lowering the average transaction the
 > operator sees per head. The middleman's job shifts from "sell the cheapest
 > thing" to "convert the free install", which is a harder sell but a bigger
-> market.
+> market — and with one paid plan, it is also a simpler sale than it has ever
+> been.
 
 ## 8.6 Guardrails
 

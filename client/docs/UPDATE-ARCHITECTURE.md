@@ -4,7 +4,7 @@
 audience:    builder
 status:      design-record
 authoritative-for: why the updater is hub-mediated, and how it differs from Tauri's
-verified-against: docs/STATE.md
+verified-against: client/src-tauri/src/locus/update/, server/pb_hooks/release.pb.js
 ```
 
 > **Design record — implemented, with one correction.** The hub-mediated path is

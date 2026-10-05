@@ -4,7 +4,7 @@
 audience:    human-operator
 status:      live
 authoritative-for: the commercial plan and how to run the business
-verified-against: docs/STATE.md
+verified-against: docs/state.toml, docs/operate/CLAIMS.md
 ```
 
 The commercial plan for the product as it actually ships (current client version

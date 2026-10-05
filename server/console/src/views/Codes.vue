@@ -86,7 +86,13 @@ watch([query, tierFilter, statusFilter, middlemanFilter, worklistDays], () => {
   selected.value = new Set()
 })
 
-const tiers = ref<string[]>(['eco', 'stealth', 'strike'])
+// Pre-load placeholder only: `loadMeta()` replaces this with the hub's real
+// `tier_configs` rows via `tiers.list`. It exists so the dropdown is not empty
+// on first paint. It must still name only tiers the hub actually seeds — a
+// placeholder offering a retired tier is a dropdown entry that mints a code
+// which can never resolve, and `check-consistency.sh` §27 holds it to
+// `seed-pb.py` for exactly that reason.
+const tiers = ref<string[]>(['free', 'strike'])
 const middlemen = ref<{ name: string; codes: number }[]>([])
 
 async function load() {

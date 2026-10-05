@@ -51,7 +51,7 @@ numbers the system does not have.
 ## 16.3 The one metric that now matters most
 
 With the free tier, **free → paid conversion is the number that validates or
-kills the pricing strategy** ([`05-pricing.md`](05-pricing.md#541-how-this-compares-to-the-old-ladder),
+kills the pricing strategy** ([`05-pricing.md`](05-pricing.md#541-how-this-compares-to-the-ladders-before-it),
 [`11-growth.md`](11-growth.md#113-the-free-tier-as-the-acquisition-engine)). Everything else is bookkeeping.
 
 It is also the hardest to measure here, because:
@@ -84,6 +84,14 @@ it becomes important, that is the first thing worth instrumenting
 - Churn.
 - Per-user bandwidth.
 - Revenue (inferred from code counts and the price ladder, by hand).
+
+> **The one simplification the merge brought.** "Revenue" used to need a
+> per-tier price table, because a code count told you nothing until you knew
+> whether each code was Stealth or Strike. Now every paid code is worth the same
+> $5, so **paid code count × $5** is the whole calculation. It is still
+> hand-computed and still approximate (it cannot see refunds, suspensions, or
+> term passes sold at the discount), but the arithmetic stopped being a source of
+> error — a small, real operational win from deleting a tier.
 - Money owed to or by a middleman ([`07-billing.md`](07-billing.md#74-cash-handling)).
 
 > **There is no analytics beyond the dashboard.** If a metric matters, it is

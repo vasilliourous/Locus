@@ -1,5 +1,12 @@
 # 10. Open questions
 
+```
+audience:    human-operator
+status:      design-record
+authoritative-for: what is still undecided
+verified-against: docs/reference/DEVICE-IDENTITY.md, docs/reference/FIXES.md
+```
+
 > What is still undecided, and what cannot be resolved without real hardware or
 > a deployed hub. Kept separate from the design so the design does not pretend
 > to be settled where it is not.

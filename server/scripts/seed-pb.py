@@ -395,11 +395,24 @@ else:
 
     # ── Step 4: Seed tier configs ──
     # udp_relay + uot_port advertise the sing-box UoT endpoint to clients.
-    # That endpoint is part of the DEFAULT deployment now
+    # Those endpoints are part of the DEFAULT deployment now
     # (02-shadowsocks.sh: ENABLE_UOT defaults to 1), so the default here
     # matches. Set ENABLE_UOT=0 in BOTH places to turn it off — advertising
-    # uot_port without the service running sends Strike game UDP to a dead
+    # uot_port without the service running sends game UDP to a dead
     # port until the client times out and falls back to raw UDP.
+    #
+    # BOTH PLANS ADVERTISE THEIR OWN ENDPOINT. The free plan is not a
+    # second-class citizen on UDP: Roblox/Minecraft-shaped traffic is exactly
+    # what the free plan is for, and UDP is a given rather than a paid feature.
+    # The paid plan is differentiated by RATE (see 04-tc.sh), not by having a
+    # UDP path at all.
+    #
+    # The two endpoints are separate PORTS with separate CREDENTIALS, because a
+    # sing-box shadowsocks inbound is bound to one password: pointing the free
+    # row at the paid listener would send ECO_PASS at a listener expecting
+    # STRIKE_PASS, and the handshake would fail. Each plan therefore names its
+    # own uot_port, and each of those ports is shaped independently (the free
+    # one at 1 Mbps).
     # Without UoT, UDP flows via standard ss UDP — the plain
     # shadowsocks-rust server does not implement sing-box's proprietary
     # UDP-over-TCP and RSTs it (observed 2026-08-01).
@@ -424,6 +437,7 @@ if not pw_from_file and os.path.exists(pw_file):
 if pw_from_file:
     uot_enabled = os.environ.get("ENABLE_UOT", "1") != "0"
     uot_port = int(os.environ.get("UOT_PORT", "8446"))
+    uot_port_free = int(os.environ.get("UOT_PORT_FREE", "8447"))
     # `free` and `eco` are the SAME endpoint (port 8443, same password, same
     # 1mbit tc class). Both rows are seeded on purpose:
     #   * `free` is the tier name new codes are minted against, and what the
@@ -435,21 +449,35 @@ if pw_from_file:
     #     server_config. See docs/business/04-tiers.md §4.5.
     # A code's `tier` string is therefore either "free" or "eco"; both map to
     # 8443. Passwords are the same ECO_PASS for both rows.
+    #
+    # `stealth` is RETIRED and deliberately NOT seeded (docs/business/04-tiers.md
+    # §4.2.4): it was merged into `strike`, which keeps its name, its password
+    # and its UoT endpoint because a code in the field already carries
+    # `tier: "strike"` and resolves against this row by that string. The paid
+    # tier's cap is now 100mbit (was 200 in `04-tc.sh`).
+    #
+    # NOTE: this loop does not DELETE a `stealth` row that a previous run seeded.
+    # If live codes carry that string they must keep resolving
+    # (docs/business/04-tiers.md §4.6), so removing the row is an operator
+    # decision made with the console in front of them — not a side effect of
+    # re-running a seed script. The probe that decides it is in
+    # docs/operate/CLAIMS.md §5.
     for t, pw_key, port in [("eco", "ECO_PASS", 8443),
                             ("free", "ECO_PASS", 8443),
-                            ("stealth", "STEALTH_PASS", 8444),
                             ("strike", "STRIKE_PASS", 8445)]:
         pw = os.environ.get(pw_key, "")
         if not pw:
             log(f"  {t}: no password found — skipping")
             continue
-        udp = uot_enabled and t == "strike"
+        # Every plan gets UDP. The port differs per plan because the listener's
+        # credentials differ — see the note above.
+        udp = uot_enabled
         cfg_dict = {
             "server": DOMAIN, "server_port": port,
             "password": pw, "method": SS_METHOD,
         }
         if udp:
-            cfg_dict["uot_port"] = uot_port
+            cfg_dict["uot_port"] = uot_port if t == "strike" else uot_port_free
         config_str = json.dumps(cfg_dict)
         body = {"tier": t, "config": config_str, "active": True, "udp_relay": udp}
 

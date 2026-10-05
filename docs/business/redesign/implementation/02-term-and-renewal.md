@@ -1,5 +1,12 @@
 # 2. Term and renewal — the arithmetic, exactly
 
+```
+audience:    builder
+status:      design-record
+authoritative-for: the term/renewal arithmetic, exactly
+verified-against: docs/reference/DEVICE-IDENTITY.md, docs/reference/FIXES.md
+```
+
 > The arithmetic decides how much time a paying student gets. It is stated here
 > in full, with the boundary cases, so it can be checked without reading goja.
 

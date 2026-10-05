@@ -4,11 +4,128 @@
 audience:    builder
 status:      live
 authoritative-for: what is unfinished, unverified, or deliberately deferred
-verified-against: docs/STATE.md
+verified-against: docs/state.toml, docs/operate/CLAIMS.md
 ```
 
 What I did **not** finish, and what a successor should know before picking it up.
 Ordered by whether I could have validated it here.
+
+---
+
+## The Free/Full tier merge — written, verified in the tree, never run on the hub
+
+**Added 2026-10-05.** The paid ladder was merged from two tiers into one: Free
+($0, 1 Mbps, 10 GB) and Full ($5, 100 Mbps unmetered + UDP). Stealth was retired;
+the survivor keeps the on-box name `strike`. See
+[`../business/04-tiers.md`](../business/04-tiers.md) §4.2.4 and §4.7.
+
+**Verified here** (the tree, by running things — not by reading):
+
+- `bash server/scripts/check-consistency.sh` exits **green**, and its new **§27**
+  asserts the agreement across `04-tc.sh` (applied class *and* reboot unit),
+  `seed-pb.py` (the row *and* its `udp_relay` gating), the console's tier
+  placeholder, and the `README.md` prose. `state.toml [tiers.paid]` is a
+  `provenance = "derived"` fact and §9 FAILS when it disagrees with the tree.
+- **Each new guard was observed failing** against the defect it claims to catch:
+  restoring the 200 Mbit cap, re-adding the `stealth` seed row, pointing the
+  console placeholder at the retired tier, and restating the old caps in
+  `README.md` each produced a `BAD` line. A guard that cannot fail reads exactly
+  like one that passed, so this was done before they were kept.
+- The client: `cargo test --lib locus` **224 passed**, `vitest run` **96 passed**
+  (including the palette test, which now asserts the retired tier's colour is
+  *absent*), `tsc --noEmit` clean, and the console's `vite build` succeeds.
+- Every hub-side script that enumerated a tier was updated: `setup.sh` (service
+  list, batch tiers), `smoke-test.sh`, `verify-ss2022.sh`,
+  `write-admin-credentials.sh`, `fix-tier-configs.py`, `generate_codes.sh`,
+  `print_codes.sh`. All pass `bash -n`; the Python passes `py_compile`.
+
+**NOT verified here, and not verifiable from a checkout:**
+
+- **That the hub has taken it.** A11. The tree being green says nothing about
+  the box; `/root/server/` is a separate copy and `setup.sh` has to re-run.
+- **That a paid code connects on the merged tier.** A12 — the merge's central
+  claim. Structural argument only: the row name is unchanged, so a code that
+  resolved yesterday resolves today; nobody has run one.
+- **Whether any live code carries `tier: "stealth"`.** A10. This is a live-data
+  question with a real consequence — if any do, the row must be re-pointed
+  rather than deleted, or a paying student is stranded.
+- **That the retired `stealth` service is actually stopped.** A11. `04-tc.sh`
+  disables `tc-stealth-cap.service` best-effort, but
+  `/etc/shadowsocks/stealth.json` and `shadowsocks-stealth.service` are
+  *skip-if-exists* and survive a re-run by design — so 8444 can keep serving with
+  a working password on a box that looks merged. That is an operator step
+  ([`../business/14-risks.md`](../business/14-risks.md) §14.8).
+
+### The free plan's UDP path — built to match the paid one, never run
+
+**Added 2026-10-05.** UDP became a given on both plans: the free plan now has its
+own sing-box UoT listener on 8447 (its own credentials, its own 1 Mbps `tc`
+class) beside the paid one on 8446.
+
+**Verified here:** the tree agrees with itself. `check-consistency.sh` **§27(h)**
+asserts five things — every row advertises UDP (no paid-only gate), each row names
+its own `uot_port`, the free UDP port carries a server-side 1 Mbps class, its
+reboot unit matches, and the paid UDP port is *not* shaped — plus that the firewall
+actually opens 8447. Each was observed failing against the corresponding defect.
+
+**Verified on 2026-10-05 by the deploy** (`docs/operate/CLAIMS.md` §5, A13):
+
+- Both listeners are `active` and `enabled` on TCP+UDP, both reachable from
+  outside the school network, and both tier rows resolve their own `uot_port`
+  (`eco`/`free` → 8447, `strike` → 8446). The free plan's UDP is shaped at 1 Mbps
+  on `1:20`; the paid plan's is unshaped on 8446.
+
+**NOT verified:**
+
+- **That a client tunnels real game traffic at the shaped rate.** Nothing has
+  connected a real machine and played. This is the remaining gap and it is a
+  hardware observation, not a repo one.
+- **That a free client's game traffic actually flows.** The client needs no
+  change (it keys UoT off its own `uot_port`+`udp_relay`, never the tier name), so
+  this is a hub-side claim — but "no client change was needed" is a structural
+  argument about `contract.rs`, not an observation.
+- **Whether 1 Mbps is playable.** The user's premise is that Roblox/Minecraft
+  work badly at 1 Mbps and that this is acceptable as a demo. Nobody has measured
+  it. If it is *worse* than "badly" — unplayable — then the free plan's games are
+  still broken and §4.3.1's argument loses its empirical leg.
+
+> **The port-collision trap was real and was hit.** The old single-listener unit
+> (`sing-box-uot.service`) bound :8446, the same port as its replacement
+> (`sing-box-uot-strike.service`). The module caught and retired it on the
+> 2026-10-05 deploy — but the retirement is best-effort and only runs on a re-run,
+> so a box that skipped it would have two processes racing for one port. Confirm
+> with `systemctl is-active sing-box-uot` (expect: not-found) after any upgrade.
+>
+> **Two defects this deploy exposed, both since fixed** — worth reading as a pair,
+> because they are the same class of bug: *a step that reports success without
+> doing the thing.*
+>
+> 1. **The UoT units were created but never started.** `systemctl enable` only
+>    takes effect at the next boot, so a rewrite-and-enable on a live box left
+>    both plans with no UDP at all between deploy and reboot, while the module
+>    logged "✓ Created". `02-shadowsocks.sh` now starts them and asserts
+>    `is-active` for each.
+> 2. **`04-tc.sh` warned "Filter not found" on a correctly shaped interface.**
+>    It grepped for `sport <port>`, but `tc filter show` prints a u32 filter as a
+>    hex match (`match 20fb0000/ffff0000` for 8443). The cap *was* applied; the
+>    check was wrong about the wrong thing. It now decodes the match and asserts
+>    the intended class, with the retired 8444 port asserted as a negative.
+
+**Two things this work deliberately did NOT change, so nobody reads them as
+closed:**
+
+- **`free_throttle_mbps` is still stored and never applied.** The client parses
+  the throttle speed and persists it; nothing lowers a running Core's rate from
+  it. The merge renamed the plan the throttle banner points at; it did not make
+  the throttle act.
+- **The free allowance is still counted client-side** and is still not
+  console-editable. It moved 5 GB → 10 GB, which is a hook value, not a
+  mechanism.
+
+**What to do with a live hub:** run the read-only probe in
+[`../business/15-continuity.md`](../business/15-continuity.md) §15.3.1, answer
+A10 from the console, then re-run `setup.sh` and enable/disable the two
+shadowsocks units by hand.
 
 ---
 
@@ -108,9 +225,10 @@ clamping and skew guards on the advisory inputs.
   comparison and the documented fraction cannot drift apart.
 - The wire shape on both sides, tolerantly: a malformed advisory field no longer
   fails the beat, and a well-formed one (including zero) still parses.
-- 597 lib tests, clippy `-D warnings`, `tsc`, `lint`, 96 frontend tests, the web
-  build and `check-consistency.sh` (101 checks) all pass. Every §23 assertion was
-  observed failing against its defect.
+- The lib test suite, clippy `-D warnings`, `tsc`, `lint`, the frontend suite and
+  the web build all pass, as does `check-consistency.sh`. Those counts are
+  derived and move every commit — run the suites; do not read a number here.
+  Every §23 assertion was observed failing against its defect.
 
 **NOT verified:**
 
@@ -471,8 +589,9 @@ honest description of the second one is "overrides the first while set".
 **Added 2026-10-01.** Same change.
 
 `account.tsx` now has two adjacent controls in Preferences: Appearance
-(`theme_mode`, 3 options) and Theme (`theme_id`, 6 options). When a theme is set,
-the first shows a value the app is not honouring. `THEMES.md` §7 records this as
+(`theme_mode`, 3 options) and Theme (`theme_id`, one option per entry in the
+registry — nine today; `check-consistency.sh` §9 recomputes the id list). When a
+theme is set, the first shows a value the app is not honouring. `THEMES.md` §7 records this as
 deliberately deferred rather than overlooked — merging them is a UI change with
 its own migration question (what does an existing "Dark" choice become?) and is
 not needed for themes to work. **The point where this becomes confusing to a
@@ -546,17 +665,19 @@ Also note: the removal leaves `device_identities` and `device_bindings` in place
 on an existing hub, and `codes.bound_fingerprint` on every code row. None is read
 or written any more. Dropping them is a separate, deliberate operator action.
 
-### CI now runs the tests — but nobody has watched it do so
+### CI now runs the tests — and it has since been watched doing so
 
-**Added 2026-09-29.** `cargo test`, `cargo clippy -D warnings` and
-`pnpm test` were added to the `verify` job. Every one was run locally and passes
-(541 Rust across all suites, 49 frontend, clippy clean), and the workflow YAML parses.
+**Added 2026-09-29. RESOLVED — kept as the record.** `cargo test`,
+`cargo clippy -D warnings` and `pnpm test` were added to the `verify` job. Every
+one was run locally and passes, and the workflow YAML parses.
 
-What is **not** verified is the workflow actually running on GitHub: the
-dependency install (`libwebkit2gtk-4.1-dev` and friends) and the
-`--features clippy` flag are the plausible failure points, and a failure here is
-red CI on `main` rather than a broken release. The first push to `main` after
-this commit is the test.
+The open question was whether the workflow actually ran on GitHub (the dependency
+install and the `--features clippy` flag were the plausible failure points). It
+has: `CLAIMS.md` §5 **A4** records a green run for `5ebfc89` on 2026-09-30 (run
+`36669449010`) — `Verify`, all four builds incl. `windows-2022`, `Release`,
+`Report`. Subsequent releases have built and published since. Re-check with
+`gh run list --workflow=client.yml`; that A4 is a dated observation, not a
+standing property, is the whole point of the register.
 
 ### No update has ever *successfully* been installed
 
@@ -965,10 +1086,15 @@ finding stated as a to-do.
 
 ## Open, and fixable now
 
-### Device identity has never met a real PocketBase
+### The hub hooks have never met a real PocketBase
 
-**Added 2026-10-01.** The durable-identity work (see
-[`DEVICE-IDENTITY.md`](DEVICE-IDENTITY.md)) is complete, tested and compiling, but
+**Added 2026-10-01** as "Device identity has never met a real PocketBase";
+**retitled 2026-10** because the device-identity mechanism was removed and no
+longer contributes to this gap. What remains is the hub half of the **term
+model, renewal and the single-use rule** — see also
+["The term model, renewal and the single-use rule have never met a database"](#the-term-model-renewal-and-the-single-use-rule-have-never-met-a-database),
+which is the same gap stated as a to-do list. *This* entry is the finding; that
+one is the closing procedure. The hooks are complete, tested and compiling, but
 **no part of the hub half has run**. There is no PocketBase runtime in this
 checkout, so the hooks are syntax-checked and covered by the
 `check-consistency.sh` trap wave — the same standard as every other hook here, and
@@ -990,11 +1116,14 @@ activated" with a `server_config`.
 
 ### The code survives a real reinstall — needs real hardware
 
-**Added 2026-10.** The design moves the *decision logic* out of the
-"cannot verify here" bucket: `credential.rs` is pure I/O tested against a scratch
-directory, and the config-first-then-mirror ordering is unit-tested. What remains
-genuinely hardware-gated is whether the machine-scoped store **survives an actual
-uninstall** and is **writable without elevation** in each deployment shape.
+**Added 2026-10.** **This is the same gap as
+[the activation code's durability](#the-activation-codes-durability-has-never-been-exercised-against-a-real-machine)
+above** — the full statement, including the Linux path and the UI gap, is there.
+Kept as a short entry here so the "Open, and fixable now" list is not missing it.
+The one-line version: the machine-scoped store (`locus/credential.rs`) is unit
+tested against a scratch directory, but whether it **survives an actual
+uninstall** and is **writable without elevation** on each platform has never
+been watched on real hardware.
 
 Needs a real Windows and a real macOS machine, an install -> uninstall ->
 reinstall cycle per platform, and confirmation the path is writable by a
@@ -1013,7 +1142,8 @@ before this is called done.
 ### The client works; a real update has never been INSTALLED
 
 **This section used to say the client port had not started. It has, and it
-shipped across the whole 3.x line (current version: `docs/STATE.md`).** `client/` has
+shipped across the whole 3.x line (current version: `[client.version]` in
+[`../state.toml`](../state.toml)).** `client/` has
 `src-tauri/src/locus/` with activation, device
 fingerprinting, a heartbeat, tier→config translation and a hub-mediated updater,
 plus a first-run activation gate and a single Connect/Disconnect.
@@ -1117,8 +1247,10 @@ substituting the old logo, deliberately — drawing a brand mark needs a human d
 
 This was an open decision; it is settled.
 
-**The client is 3.0.0**, its own Locus line, not Clash Verge's `2.5.5`. The
-reasoning is worth keeping, because the trap was real:
+**The client's own Locus line began at 3.0.0** (the line has moved on; the
+current version is `[client.version]` in [`../state.toml`](../state.toml)), not
+Clash Verge's inherited `2.5.5`. The reasoning is worth keeping, because the trap
+was real:
 
 ```
 2.5.5 vs 2.2.6 -> strictly newer? true     (publishing 2.5.5 moves the fleet up)
@@ -1130,13 +1262,28 @@ The client reported the version it inherited from Verge while the hub served
 numbering permanently, with no server-driven downgrade to recover from — a manual
 reinstall per device would be the only fix.
 
-**Three version sites must agree**:
-`client/src-tauri/Cargo.toml`, `client/package.json`,
-`client/src-tauri/tauri.conf.json`. That agreement is enforced by
-`client/src-tauri/tests/version_consistency.rs`, which reads them from disk. Drift
-is a correctness dependency of the updater, not hygiene: a build whose reported
-version disagrees with its bundled one either refuses the update that would fix it
-or silently declines every release, and neither says so.
+**Two version-site sets, and the difference is deliberate** — do not "correct"
+one to the other:
+
+- **Three sites must agree at runtime**, and `client/src-tauri/tests/version_consistency.rs`
+  reads them from disk and fails when they do not: `client/src-tauri/Cargo.toml`
+  (compiled in — what the client reports), `client/package.json` (what the
+  frontend shows), and `client/src-tauri/tauri.conf.json` (what the bundler
+  names installers after). Drift here is a correctness dependency of the
+  updater, not hygiene: a build whose reported version disagrees with its
+  bundled one either refuses the update that would fix it or silently declines
+  every release, and neither says so.
+- **`pnpm release-version` writes five files**, adding `Cargo.lock` and
+  `../docs/state.toml` (the `[client.version]` derived fact) to the three above.
+  Those two are not covered by the Rust test on purpose — `Cargo.lock` is
+  repaired by Cargo before any test runs (and is covered by `cargo fetch
+  --locked` in CI instead), and `state.toml` is covered by
+  `check-consistency.sh` §7/§9. See the header of `client/scripts/release-version.mjs`.
+  The **five-site list is `[client.version_sites]` in
+  [`../state.toml`](../state.toml)** — link it rather than restating the count.
+
+The rule that matters either way: **bump with `pnpm release-version`, never by
+hand**, and let the guards disagree with you if you try.
 
 **No root `VERSION` file.** The fork versions itself in its own manifests.
 

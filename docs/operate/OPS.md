@@ -35,7 +35,9 @@ export ADMIN_TOKEN="your-admin-api-token"
 ### All Services
 
 ```bash
-ssh $VPS "systemctl is-active caddy pocketbase shadowsocks-eco shadowsocks-stealth shadowsocks-strike"
+ssh $VPS "systemctl is-active caddy pocketbase shadowsocks-eco shadowsocks-strike"
+# On an upgraded box, confirm the retired tier is gone:
+ssh $VPS "systemctl is-enabled shadowsocks-stealth 2>&1"   # expect: not-found / disabled
 ```
 
 Expected output:
@@ -49,7 +51,7 @@ active
 
 ### Congestion Control
 
-All three tiers use **BBR** (Linux kernel built-in) — no kernel modules to maintain.
+Both plans use **BBR** (Linux kernel built-in) — no kernel modules to maintain.
 
 ```bash
 # Confirm BBR is the system default
@@ -62,18 +64,18 @@ ssh $VPS "sysctl net.ipv4.tcp_congestion_control"
 # Check tc classes exist
 ssh $VPS "tc -s class show dev \$(ip route show default | awk '\$5{print\$5;exit}')"
 
-# Eco class (1:10) should show traffic — 5 Mbps
-# Stealth class (1:20) should show traffic — 100 Mbps
-# Strike class (1:30) should show traffic — 200 Mbps
+# Free/Eco class (1:10) should show traffic — 1 Mbps
+# Full/Strike class (1:30) should show traffic — 100 Mbps
+# Class 1:20 (retired Stealth) should NOT exist. If it does, the old
+# tc-stealth-cap.service survived the merge — remove it (business/14-risks.md §14.8).
 ```
 
 ### Logs
 
 ```bash
 # Shadowsocks per-tier
-ssh $VPS "journalctl -u shadowsocks-eco -n 20 --no-pager"
-ssh $VPS "journalctl -u shadowsocks-stealth -n 20 --no-pager"
-ssh $VPS "journalctl -u shadowsocks-strike -n 20 --no-pager"
+ssh $VPS "journalctl -u shadowsocks-eco -n 20 --no-pager"    # the free plan
+ssh $VPS "journalctl -u shadowsocks-strike -n 20 --no-pager" # the paid plan
 
 # PocketBase
 ssh $VPS "journalctl -u pocketbase -n 20 --no-pager"
@@ -329,7 +331,7 @@ ssh root@new-vps 'bash -s' < server/restore.sh
 ```bash
 # Shadowsocks
 ssh $VPS "systemctl restart shadowsocks-eco"
-ssh $VPS "systemctl restart shadowsocks-stealth"
+ssh $VPS "systemctl restart shadowsocks-strike"
 ssh $VPS "systemctl restart shadowsocks-strike"
 
 # Caddy
@@ -339,7 +341,7 @@ ssh $VPS "caddy fmt --overwrite /etc/caddy/Caddyfile && systemctl reload caddy"
 ssh $VPS "systemctl restart pocketbase"
 
 # tc rules after reboot
-ssh $VPS "systemctl restart tc-eco-cap tc-stealth-cap tc-strike-cap"
+ssh $VPS "systemctl restart tc-eco-cap tc-strike-cap"
 ```
 
 ### One-command deploy (`server/scripts/deploy.sh`)
@@ -981,7 +983,7 @@ pre-existing clients are unaffected either way.
 The tc cap services are oneshot — after a kernel/reboot change, re-apply them:
 
 ```bash
-ssh $VPS "systemctl restart tc-eco-cap tc-stealth-cap tc-strike-cap"
+ssh $VPS "systemctl restart tc-eco-cap tc-strike-cap"
 ssh $VPS "tc -s class show dev \$(ip route show default | awk '\$5{print\$5;exit}')"
 ```
 

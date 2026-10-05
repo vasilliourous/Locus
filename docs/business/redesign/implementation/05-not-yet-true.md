@@ -1,9 +1,26 @@
 # 5. What is not yet true
 
+```
+audience:    builder
+status:      design-record
+authoritative-for: what has not been run, tested, or seen
+verified-against: docs/reference/DEVICE-IDENTITY.md, docs/reference/FIXES.md
+```
+
 > **Read this before trusting anything else in this directory.** Every other
 > file describes what the code does; this one describes what has **not** been
 > run, tested, or seen. It is deliberately specific, because "mostly tested" is
 > not a status anyone can act on.
+>
+> **⚠️ PARTLY SUPERSEDED 2026-10.** Everything below that depends on **device
+> binding** (one-code-per-device, the 409, `device.get`/`devices.list`, the
+> unique index, the fingerprint-durability fix) describes a mechanism that was
+> **removed**, not finished — see
+> [`../../../reference/DEVICE-IDENTITY.md`](../../../reference/DEVICE-IDENTITY.md).
+> Those items are struck or marked below. What remains genuinely open (the
+> **term model, renewal, the migration, the single-use stamp**) is still accurate
+> and is restated in [`../../../reference/STILL-OPEN.md`](../../../reference/STILL-OPEN.md)
+> §"The term model, renewal and the single-use rule have never met a database".
 
 ---
 
@@ -21,7 +38,16 @@ Concretely, this means:
 | The migration preserves the paying codes | **Untested, and this is the highest-consequence unknown.** |
 | Clients are unaffected | **Reasoned, not observed.** |
 
-## 5.2 The fingerprint fix is not done
+## 5.2 The fingerprint fix is not done — MOOT (the mechanism it served is gone)
+
+> **Superseded 2026-10.** This section describes the fingerprint-durability fix
+> for **device binding**, and device binding was removed. Nothing depends on the
+> fingerprint surviving a reinstall any more: a code is not tied to a device, so
+> a reinstalling student is **not** refused and needs **no** operator. The
+> consequence stated below ("a reinstalling student is refused with a 409 and
+> needs an operator") **is no longer true** — re-activating a redeemed code
+> succeeds. Kept as the record of why the fix was deferred, and of what a code
+> durability guarantee *would* have required.
 
 **The client's fingerprint can still change across a reinstall**, because it
 still falls back to a value persisted only in the client's own config
@@ -57,25 +83,30 @@ observed:
 | # | Not observed | Why it matters |
 |---|---|---|
 | U1 | A **renewal reaching a running client** and moving the displayed window | The whole propagation path (hook → heartbeat wire → `record_expiry` → UI) is reasoned and unit-tested in pieces, never run as a chain |
-| U2 | **The 409 refusal** on a real second activation | The classification is unit-tested; the hub's actual response through the network is not |
-| U3 | `device.get` / `devices.list` running against a populated index | The actions parse and the console builds; no row has ever been read |
-| U4 | The **unique index actually rejecting** a duplicate | The constraint is declared; PocketBase has not been observed enforcing it |
+| U2 | ~~**The 409 refusal** on a real second activation~~ | **REMOVED 2026-10** — there is no 409; a redeemed code re-activates successfully |
+| U3 | ~~`device.get` / `devices.list` running against a populated index~~ | **REMOVED 2026-10** — the collections are kept but read by nothing |
+| U4 | ~~The **unique index actually rejecting** a duplicate~~ | **REMOVED 2026-10** — no uniqueness constraint is in play |
 | U5 | The **worklist filter** against real rows | The logic was simulated in node against synthetic data; the hook has not run |
 | U6 | A **release propagating**, so a client change can reach the field at all | Pre-existing, unchanged, and still the ceiling on how fast any client-side fix can land |
 
-U4 is the one to check first after deploying: it is the entire guarantee behind
+~~U4 is the one to check first after deploying: it is the entire guarantee behind
 one-code-per-device, and the schema layer is the backstop that cannot be
-forgiven for being wrong.
+forgiven for being wrong.~~ **U4 is moot** — the guarantee it described was
+removed. The first thing to check after deploying is now **U1** (a renewal
+reaching a running client) and the single-use stamp, both of which are still
+unrun — see [`../../../reference/STILL-OPEN.md`](../../../reference/STILL-OPEN.md).
 
 ## 5.4 The verification that *was* performed
 
 Stated so the gap above is measurable rather than vague. Full commands in
 [`06-verification.md`](06-verification.md).
 
-* 541 Rust tests pass (all suites); `clippy -D warnings` clean; 49 frontend tests; eslint and
-  `tsc` clean.
-* `check-consistency.sh` green, with 40 hook-written fields reconciled against
-  the schema (up from 35 — the guard confirming the new columns are declared).
+* The whole Rust and frontend suite passes (`cd client && cargo test && pnpm test`);
+  `clippy -D warnings` clean; eslint and `tsc` clean. **Read the counts from the
+  runners, not from a sentence** — they are derived and move every commit.
+* `check-consistency.sh` green, reconciled against the schema (the guard
+  confirms every hook-written field is declared). Run it and read the count:
+  `bash server/scripts/check-consistency.sh | grep 'hook-written'`.
 * Every hook and script parses (node / `bash -n` / `ast.parse`).
 * The console typechecks and **builds**, with all four new actions and both new
   pages present in the emitted bundle.

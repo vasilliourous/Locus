@@ -4,7 +4,7 @@
 audience:    human-operator
 status:      design-record
 authoritative-for: the design rationale for terms, renewal and device binding
-verified-against: docs/STATE.md
+verified-against: docs/reference/DEVICE-IDENTITY.md, docs/reference/FIXES.md
 ```
 
 > **Largely built** (`9a91da1`; written against client `3.2.5`). The term model,
@@ -24,13 +24,19 @@ verified-against: docs/STATE.md
 > accurate and are still authoritative.
 >
 > **What is built:** `term_days` on codes with the expiry materialised into
-> `expires_at`; `codes.renew`, `codes.rebind`, `codes.set-term`; the
-> `device_bindings` collection with a unique fingerprint index; the console's
-> Renew button and name search; the client's 409 handling; the backfill script.
+> `expires_at`; `codes.renew`, `codes.set-term`; the console's Renew button, Set
+> term and name search; the backfill script.
+>
+> **What was removed rather than finished (2026-10):** `codes.rebind` (now a
+> `410` tombstone), the `device_bindings` collection and its unique fingerprint
+> index, the client's 409 handling as a live path, and the durable device
+> identity. A code is single-use and tied to no device; the *client* keeps the
+> code durably so a reinstall does not lose it. See
+> [`../../reference/DEVICE-IDENTITY.md`](../../reference/DEVICE-IDENTITY.md).
 >
 > **What is not:** the live migration (it needs the deployed hub and the
 > operator's eyes), a renewal actually reaching a running client, and the
-> fingerprint fix.
+> single-use rule ever having run against a real database.
 >
 > The live plan in `docs/business/` still needs its per-file updates — see
 > [`09-impact-on-the-live-plan.md`](09-impact-on-the-live-plan.md).
@@ -203,22 +209,31 @@ Recorded here so a successor can tell design from code without diffing.
 | Client | 409 → its own `DeviceAlreadyActivated` outcome, pinned by a test | `client/src-tauri/src/locus/activation.rs` |
 | Console | Renew (row + detail), Set term, Move to another device, term at mint, search placeholder | `server/console/src/views/Codes.vue` |
 
+> **2026-10 status.** The **device-binding** half of this table was removed, not
+> finished: there is no 409, no `codes.rebind` write path (it is a `410`
+> tombstone), and no device identity. The **term model, renewal, `codes.set-term`
+> and search** rows remain live. See
+> [`../../reference/DEVICE-IDENTITY.md`](../../reference/DEVICE-IDENTITY.md).
+
 **Verification actually performed** (not assumed):
 
-* `check-consistency.sh` green, with **40** hook-written fields reconciled
-  against the schema — up from 35, which is the guard confirming the new
-  columns are declared.
-* 518 Rust tests; `clippy -D warnings` clean; 49 frontend tests; eslint and
-  `tsc` clean; the console typechecks and builds, with all four new actions
-  present in the emitted bundle.
+* `check-consistency.sh` green — the guard confirms every hook-written field is
+  declared. **Read the count from the run, not from here**
+  (`bash server/scripts/check-consistency.sh | grep 'hook-written'`).
+* The Rust and frontend suites pass; `clippy -D warnings` clean; eslint and
+  `tsc` clean; the console typechecks and builds, with the new actions present
+  in the emitted bundle. **Run the suites for current counts.**
 * The **term arithmetic** and the **renewal arithmetic** were exercised directly
   in node against the extracted helpers — including that a `0`/absent/negative/
   garbage term yields `null` (never a date), that a string `"30"` works, and
   that renewal is provably unable to shorten an existing expiry.
 * The 409 test was **verified to fail** when its `match` arm is removed.
+  *(2026-10: the arm is now unreachable — binding was removed — but the
+  verified-by-failing discipline it records is the durable part.)*
 * The binding lifecycle was simulated across five scenarios, including that a
   force-deleted bound code frees its device (a bug this work introduced and
-  fixed — without it a deletion would brick a device permanently).
+  fixed — without it a deletion would brick a device permanently). *(2026-10:
+  the lifecycle itself was removed; kept as the origin of a still-live guard.)*
 * `backfill-terms.py` was run against the real PocketBase space-separator date
   format and four safety cases.
 

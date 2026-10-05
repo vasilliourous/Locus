@@ -4,7 +4,7 @@
 audience:    builder
 status:      design-record
 authoritative-for: the module map and the behaviour each Locus module owns
-verified-against: docs/STATE.md
+verified-against: client/src-tauri/src/locus/
 ```
 
 > **Design record — only partly a to-do.** `client/src-tauri/src/locus/` exists and
@@ -63,6 +63,18 @@ src-tauri/src/
 **Reference:** `legacy/wails-client/internal/activation/activation.go` (~400 lines) and
 `luhn.go`.
 
+> **Two corrections to the blueprint below, from the live code — read these first.**
+> This section was written from the retired Wails client, and two of its
+> statements no longer describe the shipping client:
+>
+> 1. **`fingerprint` no longer binds anything.** It is still *sent* (a coarse
+>    rate-limit/support key) and `device_fingerprint` is still *echoed* as a frozen
+>    wire field, but a code is single-use (`codes.activated_at`) and tied to no
+>    device. The `409` / "code used on a different fingerprint" rows in the table
+>    below are **historical** — see [`../../docs/reference/DEVICE-IDENTITY.md`](../../docs/reference/DEVICE-IDENTITY.md).
+> 2. **`udp_relay` is in the live contract.** `contract.rs` declares it, and
+>    `tier.rs` gates the UoT outbound on `udp_relay && uot_port > 0` (below).
+
 ### Required
 
 - `validate_code_format(code) -> Result<()>` — **client-side, no network.** Luhn
@@ -90,8 +102,8 @@ struct ServerConfig {
     server_port: u16,
     password: String,
     method: String,
-    // The hub sends "uot_port"; every deployed client reads "server_port_uot".
-    // See tier.rs — accept BOTH keys.
+    // The hub emits "uot_port" (verbatim tier-config passthrough); the retired
+    // client read "server_port_uot". Accept BOTH keys. See tier.rs.
     #[serde(rename = "server_port_uot", alias = "uot_port")]
     server_port_uot: Option<u16>,
 }
@@ -103,15 +115,22 @@ struct ServerConfig {
 response body carries its own `code` field, which is what is switched on — the HTTP
 status is only checked separately for `429`:
 
+> **The device-binding rows below are HISTORICAL as of 2026-10.** A code is no
+> longer tied to a device: there is no "bound to another device" refusal, no
+> `409`, and re-activating a redeemed code **succeeds** (it restores the
+> entitlement). The rows are kept because the *status codes* are still the wire
+> contract the client parses. The live model: [`../../docs/reference/DEVICE-IDENTITY.md`](../../docs/reference/DEVICE-IDENTITY.md);
+> the wire facts: [`../../docs/reference/API.md`](../../docs/reference/API.md) §5b.
+
 | Situation | Expected |
 |---|---|
 | Code fails Luhn | Reject locally, no request, specific message |
 | Code valid, unused | `code: 200` → success |
-| Code **used, same fingerprint** | **Succeed** (reinstall / re-paste) |
+| Code **already redeemed** (any device) | **Succeed** — re-activation restores access; message "Already activated" |
 | Code malformed / unknown | `code: 400` or `404` → invalid |
-| Code used on a different fingerprint | `code: 403` → **bound** |
+| ~~Code used on a different fingerprint~~ | **HISTORICAL** — no such refusal; a code is not device-tied |
 | Account suspended | `code: 403` with `"suspended"` in `message` → suspended |
-| **This device already holds a different code** | **`code: 409` → `DeviceAlreadyActivated`** |
+| ~~This device already holds a different code~~ | **HISTORICAL** — no `409` is emitted; `codes.rebind` is a `410` tombstone |
 | Code expired | `code: 410` → **expired** (not 403) |
 | Rate limited | `code: 429` **or** HTTP 429 |
 | Anything else | generic server error carrying the code |
@@ -242,18 +261,27 @@ staging decision, and reload-vs-restart policy for free.
 
 ### The `uot_port` naming trap (FIXES #29)
 
-- Hub field: **`uot_port`**
-- Wire key the client has always read: **`server_port_uot`**
-- The hub hook renames on the way out; deployed clients depend on it.
+- Wire key the **hub emits** (and must keep emitting): **`uot_port`**
+- Key the **retired Wails client** read: **`server_port_uot`**
 
-This is the same hazard class as `download_* → update_*`. Accept both, emit one, and
-comment why. The old client's `UnmarshalJSON`/`fromWire` pair is the reference.
+The hub passes the tier's config JSON through **VERBATIM**
+(`heartbeat.pb.js`, `activation.pb.js`), so the endpoint reaches the client under
+its stored key `uot_port` — the hub does **not** rename anything on the way out.
+The client is the side that tolerates both spellings: `contract.rs` declares
+`#[serde(rename = "server_port_uot", alias = "uot_port")]`.
+
+Why `uot_port` and not `server_port_uot`: the retired client declared only
+`server_port_uot` while the hub emitted `uot_port`, and an unknown-to-the-client
+key is a **silent no-op** rather than an error — UDP-over-TCP was dead fleet-wide
+until 2026-09-19. Deployed builds cannot be updated retroactively, so the hub
+must keep emitting `uot_port`; the client accepts both. (This is the same hazard
+class as `download_* → update_*`.)
 
 ### Tier → transport mapping
 
 | Tier | Transport | Notes |
 |---|---|---|
-| eco | Shadowsocks TCP | fallback when UDP is blocked |
+| eco / free | Shadowsocks TCP | fallback when UDP is blocked. `free` and `eco` are the SAME endpoint (port 8443); `eco` is the legacy row kept so field codes resolve — see `docs/business/04-tiers.md` §4.5 |
 | stealth | TCP, no TUN | `clash-verge-stealth-notun.yaml` sits in the repo root as a **local, gitignored** reference profile — it is **not tracked**, not a source of truth, and embeds a live tier PSK. Do not commit or cite it; the contract is the tier payload, not this file. |
 | strike | + UDP over TCP (UoT) | gated on `udp_relay` **and** `uot_port > 0` |
 

@@ -1072,6 +1072,35 @@ def free_tier():
     # carries no meaning, so comparing by position would fail on a harmless
     # reorder. Compare as a set.
     return {"port": int(port), "cap": cap, "tier_rows": sorted(rows)}
+def paid_tier():
+    """The paid tier's port, cap and row names, from the tree.
+
+    Same shape and same reasoning as `free_tier()`: the cap and port come from
+    `04-tc.sh`'s applied class, the seeded row name from `seed-pb.py`. §27
+    asserts the same agreement from the other direction (reboot unit, udp_relay
+    gating, the console placeholder, and the negative that the retired tier is
+    not seeded).
+
+    NOTE the cap regex differs from `free_tier`'s: `free_tier` takes the FIRST
+    `apply_tc_now` (8443) and this takes the one for the paid port. Both are
+    anchored on the apply line so a comment cannot satisfy them.
+
+    Returns a dict matching the TOML shape, or None if either file has moved.
+    """
+    tc = read("server/modules/04-tc.sh")
+    m = re.search(r'apply_tc_now\s+8445\s+"[0-9:]+"\s+"([0-9a-z]+)"', tc)
+    if not m:
+        return None
+    cap = m.group(1)
+
+    seed = read("server/scripts/seed-pb.py")
+    rows = re.findall(r'\("(strike)",\s*"STRIKE_PASS",\s*8445\)', seed)
+    if not rows:
+        return None
+    # The retirement is part of the fact: `state.toml` says Stealth is not seeded,
+    # and §9 must be able to FAIL when it is seeded again.
+    retired = [t for t in ("stealth",) if not re.search(r'\(' + t + r'",\s*"STEALTH_PASS"', seed)]
+    return {"port": 8445, "cap": cap, "tier_rows": sorted(rows), "retired_rows": sorted(retired)}
 
 def licence_client():
     """The client/ licence, as asserted by the root LICENSE scope table.
@@ -1145,6 +1174,7 @@ CHECKERS = {
     "licence.client":       licence_client,
     "client.theme_ids":     theme_ids,
     "tiers.free":           free_tier,
+    "tiers.paid":           paid_tier,
     "site.domain":           landing_domain,
     "site.document_root":    landing_docroot,
     "site.download_path":    landing_download_path,
@@ -2592,10 +2622,14 @@ else
     # old number now fails the build rather than shipping.
     README_MD="$REPO/README.md"
     if [ -f "$README_MD" ]; then
-        if grep -Eq 'tc caps \(1/100/200 Mbps\)' "$README_MD"; then
-            ok "README.md's tier-cap summary agrees with state.toml (1/100/200 Mbps)"
+        # The merged ladder: free 1 Mbps, paid 100 Mbps. NOTE this literal moved
+        # from (1/100/200) to (1/100) in the same commit as every other file that
+        # restated it — that is this guard doing its job, not a guard breaking.
+        # The paid-tier half of the same agreement is asserted by §27(g).
+        if grep -Eq 'tc caps \(1/100 Mbps\)' "$README_MD"; then
+            ok "README.md's tier-cap summary agrees with state.toml (1/100 Mbps)"
         else
-            bad "README.md restates the tier caps and disagrees with state.toml — expected 'tc caps (1/100/200 Mbps)'"
+            bad "README.md restates the tier caps and disagrees with state.toml — expected 'tc caps (1/100 Mbps)'"
         fi
         if grep -Eq 'Eco 5Mbit' "$README_MD"; then
             bad "README.md still calls the free/Eco tier '5Mbit' — the cap was lowered to 1mbit"
@@ -2604,14 +2638,217 @@ else
         fi
     fi
     # The module header comment must not contradict the code below it. Match the
-    # "Eco (port 8443): 5 Mbps" line specifically; the numeric detail line in the
-    # cap table is checked by (a) above.
+    # retired "Eco (port 8443): 5 Mbps" line specifically; the applied caps are
+    # checked by (a)/(b) above and by §27(a)/(b).
     if grep -Eq 'Eco \(port 8443\): 5 Mbps' "$TC_MOD"; then
         bad "04-tc.sh's header comment says 'Eco (port 8443): 5 Mbps' but the code below applies 1mbit"
     else
         ok "04-tc.sh's header comment does not contradict its own applied cap"
     fi
 fi
+
+echo
+echo "27. The paid tier is the only paid tier, and every surface agrees"
+#
+# WHY THIS EXISTS
+#
+# §23 does this for the FREE tier. The paid tier had no such treatment, and that
+# is how Stealth and Strike drifted into being the same plan at two rates for
+# months without anything noticing: four files described the paid endpoint
+# (`04-tc.sh` cap, `02-shadowsocks.sh` service, `seed-pb.py` row + udp_relay,
+# `Codes.vue` dropdown) in three vocabularies, and no check asserted they AGREED.
+#
+# The merge (docs/business/04-tiers.md §4.2.4) collapses those to one tier, and
+# this holds the collapse in place. It is written as a set of AGREEMENTS plus a
+# NEGATIVE, because the failure modes here are:
+#
+#   1. Someone re-adds a 200mbit class or a `stealth` service because a stale
+#      comment said the ladder had three tiers.
+#   2. The cap in the applied class and the cap in the reboot unit disagree, so
+#      a reboot silently restores the old rate.
+#   3. The console offers a tier the hub does not seed, so the operator can mint
+#      a code that can never resolve.
+#
+# Every assertion below was observed FAILING against the pre-merge tree before it
+# was kept, and against each half-merged state (the 200mbit cap, the surviving
+# `stealth` seed row, the console's stale dropdown literal).
+PAID_PORT=8445
+PAID_CAP=100mbit
+PAID_ROW=strike
+CONSOLE_CODES="$REPO/server/console/src/views/Codes.vue"
+
+if [ ! -f "$TC_MOD" ] || [ ! -f "$SEED" ]; then
+    warn "paid-tier guard: a file it needs is missing — skipping"
+else
+    # (a) The applied cap. Anchored on the APPLY LINE, not a bare mention: the
+    #     number also appears in comments, so a plain grep stays green with the
+    #     assignment deleted — a check that cannot fail.
+    if grep -Eq "apply_tc_now[[:space:]]+${PAID_PORT}[[:space:]]+\"[0-9:]+\"[[:space:]]+\"${PAID_CAP}\"" "$TC_MOD"; then
+        ok "04-tc.sh caps the paid port (${PAID_PORT}) at ${PAID_CAP}"
+    else
+        bad "04-tc.sh does NOT cap port ${PAID_PORT} at ${PAID_CAP} (expected: apply_tc_now ${PAID_PORT} \"1:30\" \"${PAID_CAP}\")"
+    fi
+
+    # (b) The reboot unit uses the same rate, or a reboot silently restores the
+    #     old cap while the running class says otherwise.
+    if grep -Eq "create_tc_service[[:space:]]+\"${PAID_ROW}\"[[:space:]]+\"[0-9:]+\"[[:space:]]+\"${PAID_CAP}\"[[:space:]]+${PAID_PORT}" "$TC_MOD"; then
+        ok "04-tc.sh's tc-${PAID_ROW}-cap.service uses the same ${PAID_CAP} rate"
+    else
+        bad "04-tc.sh's tc-${PAID_ROW}-cap.service rate disagrees with the applied cap"
+    fi
+
+    # (c) THE NEGATIVE — the retired rate must not come back. This is the
+    #     property that actually protects the fleet: `200mbit` anywhere in the
+    #     module means someone has restored the tier the merge deleted.
+    if grep -Eq '200mbit' "$TC_MOD"; then
+        bad "04-tc.sh still names a 200mbit cap — the retired second paid tier has come back"
+    else
+        ok "04-tc.sh names no retired 200mbit cap"
+    fi
+
+    # (d) The seed carries the paid row, with UDP advertised. Assert the ROW and
+    #     the udp flag together: a row without udp_relay sells a gaming plan that
+    #     does not do gaming, which is the FIXES.md-29 class of silent no-op.
+    if grep -Eq "\(\"${PAID_ROW}\",[[:space:]]*\"STRIKE_PASS\",[[:space:]]*${PAID_PORT}\)" "$SEED"; then
+        ok "seed-pb.py seeds the \`${PAID_ROW}\` row on port ${PAID_PORT}"
+    else
+        bad "seed-pb.py has no \`${PAID_ROW}\` row on port ${PAID_PORT} — a paid code could not resolve"
+    fi
+    # INVERTED 2026-10. This assertion used to REQUIRE the paid-only gate
+    # (`udp_enabled and t == "strike"`), because UDP was the paid plan's
+    # differentiator. UDP is now a given on both plans and the differentiator is
+    # RATE, so the gate it demanded is precisely the defect. The stronger
+    # two-sided form now lives at (h): every row advertises UDP, and each row
+    # names its own listener. Kept here as a TOMBSTONE rather than deleted, so a
+    # reader who remembers the old gate finds out why it is gone instead of
+    # re-adding it.
+    if grep -Eq 'uot_enabled and t == "strike"' "$SEED"; then
+        bad "seed-pb.py gates UDP to the paid row — UDP is a given on BOTH plans now (see §27(h)); the differentiator is rate"
+    else
+        ok "seed-pb.py does not gate UDP to the paid row (both plans carry it)"
+    fi
+
+    # (e) The retired tier must not be SEEDED. Its row may survive in a live DB
+    #     (field codes may carry the string), but a fresh seed must not recreate
+    #     it — that is how a retired tier silently becomes sellable again.
+    if grep -Eq '\("stealth\",[[:space:]]*"STEALTH_PASS"' "$SEED"; then
+        bad "seed-pb.py still seeds a \`stealth\` row — the retired tier is sellable again on a fresh deploy"
+    else
+        ok "seed-pb.py seeds no retired \`stealth\` row"
+    fi
+
+    # (f) TWO-SIDED, the console. The dropdown literal is a PRE-LOAD placeholder
+    #     (Codes.vue hydrates it from tiers.list), so it is not an allow-list in
+    #     the way a deployed client's enum is — but a placeholder naming a
+    #     retired tier is a dropdown entry that can mint an unresolvable code on
+    #     first paint. Assert it names only seeded rows.
+    if [ -f "$CONSOLE_CODES" ]; then
+        if grep -Eq "ref<string\[\]>\(\[[^]]*'${PAID_ROW}'" "$CONSOLE_CODES"; then
+            ok "the console's tier placeholder names the paid row"
+        else
+            bad "the console's tier placeholder does not name '${PAID_ROW}' — the mint form could offer no valid paid tier on first paint"
+        fi
+        if grep -Eq "ref<string\[\]>\(\[[^]]*'stealth'" "$CONSOLE_CODES"; then
+            bad "the console's tier placeholder still names the retired 'stealth' tier"
+        else
+            ok "the console's tier placeholder names no retired tier"
+        fi
+    else
+        warn "no console Codes.vue found — cannot check the tier placeholder"
+    fi
+
+    # (h) UDP IS A GIVEN — BOTH PLANS ADVERTISE IT, ON SEPARATE PORTS.
+    #
+    # WHY THIS EXISTS. UDP stopped being the paid plan's differentiator: the two
+    # plans are separated by RATE (100 Mbps vs 1 Mbps), not by whether a UDP path
+    # exists. That makes three things load-bearing at once, and each has a silent
+    # failure mode:
+    #
+    #   1. `seed-pb.py` must set udp_relay for EVERY row, not just `strike`. The
+    #      old gate (`t == "strike"`) is a one-word edit away from coming back,
+    #      and the symptom would be "free users can't play Roblox" — noticed by
+    #      students, not by CI.
+    #   2. Each row must name its OWN uot_port. A sing-box listener is bound to
+    #      one password, so pointing the free row at the paid port sends ECO_PASS
+    #      to a listener expecting STRIKE_PASS: the handshake fails and UDP dies
+    #      for exactly one plan.
+    #   3. The free UDP port must be SHAPED. Without a tc class on it, the free
+    #      plan's UDP is bounded only by the client's own cap — the hub trusting
+    #      the thing it is supposed to be shaping, and a modified client gets
+    #      uncapped UDP. That is the security half of this change, and the reason
+    #      the user asked for a server-side cap.
+    #
+    # Every assertion below was observed FAILING against the pre-change tree.
+    UOT_FREE_PORT=8447
+    FW="$REPO/server/modules/08-firewall.sh"
+
+    if grep -Eq 'udp = uot_enabled$' "$SEED"; then
+        ok "seed-pb.py advertises UDP for every plan (no paid-only gate)"
+    else
+        bad "seed-pb.py does NOT advertise UDP for every plan — the paid-only gate is back, and free users lose UDP silently"
+    fi
+
+    if grep -Eq 'uot_port if t == "strike" else uot_port_free' "$SEED"; then
+        ok "seed-pb.py gives each plan its own uot_port (free -> ${UOT_FREE_PORT})"
+    else
+        bad "seed-pb.py does not select a per-plan uot_port — one plan would be told to use the other's listener"
+    fi
+
+    if grep -Eq "apply_tc_now[[:space:]]+${UOT_FREE_PORT}[[:space:]]+\"[0-9:]+\"[[:space:]]+\"1mbit\"" "$TC_MOD"; then
+        ok "04-tc.sh caps the free UDP port (${UOT_FREE_PORT}) at 1mbit, server-side"
+    else
+        bad "04-tc.sh does NOT cap the free UDP port (${UOT_FREE_PORT}) — free UDP would be bounded only by the client, which a modified client controls"
+    fi
+
+    if grep -Eq "create_tc_service[[:space:]]+\"eco-udp\"[[:space:]]+\"[0-9:]+\"[[:space:]]+\"1mbit\"[[:space:]]+${UOT_FREE_PORT}" "$TC_MOD"; then
+        ok "04-tc.sh's tc-eco-udp-cap.service uses the same 1mbit rate"
+    else
+        bad "04-tc.sh's free-UDP reboot unit disagrees with the applied cap"
+    fi
+
+    # The paid UDP port must NOT be shaped: capping a latency-sensitive flow to
+    # protect bandwidth is the wrong trade for a plan sold on 100 Mbps.
+    if grep -Eq "apply_tc_now[[:space:]]+8446" "$TC_MOD"; then
+        bad "04-tc.sh shapes the PAID UDP port (8446) — that can add latency to exactly the traffic the paid plan exists for"
+    else
+        ok "04-tc.sh does not shape the paid UDP port"
+    fi
+
+    # Two-sided: the firewall must admit both listeners, or clients sit on an
+    # advertised port that nothing answers.
+    # ANCHORED ON THE COMMAND, not on a bare mention of the port variable.
+    #
+    # The first draft of this check grepped for `${UOT_PORT_FREE:-8447}` and
+    # stayed GREEN when both `ufw allow` lines were deleted — because the port
+    # also appears in the surrounding `log` lines. That is the same
+    # "a check on a value is not a check on what the code does with it" defect
+    # §23(f) and the macOS section both record, so it is anchored on `ufw allow`
+    # now and was re-observed failing against the deleted-rule tree.
+    if [ -f "$FW" ]; then
+        if grep -Eq '^[[:space:]]*ufw allow[[:space:]]+"\$\{UOT_PORT_FREE:-8447\}"/(tcp|udp)' "$FW"; then
+            ok "08-firewall.sh actually opens the free UDP port (8447) with ufw"
+        else
+            bad "08-firewall.sh does not open the free UDP port with ufw allow — the hub would advertise it and refuse it"
+        fi
+    fi
+
+    # (g) THE PROSE ABOUT THE PAID CAP, not just the cap (§23(g)'s lesson one
+    #     tier over). Two documents restate it and both are ones a reader meets
+    #     first. A prose copy that reintroduces the retired 200 Mbps now fails.
+    if [ -f "$REPO/README.md" ]; then
+        if grep -Eq 'tc caps \(1/100 Mbps\)' "$REPO/README.md"; then
+            ok "README.md's tier-cap summary agrees with the merged ladder (1/100 Mbps)"
+        else
+            bad "README.md restates the tier caps and disagrees with the tree — expected 'tc caps (1/100 Mbps)'"
+        fi
+        if grep -Eq 'Stealth [0-9]+ ?Mbps|5M tc' "$REPO/README.md"; then
+            bad "README.md still restates a retired tier's cap"
+        else
+            ok "README.md does not restate a retired tier's cap"
+        fi
+    fi
+fi
+
 
 echo
 echo "24. The macOS updater payload is a .app.tar.gz, and three sites agree on that"

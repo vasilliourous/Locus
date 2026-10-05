@@ -86,9 +86,10 @@ fi
 # it (02-shadowsocks, 08-firewall, 06-pocketbase/seed-pb) still saw the default
 # and enabled the feature — a silently half-applied opt-out.
 : "${ENABLE_UOT:=1}"          # 1 = install Strike UDP-over-TCP (:8446)
-: "${UOT_PORT:=8446}"
+: "${UOT_PORT:=8446}"           # the PAID plan's UDP-over-TCP listener
+: "${UOT_PORT_FREE:=8447}"      # the FREE plan's UDP-over-TCP listener (capped 1 Mbps)
 : "${SKIP_CONSOLE:=0}"        # 1 = skip deploying the admin console
-export ENABLE_UOT UOT_PORT SKIP_CONSOLE
+export ENABLE_UOT UOT_PORT UOT_PORT_FREE SKIP_CONSOLE
 
 # ── Shadowsocks cipher (must be forwarded, not just exported up-chain) ──
 # Module 00 defines SS_METHOD/SS_KEY_BYTES and exports them, but run_module runs
@@ -140,7 +141,7 @@ run_module() {
     # module can never silently act on the default when setup.sh was told
     # otherwise (see the toggle block near the top).
     DOMAIN="$DOMAIN" FORCE="$FORCE" \
-    ENABLE_UOT="$ENABLE_UOT" UOT_PORT="$UOT_PORT" SKIP_CONSOLE="$SKIP_CONSOLE" \
+    ENABLE_UOT="$ENABLE_UOT" UOT_PORT="$UOT_PORT" UOT_PORT_FREE="$UOT_PORT_FREE" SKIP_CONSOLE="$SKIP_CONSOLE" \
     SS_METHOD="$SS_METHOD" SS_KEY_BYTES="$SS_KEY_BYTES" \
     bash "$module" 2>&1 | tee -a "$LOGFILE"
     # shellcheck disable=SC2320
@@ -295,7 +296,7 @@ done
 # ── Start Shadowsocks services (all modules done) ──
 log "Starting Shadowsocks services..."
 systemctl daemon-reload
-for svc in shadowsocks-eco shadowsocks-stealth shadowsocks-strike; do
+for svc in shadowsocks-eco shadowsocks-strike; do
     if systemctl enable "$svc" 2>/dev/null; then
         log "  Enabled ${svc}"
     fi
@@ -304,7 +305,7 @@ done
 # Start services and verify.
 # sing-box-uot (Strike UDP-over-TCP, port 8446) is part of the default
 # deployment; ENABLE_UOT=0 opts out of it.
-SERVICES="shadowsocks-eco shadowsocks-stealth shadowsocks-strike tc-eco-cap tc-stealth-cap tc-strike-cap"
+SERVICES="shadowsocks-eco shadowsocks-strike tc-eco-cap tc-strike-cap"
 if [ "${ENABLE_UOT:-1}" = "1" ]; then
     SERVICES="${SERVICES} sing-box-uot"
 fi
@@ -343,7 +344,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/scripts" 2>/dev/null && pwd || 
 SMOKE_TEST="${SCRIPT_DIR}/smoke-test.sh"
 if [ -f "$SMOKE_TEST" ]; then
     log "Running post-deploy smoke test..."
-    DOMAIN="$DOMAIN" ENABLE_UOT="$ENABLE_UOT" UOT_PORT="$UOT_PORT" \
+    DOMAIN="$DOMAIN" ENABLE_UOT="$ENABLE_UOT" UOT_PORT="$UOT_PORT" UOT_PORT_FREE="$UOT_PORT_FREE" \
         bash "$SMOKE_TEST" 2>&1 | tee -a "$LOGFILE" || true
 else
     warn "Smoke test script not found at ${SMOKE_TEST}"
@@ -354,10 +355,9 @@ fi
 # to go and generate some before anything can be sold. Set FIRST_BATCH to mint
 # them during deploy.
 #
-#   FIRST_BATCH=20                  each tier gets 20 codes (eco/stealth/strike)
-#   FIRST_BATCH_ECO=50              per-tier overrides
-#   FIRST_BATCH_STEALTH=30
-#   FIRST_BATCH_STRIKE=10
+#   FIRST_BATCH=20                  each tier gets 20 codes (free/full)
+#   FIRST_BATCH_FREE=50             per-tier overrides
+#   FIRST_BATCH_STRIKE=10           (the paid tier's row name is `strike`)
 #   FIRST_BATCH_MIDDLEMAN=Sarah     recorded against every code in the batch
 #   FIRST_BATCH_EXPIRES=2027-09-19  optional expiry (YYYY-MM-DD)
 #
@@ -366,11 +366,10 @@ fi
 # (which would silently create unsold inventory). Delete that file to re-arm.
 generate_first_batch() {
     local marker="/root/.first_batch_done"
-    local eco_n="${FIRST_BATCH_ECO:-${FIRST_BATCH:-0}}"
-    local stealth_n="${FIRST_BATCH_STEALTH:-${FIRST_BATCH:-0}}"
+    local free_n="${FIRST_BATCH_FREE:-${FIRST_BATCH:-0}}"
     local strike_n="${FIRST_BATCH_STRIKE:-${FIRST_BATCH:-0}}"
 
-    if [ "$eco_n" = "0" ] && [ "$stealth_n" = "0" ] && [ "$strike_n" = "0" ]; then
+    if [ "$free_n" = "0" ] && [ "$strike_n" = "0" ]; then
         return 0   # nothing requested
     fi
 
@@ -408,7 +407,7 @@ generate_first_batch() {
 
     log "Generating first batch of activation codes..."
     local made=0
-    for pair in "eco:${eco_n}" "stealth:${stealth_n}" "strike:${strike_n}"; do
+    for pair in "free:${free_n}" "strike:${strike_n}"; do
         local tier="${pair%%:*}" n="${pair##*:}"
         [ "$n" = "0" ] && continue
         log "  ${tier}: ${n} codes"
@@ -486,7 +485,7 @@ log ""
 log "   PocketBase UI:  https://${DOMAIN}/_/"
 log "                   admin: $(grep '^PB_ADMIN_EMAIL=' /root/.pb_admin_creds 2>/dev/null | cut -d= -f2 || echo 'see /root/.pb_admin_creds')"
 log ""
-log "   Tier configs:   seeded automatically (eco/stealth/strike)"
+log "   Tier configs:   seeded automatically (free/strike, plus legacy eco)"
 log "   Backups:        pocketbase-backup.timer (hourly -> B2)"
 log "   SSH access:     fail2ban protected (no ufw rate-limit on port 22)"
 log ""
@@ -494,13 +493,15 @@ log "═════════════════════════
 log " Service Summary"
 log "═══════════════════════════════════════════"
 log "   Domain:        ${DOMAIN}"
-log "   Eco port:      8443 (BBR, 5 Mbps tc)"
-log "   Stealth port:  8444 (BBR, 100 Mbps tc)"
-log "   Strike port:   8445 (BBR+UDP, 200 Mbps tc)"
+log "   Free port:     8443 (BBR, 1 Mbps tc)      [row: eco/free]"
+log "   Full port:     8445 (BBR+UDP, 100 Mbps tc) [row: strike]"
+log "   Retired:       8444 (Stealth) — on an upgraded box, remove the old unit:"
+log "                  systemctl disable --now shadowsocks-stealth"
 if [ "${ENABLE_UOT:-1}" = "1" ]; then
-log "   Strike UoT:    ${UOT_PORT:-8446} (TCP+UDP, UDP-over-TCP for game traffic)"
+log "   UoT (paid):    ${UOT_PORT:-8446} (TCP+UDP, UDP-over-TCP) — uncapped"
+log "   UoT (free):    ${UOT_PORT_FREE:-8447} (TCP+UDP, UDP-over-TCP) — 1 Mbps cap"
 else
-log "   Strike UoT:    disabled (ENABLE_UOT=0)"
+log "   Full UoT:      disabled (ENABLE_UOT=0)"
 fi
 log "   PocketBase:    https://${DOMAIN}/_/"
 log "   Admin console: https://${DOMAIN}/admin/"
@@ -527,7 +528,8 @@ log "     * Console:    Codes & Clients -> Generate (recommended)"
 log "     * Or deploy with a batch next time:"
 log "         FIRST_BATCH=50 FIRST_BATCH_MIDDLEMAN=Sarah setup.sh"
 log "     * Or from your workstation:"
-log "         ./scripts/generate_codes.sh https://${DOMAIN} <PB_ADMIN_JWT> eco 50"
+log "         ./scripts/generate_codes.sh https://${DOMAIN} <PB_ADMIN_JWT> free 50"
+log "         ./scripts/generate_codes.sh https://${DOMAIN} <PB_ADMIN_JWT> strike 20   # paid"
 log "       (PB_ADMIN_JWT is the PB_TOKEN line in /root/.pb_admin_creds —"
 log "        the ADMIN_API_TOKEN is rejected for record access by PB 0.22)"
 fi

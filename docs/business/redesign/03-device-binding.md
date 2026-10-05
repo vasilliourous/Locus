@@ -1,5 +1,12 @@
 # 3. Device binding — SUPERSEDED
 
+```
+audience:    human-operator
+status:      design-record
+authoritative-for: the device-binding design — REMOVED, not shipped; see the banner
+verified-against: docs/reference/DEVICE-IDENTITY.md, docs/reference/FIXES.md
+```
+
 > **SUPERSEDED 2026-10.** Everything in this file — one-code-per-device, the
 > `device_bindings` index, explicit re-binding, fingerprint stability — was
 > **removed rather than finished**. A code is now single-use and is not tied to

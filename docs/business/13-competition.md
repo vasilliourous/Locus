@@ -4,7 +4,7 @@
 audience:    human-operator
 status:      live
 authoritative-for: the competitive set, and what the moat actually is
-verified-against: docs/STATE.md
+verified-against: docs/state.toml
 ```
 
 ## 13.1 The competitive set
@@ -16,9 +16,10 @@ verified-against: docs/STATE.md
 
 ## 13.2 The moat, precisely
 
-- **TCP-only Shadowsocks** has no TLS fingerprint for the Palo Alto to match,
-  and does not depend on UDP for the base tiers
-  ([`02-market.md`](02-market.md#23-the-wedge)).
+- **Shadowsocks over TCP** has no TLS fingerprint for the Palo Alto to match,
+  and game/voice UDP rides *inside* that TCP stream via UDP-over-TCP rather than
+  depending on the network admitting raw UDP
+  ([`02-market.md`](02-market.md#23-the-wedge), [`../GAMING-UDP.md`](../GAMING-UDP.md)).
 - **The VPS IP is fresh and unlisted**, unlike the public blocklists free
   VPNs sit on.
 - **A dedicated VPS** is not oversold.
@@ -34,9 +35,12 @@ the free VPNs on their own terms — and it is not:
 
 - **The free VPNs are free *and* unreliable here.** The free tier is free
   *and works here*. That is a different proposition.
-- **The free tier is deliberately too limited to substitute for the paid
-  one.** 1 Mbps / 5 GB cannot game or stream; it is a demonstration, not a
-  destination.
+- **The free tier is deliberately too limited to substitute for the paid one.**
+  1 Mbps / 10 GB cannot stream, and can only game the games that tolerate it
+  (Roblox, Minecraft) — badly. It carries UDP, so it is *not* broken for games;
+  it is simply 100× too slow for a competitive one. That is a narrower gap than
+  "it cannot game at all", and it is the honest one: the free plan is a
+  demonstration of a working tunnel, not a destination.
 - **The free tier exists to place the app**, and the app is the thing that
   works when others do not.
 

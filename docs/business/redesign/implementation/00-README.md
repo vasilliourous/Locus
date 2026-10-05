@@ -4,7 +4,7 @@
 audience:    builder
 status:      design-record
 authoritative-for: how the term/renewal/device-binding code actually works
-verified-against: docs/STATE.md
+verified-against: docs/reference/DEVICE-IDENTITY.md, docs/reference/FIXES.md
 ```
 
 > **Built and committed.** This directory describes what the code

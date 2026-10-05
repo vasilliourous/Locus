@@ -4,7 +4,7 @@
 audience:    human-operator
 status:      live
 authoritative-for: who the customer is, and why the incumbents fail them
-verified-against: docs/STATE.md
+verified-against: docs/state.toml
 ```
 
 ## 2.1 Who the customer is
@@ -18,9 +18,12 @@ They want, in rough order of frequency:
 3. **To reach sites** the school firewall restricts.
 
 The first is the highest-value need and the hardest for anyone else to serve
-on this network — it is why Strike exists
-([`04-tiers.md`](04-tiers.md)) and why it can carry a price premium
-([`05-pricing.md`](05-pricing.md)).
+on this network — it is the entire reason the paid tier exists
+([`04-tiers.md`](04-tiers.md#424-stealth-and-strike-are-merged-into-one-paid-tier)).
+Note the shift the merge made: games used to justify the **premium** (Strike at
+$7); with one paid plan they justify **the paid plan itself**, which is a
+stronger position — the paid tier now has a reason to exist that a free VPN
+cannot copy here, rather than merely being the faster of two paid options.
 
 ## 2.2 Why the incumbents fail them
 

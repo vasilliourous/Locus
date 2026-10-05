@@ -43,10 +43,11 @@ Two conventions hold across this directory:
 
 | Script | What it proves |
 |---|---|
-| `check-consistency.sh` | The cross-language guards: platform keys, frozen wire names, hook-written fields vs the schema, the single cipher definition, Windows-illegal tracked paths, the derived facts in `docs/state.toml`, and the `client/` licence carve-out. **Runs in CI and in `deploy.sh`** — run it before any change touching a wire name |
+| `check-consistency.sh` | The cross-language guards: platform keys, frozen wire names, hook-written fields vs the schema, the single cipher definition, Windows-illegal tracked paths, the derived facts in `docs/state.toml`, the `client/` licence carve-out, and §24 — the macOS updater payload (four sites must agree, a bare Mach-O is refused, and the resolution is exercised behaviourally). **Runs in CI and in `deploy.sh`** — run it before any change touching a wire name |
 | `smoke-test.sh` | Post-deploy health: services, ports, tc classes, hooks, DB rows (expects *N* passed / 0 failed) |
 | `smoke-publish.sh` | That `publish-release.sh` **refuses** bad input (truncated artifact, tampered bytes, wrong version) — the failure that matters is a wrong upload, not a failed one |
 | `smoke-update-endpoint.sh` | That the hub's version rules agree with the client's, by extracting the logic from the shipped hook |
+| `smoke-macos-payload-resolution.sh` | That a macOS **update** slot resolves to an installable `.app.tar.gz`, and that a pre-fix release (bare Mach-O only) is **refused** rather than silently served. Imports the shipped `resolve_platform_names`; **also run by `check-consistency.sh` §24(j)**, so it is enforced in CI, not merely available |
 | `verify-release.sh` | "Is this release actually shippable?" in one command — the checks that a release can look finished and fail |
 | `verify-ss2022.sh` | **Run on the host** after `setup.sh`: proves the Shadowsocks 2022 migration took effect (cipher and key length per listener). Separate from `smoke-test.sh`, which answers "is the deployment healthy?" |
 

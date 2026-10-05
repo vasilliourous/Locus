@@ -1,5 +1,12 @@
 # 1. Identity without PII
 
+```
+audience:    human-operator
+status:      design-record
+authoritative-for: the no-PII identity decision
+verified-against: docs/reference/DEVICE-IDENTITY.md, docs/reference/FIXES.md
+```
+
 > **Decision (operator):** the hub stores **no personal information**. The
 > human-to-code link is kept **on paper**, and the admin console's existing
 > `label` and `notes` fields carry whatever the operator chooses to record.

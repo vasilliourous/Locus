@@ -1,9 +1,16 @@
 #!/usr/bin/env bash
-# Module 02: Shadowsocks Server — 3-tier instances
-# Installs ssserver and creates three systemd services:
-#   - Eco (port 8443, BBR, TCP only)
-#   - Stealth (port 8444, BBR, TCP only)
-#   - Strike (port 8445, BBR, TCP+UDP)
+# Module 02: Shadowsocks Server — 2-tier instances
+# Installs ssserver and creates two systemd services:
+#   - Eco / Free (port 8443, BBR, TCP only)      — the free tier
+#   - Strike / Full (port 8445, BBR, TCP+UDP)    — the merged paid tier
+#
+# Stealth (port 8444) was RETIRED when the paid ladder was merged into one plan
+# (docs/business/04-tiers.md §4.2.4). This module no longer creates its config or
+# its unit — but note `write_service` is skip-if-exists, so an ALREADY-DEPLOYED
+# box keeps shadowsocks-stealth.service and /etc/shadowsocks/stealth.json and
+# will keep serving 8444 with a working password until an operator removes them.
+# That is an explicit operator step, not something a re-run does: see
+# docs/business/14-risks.md §14.8.
 set -euo pipefail
 
 log()  { echo "[02-shadowsocks] $*"; }
@@ -142,12 +149,12 @@ EOF
     # Export for use in config files
     export ECO_PASS STEALTH_PASS STRIKE_PASS
     export TIER_PASSWORDS_GENERATED
-    log "✓ Tier passwords ready (eco/stealth/strike)"
+    log "✓ Tier passwords ready (eco, strike; stealth retired)"
 }
 
 # ── Create Shadowsocks config ──
 write_config() {
-    local tier="$1"    # eco, stealth, strike
+    local tier="$1"    # the on-box name: eco (free) or strike (full)
     local port="$2"
     local pass_var="$3"
     local mode="$4"    # tcp_only or tcp_and_udp
@@ -226,49 +233,69 @@ setup_passwords
 
 mkdir -p /etc/shadowsocks
 
-# ── Eco (BBR, TCP only, 5 Mbps tc) ──
+# ── Eco / Free (BBR, TCP only, 1 Mbps tc) ──
+# The on-box name stays `eco`; the customer-facing name is Free. See
+# docs/business/04-tiers.md §4.5.
 write_config "eco" 8443 "ECO_PASS" "tcp_only"
-write_service "eco" "Eco — BBR, 5 Mbps tc cap"
+write_service "eco" "Eco/Free — BBR, 1 Mbps tc cap"
 
-# ── Stealth (BBR, TCP only, 100 Mbps tc) ──
-write_config "stealth" 8444 "STEALTH_PASS" "tcp_only"
-write_service "stealth" "Stealth — BBR, 100 Mbps tc cap"
-
-# ── Strike (BBR, TCP+UDP, 200 Mbps tc) ──
+# ── Strike / Full (BBR, TCP+UDP, 100 Mbps tc) ──
+# The on-box name stays `strike` (a code in the field carries that string, and
+# the sing-box UoT endpoint serves these credentials), the customer-facing name
+# is Full, and the cap is 100 Mbps — it absorbed Stealth. See §4.6.
 write_config "strike" 8445 "STRIKE_PASS" "tcp_and_udp"
-write_service "strike" "Strike — BBR, 200 Mbps tc cap, UDP"
+write_service "strike" "Strike/Full — BBR, 100 Mbps tc cap, UDP"
 
 # ── Reload systemd ──
 systemctl daemon-reload
 
 # ── Enable services (started by setup.sh after all modules complete) ──
 systemctl enable shadowsocks-eco.service 2>/dev/null || true
-systemctl enable shadowsocks-stealth.service 2>/dev/null || true
 systemctl enable shadowsocks-strike.service 2>/dev/null || true
 log "   Services enabled (will start after all modules complete)"
-log "   Eco:     :8443 (TCP, BBR)"
-log "   Stealth: :8444 (TCP, BBR)"
-log "   Strike:  :8445 (TCP+UDP, BBR)"
+log "   Eco/Free:     :8443 (TCP, BBR)"
+log "   Strike/Full:  :8445 (TCP+UDP, BBR)"
+log ""
+log "   NOTE: shadowsocks-stealth (:8444) is retired. If this box previously ran"
+log "   it, the service still exists and must be removed by hand:"
+log "     systemctl disable --now shadowsocks-stealth"
+log "     rm -f /etc/systemd/system/shadowsocks-stealth.service /etc/shadowsocks/stealth.json"
 log ""
 log "   Passwords saved to ${PASS_FILE} (chmod 600)"
 
 # ═══════════════════════════════════════════
-# Strike UDP-over-TCP (sing-box server) — ON BY DEFAULT
+# UDP-over-TCP (sing-box servers) — ON BY DEFAULT, ONE PER PLAN
 #
-# Installs a sing-box server listening on UOT_PORT serving Strike's
-# credentials (SS2022), so game/voice UDP can ride inside an allowed
+# Installs a sing-box server per plan, each listening on its own port with that
+# plan's own SS2022 credentials, so game/voice UDP can ride inside an allowed
 # TCP flow on networks that drop raw UDP (N4L school WiFi).
 #
-# ADDITIVE: the standard 8443/8444/8445 shadowsocks-rust services are
-# untouched — TCP traffic never uses this instance. Clients only route UDP
-# here when the tier's tier_configs config advertises "uot_port", which
-# seed-pb.py does automatically (same default).
+# TWO INSTANCES, NOT ONE, BECAUSE THE LISTENER IS BOUND TO A PASSWORD.
+# A sing-box shadowsocks inbound is configured with ONE password. Pointing both
+# plans at one listener would mean one plan's clients handshaking with the
+# other's credential — so the free plan gets its own listener with ECO_PASS,
+# exactly as the paid plan has one with STRIKE_PASS. This also lets each be
+# shaped independently (see 04-tc.sh: the free instance carries the same 1 Mbps
+# ceiling as the free TCP tier).
 #
-# Disable with ENABLE_UOT=0 (then re-run seed-pb.py so the tier stops
+#   paid (strike) -> UOT_PORT       (default 8446)
+#   free (eco)    -> UOT_PORT_FREE  (default 8447)
+#
+# UDP IS NOT A DIFFERENTIATOR ANY MORE. Both plans carry it; the paid plan is
+# differentiated by RATE (100 Mbps vs 1 Mbps), which is the only property that
+# actually separates them on this network. See docs/business/04-tiers.md §4.2.4.
+#
+# ADDITIVE: the shadowsocks-rust TCP services are untouched — TCP traffic never
+# uses these instances. Clients only route UDP here when the tier's
+# tier_configs config advertises "uot_port", which seed-pb.py does for BOTH
+# plans (same defaults).
+#
+# Disable with ENABLE_UOT=0 (then re-run seed-pb.py so the tiers stop
 # advertising uot_port, otherwise clients are told to use a dead port).
 # ═══════════════════════════════════════════
 UOT_ENABLED="${ENABLE_UOT:-1}"
 UOT_PORT="${UOT_PORT:-8446}"
+UOT_PORT_FREE="${UOT_PORT_FREE:-8447}"
 SING_BOX_VERSION="${SING_BOX_VERSION:-v1.12.1}"
 SING_BOX_BINARY="/usr/local/bin/sing-box"
 
@@ -298,8 +325,17 @@ install_singbox() {
     log "✓ sing-box installed"
 }
 
+# write_uot_config <name> <port> <password>
+#
+# One listener per plan, because a sing-box shadowsocks inbound is bound to ONE
+# password. `name` is both the config filename and the inbound tag, so the two
+# instances are distinguishable in `sing-box`'s own logs — which is the only
+# place a cross-plan misconfiguration would show up.
 write_uot_config() {
-    local config_file="/etc/sing-box/config.json"
+    local name="$1"
+    local port="$2"
+    local password="$3"
+    local config_file="/etc/sing-box/${name}.json"
     mkdir -p /etc/sing-box
 
     cat > "$config_file" <<EOF
@@ -308,16 +344,16 @@ write_uot_config() {
   "inbounds": [
     {
       "type": "shadowsocks",
-      "tag": "strike-uot",
+      "tag": "${name}-uot",
       "listen": "::",
-      "listen_port": ${UOT_PORT},
+      "listen_port": ${port},
       "method": "${SS_METHOD}",
-      "password": "${STRIKE_PASS}"
+      "password": "${password}"
     }
   ]
 }
 EOF
-    log "✓ Created ${config_file} (port ${UOT_PORT}, Strike creds, udp_over_tcp)"
+    log "✓ Created ${config_file} (port ${port}, ${name} creds, udp_over_tcp)"
     log "  NOTE: 'network' omitted — sing-box defaults to tcp+udp; the value"
     log "  'tcp_and_udp' (shadowsocks-rust syntax) is REJECTED by sing-box."
     log "  NOTE: no udp_over_tcp field on the INBOUND — sing-box <=1.12.1"
@@ -338,28 +374,39 @@ EOF
     log "  it as its own change and re-test the UoT path end to end."
 }
 
+# write_uot_service <name>
+#
+# The unit name (`sing-box-uot-<name>.service`) carries the plan so an operator
+# reading `systemctl` output can tell which listener they are looking at, and so
+# retiring one plan cannot silently stop the other's UDP.
 write_uot_service() {
-    local service_file="/etc/systemd/system/sing-box-uot.service"
+    local name="$1"
+    local desc="$2"
+    local service_file="/etc/systemd/system/sing-box-uot-${name}.service"
 
     cat > "$service_file" <<SERVICE
 [Unit]
-Description=sing-box server (Strike UDP-over-TCP)
+Description=sing-box server (${desc} UDP-over-TCP)
 After=network.target
 
 [Service]
 Type=simple
-ExecStart=${SING_BOX_BINARY} run -c /etc/sing-box/config.json
+ExecStart=${SING_BOX_BINARY} run -c /etc/sing-box/${name}.json
 Restart=on-failure
 RestartSec=5
 
 # Keep the file-descriptor limit generous.
 #
-# Every UDP flow a Strike client carries becomes a socket on this listener, and
+# Every UDP flow a client carries becomes a socket on this listener, and
 # UDP-over-TCP multiplexes all of them over relatively few TCP connections. The
 # default soft limit is low enough that a handful of gaming clients can exhaust
 # it, and the symptom is new UDP flows silently failing while TCP keeps working —
 # a "game doesn't connect but the VPN is fine" report that is very hard to
 # attribute. Raised here rather than left to the distro default.
+#
+# Raised on BOTH listeners. The free one carries Roblox/Minecraft-shaped traffic
+# from a population that is expected to be much larger than the paid one, so it
+# is if anything the more exposed of the two.
 LimitNOFILE=65536
 
 [Install]
@@ -370,19 +417,68 @@ SERVICE
 
 if [ "$UOT_ENABLED" = "1" ]; then
     if install_singbox; then
-        write_uot_config
-        write_uot_service
+        # Paid first, then free — the historical order, and the paid listener is
+        # the one already deployed on an upgraded box.
+        write_uot_config "strike" "$UOT_PORT"      "$STRIKE_PASS"
+        write_uot_service "strike" "paid"
+        write_uot_config "eco"    "$UOT_PORT_FREE" "$ECO_PASS"
+        write_uot_service "eco"    "free"
         systemctl daemon-reload
-        systemctl enable sing-box-uot.service 2>/dev/null || true
-        log "✓ UoT enabled: sing-box :${UOT_PORT} (Strike creds, tcp+udp, udp_over_tcp)"
-        log "  seed-pb.py advertises \"uot_port\": ${UOT_PORT} on the strike tier by default,"
-        log "  so existing Strike clients pick it up on their next heartbeat."
+        systemctl enable sing-box-uot-strike.service 2>/dev/null || true
+        systemctl enable sing-box-uot-eco.service 2>/dev/null || true
+        # START them, not just enable them.
+        #
+        # `enable` only takes effect at the NEXT boot, and `write_uot_service`
+        # rewrites the unit file without systemd being told to act on it. So a
+        # module run on a live box that already had a listener leaves it
+        # STOPPED: found 2026-10-05, when a deployment created both per-plan
+        # units, retired the old one, and left BOTH plans with no UDP at all
+        # while every check said "created". The enablements above mean a reboot
+        # would have masked it — the failure only appears between deploy and
+        # reboot, which is precisely when a student is most likely to notice.
+        systemctl start sing-box-uot-strike.service 2>/dev/null || \
+            warn "Could not start sing-box-uot-strike.service (:${UOT_PORT}) — start it by hand"
+        systemctl start sing-box-uot-eco.service 2>/dev/null || \
+            warn "Could not start sing-box-uot-eco.service (:${UOT_PORT_FREE}) — start it by hand"
+
+        # Prove they are actually listening rather than assuming the start
+        # worked. A unit that "started" and immediately died is the classic
+        # sing-box failure (an unknown config key makes it exit), and the whole
+        # point of this block is that UDP dies silently otherwise.
+        sleep 1
+        for pair in "strike:${UOT_PORT}" "eco:${UOT_PORT_FREE}"; do
+            _n="${pair%%:*}"; _p="${pair#*:}"
+            if systemctl is-active --quiet "sing-box-uot-${_n}.service"; then
+                log "  ✓ sing-box-uot-${_n} is active on :${_p}"
+            else
+                warn "sing-box-uot-${_n} is NOT running — UDP for that plan is DEAD."
+                warn "  Check: journalctl -u sing-box-uot-${_n} -n 20 --no-pager"
+            fi
+        done
+        log "✓ UoT enabled on both plans:"
+        log "    paid (strike creds): :${UOT_PORT}"
+        log "    free (eco creds):    :${UOT_PORT_FREE}  <- capped at 1 Mbps by 04-tc.sh"
+        log "  seed-pb.py advertises \"uot_port\" on BOTH tier rows, so every client"
+        log "  picks its own endpoint up on the next heartbeat."
+
+        # Retire the OLD single-listener unit if this box has one. It served the
+        # paid plan on the same port the new per-plan unit now uses, so leaving it
+        # running would mean two processes fighting for :8446 — one of them bound,
+        # the other failing to start and flapping. Best-effort and non-fatal: a
+        # fresh box has never had it.
+        if [ -f /etc/systemd/system/sing-box-uot.service ]; then
+            warn "Retiring the old combined sing-box-uot.service (replaced by the per-plan units)"
+            systemctl disable --now sing-box-uot.service 2>/dev/null || \
+                warn "Could not stop sing-box-uot.service — stop it by hand or :${UOT_PORT} will flap"
+            rm -f /etc/systemd/system/sing-box-uot.service
+            systemctl daemon-reload
+        fi
     else
         warn "UoT setup aborted (download failed). TCP tiers unaffected."
     fi
 else
-    log "UoT disabled (ENABLE_UOT=0) — Strike clients continue on raw UDP."
-    log "  NOTE: re-run seed-pb.py so the strike tier stops advertising uot_port;"
+    log "UoT disabled (ENABLE_UOT=0) — both plans continue on raw UDP."
+    log "  NOTE: re-run seed-pb.py so the tiers stop advertising uot_port;"
     log "  otherwise clients are told to use a UDP port nothing is listening on."
 fi
 

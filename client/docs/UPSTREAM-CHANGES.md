@@ -4,7 +4,7 @@
 audience:    builder
 status:      live
 authoritative-for: how the Locus client differs from upstream Clash Verge Rev
-verified-against: docs/STATE.md
+verified-against: client/ (vs Clash Verge Rev v2.5.5)
 ```
 
 > **The client is an application built on Clash Verge Rev v2.5.5, not a fork with a
@@ -21,9 +21,9 @@ verified-against: docs/STATE.md
 
 | | Size | Notes |
 |---|---|---|
-| **Locus logic we wrote** | ~5,800 Rust | `src-tauri/src/locus/` + `cmd/locus.rs` |
+| **Locus logic we wrote** | the `locus/` module tree + `cmd/locus.rs` | a few thousand lines; read the tree — a count here is stale the next commit |
 | **Locus frontend we wrote** | ~500 TS/TSX | activation gate, connect control, service shims |
-| **Locus tests** | 156 unit | inline in the modules they cover, plus 6 integration |
+| **Locus tests** | run the suites for the count | inline in the modules they cover, plus the integration crates |
 | Upstream code retained | the rest | `core/`, `config/`, `enhance/`, `feat/`, `cmd/` |
 
 Upstream's machinery was **not** rewritten. Everything Verge already did well —

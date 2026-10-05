@@ -155,7 +155,7 @@ the claim is not verified.**
 
 | # | Claim | Last verified | How to re-verify |
 |---|---|---|---|
-| A1 | The hub endpoint `https://networkingguides.duckdns.org` resolves and answers `/api/health` | **unverified** | `server/scripts/verify-live.sh` |
+| A1 | The hub endpoint `https://networkingguides.duckdns.org` resolves and answers `/api/health` | **verified 2026-10-05** | `server/scripts/verify-live.sh` — ran 2026-10-04T22:45Z (= 2026-10-05 NZ, the register's dateline), `A1 PASS`, `/api/health` returned 200 (`{"message":"API is healthy.","code":200}`) |
 | A2 | The hub holds paid codes in active use (count deliberately not recorded — §4) | **unverified** | sign in to the console at `/admin/`, Codes & Clients |
 | A3 | The rolling `build-preview` release is current for the pushed commit | **unverified** | `gh release view build-preview --json tagName,assets,createdAt` |
 | A4 | The client CI workflow has run and gone green for a given commit | **verified 2026-09-30** for `5ebfc89` | run `36669449010` — `Verify`, all four builds incl. `windows-2022`, `Release`, `Report` — read from the GitHub REST API. Re-check with `gh run list --workflow=client.yml` |
@@ -163,6 +163,57 @@ the claim is not verified.**
 | A6 | The **Windows** NSIS installer completes on a clean machine — the setup runs interactively and installs Locus | **verified 2026-09-30** for the `v3.2.12` installer (`installer-Locus_3.2.12_x64-setup.exe`) | opened the NSIS setup on real Windows and completed the install; Locus installed. Re-check by running the setup on a clean machine and confirming the install finishes |
 | A7 | The **installed Windows client stays installed** — it launches from `C:\Program Files\Locus\`, serves its own bundled assets, and is not relaunched out of its install directory by its own updater | **unverified** — and was **falsified in the field** on 2026-09-30 (see the note) | install on Windows, let it take an advertised update, then launch from the Start Menu and confirm the window renders the app. Nothing in CI launches either artifact, which is why three green releases shipped this broken — see `../reference/FIXES.md`, 2026-09-30 (second entry) |
 | A8 | The **shipped client resolves its own bundled assets at run time** — a build carries no CI-runner path, so an installed app on a machine without the runner's drive renders the app rather than `ERR_FILE_NOT_FOUND` | **verified 2026-09-30** for `a8b0acf` (CI run `36686775049`) | the built `locus-windows-amd64.exe` was read back from the run's artifacts and the Tauri context string now carries the relative `../dist` where the broken `5ebfc89` build carried `d:/a/Locus/Locus/client/dist`. Re-check with `strings locus-windows-amd64.exe \| grep -c 'a/Locus/Locus'` (expect `0`) |
+| A9 | The **macOS** update slot serves an installable `.app.tar.gz` — a macOS client is offered a payload its updater can apply | **unverified** — and was **falsified in the field** on 2026-10-05 for `3.2.26` (see the note) | `curl -s "https://networkingguides.duckdns.org/api/update?version=<prev>&platform=macos_arm"` must return `"url": …/locus-darwin-arm64.app.tar.gz`; and `curl -s …/updates/<v>/locus-darwin-arm64.app.tar.gz \| head -c2 \| od -An -tx1` must print `1f 8b` (gzip), not the Mach-O magic `cf fa ed fe`. Recovery: `RECOVER-MACOS-UPDATE.md` |
+| A10 | **No live code carries `tier: "stealth"`** — the retired tier's row can be deleted without stranding a paying student | **verified 2026-10-05** | console → Codes & Clients → filter by tier; or `GET /api/collections/codes/records?filter=(tier='stealth')&perPage=1` with an admin token and read `totalItems`. A non-zero count means the disposition is "re-point, do not delete" — see `../business/04-tiers.md` §4.6. **Never** bulk-delete the rows either way. |
+| A11 | The **live hub took the Free/Full merge** — port 8445 is capped at 100 Mbit, port 8444 is no longer shaped, and the retired service is stopped | **verified 2026-10-05** | read-only: `tc class show dev "$(ip -4 route show default \| awk '{print $5}' \| head -1)"` must show a `1:30` class at 100Mbit and **no** `1:20` class; `systemctl is-active shadowsocks-eco shadowsocks-strike` must be `active` and `systemctl is-enabled shadowsocks-stealth` must not report `enabled`. The tree is green either way — this is the box, not the repo. |
+| A13 | **Free clients carry UDP** — the free plan's UoT listener answers on 8447 and the free tier rows advertise `uot_port` | **verified 2026-10-05** | after a `setup.sh` re-run: `ssh <hub> "systemctl is-active sing-box-uot-eco sing-box-uot-strike"` must both be `active`, `ufw status \| grep 8447` must show tcp+udp allowed, and `tc class show dev <iface>` must show a `1:20` class at 1mbit. Then activate a throwaway `free` code and confirm its heartbeat returns `server_config.uot_port: 8447` with `udp_relay: true`. The mechanism is a second instance of the paid path (which works), but "the second instance works" is not implied by "the first does". |
+| A12 | A **paid code connects on the merged tier** — activation resolves `strike` and the heartbeat returns a `server_config` on 8445 with `udp_relay` true | **verified 2026-10-05** | activate a throwaway `strike` code (never a live student's) and inspect the `/api/activate` and `/api/heartbeat` responses; `server_config.server_port` must be 8445 and `udp_relay` must be `true`. This is the merge's central claim and it is the one thing that cannot be proven from the checkout. |
+
+> **A10–A13 were verified on 2026-10-05 by the deploy that shipped them**, with
+> the caveat each row records:
+>
+> - **A10** — `SELECT tier, COUNT(*) FROM codes GROUP BY tier` returned a single
+>   row: `strike`, 8 codes (3 activated). **No `stealth` code has ever been
+>   minted**, so the retired tier stranded nobody and its service was removed.
+> - **A11** — the live tc state is `1:10 @ 1Mbit`, `1:20 @ 1Mbit`, `1:30 @ 100Mbit`
+>   with three matching filters and **no 8444 filter**; `shadowsocks-stealth
+>   .service` and `/etc/shadowsocks/stealth.json` were deleted and 8444 stopped
+>   listening.
+> - **A13** — `sing-box-uot-strike` (8446) and `sing-box-uot-eco` (8447) are both
+>   `active` and `enabled`, both listening on TCP+UDP, both reachable from
+>   outside this network, and both tier rows advertise their own `uot_port`.
+> - **A12** — verified by activating **one throwaway code per plan** through the
+>   *public* `POST /api/activate`, exactly as a student's client does, and reading
+>   the response back:
+>
+>   | Plan | status | tier | TCP | `udp_relay` | `uot_port` |
+>   |---|---|---|---|---|---|
+>   | Free | Activation successful | `free` | 8443 | `True` | **8447** |
+>   | Full | Activation successful | `strike` | 8445 | `True` | **8446** |
+>
+>   Both codes were minted for the test and deleted afterwards (never a live
+>   code, and never a bulk delete — `CLAIMS.md` §4). This exercises the whole
+>   chain: code → checksum → lookup → activate → tier-config resolution →
+>   per-plan `uot_port`.
+>
+>   **What it still does not prove:** that a client *tunnels real game traffic* at
+>   the shaped rate. The response is the hub's promise; no machine has yet played
+>   through it. That observation needs real hardware
+>   ([`../reference/STILL-OPEN.md`](../reference/STILL-OPEN.md)).
+>
+> **Two defects were found and fixed by this deploy, both invisible in the tree:**
+>
+> 1. **The UoT units were created but never started.** `systemctl enable` acts at
+>    the next boot, and rewriting a unit file does not restart it — so a module
+>    run on a live box left *both* plans with no UDP at all, while every check
+>    said "created". Both listeners were started by hand, and
+>    `02-shadowsocks.sh` now starts and asserts them.
+> 2. **`04-tc.sh`'s own verification was a false negative.** It grepped
+>    `tc filter show` for `sport <port>`, but a u32 filter is printed as a hex
+>    match (`match 20fb0000/ffff0000`), so it warned "filter not found" for all
+>    three ports on a correctly shaped interface. Now decoded and asserted
+>    against the intended class, with the retired 8444 port checked as a
+>    negative.
 
 > **A7 is no longer merely unverified — it was observed FAILING on 2026-09-30, and
 > the failure was a different one from the two already fixed.**
@@ -264,11 +315,17 @@ the claim is not verified.**
 **This file does not make any Class A claim true.** It makes them dated,
 single-homed, and checkable, and it stops them being laundered into derived
 sentences that read as facts about the code. A5 and A7 above are **not verified**;
-A4, A6 and A8 each carry a single dated verification of one artifact and nothing
-more. When this documentation overhaul was performed (2026-09-29) the environment
-had no route to the hub: the previous address no longer existed and no credentials
-were available. That is itself an example of the rule — the honest state is written
-down, not assumed away.
+A4, A6 and A8 each carry a single dated verification of one artifact, and A1 a
+single dated reachability check. Nothing more.
+
+**Reachability is itself a dated observation, and it is recorded as one.** When
+this documentation overhaul was performed (2026-09-29) the environment had no
+route to the hub: the previous address no longer existed and no credentials were
+available, and every world claim was written `unverified` accordingly. On
+2026-10-05 the environment *could* reach the hub (`verify-live.sh` → `A1 PASS`),
+so A1's date moved and nothing else did — A3/A4 stayed `SKIP` because `gh` is not
+installed, and a `SKIP` is never a pass. Both states are the rule working: the
+honest current state is written down, not assumed in either direction.
 
 **A verification is a dated observation of one run, never a property.** A4 says
 "verified for `5ebfc89`", not "the workflow is green"; A6 says "verified for the

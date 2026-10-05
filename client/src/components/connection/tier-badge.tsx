@@ -7,33 +7,45 @@ import { TIER_COLORS, TIER_FALLBACK } from '@/pages/_theme'
  * The tier badge.
  *
  * From `docs/archive/UI-AESTHETICS.md` §7 — the "tier sells itself" principle:
- * a student on Strike should be able to see they are on Strike without a
+ * a student on the paid plan should be able to see that without opening a
  * settings page. Each tier gets a colour, a small glyph, and nothing else.
  *
  * The glyph is decorative (`aria-hidden`) because it duplicates the label: a
- * screen reader announcing "lightning bolt strike" is worse than "strike". The
+ * screen reader announcing "lightning bolt full" is worse than "full". The
  * colour is likewise redundant — it reinforces the word rather than carrying
  * meaning on its own, which is the rule the whole palette follows.
+ *
+ * ## Two tiers, two frozen wire names and their labels
+ *
+ * The hub sends `tier` as a **frozen wire name** — a code carries the string it
+ * was minted with, and the hub resolves it against `tier_configs`. So this
+ * component is the ONE place a wire name becomes a student-visible label, and
+ * every mapping lives here rather than being spread across call sites:
+ *
+ *   `eco`     → shown as "Free"   (the legacy slot the free tier reuses)
+ *   `free`    → shown as "Free"
+ *   `strike`  → shown as "Full"   (the merged paid tier)
+ *
+ * `strike` deliberately does NOT display as "Strike", and `Full` is not a wire
+ * name: renaming the row would strand every paid code in the field. See
+ * `docs/business/04-tiers.md` §4.6.
  */
 
 /** The tier identity, including the unknown case. */
 const tierIdentity = (tier: string | null | undefined) => {
   const key = (tier ?? '').trim().toLowerCase()
-  const glyph =
-    key === 'strike' ? '\u26A1' : key === 'stealth' ? '\u25C9' : '\u25CB'
+  const glyph = key === 'strike' ? '\u26A1' : '\u25CB'
   const palette = TIER_COLORS[key] ?? TIER_FALLBACK
 
   // An unknown tier shows the raw name rather than a guessed label: if the hub
-  // ever adds a tier this build predates, showing "strike" for it would be a
+  // ever adds a tier this build predates, showing "Full" for it would be a
   // lie, and showing nothing would hide a plan the student is paying for.
   const label =
     key === 'strike'
-      ? 'Strike'
-      : key === 'stealth'
-        ? 'Stealth'
-        : key === 'eco'
-          ? 'Eco'
-          : (tier ?? '')
+      ? 'Full'
+      : key === 'free' || key === 'eco'
+        ? 'Free'
+        : (tier ?? '')
 
   return { glyph, palette, label }
 }

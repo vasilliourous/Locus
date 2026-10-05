@@ -253,7 +253,7 @@ mod tests {
     }
 
     /// A tier with no UoT endpoint must still produce a document Verge accepts,
-    /// because eco and stealth are the common case.
+    /// because the free plan is the common case.
     #[test]
     fn a_tier_without_uot_is_still_applicable() {
         use crate::locus::tier::build_profile;

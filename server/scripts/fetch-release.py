@@ -225,12 +225,33 @@ def resolve_platform_names(version, available=None):
     the hub and CI drifting apart on an asset name. The Windows entry is
     version-bearing because Tauri names its NSIS bundle with the version.
 
-    `available` is the set of asset names the release actually carries. When a
-    macOS tarball is ABSENT but the legacy bare binary is present, the legacy
-    name is returned so a release published before the packaging step still
-    resolves. That fallback is deliberately narrow — macOS only, and only when
-    the tarball is genuinely missing — because preferring a bare Mach-O in a
-    macOS update slot is the defect this function now avoids.
+    `available` is the set of asset names the release actually carries. When it
+    is supplied and a macOS tarball is ABSENT, this **refuses** (raises
+    `FetchError`) rather than falling back to the pre-fix bare Mach-O.
+
+    # Why the fallback that used to live here was removed
+
+    It used to return the legacy bare binary, log a WARNING, and carry on. That
+    is the retired client's worst failure mode reproduced on the hub side: an
+    update is published, it looks perfectly healthy from the operator's seat,
+    and every macOS client that accepts it downloads 48 MB it can never install.
+    It is *exactly* how v3.2.26 reached the live hub pointing `macos_arm` at a
+    bare Mach-O — the release genuinely predated the packaging step, the
+    fallback "degraded gracefully", and the result was a live `update_config` row
+    no macOS client could act on.
+
+    Degrading to an uninstallable payload is worse than refusing, because a
+    refusal is visible at publish time and a broken row is not. The rules this
+    repository already learned, applied literally:
+
+      * "An update that is advertised and then ignored is indistinguishable from
+        a stable release with no update" — so it must fail loudly, not log.
+      * A check that can silently take the wrong branch reads exactly like a
+        check that passed.
+
+    `available=None` (no release context, used by the filename cross-check and
+    by callers that only want the *preferred* names) still returns the preferred
+    names without a refusal — there is nothing to reconcile against.
     """
     names = []
     for key, name, column in PLATFORMS:
@@ -239,15 +260,19 @@ def resolve_platform_names(version, available=None):
         elif available is not None and name not in available:
             legacy = LEGACY_MACOS_NAMES.get(key)
             if legacy and legacy in available:
-                log(
-                    "WARNING: %s has no %s in this release; falling back to the "
-                    "pre-fix bare binary %s, which a macOS updater cannot install. "
-                    "Re-cut the release from a build that ran the packaging step."
-                    % (key, name, legacy)
+                raise FetchError(
+                    "the v%s release has no %s but carries the pre-fix bare "
+                    "binary %s. A bare Mach-O in a macOS update slot is "
+                    "downloadable and uninstallable — `tauri_plugin_updater` "
+                    "extracts a tar of an `.app` bundle on macOS, so a student "
+                    "would pay for ~48 MB and install nothing. Refusing to "
+                    "publish rather than degrade to an artifact no macOS client "
+                    "can install. Cut a new release from a build whose CI ran "
+                    "the `Package the macOS updater payload` step."
+                    % (version, name, legacy),
+                    400,
                 )
-                resolved = legacy
-            else:
-                resolved = name
+            resolved = name
         else:
             resolved = name
         names.append((key, resolved, column))
@@ -706,8 +731,18 @@ def fetch_release(version, force=False):
             )
 
         advertised = published.get("platforms") or {}
+
+        # Compare the manifest against what the hub WILL ACTUALLY SERVE — that
+        # is `resolved`, the same list the staging loop above used (built with
+        # `available=set(assets)`). It used to re-call `resolve_platform_names`
+        # with NO `available`, which answers a DIFFERENT question: the names the
+        # hub *prefers*, not the names it will fetch. The two agreed only while
+        # every release carried every preferred name, so the check could pass
+        # while staging served something else — the "two sources of truth with
+        # no reconciliation" shape this project keeps paying for. One call site,
+        # one answer: the thing compared is the thing staged.
         mismatches = []
-        for key, name, _ in resolve_platform_names(version):
+        for key, name, _ in resolved:
             stated = (advertised.get(key) or {}).get("file")
             if not stated:
                 # Not fatal here: a platform CI chose not to advertise is the
@@ -725,9 +760,14 @@ def fetch_release(version, force=False):
                 "the hub's platform filenames disagree with CI's manifest for "
                 "v%s — refusing to publish, because serving a file other than "
                 "the one CI named is how a Windows client was handed a raw "
-                "executable it could not install: %s. Update PLATFORMS in "
-                "fetch-release.py (and publish-release.sh) to match the "
-                "manifest." % (version, "; ".join(mismatches)),
+                "executable it could not install, and how a macOS client was "
+                "handed a bare Mach-O it cannot install: %s. This is almost "
+                "always a STALE DEPLOYED fetch-release.py: the names live in "
+                "PLATFORMS here, and the host runs its own copy. Re-deploy it "
+                "with `server/scripts/hooks-sync.sh --fetch-service`, then "
+                "re-run the fetch. If the deployed copy is current, the release "
+                "genuinely predates the packaging step — cut a new one rather "
+                "than republishing." % (version, "; ".join(mismatches)),
                 400,
             )
         log("  ✓ platform filenames agree with manifest.json")

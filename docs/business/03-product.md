@@ -14,14 +14,16 @@ hood there are three parts, and only one of them is the customer's.
 
 | Part | What it is | Where |
 |---|---|---|
-| **Client** | Tauri 2 + React desktop app, forked from Clash Verge Rev v2.5.5, tunnelling via mihomo. The Locus logic is ~5,800 lines of Rust. Ships as a 3.x release (current version in [`../STATE.md`](../STATE.md)). | `client/` |
+| **Client** | Tauri 2 + React desktop app, forked from Clash Verge Rev v2.5.5, tunnelling via mihomo. The Locus logic is its own `locus/` module tree in Rust. Ships as a 3.x release (current version: `[client.version]` in [`../state.toml`](../state.toml)). | `client/` |
 | **Hub** | One DigitalOcean droplet running PocketBase + Caddy + the Shadowsocks/BBR/tc stack. Holds codes, tiers, releases, and the admin console. | `server/` |
 | **Retired clients** | Go + Wails and Go + Fyne predecessors. Reference only — they paid for the behavioural contract the fork reproduces. | `legacy/` |
 
 ## 3.2 What the customer is allowed to see
 
 The UI shows plan name, connection status, connection metrics, and (for the
-free tier) usage against the monthly allowance. It does **not** show protocol
+free tier) usage against the monthly allowance. It does **not** mention UDP:
+it is a given on both plans, so there is nothing to advertise — the difference
+the student feels is speed. It does **not** show protocol
 names, ports, or the tech stack.
 
 This is a deliberate product decision inherited from the legacy plan (custom

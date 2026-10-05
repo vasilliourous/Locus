@@ -15,9 +15,10 @@ publish path) and `fetch-release.py` (the GitHub-fetch path).
 
 > **Removed:** `release-cut.sh`, root `bump.sh`, `server/scripts/bump-version.sh`,
 > `stamp-syso.py`, and `smoke-bump.sh`. They versioned the **archived** Wails
-> client and were the source of the repo's tagging confusion. There is no version
-> authority now — the shipping fork's release path is an open decision
-> (`docs/reference/STILL-OPEN.md`).
+> client and were the source of the repo's tagging confusion. The shipping fork
+> has its own version authority now: `pnpm release-version` in `client/` writes
+> every version site (the list is `[client.version_sites]` in `docs/state.toml`),
+> and `docs/operate/RELEASING.md` is the procedure.
 
 > **Retired:** `publish-update.sh` was moved to
 > `legacy/publish-update.sh.broken`. It wrote no `sha256_<platform>` columns and
@@ -28,27 +29,30 @@ publish path) and `fetch-release.py` (the GitHub-fetch path).
 ### Generate Codes
 
 ```bash
-# Generate 50 Eco codes and import to PocketBase
+# Generate 50 free-plan codes and import to PocketBase
 PB_TOKEN=$(grep PB_TOKEN /root/.pb_admin_creds | cut -d= -f2)
-./scripts/generate_codes.sh https://networkingguides.duckdns.org $PB_TOKEN eco 50
+./scripts/generate_codes.sh https://networkingguides.duckdns.org $PB_TOKEN free 50
+
+# Paid plan — the row is `strike`, the card prints "Full"
+./scripts/generate_codes.sh https://networkingguides.duckdns.org $PB_TOKEN strike 20
 
 # Dry run (no import)
 DRY_RUN=1 PB_TOKEN=$(grep PB_TOKEN /root/.pb_admin_creds | cut -d= -f2)
-./scripts/generate_codes.sh https://networkingguides.duckdns.org $PB_TOKEN eco 50
+./scripts/generate_codes.sh https://networkingguides.duckdns.org $PB_TOKEN free 50
 
 # Custom expiry (30 days)
 EXPIRY_DAYS=30 PB_TOKEN=$(grep PB_TOKEN /root/.pb_admin_creds | cut -d= -f2)
-./scripts/generate_codes.sh https://networkingguides.duckdns.org $PB_TOKEN eco 10
+./scripts/generate_codes.sh https://networkingguides.duckdns.org $PB_TOKEN free 10
 ```
 
 ### Print Code Cards
 
 ```bash
 # Generate PDF from codes file
-./scripts/print_codes.sh eco-codes.txt eco-cards.pdf
+./scripts/print_codes.sh free-codes.txt free-cards.pdf
 
 # Pipe codes directly
-cat eco-codes.txt | ./scripts/print_codes.sh -o eco-cards.pdf
+cat free-codes.txt | ./scripts/print_codes.sh -o free-cards.pdf
 ```
 
 ## Code Format

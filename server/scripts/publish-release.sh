@@ -71,7 +71,29 @@ case "$VERSION" in
     *) echo "error: '${VERSION}' does not look like a version (expected x.y.z)" >&2; exit 1 ;;
 esac
 
-VPS="${VPS:-root@networkingguides.duckdns.org}"
+# Prefer the `locus-hub` ssh alias, which carries the deploy key and needs no
+# password; fall back to the bare host for a machine set up differently.
+#
+# WHY THIS PROBE EXISTS, because the failure it prevents is a HANG, not an error:
+# the bare hostname has no key installed here, so `ssh` with BatchMode=yes and
+# no alias falls through to an interactive password prompt. Under a pipe (a
+# script, a CI job, a redirected log) there is nothing to type, so it waits
+# forever and looks like "the check is slow" rather than "the check cannot
+# authenticate". `deploy.sh` learned this first; `verify-release.sh` and
+# `publish-release.sh` both shipped without it and both hang the same way.
+#
+# It still fails rather than hanging: ConnectTimeout bounds the probe, and the
+# fallback keeps working on a host where the bare name does have key auth.
+_site_pick_ssh_target() {
+    if [ -n "${VPS:-}" ]; then printf '%s' "$VPS"; return; fi
+    if ssh -o BatchMode=yes -o ConnectTimeout=5 locus-hub true 2>/dev/null; then
+        printf 'locus-hub'
+    else
+        printf 'root@networkingguides.duckdns.org'
+    fi
+}
+_VPS_CHOSEN="$(_site_pick_ssh_target)"
+VPS="${_VPS_CHOSEN}"
 PB_API="${PB_API:-https://networkingguides.duckdns.org}"
 # Kept only so an older invocation that sets ROLLOUT_PERCENT still runs; the
 # value is written for schema compatibility and is IGNORED by every reader.

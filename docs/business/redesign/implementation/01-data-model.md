@@ -1,13 +1,24 @@
 # 1. Data model — what was added, and who touches it
 
+```
+audience:    builder
+status:      design-record
+authoritative-for: the schema and who writes each field
+verified-against: docs/reference/DEVICE-IDENTITY.md, docs/reference/FIXES.md
+```
+
 > Every field below exists in `server/scripts/seed-pb.py` and is written by a
 > hook. The consistency guard (`server/scripts/check-consistency.sh`, group 3)
-> asserts that every field a hook writes exists in the schema — **40 fields at
-> the last run**, up from 35 before this work. If that number drops, a field was
-> lost; if it fails, a hook writes something the schema does not have.
->
+> asserts that every field a hook writes exists in the schema. If that count
+> drops, a field was lost; if a hook writes a field the schema lacks, the guard
+> fails. **Read the current count from the guard's own output rather than from
+> this sentence** — it is a derived fact and it changes as hooks are added:
+> `bash server/scripts/check-consistency.sh | grep 'hook-written'`.
 > The five this work added are exactly: `term_days`, `term_kind` (on `codes`)
 > and `bound_at`, `released_at`, `release_reason` (on `device_bindings`).
+> **2026-10 note:** the `device_bindings` half is removed — that collection is
+> kept on an existing hub but read and written by nothing. The two `codes` fields
+> (`term_days`, `term_kind`) remain live.
 > Re-deriving the delta: diff the `.set("…")` calls in `server/pb_hooks/*.js`
 > against the `{"name": …}` entries in `seed-pb.py`.
 

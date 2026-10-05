@@ -209,6 +209,40 @@ value      = { port = 8443, cap = "1mbit", tier_rows = ["eco", "free"] }
 source     = "server/modules/04-tc.sh; server/scripts/seed-pb.py"
 provenance = "derived"
 
+[tiers.paid]
+# The paid tier's endpoint, recomputable from the same three files.
+#
+# THERE IS ONE PAID TIER. Stealth (port 8444) was retired when the paid ladder
+# was merged into one plan: Stealth and Strike were the same tier at two rates,
+# and the only real difference was Strike's UDP-over-TCP endpoint. Retiring it
+# also retired the faster class the second paid tier existed to advertise; the
+# paid cap is now 100 Mbps, which is the rate Stealth already sold at and far
+# above what any game needs. See docs/business/04-tiers.md §4.2.4.
+#
+# The retired rate is deliberately NOT written down here, even as history. A
+# number in a comment is a number the next person copies back into the code —
+# which is exactly why check-consistency.sh §27(c) fails the build on it in
+# 04-tc.sh. (A ratified `provenance = "derived"` value is the only number this
+# file may state.)
+#
+# `strike` is the FROZEN row name, for the same reason `eco` is: a code in the
+# field carries that string in its `tier` field, and activation/heartbeat resolve
+# a tier by looking that string up in `tier_configs`. The customer-facing name is
+# "Full"; renaming the row would strand every paid code in the field. See
+# docs/business/04-tiers.md §4.6.
+#
+# check-consistency.sh §27 recomputes the cap and the port from 04-tc.sh, asserts
+# the seed row and its udp_relay gating, asserts the retired tier is NOT seeded,
+# and asserts the console's placeholder names this row — the AGREEMENT across
+# four files, not any single file.
+#
+# The `udp_relay`/`uot_port` split is NOT a fact here: like the free allowance it
+# is set at deploy time (ENABLE_UOT / UOT_PORT) so the operator can move the UoT
+# endpoint without a release.
+value      = { port = 8445, cap = "100mbit", tier_rows = ["strike"], retired_rows = ["stealth"] }
+source     = "server/modules/04-tc.sh; server/scripts/seed-pb.py"
+provenance = "derived"
+
 [world]
 # A pointer into CLAIMS.md §5, not a fact. Listed here so a reader of this file
 # is sent to the right place rather than tempted to put a world claim in this

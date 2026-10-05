@@ -53,7 +53,7 @@ fi
 
 # ── 1. The tier configs declare SS2022, and their keys are the right size ──
 log "Step 1/5: Checking /etc/shadowsocks/*.json method and key length..."
-for tier in eco stealth strike; do
+for tier in eco strike; do
     cfg="/etc/shadowsocks/${tier}.json"
     if [ ! -f "$cfg" ]; then
         fail "${cfg} does not exist — ${tier} was never configured"
@@ -114,7 +114,7 @@ fi
 
 # ── 3. The listeners are actually up ──
 log "Step 3/5: Checking listeners..."
-for svc in shadowsocks-eco shadowsocks-stealth shadowsocks-strike; do
+for svc in shadowsocks-eco shadowsocks-strike; do
     if systemctl is-active --quiet "$svc"; then
         pass "${svc} is running"
     else
@@ -135,7 +135,7 @@ fi
 # whole script exists to catch, so the journal is read for key/decrypt errors
 # rather than trusting `is-active` alone.
 log "Step 4/5: Scanning recent journals for handshake/key errors..."
-for svc in shadowsocks-eco shadowsocks-stealth shadowsocks-strike sing-box-uot; do
+for svc in shadowsocks-eco shadowsocks-strike sing-box-uot; do
     systemctl is-active --quiet "$svc" 2>/dev/null || continue
     hits=$(journalctl -u "$svc" --since "1 hour ago" --no-pager 2>/dev/null \
         | grep -ciE 'invalid key|cipher|password|decrypt.*fail|unsupported method' || true)
@@ -160,7 +160,7 @@ if [ -n "${DOMAIN:-}" ]; then
     if [ -f /root/.pb_admin_creds ]; then
         PB_TOKEN=$(grep -m1 '^PB_TOKEN=' /root/.pb_admin_creds 2>/dev/null | cut -d= -f2-)
         if [ -n "$PB_TOKEN" ]; then
-            for tier in eco stealth strike; do
+            for tier in eco strike; do
                 adv=$(curl -sf "https://${DOMAIN}/api/collections/tier_configs/records?filter=(tier='${tier}')" \
                     -H "Authorization: Bearer ${PB_TOKEN}" 2>/dev/null \
                     | python3 -c "

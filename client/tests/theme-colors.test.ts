@@ -586,9 +586,12 @@ describe('locus palette consistency across paint layers', () => {
     // From docs/archive/UI-AESTHETICS.md §7. Pinned because these are the
     // "tier sells itself" cues and a wrong gold/green would be a brand error
     // nobody notices in code review.
-    expect(theme).toContain('#eab308') // strike, gold
-    expect(theme).toContain('#46c186') // stealth, green
-    expect(theme).toContain('#7fb48f') // eco, muted green
+    expect(theme).toContain('#eab308') // strike, gold — the paid tier
+    expect(theme).toContain('#7fb48f') // free/eco, muted green
+    // The retired tier's colour is gone. If `stealth` reappears in the palette,
+    // someone has re-added a tier the hub no longer seeds
+    // (docs/business/04-tiers.md §4.2.4).
+    expect(theme).not.toContain('#46c186')
   })
 
   it('the base palette is the designed values', () => {

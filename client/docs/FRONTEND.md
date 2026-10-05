@@ -4,7 +4,7 @@
 audience:    builder
 status:      live
 authoritative-for: the shipping two-tab UI and the rules each surface obeys
-verified-against: docs/STATE.md
+verified-against: client/src/pages/, client/src/components/
 ```
 
 > The front-end was replaced in the 3.1.0 rework: the inherited Clash Verge

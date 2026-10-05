@@ -88,11 +88,14 @@ generate_enscript() {
 
     echo "" > "$tmp_txt"
     for code in "${CODES[@]}"; do
-        # Extract tier from filename or mark as unknown
+        # Extract tier from filename or mark as unknown.
+        # NOTE: `strike-codes.txt` prints as "Full" — the row name is frozen
+        # (`strike`) and the customer-facing name is Full. See
+        # docs/business/04-tiers.md §4.6.
         local tier=""
-        if [[ "$INPUT_FILE" == *"eco"* ]]; then tier="Eco"
-        elif [[ "$INPUT_FILE" == *"stealth"* ]]; then tier="Stealth"
-        elif [[ "$INPUT_FILE" == *"strike"* ]]; then tier="Strike"
+        if [[ "$INPUT_FILE" == *"free"* ]]; then tier="Free"
+        elif [[ "$INPUT_FILE" == *"eco"* ]]; then tier="Free"
+        elif [[ "$INPUT_FILE" == *"strike"* ]]; then tier="Full"
         else tier="Locus"
         fi
 

@@ -86,7 +86,19 @@ fi
 
 echo "verify-live.sh — checking the world claims in CLAIMS.md §5"
 echo "════════════════════════════════════════════════════════════"
-echo "  time:    $(now_utc)"
+# ── The date the REGISTER uses. ──
+#
+# The register in CLAIMS.md §5 dates every observation in the project's own
+# dateline, which is NZ local time (the operator's, and the one the FIXES.md
+# entries are written in) — see the commit dates in `git log`. `date -u` runs up
+# to a day BEHIND that between 12:00 and 24:00 NZ, so a date copied from the UTC
+# clock would be a day earlier than every neighbouring entry and would read as a
+# stale probe. Emit the same dateline the docs are written in.
+#
+# TZ is set on the command, not exported, so the rest of the script is unchanged.
+today_local() { TZ="${LOCUS_TZ:-Pacific/Auckland}" date +%Y-%m-%d; }
+
+echo "  time:    $(now_utc)  (register date: $(today_local))"
 echo "  domain:  $DOMAIN"
 echo
 
@@ -207,6 +219,38 @@ fi
 record "A2"$'\t'"SKIP"$'\t'"needs the admin console and a credential, and the count is deliberately not recorded (CLAIMS.md §4)"
 record "A5"$'\t'"SKIP"$'\t'"needs real Windows/macOS hardware (STILL-OPEN.md)"
 
+# ── A10 — no live code carries the retired `stealth` tier ──
+#
+# This one is answerable from the API but only with an admin token, so it runs
+# when the operator has one and SKIPs otherwise. It answers a yes/no ("is the
+# retired tier still in use") and NOT a count — CLAIMS.md §4 forbids recording
+# how many codes exist, and the filter below deliberately requests one row and
+# reads only whether any matched.
+#
+# WHY IT MATTERS: it decides whether the retired `stealth` tier_configs row can
+# be deleted or must be re-pointed at the merged endpoint. Deleting the row while
+# a code still carries the string strands a paying student with an activation
+# that names a tier with no server_config.
+if [ -z "${PB_TOKEN:-}" ]; then
+    record "A10"$'\t'"SKIP"$'\t'"no PB_TOKEN in the environment — cannot ask whether any live code carries the retired tier"
+    echo -e "  ${BLUE}A10${NC} retired-tier check skipped (set PB_TOKEN to probe)"
+else
+    stealth_n="$(curl -sf -m 20 \
+        "https://${DOMAIN}/api/collections/codes/records?filter=(tier='stealth')&perPage=1&fields=id" \
+        -H "Authorization: Bearer ${PB_TOKEN}" 2>/dev/null \
+        | python3 -c 'import json,sys; print(json.load(sys.stdin).get("totalItems", 0))' 2>/dev/null || echo "")"
+    if [ -z "$stealth_n" ]; then
+        record "A10"$'\t'"SKIP"$'\t'"the codes query did not answer — UNKNOWN, not 'none'"
+        echo -e "  ${BLUE}A10${NC} retired-tier check inconclusive"
+    elif [ "$stealth_n" = "0" ]; then
+        record "A10"$'\t'"PASS"$'\t'"no live code carries the retired tier — its tier_configs row may be deleted"
+        echo -e "  ${GREEN}A10${NC} no retired-tier codes"
+    else
+        record "A10"$'\t'"FAIL"$'\t'"at least one live code still carries the retired tier — RE-POINT the row, do NOT delete it (business/04-tiers.md §4.6)"
+        echo -e "  ${RED}A10${NC} retired-tier codes still exist — re-point, do not delete"
+    fi
+fi
+
 echo
 echo "────────────────────────────────────────────────────────────"
 printf '%-5s %-6s %s\n' "CLAIM" "STATE" "DETAIL"
@@ -261,7 +305,7 @@ else
     [ "$n_skip" -gt 0 ] && echo "($n_skip claim(s) still SKIPPED — those stay unverified in the register.)"
     echo
     echo "To record this: update the 'Last verified' column in docs/operate/CLAIMS.md §5"
-    echo "for the claims marked PASS, with today's date ($(date -u +%Y-%m-%d))."
+    echo "for the claims marked PASS, with today's date ($(today_local))."
     echo "Leave every SKIPPED claim's date exactly as it was."
     exit 0
 fi

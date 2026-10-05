@@ -4,7 +4,7 @@
 audience:    human-operator
 status:      live
 authoritative-for: what is decided but unbuilt, what is proposed, and what the operator must supply
-verified-against: docs/STATE.md
+verified-against: server/pb_hooks/, client/src-tauri/src/locus/
 ```
 
 Proposals awaiting a decision, or work already decided but not yet built.
@@ -35,7 +35,7 @@ is done, and what is left:
   failing against each half-deployed state.
 
 - **The upgrade route** (shipped 3.2.26). The throttle state is followed by a
-  sentence naming the action — contact the middleman about Stealth. There is no
+  sentence naming the action — contact the middleman about Full. There is no
   self-serve checkout to link to; a code is a physical card
   ([`08-distribution.md`](08-distribution.md)).
 - **Safety guards** (shipped 3.2.26): an absurd allowance from the hub is clamped
@@ -57,11 +57,52 @@ is done, and what is left:
   is untested — the classification is tested, the effect on a running tunnel is
   not.
 - **Deployment.** All of the hub half is inert until `setup.sh` re-runs.
+- **The allowance is now 10 GB** (was 5). Still one hook value, still changeable
+  without a release, and the client picks it up on its next beat.
 
 **Before a middleman sells a free card**, the throttle application and a hub
 deploy are the two items that matter.
 
-### P2 — Confirm the price ladder
+### P2 — ~~Confirm the price ladder~~ DONE: the ladder is $0 / $5 and there is no ladder
+
+**Decided and written, not yet sold.** The offer is two plans — Free ($0, 1 Mbps,
+10 GB) and Full ($5, 100 Mbps unmetered + UDP) — with a $12 term pass
+([`05-pricing.md`](05-pricing.md)). This replaces the $0/$4/$7 ladder, which is
+now historical.
+
+**What remains for the operator:**
+
+- **Re-print the cards.** `scripts/print_codes.sh` labels a code by its tier, so
+  a batch minted before this change says "Stealth" or "Strike" on paper
+  ([`04-tiers.md`](04-tiers.md#46-the-same-choice-made-again-for-stealth--merged-into-full)).
+- **Re-brief the middlemen.** The pitch is now one sentence
+  ([`08-distribution.md`](08-distribution.md#85-how-the-free-tier-changes-middleman-work)).
+- **Confirm $5 is right after the first term.** §5.4.2 names the failure mode:
+  the $4 volume seller is gone, so if conversion collapses the fix is a price
+  cut, not a new tier.
+
+### P2.1 — Deploy the merge to the live hub (operator step, not a code change)
+
+**Written in the tree; inert on the box.** The merge changes three shipped files,
+and the hub deploys from `/root/server/`, so nothing a student feels has moved
+until this runs.
+
+1. `server/scripts/check-consistency.sh` must be green (**§23 and §27** now cover
+the paid tier and the console list).
+2. Answer the **open world claim**: does any live code carry `tier: "stealth"`?
+  Read it from the console — Codes & Clients, filter by tier. The disposition
+  differs by the answer and both are safe
+  ([`04-tiers.md`](04-tiers.md#46-the-same-choice-made-again-for-stealth--merged-into-full),
+  [`../operate/CLAIMS.md`](../operate/CLAIMS.md) §5).
+3. Re-run `setup.sh` (or `deploy.sh`) so `04-tc.sh`, `02-shadowsocks.sh` and
+  `seed-pb.py` take effect, then confirm with the read-only probe in
+  [`15-continuity.md`](15-continuity.md#153-what-this-merge-changed-about-continuity).
+4. **Retire the stranded service** — `systemctl disable --now shadowsocks-stealth`,
+  remove the unit and `/etc/shadowsocks/stealth.json`. `setup.sh` will not do
+  this and the code cannot ([`14-risks.md`](14-risks.md#148-the-tier-merge-strands-a-live-endpoint-and-nothing-removes-it)).
+5. Confirm a **paid** code still resolves: activate a throwaway `strike` code and
+  check its heartbeat returns a `server_config` on 8445 with `udp_relay` true.
+  This is the merge's central claim and it is the thing to prove on the box.
 
 **$0 / $4 / $7** monthly, **$10 / $19** term passes
 ([`05-pricing.md`](05-pricing.md)). This one number set propagates
@@ -89,10 +130,10 @@ them without passing a `term_days` explicitly.
 
 ## 18.2 Proposed, awaiting a decision
 
-### P3 — Tier bundling (Strike → free code)
+### P3 — Tier bundling (Full → free code)
 
 The one legacy growth mechanic worth reconsidering
-([`11-growth.md`](11-growth.md#114-tier-bundling--reconsider-dont-dismiss)): a Strike buyer gets a free code to give
+([`11-growth.md`](11-growth.md#114-tier-bundling--reconsider-dont-dismiss)): a Full buyer gets a free code to give
 away, via a `label`ed batch. Decide whether to trial it; cost is free-user
 bandwidth ([`06-unit-economics.md`](06-unit-economics.md#63-the-free-tiers-cost)).
 
@@ -102,14 +143,28 @@ Per-user SS2022 credentials plus a usage table would make the quota
 tamper-proof ([`04-tiers.md`](04-tiers.md#443-why-enforcement-is-client-side-and-what-that-means)). Real work; do it only if
 client-side enforcement proves inadequate.
 
-### P5 — Remote protocol swap
+### P5 — Operator control of the paid tier and the free limits
+
+The merge made one thing obvious: **the paid endpoint and the free limits are
+both operator-relevant and neither is console-editable.** The free allowance
+(`free_allowance_mb`) is a hook value, so it changes without a release but not
+from the UI; the paid tier's cap is a `tc` value in `04-tc.sh`, so it needs a
+`setup.sh` re-run. If a term goes badly — free adoption is burning bandwidth, or
+$5 converts worse than $4 did — the operator's only lever today is a code change
+plus a deploy.
+
+**Worth building when:** the first real tuning decision arrives. Until then the
+hook edit is cheap enough, and §14.8 is the reminder that a console edit would
+*not* remove a stranded service either.
+
+### P6 — Remote protocol swap
 
 The real continuity project, and the one that closes four of the six risks
 ([`14-risks.md`](14-risks.md#146-renewal-is-manual--the-risk-the-redesign-introduces)): a second protocol deployed, settable in
 `tier_configs`, and a **client update that has actually been installed** —
 the last part is unproven (`docs/reference/STILL-OPEN.md`).
 
-### P6 — Instrument free → paid conversion
+### P7 — Instrument free → paid conversion
 
 The metric that validates the entire pricing strategy
 ([`16-metrics.md`](16-metrics.md#163-the-one-metric-that-now-matters-most)) is currently unmeasurable beyond
@@ -126,6 +181,6 @@ These do not gate any written decision, but they would sharpen several files:
 |---|---|
 | Current paying-user count | [`12-scale-and-ceiling.md`](12-scale-and-ceiling.md) |
 | Active middleman count | [`08-distribution.md`](08-distribution.md#84-middleman-economics) |
-| Any churn / renewal data | [`05-pricing.md`](05-pricing.md#541-how-this-compares-to-the-old-ladder) |
+| Any churn / renewal data | [`05-pricing.md`](05-pricing.md#541-how-this-compares-to-the-ladders-before-it) |
 | Whether Macleans College is still the only market | [`02-market.md`](02-market.md#25-what-the-market-does-not-contain) |
 | Real concurrent-user ceiling | [`06-unit-economics.md`](06-unit-economics.md#64-the-estimate-that-must-stay-labelled) |

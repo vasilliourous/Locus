@@ -27,8 +27,7 @@ There are two kinds of fact, and they have two homes. Neither of them is here.
 
 | If the fact is… | It is a… | Its home | Who checks it |
 |---|---|---|---|
-| Recomputable from this checkout (version, domain, console path, platform list) | **Class B — derived** | [`state.toml`](state.toml) | `server/scripts/check-consistency.sh` §9, which fails the build |
-| About the deployed system or the world (hub reachable, codes in use, CI ran, preview is current) | **Class A — world claim** | [`operate/CLAIMS.md`](operate/CLAIMS.md) §5 | `server/scripts/verify-live.sh`, which may only ever mark them verified by reaching them |
+| Recomputable from this checkout (version, domain, console path, platform list) | **Class B — derived** | [`state.toml`](state.toml) | `server/scripts/check-consistency.sh` §9, which fails the build || About the deployed system or the world (hub reachable, codes in use, CI ran, preview is current) | **Class A — world claim** | [`operate/CLAIMS.md`](operate/CLAIMS.md) §5 | `server/scripts/verify-live.sh`, which may only ever mark them verified by reaching them |
 
 **The rule in one line:** if it changes when the box moves, the world moves, or a
 day passes, it is dated and checkable — never a present-tense sentence. If a
@@ -96,7 +95,9 @@ disagree, the owner wins.
    instead; §10 of the consistency check fails the build if you do not.
 3. **Status is structure, not a banner.** A document's status is a front-matter
    field (`status: live | reference | design-record`); if it is retired, it lives
-   in `archive/` or `history/`, where the folder carries the status.
+   in `archive/` or `history/`, where the folder carries the status. This is
+   **enforced**: `check-consistency.sh` §25 fails the build when a live document
+   has no front-matter block or an invented `status:` value.
 4. **A world claim carries a date and a method.** Present tense is for things that
    cannot change. Everything else is *"as last verified on `<date>`"*, and if it
    has not been verified, it says **unverified** in those words.

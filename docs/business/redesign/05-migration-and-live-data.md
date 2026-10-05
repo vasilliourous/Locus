@@ -1,5 +1,12 @@
 # 5. Migration, and the live data it must not damage
 
+```
+audience:    human-operator
+status:      design-record
+authoritative-for: the migration plan against live data — gating, unexecuted
+verified-against: docs/reference/DEVICE-IDENTITY.md, docs/reference/FIXES.md
+```
+
 > **This is the gating file.** Read it before any code change. It exists because
 > the hub is **live, holds paying customers, and has no sandbox.**
 
