@@ -21,12 +21,12 @@ body {
 // `#5b5c9d`, and grey surfaces); they are now Locus's, matching
 // `src/pages/_theme.tsx`. `tests/theme-colors.test.ts` fails if they drift.
 :root {
-  --primary-main: #2ea86a;
-  --text-primary: #eaf2ec;
-  --selection-color: #0c1711;
-  --scroller-color: #8ca596;
-  --background-color: #06130c;
-  --background-color-alpha: rgba(46, 168, 106, 0.1);
+  --primary-main: #4fbf84;
+  --text-primary: #e4ede7;
+  --selection-color: #16211c;
+  --scroller-color: #9bafa3;
+  --background-color: #0d1512;
+  --background-color-alpha: rgba(79, 191, 132, 0.1);
   --border-radius: 8px;
 }
 

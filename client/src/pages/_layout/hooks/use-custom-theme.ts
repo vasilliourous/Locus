@@ -201,9 +201,11 @@ export const useCustomTheme = () => {
    * Purely additive, and deliberately kept out of the MUI theme object: a theme's
    * decoration is one named preset from `DECORATIONS` (never CSS text -- see
    * `THEMES.md` section 1), written as a single `<style>` element scoped to
-   * `[data-theme-skin]`. Nothing here targets a component, a class or the
-   * document, so deleting this effect removes every trace of the layer and
-   * leaves the shipped appearance byte-identical.
+   * `[data-theme-skin]`. A preset is a structure of one or more declaration
+   * blocks (see `DecorationSpec`); each is scoped identically, so a layer cannot
+   * introduce a selector of its own. Nothing here targets a component, a class
+   * or the document, so deleting this effect removes every trace of the layer
+   * and leaves the shipped appearance byte-identical.
    *
    * The radii go out as CSS variables *in addition to* being applied through MUI,
    * because `_surfaces.ts` reads them for the shared card. A theme that sets no
@@ -239,7 +241,19 @@ export const useCustomTheme = () => {
     // Scoped to the skin attribute, so a preset cannot reach a component even by
     // accident. `data-theme-skin` is only present while a decorated theme is
     // active, which is why removing the attribute above also disarms the CSS.
-    el.textContent = `[data-theme-skin] { ${preset} }`
+    //
+    // A preset is a *structure* now: `short` is the root declarations, and each
+    // entry of `layers` is a further declaration block painted on top, in order.
+    // Both forms go through the same scoping, so no layer can introduce a
+    // selector of its own.
+    //
+    // When `layers` is empty this emits exactly what it emitted before the type
+    // changed — one scoped block, no extra whitespace beyond the template's — so
+    // a flat preset like `forest-glow` is byte-identical to the shipped output.
+    const blocks = [preset.short, ...preset.layers]
+      .map((block) => `[data-theme-skin] { ${block} }`)
+      .join('\n')
+    el.textContent = blocks
   }, [spec])
 
   const theme = useMemo(() => {

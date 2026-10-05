@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://locusvpn.jadedns.uk/sitemap.xml

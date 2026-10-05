@@ -1,13 +1,20 @@
 # 1. The business in one page
 
+```
+audience:    human-operator
+status:      live
+authoritative-for: the business in one page, and the three sentences that drive the rest
+verified-against: docs/state.toml
+```
+
 | | |
 |---|---|
 | **Product** | Locus — a small commercial VPN service sold to students at N4L-managed NZ schools (the live deployment is Macleans College). |
 | **The job it does** | Lets a student on school WiFi reach games, video, and sites the school firewall blocks. |
 | **How** | Shadowsocks 2022 over **TCP** — no TLS fingerprint for the firewall to match, no UDP dependency for the base tiers. |
 | **Form** | Signed desktop app (Windows-primary; macOS/Linux builds exist), activation-code gated, no self-signup. |
-| **Tiers** | **Free · Stealth · Strike.** See [`04-tiers.md`](04-tiers.md). |
-| **Prices** | **$0 · $4 · $7** per month. See [`05-pricing.md`](05-pricing.md). |
+| **Tiers** | **Free · Full.** Two plans, no ladder. See [`04-tiers.md`](04-tiers.md). |
+| **Prices** | **$0 · $5** per month. See [`05-pricing.md`](05-pricing.md). |
 | **Distribution** | Friends act as middlemen and sell paper code cards for cash. See [`08-distribution.md`](08-distribution.md). |
 | **Cost base** | One ~$6/mo VPS. See [`06-unit-economics.md`](06-unit-economics.md). |
 | **Ambition** | Cover costs, pay a coffee, stay a side project. See [`12-scale-and-ceiling.md`](12-scale-and-ceiling.md). |
@@ -28,7 +35,7 @@
 
 1. **We are not cheaper than free, and not faster than a good VPN — we are
    the option that still works on this specific network.**
-2. **Revenue comes from volume in the cheap tiers, not margin at the top.**
+2. **Revenue comes from volume in the cheap plan, not margin at the top.**
 3. **This is a side project that pays for itself and a bit more; the plan is
    not built to reward chasing scale.**
 

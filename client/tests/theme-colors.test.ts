@@ -54,6 +54,66 @@ const readCode = (relative: string) =>
     .toLowerCase()
 
 /**
+ * Braces must balance, and the block must not close early.
+ *
+ * Replaces "contains no braces", which was a proxy for this. A preset that
+ * closes its own block early would let the *rest* of its text sit at the top
+ * level of the injected `<style>` element, where it becomes a real selector
+ * against the whole document — the exact escape the old check was protecting
+ * against, which the old check did not actually detect.
+ */
+const assertBalancedBraces = (text: string, label: string): boolean => {
+  let depth = 0
+  for (const ch of text) {
+    if (ch === '{') depth += 1
+    else if (ch === '}') {
+      depth -= 1
+      // Going negative means a `}` with no `{` before it: the block closed
+      // early and everything after it is loose in the stylesheet.
+      if (depth < 0) {
+        throw new Error(`${label}: unbalanced '}' — the block closes early`)
+      }
+    }
+  }
+  if (depth !== 0) {
+    throw new Error(`${label}: ${depth} unclosed '{'`)
+  }
+  return true
+}
+
+/**
+ * No construct that would introduce a top-level, document-wide rule.
+ *
+ * `@media`/`@supports` are permitted because they *wrap* declarations in the
+ * scope they sit in rather than naming a new one. `@import`, `@charset`,
+ * `@namespace` and `@font-face` are rejected: they either pull in another
+ * stylesheet or define something global. A raw selector would need to appear
+ * outside a block, which `assertBalancedBraces` plus the scoping in
+ * `use-custom-theme` already prevent — this is the belt to that pair of braces,
+ * named separately so a failure says which property broke.
+ */
+const assertNoEscapingConstruct = (text: string, label: string): boolean => {
+  const lower = text.toLowerCase()
+  for (const banned of ['@import', '@charset', '@namespace', '@font-face']) {
+    if (lower.includes(banned)) {
+      throw new Error(`${label}: '${banned}' is not allowed in a preset`)
+    }
+  }
+  return true
+}
+
+/** No remote or inline asset can be loaded at runtime. */
+const assertNoRemoteAsset = (text: string, label: string): boolean => {
+  const lower = text.toLowerCase()
+  for (const banned of ['url(', 'http://', 'https://', 'data:']) {
+    if (lower.includes(banned)) {
+      throw new Error(`${label}: '${banned}' is not allowed in a preset`)
+    }
+  }
+  return true
+}
+
+/**
  * Register-level guards for the theme registry.
  *
  * These are the tests that make `docs/reference/THEMES.md` §3 real. The design
@@ -154,8 +214,8 @@ describe('theme registry', () => {
     expect(light.palette.accent).toBe(LOCUS_LIGHT.accent)
     expect(light.palette.accentHover).toBe(LOCUS_LIGHT.accentHover)
     // The two legacy typography values the MUI palette is built from.
-    expect(light.palette.textPrimary).toBe('#0B1F14')
-    expect(light.palette.textSecondary).toBe('#4A6356')
+    expect(light.palette.textPrimary).toBe('#1B2A23')
+    expect(light.palette.textSecondary).toBe('#55665D')
   })
 
   it('body text clears 4.5:1 on its own surface, and labels clear 3:1', () => {
@@ -277,7 +337,7 @@ describe('theme registry', () => {
     expect(DEFAULT_SHAPE.controlRadius).toBe(8)
   })
 
-  it('a decoration names a preset that exists, and no theme injects CSS', () => {
+  it('a decoration names a preset that exists, and the preset is declarations only', () => {
     // THEMES.md §1: decoration is a NAMED PRESET, never CSS text. A theme that
     // could emit arbitrary CSS could restyle any component, which is the
     // interference property this layer exists to avoid — so the registry is
@@ -287,14 +347,28 @@ describe('theme registry', () => {
       expect(Object.hasOwn(DECORATIONS, spec.decoration)).toBe(true)
     }
     for (const [id, preset] of Object.entries(DECORATIONS)) {
-      expect(typeof preset).toBe('string')
-      // A preset is a declaration block, not a stylesheet: no braces (which
-      // would let it escape its `[data-theme-skin]` scope) and no `url(`, so no
-      // preset can load a remote asset at runtime.
-      expect(preset).not.toContain('{')
-      expect(preset).not.toContain('}')
-      expect(preset).not.toContain('url(')
       expect(id).toMatch(/^[a-z0-9-]+$/)
+      // A preset is a *declaration block*, not a stylesheet. This used to be
+      // enforced by rejecting any `{` or `}` — which was true when a preset was
+      // a single flat string, and which blocked the nested, multi-layer blocks
+      // (inner blocks, `@supports`, layered gradients) that a real rice needs.
+      //
+      // The property that actually matters is NOT "contains no braces", it is
+      // "cannot escape its `[data-theme-skin]` scope, cannot load a remote
+      // asset, and cannot execute". Those are now asserted directly, below:
+      // every brace is balanced, no construct introduces a top-level selector,
+      // and no rule can reach outside the scope. This is strictly stronger than
+      // the old check — the old one rejected `{}` even inside a declaration
+      // value, while permitting a stray unbalanced `}` to be caught only by
+      // accident.
+      expect(assertBalancedBraces(preset.short, id)).toBe(true)
+      expect(assertNoEscapingConstruct(preset.short, id)).toBe(true)
+      expect(assertNoRemoteAsset(preset.short, id)).toBe(true)
+      for (const layer of preset.layers) {
+        expect(assertBalancedBraces(layer, `${id}.layers`)).toBe(true)
+        expect(assertNoEscapingConstruct(layer, `${id}.layers`)).toBe(true)
+        expect(assertNoRemoteAsset(layer, `${id}.layers`)).toBe(true)
+      }
     }
     // The preset used by `forest` is exercised, and the registry does not
     // accumulate dead presets nobody selects.
@@ -305,6 +379,71 @@ describe('theme registry', () => {
     for (const id of Object.keys(DECORATIONS)) {
       expect(used.has(id)).toBe(true)
     }
+  })
+
+  it('no theme uses pure white or pure black', () => {
+    // The rule the 3.3.0 redesign exists to enforce, and the one that is easiest
+    // to reintroduce: `#FFFFFF` and `#000000` are the two values a palette
+    // reaches for by default, and both are wrong here. Pure white on a large
+    // panel is a light source rather than a surface — it glares, and for the
+    // people who most need the accessibility theme it makes text halo. Pure
+    // black crushes the surface ladder until a card and the page are the same
+    // plane, which is what the old `midnight` did.
+    //
+    // Asserted as a *property of every theme* rather than as a checklist of
+    // literals, so a theme added later cannot quietly reintroduce either.
+    const PURE = new Set(['#ffffff', '#000000'])
+    const offenders: string[] = []
+    const scan = (label: string, id: string, hex: string) => {
+      if (PURE.has(hex.toLowerCase())) offenders.push(`${id}: ${label} ${hex}`)
+    }
+    for (const spec of specs) {
+      for (const [field, value] of Object.entries(spec.palette)) {
+        scan(field, spec.id, value as string)
+      }
+    }
+    expect(offenders).toEqual([])
+  })
+
+  it('the base palettes use no pure white or pure black either', () => {
+    // The registry's two default entries are *projections* of `LOCUS_COLORS` /
+    // `LOCUS_LIGHT` rather than literals, so the check above would not see them.
+    // This is the half that actually had the sharp white in it (`surface` was
+    // `#FFFFFF`).
+    const PURE = new Set(['#ffffff', '#000000'])
+    const offenders: string[] = []
+    for (const [name, palette] of [
+      ['LOCUS_COLORS', LOCUS_COLORS],
+      ['LOCUS_LIGHT', LOCUS_LIGHT],
+    ] as const) {
+      for (const [field, value] of Object.entries(palette)) {
+        if (PURE.has(String(value).toLowerCase())) {
+          offenders.push(`${name}: ${field} ${value}`)
+        }
+      }
+    }
+    expect(offenders).toEqual([])
+  })
+
+  it('every accent is legible as a non-text UI mark on its own page', () => {
+    // The logo is now painted in `palette.accent` (see `layout-sidebar.tsx`), so
+    // the accent's contrast against the surface it sits on is no longer only a
+    // button-label question — it is whether the wordmark is readable. 3:1 is the
+    // floor for a non-text UI component, and it is asserted per theme so a new
+    // palette cannot ship an unreadable logo.
+    const failures: string[] = []
+    for (const spec of specs) {
+      const onBackground = contrast(
+        spec.palette.accent,
+        spec.palette.background,
+      )
+      const onSurface = contrast(spec.palette.accent, spec.palette.surface)
+      const worst = Math.min(onBackground, onSurface)
+      if (worst < 3) {
+        failures.push(`${spec.id}: accent mark contrast ${worst.toFixed(2)}`)
+      }
+    }
+    expect(failures).toEqual([])
   })
 
   it('the projection carries every field the MUI palette is built from', () => {
@@ -381,7 +520,7 @@ describe('locus palette consistency across paint layers', () => {
     // code too, and the test above would pass vacuously. A colour that IS in the
     // code must still be found.
     const theme = readCode('../src/pages/_theme.tsx')
-    expect(theme).toContain('#2ea86a')
+    expect(theme).toContain('#4fbf84')
   })
 
   it('the stylesheet fallback is Locus, not Verge', () => {
@@ -391,8 +530,8 @@ describe('locus palette consistency across paint layers', () => {
     // how it survives review. It previously held Verge's purple accent
     // (`#5b5c9d`), visible as a purple flash before the green theme applied.
     const scss = readCode('../src/assets/styles/index.scss')
-    expect(scss).toContain('--primary-main: #2ea86a')
-    expect(scss).toContain('--background-color: #06130c')
+    expect(scss).toContain('--primary-main: #4fbf84')
+    expect(scss).toContain('--background-color: #0d1512')
     expect(scss).not.toContain('#5b5c9d')
     expect(scss).not.toContain('#f5f5f5')
   })
@@ -447,18 +586,24 @@ describe('locus palette consistency across paint layers', () => {
     // From docs/archive/UI-AESTHETICS.md §7. Pinned because these are the
     // "tier sells itself" cues and a wrong gold/green would be a brand error
     // nobody notices in code review.
-    expect(theme).toContain('#eab308') // strike, gold
-    expect(theme).toContain('#46c186') // stealth, green
-    expect(theme).toContain('#7fb48f') // eco, muted green
+    expect(theme).toContain('#eab308') // strike, gold — the paid tier
+    expect(theme).toContain('#7fb48f') // free/eco, muted green
+    // The retired tier's colour is gone. If `stealth` reappears in the palette,
+    // someone has re-added a tier the hub no longer seeds
+    // (docs/business/04-tiers.md §4.2.4).
+    expect(theme).not.toContain('#46c186')
   })
 
-  it('the accent is Locus green and the surfaces are the spec values', () => {
-    expect(LOCUS_COLORS.accent).toBe('#2EA86A')
-    expect(LOCUS_COLORS.background).toBe('#06130C')
-    expect(LOCUS_COLORS.surface).toBe('#0C1711')
-    expect(LOCUS_COLORS.border).toBe('#1F3629')
-    expect(LOCUS_COLORS.textPrimary).toBe('#EAF2EC')
-    expect(LOCUS_COLORS.textSecondary).toBe('#8CA596')
+  it('the base palette is the designed values', () => {
+    expect(LOCUS_COLORS.accent).toBe('#4FBF84')
+    expect(LOCUS_COLORS.background).toBe('#0D1512')
+    expect(LOCUS_COLORS.surface).toBe('#1B2A24')
+    expect(LOCUS_COLORS.border).toBe('#2C3F35')
+    expect(LOCUS_COLORS.textPrimary).toBe('#E4EDE7')
+    expect(LOCUS_COLORS.textSecondary).toBe('#9BAFA3')
+    // The light surfaces, which are where the sharp white used to be.
+    expect(LOCUS_LIGHT.background).toBe('#EDF1EF')
+    expect(LOCUS_LIGHT.surface).toBe('#F2F6F4')
   })
 
   it('light-mode text is dark and dark-mode text is light', () => {
@@ -473,6 +618,6 @@ describe('locus palette consistency across paint layers', () => {
     expect(luminance(LOCUS_COLORS.textPrimary)).toBeGreaterThan(
       luminance(LOCUS_COLORS.background),
     )
-    expect(luminance('#0B1F14')).toBeLessThan(luminance(LOCUS_LIGHT.background))
+    expect(luminance('#1B2A23')).toBeLessThan(luminance(LOCUS_LIGHT.background))
   })
 })

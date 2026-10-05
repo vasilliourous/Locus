@@ -1,8 +1,29 @@
 # 3. Device binding — the rule, the refusal, and the lifecycle
 
+```
+audience:    builder
+status:      design-record
+authoritative-for: the OLD one-code-per-device rule — REMOVED 2026-10
+verified-against: docs/reference/DEVICE-IDENTITY.md, docs/reference/FIXES.md
+```
+
 > "One code per device" is enforced by a unique index and a 409 refusal. This
 > file covers how it works, the state machine it creates, and the one bug this
 > work introduced and fixed.
+>
+> **⚠️ REMOVED 2026-10 — read this before believing any present-tense sentence
+> below.** This file describes a design that was **removed, not shipped**. There
+> is no one-code-per-device rule, no unique index in play, no 409 refusal, and no
+> `codes.rebind` write path. The live model is: a code is **single-use** and tied
+> to **no** device (`codes.activated_at` is the whole record), and the *client*
+> keeps the code durably so a reinstall does not lose it. See
+> [`../../../reference/DEVICE-IDENTITY.md`](../../../reference/DEVICE-IDENTITY.md).
+>
+> Kept as the **design record of a path deliberately not taken** — the reasoning
+> is why the shipped decision is the opposite one. Everything below is
+> past-tense in intent, whatever tense it is written in. The two surviving
+> fragments are the `409 → DeviceAlreadyActivated` client match arm (harmless,
+> never fired now) and the `.pb.js` hooks' comments.
 
 ---
 

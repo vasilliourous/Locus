@@ -1,5 +1,12 @@
 # 8. Metrics and instrumentation
 
+```
+audience:    human-operator
+status:      design-record
+authoritative-for: the metrics instrumentation specification
+verified-against: docs/reference/DEVICE-IDENTITY.md, docs/reference/FIXES.md
+```
+
 > [`../16-metrics.md`](../16-metrics.md) §16.2 already *defines* the metrics this
 > business needs. This file specifies what must be stored for them to become
 > **computable**, and is candid about which ones still will not be.

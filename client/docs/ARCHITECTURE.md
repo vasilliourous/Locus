@@ -4,7 +4,7 @@
 audience:    builder
 status:      design-record
 authoritative-for: the pre-port plan and its rationale
-verified-against: docs/STATE.md
+verified-against: client/src-tauri/src/locus/, client/docs/
 ```
 
 > **Design record — not a to-do.** This was written before the port; the plan it

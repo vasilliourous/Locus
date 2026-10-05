@@ -61,7 +61,10 @@ fn take_cancellation() -> bool {
 pub struct LocusStatus {
     /// Whether this device has a code bound and accepted.
     pub activated: bool,
-    /// The tier name (`eco`, `stealth`, `strike`), when known.
+    /// The tier name as the hub sent it (`free`/`eco`, or `strike`), when known.
+    /// This is the WIRE name, not the label the student reads — the frontend
+    /// maps it in `tier-badge.tsx`, which is the single place that mapping
+    /// lives, so the two can never disagree.
     pub tier: Option<String>,
     /// The device fingerprint, **truncated** — enough for support to correlate,
     /// not enough to be a useful identifier if someone screenshots it.
@@ -152,6 +155,92 @@ pub struct LocusStatus {
     /// It is a *rate*, not the Core's lifetime total: see
     /// `core::manager::traffic_probe`.
     pub traffic_flowing: bool,
+
+    /// The free tier's allowance state — what the usage bar, the warning and the
+    /// throttle banner all read.
+    ///
+    /// A closed set rather than loose numbers, for the same reason
+    /// [`SubscriptionStatus`] is: "no allowance applies" (a paying tier, or a hub
+    /// that predates the field) and "zero bytes used of 5 GiB" must not be
+    /// confusable. The first must never show a bar or throttle anything; the
+    /// second must show a bar at 0%.
+    ///
+    /// The UI renders from this and never recomputes: the classification is the
+    /// behaviour, and a second implementation in TypeScript is how the warning
+    /// line and the throttle line drift apart.
+    pub allowance: AllowanceStatus,
+}
+
+/// What the Connection screen should show about the free tier's allowance.
+///
+/// Mirrors [`crate::locus::usage::AllowanceState`], plus the presentation fields
+/// the bar needs, so the frontend does no arithmetic at all.
+#[derive(Debug, Clone, Serialize)]
+#[serde(tag = "state", rename_all = "camelCase", rename_all_fields = "camelCase")]
+pub enum AllowanceStatus {
+    /// No allowance applies. A paying tier, or an older hub. Render nothing and
+    /// never throttle.
+    Unlimited,
+    /// An allowance applies. Carries everything the UI needs.
+    Metered {
+        /// Bytes counted in the current window.
+        used_bytes: u64,
+        /// The window's allowance.
+        allowance_bytes: u64,
+        /// Percentage used, clamped to `0..=100`.
+        percent: u8,
+        /// Past the 80% line but not yet spent.
+        warning: bool,
+        /// The allowance is spent; the connection carries the throttle.
+        throttled: bool,
+    },
+}
+
+/// Builds the [`AllowanceStatus`] from a stored window and the hub's allowance.
+///
+/// Split out so it can be tested without an app handle. Note the hub sends the
+/// allowance on every beat, so a change to it takes effect on the next one — the
+/// client never caches the number itself, only its own usage.
+#[must_use]
+fn classify_allowance(
+    usage: &crate::locus::usage::Usage,
+    allowance_bytes: Option<u64>,
+    now_ms: u64,
+) -> AllowanceStatus {
+    use crate::locus::usage::AllowanceState;
+    match usage.classify(allowance_bytes, now_ms) {
+        AllowanceState::Unlimited => AllowanceStatus::Unlimited,
+        AllowanceState::Within {
+            used_bytes,
+            allowance_bytes,
+        } => AllowanceStatus::Metered {
+            used_bytes,
+            allowance_bytes,
+            percent: usage.percent_used(allowance_bytes, now_ms),
+            warning: false,
+            throttled: false,
+        },
+        AllowanceState::Warning {
+            used_bytes,
+            allowance_bytes,
+        } => AllowanceStatus::Metered {
+            used_bytes,
+            allowance_bytes,
+            percent: usage.percent_used(allowance_bytes, now_ms),
+            warning: true,
+            throttled: false,
+        },
+        AllowanceState::Throttled {
+            used_bytes,
+            allowance_bytes,
+        } => AllowanceStatus::Metered {
+            used_bytes,
+            allowance_bytes,
+            percent: usage.percent_used(allowance_bytes, now_ms),
+            warning: false,
+            throttled: true,
+        },
+    }
 }
 
 /// What the Account screen should say about the subscription.
@@ -291,6 +380,21 @@ pub async fn locus_status() -> LocusStatus {
     // describes the same observation the verdict above was reached from.
     let traffic_flowing = traffic_probe::is_active();
 
+    // The free tier's allowance. Read from the cached hub value and the stored
+    // usage window, then classified by the one implementation of the rule
+    // (`locus::usage`). `now` comes from the system clock, which is the only
+    // place it enters the calculation — `usage` itself is pure and fake-clock
+    // tested, so the rollover boundary is pinned without touching a real clock.
+    let usage = store::usage().await;
+    let allowance = classify_allowance(
+        &usage,
+        verge_data
+            .locus_allowance_mb
+            .filter(|mb| *mb > 0)
+            .map(|mb| crate::locus::usage::sane_allowance_mb(mb) * crate::locus::usage::MIB),
+        now_ms(),
+    );
+
     LocusStatus {
         activated: activation.is_some(),
         tier: activation.as_ref().map(|a| a.tier.clone()),
@@ -303,7 +407,24 @@ pub async fn locus_status() -> LocusStatus {
         subscription,
         last_confirmed_at: verge_data.last_heartbeat_ok,
         traffic_flowing,
+        allowance,
     }
+}
+
+/// The current wall-clock time as Unix milliseconds, saturating at the epoch for
+/// a clock set before 1970.
+///
+/// One helper rather than a `SystemTime::now()` inline, so the elapsed-time cast
+/// (which can panic or truncate on an absurd clock) is handled in exactly one
+/// place. A clock before the epoch yields `0`, which [`crate::locus::usage`]
+/// reads as "start a window now" — the safe answer, since it grants a fresh
+/// allowance rather than expiring a student's on a broken clock.
+#[must_use]
+fn now_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX))
+        .unwrap_or(0)
 }
 /// Whether the tunnel's core is running, from the run state's running mode.
 ///
@@ -613,9 +734,16 @@ fn describe_outcome(outcome: &activation::ActivationOutcome) -> String {
 /// Linux either one is sufficient, and it says "administrator rights" rather than
 /// "TUN" — the student does not know what TUN is, and naming our mechanism would
 /// describe the implementation instead of the obstacle.
+///
+/// It used to say "Install the service from Settings". That is now false on
+/// macOS, and it was never the whole story: an absent Service on macOS is
+/// requested by startup, so the install prompt appears on its own and the
+/// student's job is to APPROVE it. Sending them to hunt for a Settings control
+/// (which macOS does not render) was the second half of a real dead end — a
+/// student reported this message and could find nothing to press.
 const TUN_UNAVAILABLE_MESSAGE: &str = "Locus needs administrator rights to create the VPN tunnel, \
-     and the Locus service is not available on this device. Install the service from Settings, or \
-     start Locus as an administrator, then try again.";
+     and its helper service is not available on this device. Approve the permission prompt when \
+     Locus asks to install it, or start Locus as an administrator, then try again.";
 
 /// Whether a connect attempt may proceed on the given run state.
 ///
@@ -799,8 +927,13 @@ pub async fn locus_connect() -> CmdResult<ConnectionResult> {
     // "still starting" and keep the cancel affordance alive.
     let started = tokio::time::Instant::now();
     loop {
-        match CoreManager::global().start_core().await {
-            Ok(()) => {}
+        // The port-fallback variant, not the bare `start_core`: the mixed-port
+        // retry used to live in the launch-time `CoreManager::init`, which this
+        // app no longer calls because a launch-time start is an auto-connect. A
+        // student whose mixed port is taken would otherwise get a hard
+        // `LOCUS_CONNECT_FAILED` where they used to get a silent fallback.
+        match CoreManager::global().start_core_with_port_fallback().await {
+            Ok(_) => {}
             Err(error) => {
                 return Err(super::coded_error("LOCUS_CONNECT_FAILED", format!("{error:#}")));
             }
@@ -893,6 +1026,27 @@ pub struct UpdateStatus {
     /// without waiting for a heartbeat — the offer is recorded when a beat
     /// delivers it, and this is what the popup reads.
     pub offered_version: Option<String>,
+
+    /// Why no update is being offered, when the last heartbeat did not offer one.
+    ///
+    /// The answer to "why is this device not updating?" — a question that had no
+    /// answer before, because every reason was logged at `debug` and the default
+    /// level is `Info`. A student on macOS 3.2.24 reported exactly that ("the
+    /// update wasn't offered") and nothing on the machine said why.
+    ///
+    /// `None` means nothing to report: either an offer exists, or no beat has run.
+    /// Deliberately **not** set in the ordinary "up to date" case, so a healthy
+    /// install shows no notice.
+    pub no_offer_reason: Option<String>,
+
+    /// Whether automatic update checking is enabled.
+    ///
+    /// Surfaced alongside the reason because it is the one cause a student can
+    /// fix themselves, and the one most likely to be stuck: `auto_check_update`
+    /// is inherited from upstream Clash Verge Rev, so it can be `false` from an
+    /// era when the Account-page row was mis-wired to auto-launch. The UI uses
+    /// this to point at the exact control rather than leaving them to hunt.
+    pub automatic_checks_enabled: bool,
 }
 
 /// Reports the update state the prompt should render from.
@@ -902,11 +1056,17 @@ pub struct UpdateStatus {
 #[tauri::command]
 pub async fn locus_update_status() -> UpdateStatus {
     let verge = Config::verge().await;
-    let offered = verge.latest_arc().locus_update_offered.clone();
+    let data = verge.latest_arc();
+    let offered = data.locus_update_offered.clone();
+    let no_offer_reason = data.locus_update_check_reason.clone();
 
     UpdateStatus {
         current_version: env!("CARGO_PKG_VERSION").to_owned(),
         offered_version: offered.map(Into::into),
+        no_offer_reason: no_offer_reason.map(Into::into),
+        // Same default as the gate itself (`unwrap_or(true)`), so the status
+        // never disagrees with the behaviour it describes.
+        automatic_checks_enabled: data.auto_check_update.unwrap_or(true),
     }
 }
 
@@ -1366,6 +1526,32 @@ mod tests {
         );
     }
 
+    /// The refusal must not send the student to a control that does not exist.
+    ///
+    /// It used to say "Install the service from Settings". On macOS there is no
+    /// such control, and a student who followed that instruction found nothing to
+    /// press — then had nowhere left to go, because the app never raised the
+    /// install itself either. The message now points at the permission prompt
+    /// that the app actually shows, which is the route that exists on every
+    /// platform.
+    ///
+    /// Pinning the *approval* wording rather than a screen name is the point: a
+    /// screen name is a claim about the UI that this file cannot check, which is
+    /// exactly how the old sentence went stale without anyone noticing.
+    #[test]
+    fn the_tun_refusal_points_at_a_prompt_that_exists() {
+        let lowered = TUN_UNAVAILABLE_MESSAGE.to_lowercase();
+        assert!(
+            lowered.contains("prompt") || lowered.contains("permission"),
+            "must name the permission step the app raises, got {TUN_UNAVAILABLE_MESSAGE:?}"
+        );
+        assert!(
+            !lowered.contains("from settings"),
+            "must not direct the student to a Settings control that is not rendered, \
+             got {TUN_UNAVAILABLE_MESSAGE:?}"
+        );
+    }
+
     /// User-facing messages must not carry collapsed or doubled whitespace.
     ///
     /// A literal run of spaces inside a `format!` string is invisible in review
@@ -1660,5 +1846,77 @@ mod tests {
             value.get("reason").is_some(),
             "`reason` is a single word and must survive; got {value}"
         );
+    }
+
+    /// A paying tier reports `Unlimited`, and that must never look like a
+    /// metered zero.
+    ///
+    /// The whole point of the two variants is that "no allowance applies" cannot
+    /// be confused with "an allowance you have used none of" — the first must
+    /// render no bar and throttle nothing, the second must render a bar at 0%.
+    /// Collapsing them is how a paying student gets a free-tier banner.
+    #[test]
+    fn no_allowance_classifies_as_unlimited_not_metered() {
+        let usage = crate::locus::usage::Usage::default();
+        let value = serde_json::to_value(classify_allowance(&usage, None, 0))
+            .expect("AllowanceStatus must serialize");
+        assert_eq!(
+            value.get("state").and_then(serde_json::Value::as_str),
+            Some("unlimited"),
+            "a missing allowance must serialize as unlimited; got {value}"
+        );
+    }
+
+    /// A metered tier carries the four fields the bar needs, in camelCase.
+    #[test]
+    fn a_metered_allowance_carries_the_bar_fields() {
+        let mb: u64 = 1024 * 1024;
+        let usage = crate::locus::usage::Usage {
+            used_bytes: 0,
+            window_start_ms: 1,
+            warned: false,
+        };
+        let value = serde_json::to_value(classify_allowance(&usage, Some(5 * mb), 1_000))
+            .expect("AllowanceStatus must serialize");
+
+        assert_eq!(
+            value.get("state").and_then(serde_json::Value::as_str),
+            Some("metered")
+        );
+        // The frontend reads these by name; a snake_case slip reads `undefined`.
+        for key in ["usedBytes", "allowanceBytes", "percent", "warning", "throttled"] {
+            assert!(
+                value.get(key).is_some(),
+                "the metered payload must carry `{key}`; got {value}"
+            );
+        }
+    }
+
+    /// The three classification boundaries reach the frontend intact: a full
+    /// allowance under the line, the warning at it, and the throttle past it.
+    #[test]
+    fn the_allowance_boundaries_reach_the_wire() {
+        let mb: u64 = 1024 * 1024;
+        let allowance = 100 * mb;
+        let at = |bytes: u64| {
+            let usage = crate::locus::usage::Usage {
+                used_bytes: bytes,
+                window_start_ms: 1,
+                warned: false,
+            };
+            match classify_allowance(&usage, Some(allowance), 1_000) {
+                AllowanceStatus::Metered {
+                    warning, throttled, ..
+                } => (warning, throttled),
+                AllowanceStatus::Unlimited => panic!("a metered tier must not be unlimited"),
+            }
+        };
+
+        assert_eq!(at(0), (false, false), "a fresh window is not a warning");
+        assert_eq!(at(79 * mb), (false, false), "under the line");
+        assert_eq!(at(80 * mb), (true, false), "the warning line itself warns");
+        assert_eq!(at(99 * mb), (true, false), "under the allowance still warns");
+        assert_eq!(at(100 * mb), (false, true), "the allowance itself throttles");
+        assert_eq!(at(200 * mb), (false, true), "over the allowance throttles");
     }
 }

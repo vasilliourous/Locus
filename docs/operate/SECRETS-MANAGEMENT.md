@@ -4,7 +4,7 @@
 audience:    human-operator
 status:      live
 authoritative-for: age-encrypted secrets, what is plaintext, what must never be committed
-verified-against: docs/STATE.md
+verified-against: server/secrets.env.age, .locus-keys/
 ```
 
 > How credentials are securely deployed with the server — encrypted in the repo,
@@ -24,7 +24,9 @@ The Locus server needs several credentials to run:
 | `B2_APPLICATION_KEY_ID` | Backups module (Backblaze B2 auth) |
 | `B2_APPLICATION_KEY` | Backups module (Backblaze B2 auth) |
 | `B2_BUCKET` | Backups module (bucket name) |
-| `ECO_PASS`, `STEALTH_PASS`, `STRIKE_PASS` | Shadowsocks tier passwords |
+| `ECO_PASS` | The **free** plan's Shadowsocks password (port 8443) |
+| `STRIKE_PASS` | The **paid** plan's Shadowsocks password (port 8445) |
+| `STEALTH_PASS` | **Retired tier's password (port 8444).** Still validated and written to `/root/.tier_passwords` for compatibility, but no service consumes it on a fresh box. Keep it in the secrets file so an upgraded host does not fork, and so removing the old service is not blocked by a missing key. |
 | `PB_ADMIN_EMAIL`, `PB_ADMIN_PASS` | PocketBase admin credentials |
 
 These must be available at deploy time, but **should not be committed in plain-text**
@@ -109,7 +111,7 @@ B2_APPLICATION_KEY_ID=your-backblaze-key-id
 B2_APPLICATION_KEY=your-backblaze-application-key
 B2_BUCKET=vpsvpnbackup
 ECO_PASS=your-64-char-hex-eco-password
-STEALTH_PASS=your-64-char-hex-stealth-password
+STEALTH_PASS=your-64-char-hex-stealth-password   # retired tier; see the table above
 STRIKE_PASS=your-64-char-hex-strike-password
 PB_ADMIN_EMAIL=admin@networkingguides.duckdns.org
 PB_ADMIN_PASS=your-secure-pb-admin-password
@@ -133,8 +135,9 @@ chmod 600 .secrets.env
 > admin JWT from `/root/.pb_admin_creds` (`PB_TOKEN`) — PB 0.22 returns 401 for
 > the `ADMIN_API_TOKEN`.
 
-> **Important:** Pre-generate stable tier passwords (`ECO_PASS`, `STEALTH_PASS`,
-> `STRIKE_PASS`) and the PB admin password. Unlike the auto-generated approach,
+> **Important:** Pre-generate stable tier passwords (`ECO_PASS`, `STRIKE_PASS`,
+> and `STEALTH_PASS` while an upgraded host still names it) and the PB admin
+> password. Unlike the auto-generated approach,
 > stable passwords mean a redeploy to a new VPS produces the **exact same config** —
 > existing clients don't break, and backup restore keeps working.
 >
@@ -353,8 +356,9 @@ that `bash` can `source` the decrypted output in one line.
 
 ### Why pre-generate tier passwords instead of auto-generating?
 
-The current setup auto-generates `ECO_PASS`, `STEALTH_PASS`, `STRIKE_PASS` on
-each deploy via `02-shadowsocks.sh`. This means:
+The current setup auto-generates `ECO_PASS`, `STRIKE_PASS` (and `STEALTH_PASS`,
+kept for compatibility with the retired port) on each deploy via
+`02-shadowsocks.sh`. This means:
 - Redeploying to a new VPS produces **different passwords**
 - All existing clients would need to re-activate
 - Backup restore from a different deploy would have mismatched passwords

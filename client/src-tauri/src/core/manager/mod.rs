@@ -403,8 +403,38 @@ impl CoreManager {
         self.config_update_in_progress.store(false, Ordering::Release);
     }
 
-    #[tracing::instrument(skip_all, level = "info", fields(retries = 0))]
+    /// Brings the core up on demand — and NOT on application launch.
+    ///
+    /// This used to be called unconditionally from `resolve_setup()`, which meant
+    /// the app came up with the tunnel already up: opening the client to check
+    /// the tier, or to read a code, silently routed the whole machine through the
+    /// VPN. Connecting is a deliberate act — the single interaction the product
+    /// is built around — and it must be the student's, not the launcher's.
+    ///
+    /// The core is now started only by `locus_connect` (and by the config/restart
+    /// paths, which are themselves already the result of a user action). Nothing
+    /// else depends on a launch-time start: status reads report a genuine
+    /// `disconnected` until the first connect, which is the honest answer.
+    ///
+    /// `startup_core_block_reason` is still consulted, because a blocked startup
+    /// is a fact about this run that the connect path must not trip over later —
+    /// but the cheap guard is here so a blocked launch is reported exactly as
+    /// before rather than surfacing at the first press.
     pub async fn init(&self) -> Result<bool> {
+        if let Some(reason) = crate::config::Config::startup_core_block_reason() {
+            anyhow::bail!("core startup blocked after mixed proxy port fallback failure: {reason}");
+        }
+
+        // Deliberately do NOT start the core here. See the doc comment above:
+        // a launch-time start is an auto-connect, and this product does not
+        // auto-connect. Report "no core is running" so callers that consulted the
+        // return value keep working unchanged.
+        logging!(info, Type::Core, "Core is not started at launch; waiting for an explicit connect");
+        Ok(false)
+    }
+
+    #[tracing::instrument(skip_all, level = "info", fields(retries = 0))]
+    pub async fn start_core_with_port_fallback(&self) -> Result<bool> {
         const MAX_PORT_FALLBACK_RETRIES: usize = 3;
 
         if let Some(reason) = crate::config::Config::startup_core_block_reason() {

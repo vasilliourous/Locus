@@ -29,13 +29,51 @@ top** of the shipped appearance and must not restructure it:
 |---|---|
 | The palette (accent, surfaces, borders, text, status colours) | The two-tab shape, or anything in `_navigation-meta.ts` |
 | Corner radii, via two CSS variables | Tier identity (`TIER_COLORS`) — see §3 |
-| One additive decorative block, from a **named preset** | Any component's structure, props or behaviour |
-| Nothing else | Whether a state is shown, or what it says |
+| A **multi-layer decoration** from a named preset, scoped to `[data-theme-skin]` | Any component's structure, props or behaviour |
+| Anything a decoration can paint **without changing layout** | Whether a state is shown, or what it says |
 
 It is deliberately not a redesign. The Connection screen's layout, its state
 machine and its message priority (`client/docs/FRONTEND.md` §§2–4) are
 untouched by a theme, and a theme that changes what a student reads is a bug in
 the theme, not a feature.
+
+### What changed in 3.3.0, and why
+
+Before 3.3.0 a decoration was a **single flat string**, and the guard enforcing
+that rejected any `{` or `}` in a preset. That was true to the original design —
+a preset was one `radial-gradient` — but it could not express a *rice*, which is
+inherently layered: a base wash, a directional treatment, a texture pass and a
+vignette, composited in a defined order.
+
+A preset is now a `DecorationSpec` — `short` (root declarations) plus an ordered
+`layers` array. The safety properties are unchanged; the **enforcement** is now
+direct rather than a proxy. The old check banned braces, which:
+
+- **permitted** a stray unbalanced `}` in a preset, which closes the scoped block
+  early and leaves the rest of the text loose at the top level of the injected
+  `<style>` — a real escape the old guard did not detect; and
+- **rejected** balanced nested blocks, layered gradients and `@supports`, none of
+  which can escape anything.
+
+`theme-colors.test.ts` now asserts the properties that actually matter:
+every brace balances, no construct introduces a document-level rule, no preset
+can load a remote or inline asset, and no preset can leave the skin scope. Each
+of those assertions was demonstrated failing before it was kept — including the
+early-close case above, which the previous guard could not have caught.
+
+### The rule that replaced "no braces"
+
+The constraint that has not changed, and which a test **cannot** enforce, is that
+every layer stays **compositor-only**. `background-*`, `box-shadow`, `border-*`,
+`opacity`, `filter`, `mix-blend-mode` and custom-property declarations are all
+fine, because none can change layout. Nothing in a preset may set `width`,
+`height`, `margin`, `padding`, `position`, `display`, `flex`, `grid`, `gap`,
+`order` or `font-size` on anything. A decoration that could resize or move an
+element is a decoration that can move the Connect button, which is the one thing
+this app must not do.
+
+That is a **review obligation**, and §10 records it as an unguarded gap rather
+than claiming the suite covers it.
 
 ### Why decoration is a named preset and not injected CSS
 
@@ -94,8 +132,8 @@ theme-plus-mode matrix: selecting `Midnight` gives a dark appearance whatever
 `theme_mode` says, because the theme *is* the mode.
 
 The consequence, stated so nobody later reports it as a bug: **a student cannot
-have a light variant of a dark-only theme.** Six themes are six palettes, not
-six palettes with two variants each. This was a deliberate simplification — it
+have a light variant of a dark-only theme.** Nine themes are nine palettes, not
+nine palettes with two variants each. This was a deliberate simplification — it
 keeps the registry readable and the contrast checking tractable — and if a
 theme is wanted in both modes it is added as two entries with two names.
 
@@ -135,76 +173,104 @@ Four rules, each enforced by a test in `client/tests/theme-colors.test.ts`:
 
 ---
 
-## 4. The six themes
+## 4. The nine themes
 
-Colours are given so a reader can see each theme's intent; the **authority is
-the registry** (`client/src/pages/_themes.ts`), and `check-consistency.sh` §9
-fails if this list and the registry disagree. Contrast figures are computed by
-the test suite, not transcribed here, for the reason `CLAIMS.md` gives: a number
-in a sentence cannot be recomputed and will rot.
+Every palette is designed against the rules in §3, and each is described by its
+**colour scheme** rather than only its colour names, because the scheme is the
+part that is checkable and the part a future theme should be derived from.
 
-### 4.1 `default-dark` — Locus (dark) · *default*
+| Theme | Mode | Scheme | Base hue | Mood |
+|---|---|---|---|---|
+| `default-dark` (Locus) | dark | analogous | h~158 green | the brand |
+| `default-light` | light | analogous | h~150 green | the brand, inverted |
+| `slate` | dark | split-complementary | h~220 blue-grey | calm, recessive |
+| `dawn` | dark | analogous + complements | h~230 indigo | vivid, nocturnal |
+| `ember` | dark | complementary | h~25 terracotta | warm, energetic |
+| `moss` | dark | analogous | h~145 green | restful, organic |
+| `linen` | light | analogous | h~210 neutral-cool | clean, clinical |
+| `sepia` | light | analogous | h~35 paper | calm, analogue |
+| `contrast` | dark | neutral ramp | — | maximum legibility |
 
-The shipped dark appearance, byte-identical. Green-black window, Locus green
-accent, a card one visible step up from the page. It is the default for a reason:
-it is the mode the brand was designed in, and it is what a fresh install sees.
+### 4.1 `default-dark` — Locus · *default*
 
-*Must not be confused with:* `midnight`. This theme is **green-black**, not
-black — the surfaces carry a green cast (`#0C1711`, not `#101010`) so the accent
-reads as part of the same family rather than sitting on grey.
+The brand appearance: a dark slate with a green cast (`#0D1512`) rather than a
+near-black, Locus green as the single accent, and a card a deliberate step above
+the page. It is the default because it is the mode the brand was designed in.
+
+*Must not be confused with:* `moss`, which is the same hue family with the
+saturation and the surface step pulled down. The difference is energy, not hue.
 
 ### 4.2 `default-light` — Locus (light)
 
-The shipped light appearance, byte-identical. Same structure inverted, with the
-darker accent (`#1E7A4A`) that the body-copy contrast rule requires on white.
+The same structure inverted, with the darker accent (`#2A6E4C`) that the
+body-copy contrast rule requires on a light ground.
 
-### 4.3 `midnight` — OLED black
+### 4.3 `slate` — cool blue-grey
 
-A true-black variant for OLED panels and dark rooms. Background `#000000`,
-surfaces at `#0A0A0A`, and a *lifted* accent, because on pure black the shipped
-green reads dimmer than it does on green-black and needs a step up to stay the
-focal point.
+**Split-complementary** on a h~220 base. The frost-blue accent sits a
+quarter-turn from the surfaces, and the status colours swing warm so a warning
+is never mistaken for a link. Every colour is low-saturation and close in value,
+so nothing competes with the Connect control.
 
-*Why it exists:* a dark theme that is genuinely black saves power on OLED and is
-easier in a dark room. *Why it is not the default:* pure black loses the surface
-hierarchy the brand is built on — a card must still be visible against the page,
-and the border has to carry more of that work here than in `default-dark`.
+*Why it exists:* it is the theme for someone who wants the app to stop shouting.
 
-### 4.4 `paper` — warm light
+### 4.4 `dawn` — indigo night
 
-A warm, low-glare light theme: off-white rather than white, with a warm-neutral
-text colour instead of a green-black one. For a student reading the app in a
-bright room or beside a window.
+**Analogous** on an indigo base (h~230) with a blue accent and warm complements
+(peach, coral, violet). The highest-chroma dark theme in the registry, with a
+phosphor glow and a fine scanline (`signal-noise`).
 
-*Must not be confused with:* `default-light`. The difference is deliberate and is
-**temperature**, not brightness — a warm light theme that is merely dimmer than
-the default would be a worse default, not a distinct look.
+*Why it exists:* it is the vibrant alternative — a screen in a dark room that is
+alive rather than greyed out.
 
-### 4.5 `high-contrast` — accessibility
+### 4.5 `ember` — warm terracotta
 
-Maximum legibility: a near-black background, near-white text, saturated borders
-and a bright accent. Exists so a student who needs it does not have to accept
-the default's quiet, low-contrast aesthetic.
+**Complementary** on a h~25 base, with the accent at full strength and the cool
+counterweight carried by `info` rather than by the accent — which is what keeps a
+warm theme from turning muddy. Lit from below (`ember-pit`), so it reads as a
+fire rather than as the conventional top-down hero gradient.
 
-*The one theme where "too loud" is the point.* It is still bound by §3 rule 3 —
-every surface relationship stays intact — but its borders are meant to be
-visible rather than subtle.
+*Why it exists:* warm light is easier on the eye at night than a blue-white
+screen.
 
-### 4.6 `forest` — the character theme
+### 4.6 `moss` — desaturated green
 
-The one theme with an actual decorative preset (`forest-glow`): a deeper,
-greener palette with a soft radial wash from the top of the window, and slightly
-larger corner radii. It exists to prove the decoration seam works end to end —
-a theme that changes palette *and* shape *and* decoration is the case that would
-break a layer built only for colour.
+**Analogous** on a green base (h~145), close to the brand in hue and a long way
+from it in saturation, with the largest corner radius in the registry and a soft
+green wash (`forest-glow`).
 
-*Must not be confused with:* `default-dark` with a background image. The preset
-is a fixed, named, non-interactive wash — not the user's `background_image`
-field, which keeps working independently and is not part of any theme.
+*Why it exists:* it is the default's character made softer — for someone who
+likes the brand green but wants it quiet.
+
+### 4.7 `linen` — cool neutral light
+
+**Analogous** on a neutral-cool base (h~210): near-monochrome surfaces with a
+single blue accent, so the one saturated thing on screen is always interactive.
+The off-white ground is `#F4F7FA` (L=0.93), not white.
+
+### 4.8 `sepia` — warm paper
+
+**Analogous** on a h~35 paper base with a burnt-orange accent, warm near-black
+text, and two offset flat tints (`risograph`) reading as over-inked plates.
+
+*Why it exists:* for a bright room or beside a window, where a cool white screen
+competes with daylight.
+
+### 4.9 `contrast` — maximum legibility
+
+A **neutral ramp** with a single green accent — deliberately not a colour scheme,
+because this theme's job is legibility and hue variety would work against it.
+What separates it is *range*: ~13:1 text on the surface, 2.40:1 borders, and the
+largest surface step in the registry.
+
+*It replaces pure-white-on-pure-black.* That combination met the contrast numbers
+by every measure and was still the wrong answer: `#FFFFFF` on `#000000` is the
+highest-glare pairing possible, and for the people who need this theme most —
+astigmatism, light sensitivity — glare is the symptom, not the fix.
 
 ---
 
-## 5. The three paint layers, for six themes
+## 5. The three paint layers, for nine themes
 
 `client/docs/FRONTEND.md` §5 describes three places the window background colour
 exists and cannot share code:
@@ -227,7 +293,7 @@ green-black default rather than true black. This is a **transition between two
 dark colours**, which is not perceptible in the way the upstream-grey-to-Locus-
 green flash was, and it costs nothing.
 
-The alternative — teaching the native window and the document about six themes —
+The alternative — teaching the native window and the document about nine themes —
 means threading the selected theme through the Rust window resolver and a
 pre-bundle script, adding a second place a theme id can be wrong, to remove an
 imperceptible flash. That is not a trade worth making here. If a future theme has
@@ -277,6 +343,33 @@ cannot leak into components.
 | Light/dark variants of each theme | §2 — one mode per theme, by decision. |
 | Free-form CSS per theme | §1 — a named preset keeps a theme change reviewable. |
 | Shipping a theme over the hub | Themes are client-side data. Nothing about a theme reaches the hub, and no theme can change what the client reports about itself. |
+
+---
+
+## 7a. The logo follows the theme
+
+Both marks in the sidebar's top-left corner — the square shield
+(`icon_dark`/`icon_light.svg`) and the wordmark (`logo.svg`) — are painted in
+`palette.accent`.
+
+**There is one asset per mark, not one per theme.** The SVGs were converted from
+hardcoded fills to `fill: currentColor`, and `layout-sidebar.tsx` sets `color` to
+`theme.palette.primary.main` on the wrapper. "Recolour the logo per theme" is
+then a *derived* consequence of the palette rather than nine duplicated files —
+a per-theme asset is a file that can be forgotten when a theme is added, and the
+wordmark's own history is the argument: it shipped with
+`fill={isDark ? 'white' : 'black'}` for its whole life, which the SVG's internal
+`.st1{fill:#15803D}` class overrode anyway, so it never changed at all.
+
+The pairing of the two shield files is now about **glyph weight, not colour**:
+the `_dark` variant is the solid mark and `_light` the outlined one, chosen by
+the mode so the mark reads against its background. The colour comes from the
+theme in both cases.
+
+The accent is safe as a mark by construction: the registry suite asserts every
+theme's accent clears **3:1** against both its page and its surface, which is the
+WCAG floor for a non-text UI component. See §10 gap 8 for what that does *not*
+cover.
 
 ---
 
@@ -370,9 +463,17 @@ see §10.
 Adding a theme is safe and guarded (§6). The things that are *not* guarded, and
 should be treated as review-blocking:
 
-- **Making a theme reach past the skin attribute.** A preset is scoped to
-  `[data-theme-skin]`; the test rejects `{`, `}` and `url(` in a preset, but it
-  cannot stop someone replacing the scoping with a raw stylesheet injection.
+- **Making a theme reach past the skin attribute.** A preset's layers are each
+  scoped to `[data-theme-skin]` by `use-custom-theme`, and the test asserts that
+  every brace balances, that no layer introduces a document-level rule
+  (`@import`, `@charset`, `@namespace`, `@font-face`) and that no layer can load
+  a remote or inline asset. What it **cannot** stop is someone replacing that
+  scoping with a raw stylesheet injection, or adding a layout-affecting
+  declaration (see §1's compositor-only rule) — both are review-blocking.
+- **A decoration that changes layout.** The tests check the *shape* of a preset,
+  not which properties it sets. `width`, `margin`, `position` and friends would
+  pass every assertion in the suite and could move a control the student has to
+  press. This is the sharpest unguarded edge the layer has; it is listed in §10.
 - **Deriving the accent's role from `mode` instead of from the theme.** The
   shipped light accent is darker *because it is used as text*. A future theme that
   copies the dark accent into a light palette will pass nothing — the contrast
@@ -402,13 +503,41 @@ is a gap the next agent rediscovers. None of these has a guard.
    theme is set, the mode control shows a value the app is not honouring. §7 defers
    merging them; the point where that becomes confusing to a student is the point
    to do it.
-3. **`forest`'s decoration on a light theme is untested.** `forest-glow` is a
-   translucent green wash designed against a dark background. Nothing prevents a
-   future light theme from naming it, and no test would object — the test checks
-   the preset's *shape*, not its contrast against the palette using it.
-4. **A decoration preset cannot be verified without eyes.** `forest-glow` uses
-   `radial-gradient`, chosen because it composites without needing an asset and
-   cannot shift layout. That it *looks* right on four platforms is unverified and
-   is stated as such in §8.
-5. **Cold-start under a light theme** is the standing risk from §5, not a defect.
-   Revisit if a light default is ever shipped.
+3. **A decoration designed for one mode can be named by the other.** `forest-glow`
+   is a translucent wash designed against a dark background; `risograph` is
+   designed against a light one. Nothing prevents a light theme from naming a
+   dark-designed preset, and no test would object — the suite checks the preset's
+   *shape* and its contrast floors, not whether the preset's own alpha suits the
+   palette naming it.
+4. **A decoration preset cannot be verified without eyes.** Every preset in the
+   registry uses compositor-only techniques chosen because they need no asset and
+   cannot shift layout. That they *look* right on four platforms is unverified and
+   is stated as such in §8. The layered preset (`signal-noise`) was not rendered
+   on a real screen during this change — its **validity** is asserted, its
+   **appearance** is not.
+5. **Compositor-only is a review rule, not a checked one.** No test can tell
+   `box-shadow` from `margin-top`; both are just declarations. A preset that
+   changed layout would pass every guard in the suite. This is the direct cost of
+   allowing multi-layer decorations, and it is the first thing to check in a
+   theme diff.
+6. **All nine themes have never been seen on a real screen.** They were authored
+   against computed contrast figures — every one clears the §3 floors, the
+   surface-ladder rule and the accent-mark floor — but none was rendered during
+   this change. The *figures* are trustworthy; the *taste* is not yet evidence,
+   and this is the largest unverified surface in the redesign.
+7. **`signal-noise` is a pattern over the whole window, and it is the one preset
+   that can cost legibility.** It is capped at a 1px line on a 4px period at a
+   low alpha, and it is deliberately not on `contrast`. If `dawn`'s text ever
+   reads as thin or shimmering, remove it first.
+8. **The logo's colour is the accent, which is a coupling.** The wordmark is now
+   painted in `palette.accent`, and the suite asserts that clears 3:1 against the
+   page and the surface in every theme. What it does *not* check is whether an
+   accent reads well as a large filled wordmark — a colour can pass 3:1 and still
+   be a poor choice at that size. Changing an accent changes the logo.
+9. **The re-skin changes what existing installs see.** `default-dark` and
+   `default-light` are no longer byte-identical to the pre-3.3.0 values: the
+   grounds were lifted off pure black/white and the accent was re-derived. This
+   was the point of the redesign, but it means an upgrading student sees a
+   different app without asking for one.
+10. **Cold-start under a light theme** is the standing risk from §5, not a defect.
+    Revisit if a light default is ever shipped.

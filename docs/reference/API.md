@@ -4,7 +4,7 @@
 audience:    builder
 status:      live
 authoritative-for: the hub's HTTP API contracts (activation, heartbeat, releases, code lookup)
-verified-against: docs/STATE.md
+verified-against: server/pb_hooks/*.pb.js
 ```
 
 > Complete API contracts for the Locus server, as implemented by the
@@ -374,7 +374,6 @@ attempts.
 > A redeemed code reports `bound_this_device`. The name is a leftover from the
 > device-binding era and reads oddly now that a code is not tied to a device —
 > but it is the **only** status every deployed client maps to `ready: true`, and
-> that is the property that matters.
 >
 > A client's `LookupStatus` is an allow-list whose `#[serde(other)]` catch-all is
 > `Unknown`. A **new** status string therefore reaches a deployed client as
@@ -393,6 +392,13 @@ attempts.
 > `a_redeemed_code_reports_a_status_deployed_clients_accept` (the hub emits the
 > frozen name) and `an_unknown_lookup_status_does_not_block_activation` (the
 > client proceeds on an unknown status).
+>
+> **Current clients also *accept* the alias** `already_used` — `contract.rs`
+> declares `#[serde(alias = "bound_this_device")] AlreadyUsed` — so a hub that has
+> learned to send the descriptive name will not break a current build. That
+> tolerance is **not** a licence to send it: it exists so the eventual migration
+> is possible, not so it can be done now, because the deployed installs that
+> cannot update their way out of the gate are the ones the frozen name protects.
 
 ---
 

@@ -1,5 +1,12 @@
 # 18. Open items
 
+```
+audience:    human-operator
+status:      live
+authoritative-for: what is decided but unbuilt, what is proposed, and what the operator must supply
+verified-against: server/pb_hooks/, client/src-tauri/src/locus/
+```
+
 Proposals awaiting a decision, or work already decided but not yet built.
 Each names what it is and where it is justified.
 
@@ -9,20 +16,93 @@ Each names what it is and where it is justified.
 
 ### P1 — Implement the free tier
 
-The free tier is **decided** ([`04-tiers.md`](04-tiers.md#44-the-free-tier-in-full)) but not
-shipped. Concrete work:
+**Largely built.** The enforcement works end to end; the purchase does not. What
+is done, and what is left:
 
-- Drop the Eco slot's cap to 1 Mbps and stop selling Eco codes
+**Built:**
+- The Eco/8443 slot is capped at 1 Mbps in `04-tc.sh` — both the applied class
+  and the reboot unit, which is the pair that silently disagree if you edit one
   ([`04-tiers.md`](04-tiers.md#45-the-deploy-time-choice-renaming-eco--free)).
-- Add client-side counting of the 5 GB allowance, **read as a server-provided
-  value on heartbeat** so it can change without a release
+- A `free` `tier_configs` row is seeded beside the legacy `eco` one, so codes
+  minted now and codes already in the field both resolve.
+- The allowance is sent on every heartbeat (`free_allowance_mb`,
+  `free_throttle_mbps`), so it can change without a client release
   ([`15-continuity.md`](15-continuity.md#152-the-free-tiers-continuity-question-new)).
-- Add the usage bar, the 80% warning, the persistent throttle banner, and the
-  one-tap upgrade CTA ([`04-tiers.md`](04-tiers.md#444-what-the-free-user-sees)).
-- Add progressive throttling after the allowance
-  ([`04-tiers.md`](04-tiers.md#445-what-throttled-further-means)).
+- Client-side counting of the 5 GB window, the 80% line and the classification —
+  one pure module, `client/src-tauri/src/locus/usage.rs`, fake-clock tested.
+- The usage bar, the warning and the throttle state on the connection screen.
+- `check-consistency.sh` §23 holds all of it in agreement, and was observed
+  failing against each half-deployed state.
 
-### P2 — Confirm the price ladder
+- **The upgrade route** (shipped 3.2.26). The throttle state is followed by a
+  sentence naming the action — contact the middleman about Full. There is no
+  self-serve checkout to link to; a code is a physical card
+  ([`08-distribution.md`](08-distribution.md)).
+- **Safety guards** (shipped 3.2.26): an absurd allowance from the hub is clamped
+  rather than saturating into a permanent throttle; a future-dated window is
+  repaired rather than underflowing the elapsed-time maths; a malformed advisory
+  field no longer fails the whole heartbeat; a corrupt stored counter resets and
+  **logs** rather than resetting silently.
+
+**Still to do:**
+- **Applying the throttle to a running Core.** `free_throttle_mbps` is parsed and
+  stored, and **nothing yet lowers a live Core's speed from it**. The decision to
+  throttle works; the act does not exist. This is the largest remaining gap and
+  the one whose absence a student would notice — see
+  [`../reference/STILL-OPEN.md`](../reference/STILL-OPEN.md).
+- **Operator control from the console.** The allowance is a hook value today;
+  making it console-editable is what lets the operator change it without a
+  deploy.
+- **Verification.** That the client actually applies the slower cap to a live Core
+  is untested — the classification is tested, the effect on a running tunnel is
+  not.
+- **Deployment.** All of the hub half is inert until `setup.sh` re-runs.
+- **The allowance is now 10 GB** (was 5). Still one hook value, still changeable
+  without a release, and the client picks it up on its next beat.
+
+**Before a middleman sells a free card**, the throttle application and a hub
+deploy are the two items that matter.
+
+### P2 — ~~Confirm the price ladder~~ DONE: the ladder is $0 / $5 and there is no ladder
+
+**Decided and written, not yet sold.** The offer is two plans — Free ($0, 1 Mbps,
+10 GB) and Full ($5, 100 Mbps unmetered + UDP) — with a $12 term pass
+([`05-pricing.md`](05-pricing.md)). This replaces the $0/$4/$7 ladder, which is
+now historical.
+
+**What remains for the operator:**
+
+- **Re-print the cards.** `scripts/print_codes.sh` labels a code by its tier, so
+  a batch minted before this change says "Stealth" or "Strike" on paper
+  ([`04-tiers.md`](04-tiers.md#46-the-same-choice-made-again-for-stealth--merged-into-full)).
+- **Re-brief the middlemen.** The pitch is now one sentence
+  ([`08-distribution.md`](08-distribution.md#85-how-the-free-tier-changes-middleman-work)).
+- **Confirm $5 is right after the first term.** §5.4.2 names the failure mode:
+  the $4 volume seller is gone, so if conversion collapses the fix is a price
+  cut, not a new tier.
+
+### P2.1 — Deploy the merge to the live hub (operator step, not a code change)
+
+**Written in the tree; inert on the box.** The merge changes three shipped files,
+and the hub deploys from `/root/server/`, so nothing a student feels has moved
+until this runs.
+
+1. `server/scripts/check-consistency.sh` must be green (**§23 and §27** now cover
+the paid tier and the console list).
+2. Answer the **open world claim**: does any live code carry `tier: "stealth"`?
+  Read it from the console — Codes & Clients, filter by tier. The disposition
+  differs by the answer and both are safe
+  ([`04-tiers.md`](04-tiers.md#46-the-same-choice-made-again-for-stealth--merged-into-full),
+  [`../operate/CLAIMS.md`](../operate/CLAIMS.md) §5).
+3. Re-run `setup.sh` (or `deploy.sh`) so `04-tc.sh`, `02-shadowsocks.sh` and
+  `seed-pb.py` take effect, then confirm with the read-only probe in
+  [`15-continuity.md`](15-continuity.md#153-what-this-merge-changed-about-continuity).
+4. **Retire the stranded service** — `systemctl disable --now shadowsocks-stealth`,
+  remove the unit and `/etc/shadowsocks/stealth.json`. `setup.sh` will not do
+  this and the code cannot ([`14-risks.md`](14-risks.md#148-the-tier-merge-strands-a-live-endpoint-and-nothing-removes-it)).
+5. Confirm a **paid** code still resolves: activate a throwaway `strike` code and
+  check its heartbeat returns a `server_config` on 8445 with `udp_relay` true.
+  This is the merge's central claim and it is the thing to prove on the box.
 
 **$0 / $4 / $7** monthly, **$10 / $19** term passes
 ([`05-pricing.md`](05-pricing.md)). This one number set propagates
@@ -50,10 +130,10 @@ them without passing a `term_days` explicitly.
 
 ## 18.2 Proposed, awaiting a decision
 
-### P3 — Tier bundling (Strike → free code)
+### P3 — Tier bundling (Full → free code)
 
 The one legacy growth mechanic worth reconsidering
-([`11-growth.md`](11-growth.md#114-tier-bundling--reconsider-dont-dismiss)): a Strike buyer gets a free code to give
+([`11-growth.md`](11-growth.md#114-tier-bundling--reconsider-dont-dismiss)): a Full buyer gets a free code to give
 away, via a `label`ed batch. Decide whether to trial it; cost is free-user
 bandwidth ([`06-unit-economics.md`](06-unit-economics.md#63-the-free-tiers-cost)).
 
@@ -63,14 +143,28 @@ Per-user SS2022 credentials plus a usage table would make the quota
 tamper-proof ([`04-tiers.md`](04-tiers.md#443-why-enforcement-is-client-side-and-what-that-means)). Real work; do it only if
 client-side enforcement proves inadequate.
 
-### P5 — Remote protocol swap
+### P5 — Operator control of the paid tier and the free limits
+
+The merge made one thing obvious: **the paid endpoint and the free limits are
+both operator-relevant and neither is console-editable.** The free allowance
+(`free_allowance_mb`) is a hook value, so it changes without a release but not
+from the UI; the paid tier's cap is a `tc` value in `04-tc.sh`, so it needs a
+`setup.sh` re-run. If a term goes badly — free adoption is burning bandwidth, or
+$5 converts worse than $4 did — the operator's only lever today is a code change
+plus a deploy.
+
+**Worth building when:** the first real tuning decision arrives. Until then the
+hook edit is cheap enough, and §14.8 is the reminder that a console edit would
+*not* remove a stranded service either.
+
+### P6 — Remote protocol swap
 
 The real continuity project, and the one that closes four of the six risks
 ([`14-risks.md`](14-risks.md#146-renewal-is-manual--the-risk-the-redesign-introduces)): a second protocol deployed, settable in
 `tier_configs`, and a **client update that has actually been installed** —
 the last part is unproven (`docs/reference/STILL-OPEN.md`).
 
-### P6 — Instrument free → paid conversion
+### P7 — Instrument free → paid conversion
 
 The metric that validates the entire pricing strategy
 ([`16-metrics.md`](16-metrics.md#163-the-one-metric-that-now-matters-most)) is currently unmeasurable beyond
@@ -87,6 +181,6 @@ These do not gate any written decision, but they would sharpen several files:
 |---|---|
 | Current paying-user count | [`12-scale-and-ceiling.md`](12-scale-and-ceiling.md) |
 | Active middleman count | [`08-distribution.md`](08-distribution.md#84-middleman-economics) |
-| Any churn / renewal data | [`05-pricing.md`](05-pricing.md#541-how-this-compares-to-the-old-ladder) |
+| Any churn / renewal data | [`05-pricing.md`](05-pricing.md#541-how-this-compares-to-the-ladders-before-it) |
 | Whether Macleans College is still the only market | [`02-market.md`](02-market.md#25-what-the-market-does-not-contain) |
 | Real concurrent-user ceiling | [`06-unit-economics.md`](06-unit-economics.md#64-the-estimate-that-must-stay-labelled) |

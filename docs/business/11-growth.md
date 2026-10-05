@@ -1,5 +1,12 @@
 # 11. Growth
 
+```
+audience:    human-operator
+status:      live
+authoritative-for: the growth channels, and the referral verdict
+verified-against: docs/state.toml
+```
+
 ## 11.1 What exists, and what carries the weight
 
 | Channel | Status | Notes |
@@ -8,7 +15,7 @@
 | **The free tier** | **NEW — the funnel** | A free app can reach students no price point could. See [`04-tiers.md`](04-tiers.md#44-the-free-tier-in-full). |
 | **Word of mouth** | LIVE (organic) | The product working well is the marketing. |
 | **Riding free-VPN blocks** | LIVE (opportunistic) | When school IT kills a free VPN, displaced students need a replacement. |
-| **Tier bundling** (Strike → free code) | **NOT BUILT — reconsider §11.4** | Survives the carrier critique; kept as proposal P6 ([`18-open-items.md`](18-open-items.md)). |
+| **Tier bundling** (Full → free code) | **NOT BUILT — reconsider §11.4** | Survives the carrier critique; kept as proposal P3 ([`18-open-items.md`](18-open-items.md)). |
 | **Referral cards** | **REJECTED — §11.2** | Legacy mechanic. Does not fit the distribution model. |
 
 ## 11.2 Referral cards — re-derived, and rejected
@@ -43,12 +50,12 @@ surface (friendship networks).
 The free tier changes the growth model in three ways:
 
 1. **It removes the price objection from the first install.** A student who
-   would never ask a parent for $4 will install a free app today.
+   would never ask a parent for $5 will install a free app today.
 2. **It makes the block-window response instant.** When a free VPN dies, the
    operator can hand out free codes immediately and centrally
    ([`02-market.md`](02-market.md#24-the-timing-window), [`08-distribution.md`](08-distribution.md#85-how-the-free-tier-changes-middleman-work)).
 3. **It gives word-of-mouth something to spread.** "It's free" travels
-   further than "$4/month".
+   further than "$5/month".
 
 **But it also creates the new risk:** free adoption that never converts is a
 bandwidth cost with no upside ([`14-risks.md`](14-risks.md),
@@ -58,7 +65,7 @@ matters is therefore not free installs — it is
 
 ## 11.4 Tier bundling — reconsider, don't dismiss
 
-Bundling (a Strike buyer gets a free code to give away) is **not** the same
+Bundling (a Full buyer gets a free code to give away) is **not** the same
 as referral, and survives the carrier critique because the *buyer* carries
 the code they already have:
 
@@ -66,9 +73,9 @@ the code they already have:
 - A free user experiences the 1 Mbps cap → a real upgrade path.
 - Marginal cost is close to zero — free is a cap, not a new server.
 
-**But it is not free:** free users consume bandwidth and a Strike ticket
+**But it is not free:** free users consume bandwidth and a Full ticket
 subsidises them, and it is unbuilt. **Verdict: the one legacy growth mechanic
-worth a second look**, kept as proposal P6
+worth a second look**, kept as proposal P3
 ([`18-open-items.md`](18-open-items.md)).
 
 ## 11.5 The honest growth position

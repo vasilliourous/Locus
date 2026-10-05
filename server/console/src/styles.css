@@ -221,6 +221,21 @@ tr.dim { opacity: .55; }
 /* Hashes and filenames: monospace so they are comparable at a glance. */
 .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; }
 
+/* ── The macOS human download, inside the Releases card ──
+   Set apart from the platform table above it by a rule and a tighter heading,
+   because the two describe different KINDS of artifact: one is fetched and
+   executed by a client, the other is downloaded and run by a person. Presenting
+   them in one table is how they eventually get confused. */
+.mac-downloads {
+  margin-top: 18px; padding-top: 14px;
+  border-top: 1px solid var(--border);
+}
+.mac-downloads h3 {
+  font-size: 13px; font-weight: 600; margin: 0 0 4px;
+  color: var(--muted); text-transform: uppercase; letter-spacing: .04em;
+}
+.mac-downloads p { margin: 0 0 6px; font-size: 13px; }
+
 /* A signed trigger link is long and must not blow out the layout. */
 .breakall { word-break: break-all; white-space: normal; }
 

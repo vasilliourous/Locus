@@ -1,5 +1,12 @@
 # 6. The operator surface
 
+```
+audience:    human-operator
+status:      design-record
+authoritative-for: the operator surface (built)
+verified-against: docs/reference/DEVICE-IDENTITY.md, docs/reference/FIXES.md
+```
+
 > **STATUS `6a422bc`: BUILT.** Everything specified below exists — the renew
 > button (row and detail panel), the 7/30-day worklists, the clickable
 > Dashboard card, name search, and the device read-back. Operator instructions

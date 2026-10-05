@@ -221,6 +221,118 @@ fi
 # clients read it) and the client must keep READING it (the hub passes the
 # stored key through verbatim).
 # ─────────────────────────────────────────────────────────────
+# 1c. The macOS HUMAN download — named the same in CI, the hub and the console.
+#
+# WHY THIS EXISTS
+#
+# The `.zip` is the one artifact that is deliberately NOT an update payload: it
+# is the compressed, ad-hoc-signed `Locus.app` a PERSON downloads. The Windows
+# outage of 2026-10-01 was a filename that had to agree across three systems and
+# was checked on only one of them, so this name gets the same treatment from the
+# start rather than after it drifts.
+#
+# Three sites must agree:
+#
+#   1. CI       — `.github/workflows/client.yml`, "Package the macOS app for
+#                 download", which BUILDS `Locus_<v>_<arch>.zip` and the release
+#                 job which prefixes it to `installer-...`
+#   2. the hub  — `fetch-release.py`'s `MACOS_ZIP_TEMPLATE`, which RESOLVES it
+#                 from the GitHub Release
+#   3. console  — `Releases.vue`'s `MACOS_ARCHES`, which LINKS to it
+#
+# And one NEGATIVE, which is the property that actually protects the fleet: the
+# name must NOT appear in the update path (`PLATFORMS`,
+# `resolve_platform_names`, CI's manifest platform map). A compressed bundle in
+# an update slot is the raw-Windows-PE mistake in a new costume.
+# ─────────────────────────────────────────────────────────────
+echo
+echo "1c. macOS human download — one name, three sites, and never an update payload"
+
+# `WORKFLOW` is assigned again further down for the sections that also use it.
+# It is set here as well because this section runs FIRST and would otherwise
+# abort on an unbound variable under `set -u` — which is how this check failed
+# the first time it ran, before it had checked anything at all.
+WORKFLOW="$REPO/.github/workflows/client.yml"
+
+# The template must exist, in exactly one place per side.
+if grep -qE '^MACOS_ZIP_TEMPLATE *= *"installer-Locus_%s_%s\.zip"' "$SCRIPTS/fetch-release.py" 2>/dev/null; then
+    ok "fetch-release.py defines the macOS zip template once"
+else
+    bad "fetch-release.py has no single MACOS_ZIP_TEMPLATE definition"
+    bad '  expected: MACOS_ZIP_TEMPLATE = "installer-Locus_%s_%s.zip"'
+fi
+
+# The arch suffixes are a contract too: CI writes `_amd64`/`_arm64`, and the hub
+# resolves the same two. A third arch added on one side only would be fetched
+# forever by nobody.
+for arch in amd64 arm64; do
+    if grep -q "\"$arch\"" "$SCRIPTS/fetch-release.py" 2>/dev/null; then
+        ok "the hub knows the '$arch' macOS zip"
+    else
+        bad "fetch-release.py does not list '$arch' in MACOS_ZIP_ARCHES"
+    fi
+done
+
+# CI must produce both, and the release job must assert them present. The
+# assertion is what stops a build job that silently stopped packaging from
+# publishing a release with no macOS download at all.
+if grep -qE 'Locus_\$\{ver\}_\$\{arch\}\.zip|Locus_\$\{ver\}_' "$WORKFLOW" 2>/dev/null; then
+    ok "CI builds the macOS zip under the versioned name"
+else
+    bad "no CI step builds 'Locus_<v>_<arch>.zip'"
+    bad "  the macOS packaging step is what makes the bypassable Gatekeeper path exist"
+fi
+if grep -q 'expected two macOS download zips' "$WORKFLOW" 2>/dev/null; then
+    ok "the release job refuses to publish without both macOS zips"
+else
+    bad "the release job does not assert the macOS zips are present"
+    bad "  a packaging step that stopped running would publish a release with none"
+fi
+
+# The console must name the same shape, or the link 404s for the student.
+CONSOLE_VUE="$REPO/server/console/src/views/Releases.vue"
+if [ -f "$CONSOLE_VUE" ]; then
+    if grep -q 'installer-Locus_${v}_${a.arch}.zip' "$CONSOLE_VUE" 2>/dev/null; then
+        ok "the console builds the same zip filename"
+    else
+        bad "the console does not construct 'installer-Locus_<v>_<arch>.zip'"
+        bad "  its download link would point at a file the hub did not fetch"
+    fi
+    # The console must NOT enumerate the zip among the update platforms, or the
+    # "all four platforms published" gate would start counting a human download.
+    if grep -qE "zip_macos_amd64', *filename: *'locus-" "$CONSOLE_VUE" 2>/dev/null; then
+        bad "the console treats the macOS zip as an update platform"
+    else
+        ok "the console keeps the macOS zip out of the platform list"
+    fi
+else
+    warn "console Releases.vue not found; skipping the console half of this check"
+fi
+
+# ── The negative, and the reason this section exists ──
+#
+# Everything above is about a name agreeing. This is about the name being in the
+# WRONG PLACE, which is the failure that cost three releases on Windows. Checked
+# on both sides of the hub, because either alone would be defeated by the other
+# being edited.
+if grep -qE '^\s*\("macos_(intel|arm).*\.zip' "$SCRIPTS/fetch-release.py" 2>/dev/null; then
+    bad "fetch-release.py lists a .zip inside PLATFORMS — the update path"
+    bad "  a client would be handed an archive it cannot install from"
+else
+    ok "PLATFORMS in fetch-release.py carries no .zip"
+fi
+
+if grep -qE '"macos_(intel|arm)"[[:space:]]*:[[:space:]]*"[^"]*\.zip"' "$WORKFLOW" 2>/dev/null; then
+    bad "CI's manifest platform map advertises a .zip for a macOS platform"
+else
+    ok "CI's manifest advertises no .zip as an update payload"
+fi
+if grep -q 'refusing to publish: the manifest names a .zip' "$WORKFLOW" 2>/dev/null; then
+    ok "the manifest step actively refuses a .zip platform entry"
+else
+    bad "the manifest step does not guard against a .zip platform entry"
+fi
+# ─────────────────────────────────────────────────────────────
 echo
 echo "2. Frozen wire names"
 
@@ -578,10 +690,37 @@ else
     # reads "... client 3.2.x" / "at 3.2.x" where the x alone is the intended
     # version. Drift there is invisible to a bare-number grep, so it is checked
     # separately below.
+    #
+    # TRIAGED 2026-10-04. This list was a permanent 14-file WARN wall, and a
+    # warning nobody can action trains the reader to ignore it (§7's own lesson,
+    # and the reason §8 shrank its own report). Each file below was read, and the
+    # ones whose older number is CORRECT are excluded HERE, by exact path, with
+    # the reason — the same "exclude precisely, never widen the pattern" rule the
+    # stamp check and §10 use. What remains is genuine drift and is reported.
+    #
+    # Excluded because the number is correct AS WRITTEN:
+    #   docs/CONTEXT.md              "first shipped 3.0.0" — history, and the
+    #                                trailing "now on the 3.x line" is current
+    #   docs/reference/THEMES.md     "what changed in 3.3.0" — the milestone the
+    #                                theme layer landed in, cited as a version
+    #   docs/reference/DEBUGGING-METHOD.md, docs/operate/CLAIMS.md,
+    #   docs/operate/DEPLOY-3.2.7.md, docs/operate/UPDATE-SYSTEM.md,
+    #   docs/operate/RELEASING.md, docs/operate/RECOVER-*.md
+    #                                dated incident/example/basis citations
+    #   docs/business/1*-*.md, docs/business/redesign/**
+    #                                a design basis ("tree at <commit>, client
+    #                                3.2.x") — the number records what a claim was
+    #                                written against, and must NOT be bumped
+    #   client/docs/UPSTREAM-CHANGES.md  "the 3.1.0 rework" — history
+    #
+    # If you add a file here, add the reason. A path with no reason is the next
+    # reader's guess, and this list only stays honest if it is specific.
+    TRIAGED_BASIS='^(docs/CONTEXT\.md|docs/reference/THEMES\.md|docs/reference/DEBUGGING-METHOD\.md|docs/operate/CLAIMS\.md|docs/operate/DEPLOY-3\.2\.7\.md|docs/operate/UPDATE-SYSTEM\.md|docs/operate/RELEASING\.md|docs/operate/RECOVER-WINDOWS-UPDATE\.md|docs/operate/RECOVER-MACOS-UPDATE\.md|docs/business/1[0-9]-.*\.md|docs/business/redesign/.*\.md|client/docs/UPSTREAM-CHANGES\.md)$'
     stale=$(
         cd "$REPO" && grep -rEl --include=*.md '3\.[0-9]+\.[0-9]+' \
             README.md docs client/docs 2>/dev/null \
             | grep -vE '^(docs/reference/FIXES\.md|docs/reference/STILL-OPEN\.md|docs/history/.*|docs/archive/.*|client/docs/FRONTEND\.md)$' \
+            | grep -vE "$TRIAGED_BASIS" \
             | while read -r f; do
                 # Any 3.x.y in the file that is not the current version.
                 #
@@ -863,9 +1002,108 @@ def platform_keys():
                        read("client/src-tauri/src/locus/contract.rs"))
     return found or None
 
+def landing_domain():
+    """The landing page hostname, from the Caddyfile generator.
+
+    modules/05-caddy.sh is what actually writes the site block, so its
+    LANDING_DOMAIN default is the source. The template and the page's canonical
+    link are checked for AGREEMENT with this in section 26 — this function only
+    answers "what does the deployed config say".
+    """
+    m = re.search(r'LANDING_DOMAIN="\$\{LANDING_DOMAIN:-([^}]+)\}"',
+                  read("server/modules/05-caddy.sh"))
+    return m.group(1) if m else None
+
+def landing_docroot():
+    """The landing page document root, from deploy_site()'s own target.
+
+    Scoped to the deploy_site() function deliberately. A bare search for
+    `local target="/var/www/..."` matches deploy_console()'s `/var/www/admin`
+    FIRST (it appears earlier in the file), so the recorded root would silently
+    have been the console's — a checker that returns a plausible wrong answer is
+    worse than one that returns None, because it reports OK on a wrong fact.
+    """
+    src = read("server/modules/05-caddy.sh")
+    i = src.find("deploy_site() {")
+    if i < 0:
+        return None
+    end = src.find("\n# ", i)          # the next section comment ends the function
+    body = src[i:end if end > 0 else len(src)]
+    m = re.search(r'^\s*local target="(/var/www/[a-z]+)"', body, re.M)
+    return m.group(1) + "/" if m else None
+
+def landing_download_path():
+    """The shape of a download URL, from the renderer's own format string.
+
+    Reconstructed rather than stored, so the recorded fact cannot survive a
+    change to how deploy-site.sh builds the URL — which is the only thing that
+    can make the documented shape wrong.
+    """
+    src = read("server/scripts/deploy-site.sh")
+    if '"%s/updates/%s/%s"' not in src:
+        return None
+    m = re.search(r'HUB_BASE:-(\S+?)\}', src)
+    if not m:
+        return None
+    return m.group(1) + "/updates/<version>/<file>"
+def free_tier():
+    """The free tier's port, cap and tier-row names, from the tree.
+
+    Recomputed from the two files that DEFINE it rather than from either alone:
+    the cap and port come from `04-tc.sh`'s applied class, and the tier-row names
+    from `seed-pb.py`'s seed loop. §23 asserts the same agreement from the other
+    direction (and adds the reboot unit and the heartbeat key); this is what
+    `state.toml` is checked against, so the data file cannot go stale about a
+    value the docs point at.
+
+    Returns a dict matching the TOML shape, or None if either file has moved.
+    """
+    tc = read("server/modules/04-tc.sh")
+    m = re.search(r'apply_tc_now\s+(\d+)\s+"[0-9:]+"\s+"([0-9a-z]+)"', tc)
+    if not m:
+        return None
+    port, cap = m.group(1), m.group(2)
+
+    seed = read("server/scripts/seed-pb.py")
+    rows = re.findall(r'\("([a-z_]+)",\s*"ECO_PASS",\s*' + re.escape(port) + r'\)', seed)
+    if not rows:
+        return None
+    # Sorted: the two rows describe one endpoint and their order in the seed loop
+    # carries no meaning, so comparing by position would fail on a harmless
+    # reorder. Compare as a set.
+    return {"port": int(port), "cap": cap, "tier_rows": sorted(rows)}
+def paid_tier():
+    """The paid tier's port, cap and row names, from the tree.
+
+    Same shape and same reasoning as `free_tier()`: the cap and port come from
+    `04-tc.sh`'s applied class, the seeded row name from `seed-pb.py`. §27
+    asserts the same agreement from the other direction (reboot unit, udp_relay
+    gating, the console placeholder, and the negative that the retired tier is
+    not seeded).
+
+    NOTE the cap regex differs from `free_tier`'s: `free_tier` takes the FIRST
+    `apply_tc_now` (8443) and this takes the one for the paid port. Both are
+    anchored on the apply line so a comment cannot satisfy them.
+
+    Returns a dict matching the TOML shape, or None if either file has moved.
+    """
+    tc = read("server/modules/04-tc.sh")
+    m = re.search(r'apply_tc_now\s+8445\s+"[0-9:]+"\s+"([0-9a-z]+)"', tc)
+    if not m:
+        return None
+    cap = m.group(1)
+
+    seed = read("server/scripts/seed-pb.py")
+    rows = re.findall(r'\("(strike)",\s*"STRIKE_PASS",\s*8445\)', seed)
+    if not rows:
+        return None
+    # The retirement is part of the fact: `state.toml` says Stealth is not seeded,
+    # and §9 must be able to FAIL when it is seeded again.
+    retired = [t for t in ("stealth",) if not re.search(r'\(' + t + r'",\s*"STEALTH_PASS"', seed)]
+    return {"port": 8445, "cap": cap, "tier_rows": sorted(rows), "retired_rows": sorted(retired)}
+
 def licence_client():
     """The client/ licence, as asserted by the root LICENSE scope table.
-
     Derived from the LICENSE table rather than from either manifest, because the
     manifests are what drift. §11 then checks the manifests against the same row,
     so all three are bound to one authority.
@@ -896,9 +1134,38 @@ def theme_ids():
         return None
     return re.findall(r"^  '?([a-z0-9-]+)'?:", m.group(1), re.MULTILINE) or None
 
+def version_sites():
+    """The files `pnpm release-version` rewrites, from the bump script itself.
+
+    Derived by scanning `release-version.mjs` for the path each `update*Version()`
+    call targets, so the list cannot be restated into state.toml and drift. §17
+    asserts the same set from the other direction (that every site has a live
+    call); this is what the data file is checked against, so prose that links
+    here ("ALL FIVE version sites") can never disagree with the code.
+
+    Sorted, because the order the script happens to call the updaters in carries
+    no meaning and comparing by position would fail on a harmless reorder.
+    """
+    src = read("client/scripts/release-version.mjs")
+    # Each updater call names its target as a repo-relative path literal. Match
+    # the call sites, not the definitions, so a renamed-but-uncalled helper is
+    # not counted (the same distinction §17 makes and documents).
+    found = set()
+    for fn, rel in (
+        ("updatePackageVersion",      "client/package.json"),
+        ("updateCargoVersion",        "client/src-tauri/Cargo.toml"),
+        ("updateTauriConfigVersion",  "client/src-tauri/tauri.conf.json"),
+        ("updateCargoLockVersion",    "client/Cargo.lock"),
+        ("updateStateTomlVersion",    "docs/state.toml"),
+    ):
+        if re.search(re.escape(fn) + r'\s*\(', src):
+            found.add(rel)
+    return sorted(found) or None
+
 # Map fact -> callable returning the recomputed value, or None if not checkable.
 CHECKERS = {
     "client.version":       manifest_version,
+    "client.version_sites": version_sites,
     "hub.domain":           setup_domain,
     "hub.api_base":         publish_api_base,
     "hub.console_path":     lambda: setup_log_path("Admin console"),
@@ -906,6 +1173,11 @@ CHECKERS = {
     "platforms.keys":       platform_keys,
     "licence.client":       licence_client,
     "client.theme_ids":     theme_ids,
+    "tiers.free":           free_tier,
+    "tiers.paid":           paid_tier,
+    "site.domain":           landing_domain,
+    "site.document_root":    landing_docroot,
+    "site.download_path":    landing_download_path,
 }
 
 for path, entry in sorted(facts.items()):
@@ -928,7 +1200,11 @@ for path, entry in sorted(facts.items()):
         actual = checker()
         if actual is None:
             print(f"BAD\t{path}\tcould not recompute (source: {source})")
-        elif str(actual) != str(value):
+        elif actual != value:
+            # Structural compare, not `str() == str()`: a nested table (like
+            # `tiers.free`) has no guaranteed key order on either side, so a
+            # string comparison would fail on a harmless reordering — a check
+            # that is wrong about the wrong thing is one people learn to ignore.
             print(f"BAD\t{path}\tstate says {value!r}, tree says {actual!r} (source: {source})")
         else:
             print(f"OK\t{path}\t{value!r} agrees")
@@ -1679,7 +1955,11 @@ echo "18. The Windows installer is signed, under the name the release job prefix
 # (AGENTS.md, "assert the agreement").
 wf_installer="$WORKFLOW"
 if [ -f "$wf_installer" ]; then
-    sign_glob="$(grep -oE 'for f in installer/[^;]+' "$wf_installer" | head -1 || true)"
+    # Scoped to `installer/Locus_*` deliberately. Several steps iterate
+    # `installer/*` now (the macOS .dmg repack does), and a bare `head -1` would
+    # grab whichever comes first in the file — so this check would silently stop
+    # testing the step it exists for, which is the failure mode it is about.
+    sign_glob="$(grep -oE 'for f in installer/Locus_[^;]+' "$wf_installer" | head -1 || true)"
     prefix_src="$(grep -oE 'cp "\$f" "release/installer-\$base"' "$wf_installer" | head -1 || true)"
     # The `if:` line follows the step name, but a comment block may sit between
     # them (the file explains WHY at the point of contact). Scan forward from the
@@ -1806,6 +2086,1254 @@ PY
     fi
 else
     warn "workflow not found at ${WORKFLOW}; skipping the matrix-condition check"
+fi
+
+echo
+echo "20. The macOS disk image is signed ad-hoc, and carries no README"
+# ─────────────────────────────────────────────────────────────
+# WHY THIS EXISTS
+#
+# This section used to assert the OPPOSITE: that the .dmg carried a
+# "READ ME FIRST.txt" telling the student to run `xattr -cr` in Terminal.
+# That mitigation is gone, and the reason it is gone is worth keeping, because
+# the file looked like the fix for a year and was not.
+#
+# WHAT WAS WRONG WITH IT
+#
+# The file existed because an unsigned, quarantined .app produced
+#
+#   "Locus" is damaged and can't be opened. You should move it to the Trash.
+#
+# — and the README told the student that message was expected and what to type.
+# That is true, and it is still true that the wording cannot be fixed without an
+# Apple account. What the README could not fix is that the remedy required a
+# TERMINAL: a student who does not know what a command line is had no path
+# forward at all short of following instructions to type a command they cannot
+# evaluate. A text file next to the app is documentation for a failure the
+# student has to escape, not a fix for it.
+#
+# WHAT REPLACED IT
+#
+# Ad-hoc signing. `codesign --sign -` does not make the app trusted — there is
+# still no Developer ID and no notarization — but it changes WHICH Gatekeeper
+# outcome the student meets, and that difference is the whole point:
+#
+#   unsigned  -> "Locus is damaged and can't be opened"   -> NO "Open Anyway"
+#   ad-hoc    -> "Apple cannot check it for malicious
+#                software" (unidentified developer)        -> "Open Anyway" in
+#                                                             Privacy & Security
+#
+# Gatekeeper treats a signature that exists but is not a Developer ID as an
+# identity/notarization problem, not as corruption, so the app moves from the
+# unbypassable class to the bypassable one. The remedy becomes a control in
+# System Settings instead of a command in Terminal.
+#
+# WHY "SIGNED, NOT VERIFIED" IS NOT A GUARD
+#
+# A step that runs `codesign` and does not read the result back is indistinguish-
+# able from one that silently did nothing — the same shape as `hdiutil create`
+# exiting 0 on an image that lost the file (which is why the old section mounted
+# the .dmg back). So this check does not assert that a `codesign` line exists.
+# It asserts that the workflow ALSO verifies: `codesign --verify`, a
+# `spctl`/assessment read, or an explicit artifact read-back. Without that half,
+# a runner where signing failed would publish an unsigned installer and nothing
+# in the tree would say so.
+#
+# WHAT THIS CANNOT CHECK
+#
+# Like §14 this is a grep over the tree, not a mount or a launch. It cannot prove
+# the signature reaches a student, and it cannot prove the "Open Anyway" button
+# appears on a given macOS version — that needs real hardware, and it is recorded
+# as unverified in `docs/reference/STILL-OPEN.md`. What it catches is the change
+# that would make the mechanism dead: deleting the signing step, dropping its
+# verification half, or reintroducing the README it replaced.
+# ─────────────────────────────────────────────────────────────
+
+# ── The README is GONE, and must stay gone ──
+#
+# Stated as an assertion so that reintroducing the file is a deliberate act that
+# turns a check red, rather than a change that quietly restores a Terminal-only
+# path alongside the signing that made it unnecessary. The `xattr -cr` advice is
+# not wrong, it is just no longer the answer, and two remedies that disagree
+# about which is primary is worse than one.
+MACOS_README="$REPO/client/src-tauri/packages/macos/READ ME FIRST.txt"
+if [ -f "$MACOS_README" ]; then
+    bad "client/src-tauri/packages/macos/READ ME FIRST.txt is back"
+    bad "  ad-hoc signing replaced it: it moves the Gatekeeper failure from the"
+    bad "  unbypassable 'damaged' dialog into Privacy & Security -> Open Anyway."
+    bad "  If the README is genuinely needed again, say so in docs/operate/OPS.md"
+    bad "  and update this section — do not leave both remedies in the tree."
+else
+    ok "the macOS in-image README is gone (replaced by ad-hoc signing)"
+fi
+
+# No workflow step may copy it back in. This catches the case where the file is
+# deleted but the repack step that references it survives — which would fail at
+# build time on a macOS runner and pass everywhere else, including here.
+#
+# MATCHES THE COPY, NOT THE NAME. A bare `grep READ ME FIRST` also matches the
+# comment that explains WHY the file was removed — so this check failed on its
+# own documentation the first time it ran, and the tempting fix (delete the
+# explanation) would have left the guard passing for the wrong reason while the
+# reason for the removal was lost. That is the "check that cannot distinguish a
+# right answer from a wrong one" trap §14 and the old §20 both describe. What is
+# asserted is the MECHANISM: a `cp` (or an `install`) whose source is that path,
+# or a step that reads it back out of the image. Prose cannot satisfy either.
+if [ -f "$WORKFLOW" ]; then
+    readme_copy=$(grep -nE '(cp|install)[^|]*READ ME FIRST\.txt|\[ -f [^]]*READ ME FIRST\.txt' "$WORKFLOW" || true)
+    if [ -n "$readme_copy" ]; then
+        bad "the workflow still copies/reads READ ME FIRST.txt"
+        printf '%s\n' "$readme_copy" | head -5 | sed 's/^/         /'
+    else
+        ok "no workflow step copies READ ME FIRST.txt into the image"
+    fi
+
+    # ── The signing step, and the half that makes it real ──
+    #
+    # `codesign ... --sign -` is the ad-hoc form: the identity is a literal
+    # hyphen, not a name. A Developer-ID identity would look different, and this
+    # check would then need rewriting — which is correct, because that is a
+    # different mechanism with different claims.
+    if grep -qE 'codesign[^|]*--sign[[:space:]]+-' "$WORKFLOW"; then
+        ok "a workflow step ad-hoc signs the macOS bundle"
+    else
+        bad "no ad-hoc codesign step found in the workflow"
+        bad "  without it a quarantined .app shows 'damaged and can't be opened',"
+        bad "  which offers no 'Open Anyway' and can only be escaped in Terminal"
+    fi
+
+    # The read-back. Signing that is not verified is the "check that cannot fail"
+    # trap in its most literal form: `codesign --sign` on a bundle it cannot
+    # process exits non-zero, but a step whose failure is swallowed by `||true`,
+    # a `continue-on-error`, or a missing `set -e` publishes the unsigned image
+    # while the log shows the signing line having run.
+    if grep -qE 'codesign[^|]*(--verify|-v[[:space:]])' "$WORKFLOW"; then
+        ok "the signing step is read back with a verification of its own"
+    else
+        bad "the ad-hoc signing step is never verified"
+        bad "  add a codesign --verify (or an spctl/artifact read-back) after signing,"
+        bad "  so a runner where signing failed cannot publish an unsigned image"
+    fi
+
+    # macOS-only, for the same reason the old repack step had to be: `codesign`
+    # and `hdiutil` do not exist on the Linux and Windows runners, so an
+    # ungated step is a hard failure on two of four platforms rather than a
+    # no-op. Gating on `matrix.label` rather than `matrix.os` is the lesson §18
+    # and §19 encode — `os` gets bumped (macos-13 -> macos-14) and detaches every
+    # condition written against the old value.
+    if grep -qE "if: *startsWith\(matrix\.label, *'macos'\)" "$WORKFLOW"; then
+        ok "the macOS signing/repack steps are gated on matrix.label"
+    else
+        bad "the macOS-only steps are not gated on matrix.label starting with 'macos'"
+    fi
+else
+    warn "workflow not found at ${WORKFLOW}; skipping the signing-step checks"
+fi
+
+# ── The live docs must not still promise the README as PRESENT ──
+#
+# This is the drift that made the original section necessary in reverse: the
+# Tauri rewrite dropped the file while prose kept claiming it was there. The
+# same failure is available in the other direction — a doc left asserting the
+# image carries instructions that no longer exist, so a student (or an operator
+# answering a support ticket) is told to look for a file that is not there.
+#
+# WHAT THIS CANNOT DO, stated because the first version of this check got it
+# wrong: a grep cannot tell "the image carries a README" from "the README was
+# removed, and here is why". Banning the name outright made the check fail on
+# its own explanation, and the cheapest way to make it green would have been to
+# delete the explanation — leaving the guard passing for the wrong reason and
+# the reasoning lost. So the assertion is on the OPERATIONAL verb: a sentence
+# that says the artifact *carries*, *has*, or *includes* the file, or tells the
+# reader to *check/look for/find* it in the image. A doc that narrates the
+# removal does not match any of them.
+#
+# The negations are filtered out deliberately, and this is the third shape this
+# check took. `no longer carries`, `does not carry` and `no README` are sentences
+# that agree with the removal; a rule that flags them forces the writer to stop
+# explaining, which is the opposite of what this file is for. The filter is
+# narrow — it matches only an explicit negation immediately before the verb —
+# so "the image carries a README" still fails while "the image no longer carries
+# a README" passes.
+OPS_DOC="$REPO/docs/operate/OPS.md"
+if [ -f "$OPS_DOC" ]; then
+    stale_claim=$(grep -nEi '(carries|has|includes|ships)[^.]*READ ME FIRST|(look|check|find) for[^.]*READ ME FIRST|hdiutil attach[^.]*READ ME FIRST' "$OPS_DOC" \
+        | grep -viE 'no longer|does not|doesn.t|no README|not carry|never|removed' || true)
+    if [ -n "$stale_claim" ]; then
+        bad "docs/operate/OPS.md still says the macOS image carries a README"
+        printf '%s\n' "$stale_claim" | head -3 | sed 's/^/         /'
+        bad "  fix the prose in the same change that removes the file (README rule 3)"
+    else
+        ok "OPS.md does not promise a README in the macOS image"
+    fi
+fi
+
+echo "21. macOS asks for the Service install when it is absent"
+# ─────────────────────────────────────────────────────────────
+# WHY THIS EXISTS
+#
+# macOS has no installer that registers the Locus Service. On Windows the NSIS
+# setup does it during install, so a fresh install is never `NotInstalled` — but
+# a `.app` dragged out of the `.dmg` is, on first launch, with `enable_tun_mode`
+# defaulting to false. The only writer of that flag was the Connect path, which
+# sits behind the `tun_capable()` refusal an absent Service causes:
+#
+#     no Service -> Connect refused -> TUN never enabled
+#     TUN disabled -> install never requested -> no Service
+#
+# Nothing broke the loop, so a student who installed from the `.dmg` could never
+# connect, and the install affordance never appeared either (the dialog is driven
+# by `serviceNeedsAttention`, and an absent Service was deliberately excluded
+# from it). A real student hit this and there was no in-app route out at all.
+#
+# The fix is that `prepare_startup` requests the install for an absent Service on
+# macOS. This guard exists because that behaviour is INVISIBLE from the tree: it
+# cannot be exercised without macOS, the deadlock is silent, and reverting it
+# restores a state where the app looks healthy and simply never connects. Every
+# separate piece below was independently necessary, so each is asserted:
+#   - the predicate that decides it,
+#   - its macOS gate,
+#   - that it is actually called from the startup path,
+#   - and that the refusal no longer points at a Settings control macOS lacks.
+# ─────────────────────────────────────────────────────────────
+LIFECYCLE="$REPO/client/src-tauri/src/core/manager/lifecycle.rs"
+if [ ! -f "$LIFECYCLE" ]; then
+    warn "no lifecycle.rs — this guard cannot run"
+else
+    if grep -q 'fn should_request_install_for_absent_service' "$LIFECYCLE"; then
+        ok "the absent-Service install predicate exists"
+    else
+        bad "should_request_install_for_absent_service is gone from lifecycle.rs"
+        bad "  without it nothing requests the Service install on macOS, and a DMG"
+        bad "  install can never connect — see the comment above it for the loop"
+    fi
+
+    # The call site, not just the definition. A predicate nothing calls is inert,
+    # which is the exact shape of the original bug (the pieces were all present).
+    #
+    # Read through a python extractor that strips comments, because this file
+    # explains all three pieces in prose at the point of contact — a bare grep
+    # matches the explanation, so deleting the call while keeping its comment
+    # would read as a pass. That blind spot was found by falsifying this guard
+    # rather than by writing it.
+    lifecycle_code="$(python3 - "$LIFECYCLE" <<'PY'
+import re, sys
+text = open(sys.argv[1], encoding="utf-8", errors="replace").read()
+# Drop `//`-style comments (including doc comments) line by line.
+kept = []
+for line in text.splitlines():
+    stripped = line.strip()
+    if stripped.startswith("//"):
+        continue
+    kept.append(line)
+print("\n".join(kept))
+PY
+)"
+
+    if printf '%s' "$lifecycle_code" | grep -q 'if should_request_install_for_absent_service('; then
+        ok "the startup path calls the absent-Service predicate"
+    else
+        bad "prepare_startup does not CALL should_request_install_for_absent_service"
+        bad "  the predicate existing is not enough: nothing raises the install request,"
+        bad "  so a macOS DMG install still cannot connect"
+    fi
+
+    if printf '%s' "$lifecycle_code" | grep -q 'require_install_for_session()'; then
+        ok "the startup path still raises the install request"
+    else
+        bad "prepare_startup no longer calls require_install_for_session()"
+    fi
+
+    # The gate must be macOS. On Windows the NSIS installer registers the Service,
+    # so an absent one means removal and the pre-existing handling applies;
+    # widening this platform-blind would change Windows behaviour unasked.
+    #
+    # Checked as the cfg attribute IMMEDIATELY preceding the call, since the file
+    # also carries a `#[cfg(target_os = "macos")]` elsewhere (the dev chmod path).
+    if python3 - "$LIFECYCLE" <<'PY'
+import re, sys
+code = "\n".join(
+    l for l in open(sys.argv[1], encoding="utf-8", errors="replace").read().splitlines()
+    if not l.strip().startswith("//")
+)
+# An `if should_request_install_for_absent_service(` guarded by a macOS cfg on the
+# line directly above it.
+ok = re.search(
+    r'#\[cfg\(target_os = "macos"\)\]\s*\n\s*if should_request_install_for_absent_service\(',
+    code,
+)
+sys.exit(0 if ok else 1)
+PY
+    then
+        ok "the absent-Service request is cfg-gated to macOS at the call site"
+    else
+        bad "the absent-Service install request is not immediately cfg-gated to macOS"
+        bad "  it must not change Windows behaviour, where absence means removal"
+    fi
+fi
+
+# The refusal wording. It used to say "Install the service from Settings", which
+# macOS does not render — a student followed it, found no such control, and had
+# nowhere left to go. A message naming UI that does not exist is worse than no
+# message, because it sends someone looking.
+REFUSAL="$REPO/client/src-tauri/src/cmd/locus.rs"
+if [ ! -f "$REFUSAL" ]; then
+    warn "no cmd/locus.rs — this guard cannot run"
+else
+    # Scoped to the CONSTANT, not the file. The explanatory comments above it
+    # quote the old wording to say why it was wrong, and a bare file-wide grep
+    # matches those — so removing the string while keeping its rationale would
+    # read as a failure, which is backwards. This extracts the value only.
+    refusal_value="$(python3 - "$REFUSAL" <<'PY'
+import re, sys
+text = open(sys.argv[1], encoding="utf-8", errors="replace").read()
+m = re.search(r'TUN_UNAVAILABLE_MESSAGE\s*:\s*&str\s*=\s*"(.*?)";', text, re.S)
+print(m.group(1) if m else "")
+PY
+)"
+
+    if [ -z "$refusal_value" ]; then
+        bad "TUN_UNAVAILABLE_MESSAGE was not found in cmd/locus.rs"
+        bad "  if it was renamed, update this guard so the wording stays checked"
+    elif printf '%s' "$refusal_value" | grep -q 'from Settings'; then
+        bad "the TUN refusal still tells the student to install the service 'from Settings'"
+        bad "  macOS renders no such control; the message must name the permission"
+        bad "  prompt the app raises instead"
+    else
+        ok "the refusal does not point at a Settings control that may not exist"
+    fi
+fi
+
+# 22. A shell helper is defined before its first use.
+#
+# WHY THIS EXISTS
+#
+# `hooks-sync.sh` called `remote()` from `assert_reachable()` 132 lines before
+# `remote()` was defined. Every invocation therefore died with `remote: command
+# not found`, the reachability sentinel came back empty, and the script reported
+#
+#   cannot reach <host> over SSH (no usable key, or the host is down)
+#
+# for every host — including a reachable one. The tool was never runnable, and
+# nobody could tell, because a hardcoded failure is indistinguishable from a real
+# one by exit status.
+#
+# The function that broke is the one whose entire purpose is to stop "we could
+# not ask" being read as "the answer is no" (see its comment, and
+# docs/reference/DEBUGGING-METHOD.md). A guard that always answers "no" is the
+# exact defect it existed to prevent, so it gets its own check.
+#
+# The rule asserted: within a script that defines helper functions, no call to a
+# `name()` function may appear textually before that function's definition. This
+# is a textual approximation of a runtime property — it is conservative (it does
+# not model branches or subshells) but it catches the real failure, which is a
+# definition placed below the code that uses it.
+echo
+echo "22. Shell helpers are defined before their first use"
+
+HOOKSYNC="$REPO/server/scripts/hooks-sync.sh"
+if [ ! -f "$HOOKSYNC" ]; then
+    warn "no hooks-sync.sh — this guard cannot run"
+else
+    ordering_problem="$(python3 - "$HOOKSYNC" <<'PY'
+import re, sys
+
+path = sys.argv[1]
+lines = open(path, encoding="utf-8", errors="replace").read().splitlines()
+
+# Definitions: a line starting with `name() {` at any indent.
+defs = {}
+for i, line in enumerate(lines):
+    m = re.match(r'^\s*([A-Za-z_][A-Za-z0-9_]*)\(\)\s*\{', line)
+    if m:
+        defs.setdefault(m.group(1), i)
+
+problems = []
+for name, def_line in defs.items():
+    # Find the first CALL of this helper: `name ` or `$(name ` etc., skipping the
+    # definition line itself and any line that is a comment.
+    for i, line in enumerate(lines):
+        if i == def_line:
+            continue
+        stripped = line.lstrip()
+        if stripped.startswith('#'):
+            continue
+        if re.search(r'(?:^|[^\w$])' + re.escape(name) + r'(?![\w-])', line):
+            if i < def_line:
+                problems.append(
+                    '%s called at line %d, defined at line %d'
+                    % (name, i + 1, def_line + 1)
+                )
+            break
+
+print('\n'.join(problems))
+PY
+)"
+
+    if [ -n "$ordering_problem" ]; then
+        bad "a helper is used before it is defined in hooks-sync.sh:"
+        while IFS= read -r line; do
+            [ -n "$line" ] && bad "  $line"
+        done <<EOF
+$ordering_problem
+EOF
+    else
+        ok "every helper in hooks-sync.sh is defined before its first use"
+    fi
+fi
+
+echo
+echo "23. The free tier's endpoint, cap and allowance agree across the tree"
+#
+# WHY THIS EXISTS
+#
+# The free tier reuses the legacy Eco slot: port 8443, the Eco password, the
+# `tc-eco-cap.service` unit — renamed customerside only. That means FOUR files
+# describe one endpoint, in three different vocabularies:
+#
+#   server/modules/04-tc.sh      the tc cap ("1mbit") and the port (8443)
+#   server/scripts/seed-pb.py    the tier_configs rows ("free" and "eco" -> 8443)
+#   server/scripts/fix-tier-configs.py / seed-live.py   the repair/seed tools
+#   server/pb_hooks/heartbeat.pb.js   the allowance (free_allowance_mb)
+#
+# Nothing tied them together, so the free tier could be half-deployed in a way
+# that looks complete: the cap dropped here, the row forgotten there, and the
+# student gets an activation that names a tier with no server_config — a
+# "connected" app that cannot reach the internet (the exact failure class in
+# FIXES.md). This asserts the AGREEMENT, not each file separately: the point is
+# that they match, and a check on one file alone cannot tell you that.
+#
+# Every assertion below was observed FAILING against the pre-fix tree before it
+# was kept: the 5mbit cap, the missing `free` seed row, and a heartbeat with no
+# allowance field each tripped it.
+
+TC_MOD="$REPO/server/modules/04-tc.sh"
+SEED="$REPO/server/scripts/seed-pb.py"
+HB="$HOOKS/heartbeat.pb.js"
+
+if [ ! -f "$TC_MOD" ] || [ ! -f "$SEED" ] || [ ! -f "$HB" ]; then
+    warn "free-tier guard: a file it needs is missing — skipping"
+else
+    # (a) The 8443 tc class is capped at 1mbit, not the legacy 5mbit.
+    #     Match the apply line specifically: `apply_tc_now 8443 "1:10" "1mbit"`.
+    if grep -Eq 'apply_tc_now[[:space:]]+8443[[:space:]]+"1:10"[[:space:]]+"1mbit"' "$TC_MOD"; then
+        ok "04-tc.sh caps the free/Eco port (8443) at 1mbit"
+    else
+        bad "04-tc.sh does NOT cap port 8443 at 1mbit (expected: apply_tc_now 8443 \"1:10\" \"1mbit\")"
+    fi
+
+    # (b) The reboot-persistence unit uses the same rate, or a reboot silently
+    #     restores the old cap while the running class says otherwise.
+    if grep -Eq 'create_tc_service[[:space:]]+"eco"[[:space:]]+"1:10"[[:space:]]+"1mbit"[[:space:]]+8443' "$TC_MOD"; then
+        ok "04-tc.sh's tc-eco-cap.service uses the same 1mbit rate"
+    else
+        bad "04-tc.sh's tc-eco-cap.service rate disagrees with the applied cap"
+    fi
+
+    # (c) The seed carries BOTH tier names against 8443. `free` is minted
+    #     against; `eco` must survive so codes already in the field resolve.
+    if grep -Eq '\("free",[[:space:]]*"ECO_PASS",[[:space:]]*8443\)' "$SEED"; then
+        ok "seed-pb.py seeds the \`free\` tier against port 8443"
+    else
+        bad "seed-pb.py has no \`free\` tier row on port 8443 — the console cannot mint a working free code"
+    fi
+    if grep -Eq '\("eco",[[:space:]]*"ECO_PASS",[[:space:]]*8443\)' "$SEED"; then
+        ok "seed-pb.py keeps the legacy \`eco\` row so field codes still resolve"
+    else
+        bad "seed-pb.py dropped the \`eco\` row — codes already in the field would activate with no server_config"
+    fi
+
+    # (d) The heartbeat carries the allowance, and only for the free tiers.
+    #     Assert the KEY, because that is the wire contract the client reads.
+    # Anchor on the ASSIGNMENT — see the note on the throttle check below.
+    if grep -Eq 'response\.free_allowance_mb[[:space:]]*=' "$HB"; then
+        ok "heartbeat.pb.js sends free_allowance_mb"
+    else
+        bad "heartbeat.pb.js does not send the free-tier allowance — the client has nothing to count against"
+    fi
+    # Anchor on the ASSIGNMENT (`response.free_throttle_mbps =`), not a bare
+    # mention: the key also appears in the file's own comments and in the
+    # enforcement-version note, so a plain grep stays green with the assignment
+    # deleted — a check that cannot fail, which is the defect this section
+    # exists to catch. (It did exactly that on the first draft.)
+    if grep -Eq 'response\.free_throttle_mbps[[:space:]]*=' "$HB"; then
+        ok "heartbeat.pb.js sends free_throttle_mbps"
+    else
+        bad "heartbeat.pb.js does not send the free-tier throttle speed — the client has nothing to slow to"
+    fi
+    if grep -Eq 'tierVal === "free"' "$HB" && grep -Eq 'tierVal === "eco"' "$HB"; then
+        ok "the allowance is gated to the free/eco tiers only"
+    else
+        bad "the free allowance is not gated to the free/eco tiers (a paying tier must never see an allowance)"
+    fi
+
+    # (e) TWO-SIDED: the client must read the same key the hub writes. A hub key
+    #     with no client reader is a silent no-op, which is precisely how the
+    #     UoT endpoint stayed dead fleet-wide (FIXES.md 29). The heartbeat
+    #     response struct is where the wire keys are declared.
+    CLIENT_HB="$REPO/client/src-tauri/src/locus/heartbeat.rs"
+    if [ -f "$CLIENT_HB" ]; then
+        # Anchor on the FIELD DECLARATION, not a bare mention: the doc comments
+        # and tests also name the key, so a plain grep passes even when the
+        # field itself has been renamed — a check that cannot fail is the exact
+        # defect this whole section exists to avoid.
+        if grep -Eq '^[[:space:]]*pub free_allowance_mb:' "$CLIENT_HB"; then
+            ok "the client declares free_allowance_mb (hub key has a reader)"
+        else
+            bad "the hub sends free_allowance_mb but the client does not declare it — the allowance would be a silent no-op"
+        fi
+        if grep -Eq '^[[:space:]]*pub free_throttle_mbps:' "$CLIENT_HB"; then
+            ok "the client declares free_throttle_mbps (hub key has a reader)"
+        else
+            bad "the hub sends free_throttle_mbps but the client does not declare it — the throttle speed would be a silent no-op"
+        fi
+    else
+        warn "no client heartbeat.rs found — cannot check the client side of the allowance"
+    fi
+
+    # (f) The cached allowance/throttle must be READ back, not only written.
+    #     A `store_*` with no reader is the same class of silent no-op as a wire
+    #     key with no reader: the value arrives, is persisted, and nothing ever
+    #     uses it. `throttle_mbps` is the live example of this being worth
+    #     checking — it is deliberately stored-but-not-yet-applied, and the guard
+    #     makes that an explicit, greppable fact rather than a missing call.
+    CLIENT_STORE="$REPO/client/src-tauri/src/locus/store.rs"
+    if [ -f "$CLIENT_STORE" ]; then
+        if grep -Eq 'pub async fn throttle_mbps\(' "$CLIENT_STORE"; then
+            ok "the client can read back the stored throttle speed"
+        else
+            bad "the client stores the throttle speed with no reader — the value would be persisted and never used"
+        fi
+    fi
+
+    # (g) THE PROSE ABOUT THE CAPS, not just the caps.
+    #
+    # WHY THIS EXISTS. The (a)–(f) checks all passed while two DOCUMENTS
+    # restated the caps wrongly: the root `README.md` said "Eco 5Mbit ... tc caps
+    # (5/100/200 Mbps)" — the pre-rename value the cap was CHANGED FROM — and
+    # `04-tc.sh`'s own header comment said "Eco (port 8443): 5 Mbps" above code
+    # that applies 1mbit. The guard checked the code and the docs drifted in
+    # silence, which is the §7 lesson one level out: verifying the value is not
+    # verifying what the documents SAY about it.
+    #
+    # The value is in `state.toml` ([tiers.free].cap). These two files are the
+    # ones a reader meets first (the front door, and the module that owns the
+    # cap), so they are the ones pinned here. A prose copy that reintroduces the
+    # old number now fails the build rather than shipping.
+    README_MD="$REPO/README.md"
+    if [ -f "$README_MD" ]; then
+        # The merged ladder: free 1 Mbps, paid 100 Mbps. NOTE this literal moved
+        # from (1/100/200) to (1/100) in the same commit as every other file that
+        # restated it — that is this guard doing its job, not a guard breaking.
+        # The paid-tier half of the same agreement is asserted by §27(g).
+        if grep -Eq 'tc caps \(1/100 Mbps\)' "$README_MD"; then
+            ok "README.md's tier-cap summary agrees with state.toml (1/100 Mbps)"
+        else
+            bad "README.md restates the tier caps and disagrees with state.toml — expected 'tc caps (1/100 Mbps)'"
+        fi
+        if grep -Eq 'Eco 5Mbit' "$README_MD"; then
+            bad "README.md still calls the free/Eco tier '5Mbit' — the cap was lowered to 1mbit"
+        else
+            ok "README.md does not restate the retired 5Mbit free-tier cap"
+        fi
+    fi
+    # The module header comment must not contradict the code below it. Match the
+    # retired "Eco (port 8443): 5 Mbps" line specifically; the applied caps are
+    # checked by (a)/(b) above and by §27(a)/(b).
+    if grep -Eq 'Eco \(port 8443\): 5 Mbps' "$TC_MOD"; then
+        bad "04-tc.sh's header comment says 'Eco (port 8443): 5 Mbps' but the code below applies 1mbit"
+    else
+        ok "04-tc.sh's header comment does not contradict its own applied cap"
+    fi
+fi
+
+echo
+echo "27. The paid tier is the only paid tier, and every surface agrees"
+#
+# WHY THIS EXISTS
+#
+# §23 does this for the FREE tier. The paid tier had no such treatment, and that
+# is how Stealth and Strike drifted into being the same plan at two rates for
+# months without anything noticing: four files described the paid endpoint
+# (`04-tc.sh` cap, `02-shadowsocks.sh` service, `seed-pb.py` row + udp_relay,
+# `Codes.vue` dropdown) in three vocabularies, and no check asserted they AGREED.
+#
+# The merge (docs/business/04-tiers.md §4.2.4) collapses those to one tier, and
+# this holds the collapse in place. It is written as a set of AGREEMENTS plus a
+# NEGATIVE, because the failure modes here are:
+#
+#   1. Someone re-adds a 200mbit class or a `stealth` service because a stale
+#      comment said the ladder had three tiers.
+#   2. The cap in the applied class and the cap in the reboot unit disagree, so
+#      a reboot silently restores the old rate.
+#   3. The console offers a tier the hub does not seed, so the operator can mint
+#      a code that can never resolve.
+#
+# Every assertion below was observed FAILING against the pre-merge tree before it
+# was kept, and against each half-merged state (the 200mbit cap, the surviving
+# `stealth` seed row, the console's stale dropdown literal).
+PAID_PORT=8445
+PAID_CAP=100mbit
+PAID_ROW=strike
+CONSOLE_CODES="$REPO/server/console/src/views/Codes.vue"
+
+if [ ! -f "$TC_MOD" ] || [ ! -f "$SEED" ]; then
+    warn "paid-tier guard: a file it needs is missing — skipping"
+else
+    # (a) The applied cap. Anchored on the APPLY LINE, not a bare mention: the
+    #     number also appears in comments, so a plain grep stays green with the
+    #     assignment deleted — a check that cannot fail.
+    if grep -Eq "apply_tc_now[[:space:]]+${PAID_PORT}[[:space:]]+\"[0-9:]+\"[[:space:]]+\"${PAID_CAP}\"" "$TC_MOD"; then
+        ok "04-tc.sh caps the paid port (${PAID_PORT}) at ${PAID_CAP}"
+    else
+        bad "04-tc.sh does NOT cap port ${PAID_PORT} at ${PAID_CAP} (expected: apply_tc_now ${PAID_PORT} \"1:30\" \"${PAID_CAP}\")"
+    fi
+
+    # (b) The reboot unit uses the same rate, or a reboot silently restores the
+    #     old cap while the running class says otherwise.
+    if grep -Eq "create_tc_service[[:space:]]+\"${PAID_ROW}\"[[:space:]]+\"[0-9:]+\"[[:space:]]+\"${PAID_CAP}\"[[:space:]]+${PAID_PORT}" "$TC_MOD"; then
+        ok "04-tc.sh's tc-${PAID_ROW}-cap.service uses the same ${PAID_CAP} rate"
+    else
+        bad "04-tc.sh's tc-${PAID_ROW}-cap.service rate disagrees with the applied cap"
+    fi
+
+    # (c) THE NEGATIVE — the retired rate must not come back. This is the
+    #     property that actually protects the fleet: `200mbit` anywhere in the
+    #     module means someone has restored the tier the merge deleted.
+    if grep -Eq '200mbit' "$TC_MOD"; then
+        bad "04-tc.sh still names a 200mbit cap — the retired second paid tier has come back"
+    else
+        ok "04-tc.sh names no retired 200mbit cap"
+    fi
+
+    # (d) The seed carries the paid row, with UDP advertised. Assert the ROW and
+    #     the udp flag together: a row without udp_relay sells a gaming plan that
+    #     does not do gaming, which is the FIXES.md-29 class of silent no-op.
+    if grep -Eq "\(\"${PAID_ROW}\",[[:space:]]*\"STRIKE_PASS\",[[:space:]]*${PAID_PORT}\)" "$SEED"; then
+        ok "seed-pb.py seeds the \`${PAID_ROW}\` row on port ${PAID_PORT}"
+    else
+        bad "seed-pb.py has no \`${PAID_ROW}\` row on port ${PAID_PORT} — a paid code could not resolve"
+    fi
+    # INVERTED 2026-10. This assertion used to REQUIRE the paid-only gate
+    # (`udp_enabled and t == "strike"`), because UDP was the paid plan's
+    # differentiator. UDP is now a given on both plans and the differentiator is
+    # RATE, so the gate it demanded is precisely the defect. The stronger
+    # two-sided form now lives at (h): every row advertises UDP, and each row
+    # names its own listener. Kept here as a TOMBSTONE rather than deleted, so a
+    # reader who remembers the old gate finds out why it is gone instead of
+    # re-adding it.
+    if grep -Eq 'uot_enabled and t == "strike"' "$SEED"; then
+        bad "seed-pb.py gates UDP to the paid row — UDP is a given on BOTH plans now (see §27(h)); the differentiator is rate"
+    else
+        ok "seed-pb.py does not gate UDP to the paid row (both plans carry it)"
+    fi
+
+    # (e) The retired tier must not be SEEDED. Its row may survive in a live DB
+    #     (field codes may carry the string), but a fresh seed must not recreate
+    #     it — that is how a retired tier silently becomes sellable again.
+    if grep -Eq '\("stealth\",[[:space:]]*"STEALTH_PASS"' "$SEED"; then
+        bad "seed-pb.py still seeds a \`stealth\` row — the retired tier is sellable again on a fresh deploy"
+    else
+        ok "seed-pb.py seeds no retired \`stealth\` row"
+    fi
+
+    # (f) TWO-SIDED, the console. The dropdown literal is a PRE-LOAD placeholder
+    #     (Codes.vue hydrates it from tiers.list), so it is not an allow-list in
+    #     the way a deployed client's enum is — but a placeholder naming a
+    #     retired tier is a dropdown entry that can mint an unresolvable code on
+    #     first paint. Assert it names only seeded rows.
+    if [ -f "$CONSOLE_CODES" ]; then
+        if grep -Eq "ref<string\[\]>\(\[[^]]*'${PAID_ROW}'" "$CONSOLE_CODES"; then
+            ok "the console's tier placeholder names the paid row"
+        else
+            bad "the console's tier placeholder does not name '${PAID_ROW}' — the mint form could offer no valid paid tier on first paint"
+        fi
+        if grep -Eq "ref<string\[\]>\(\[[^]]*'stealth'" "$CONSOLE_CODES"; then
+            bad "the console's tier placeholder still names the retired 'stealth' tier"
+        else
+            ok "the console's tier placeholder names no retired tier"
+        fi
+    else
+        warn "no console Codes.vue found — cannot check the tier placeholder"
+    fi
+
+    # (h) UDP IS A GIVEN — BOTH PLANS ADVERTISE IT, ON SEPARATE PORTS.
+    #
+    # WHY THIS EXISTS. UDP stopped being the paid plan's differentiator: the two
+    # plans are separated by RATE (100 Mbps vs 1 Mbps), not by whether a UDP path
+    # exists. That makes three things load-bearing at once, and each has a silent
+    # failure mode:
+    #
+    #   1. `seed-pb.py` must set udp_relay for EVERY row, not just `strike`. The
+    #      old gate (`t == "strike"`) is a one-word edit away from coming back,
+    #      and the symptom would be "free users can't play Roblox" — noticed by
+    #      students, not by CI.
+    #   2. Each row must name its OWN uot_port. A sing-box listener is bound to
+    #      one password, so pointing the free row at the paid port sends ECO_PASS
+    #      to a listener expecting STRIKE_PASS: the handshake fails and UDP dies
+    #      for exactly one plan.
+    #   3. The free UDP port must be SHAPED. Without a tc class on it, the free
+    #      plan's UDP is bounded only by the client's own cap — the hub trusting
+    #      the thing it is supposed to be shaping, and a modified client gets
+    #      uncapped UDP. That is the security half of this change, and the reason
+    #      the user asked for a server-side cap.
+    #
+    # Every assertion below was observed FAILING against the pre-change tree.
+    UOT_FREE_PORT=8447
+    FW="$REPO/server/modules/08-firewall.sh"
+
+    if grep -Eq 'udp = uot_enabled$' "$SEED"; then
+        ok "seed-pb.py advertises UDP for every plan (no paid-only gate)"
+    else
+        bad "seed-pb.py does NOT advertise UDP for every plan — the paid-only gate is back, and free users lose UDP silently"
+    fi
+
+    if grep -Eq 'uot_port if t == "strike" else uot_port_free' "$SEED"; then
+        ok "seed-pb.py gives each plan its own uot_port (free -> ${UOT_FREE_PORT})"
+    else
+        bad "seed-pb.py does not select a per-plan uot_port — one plan would be told to use the other's listener"
+    fi
+
+    if grep -Eq "apply_tc_now[[:space:]]+${UOT_FREE_PORT}[[:space:]]+\"[0-9:]+\"[[:space:]]+\"1mbit\"" "$TC_MOD"; then
+        ok "04-tc.sh caps the free UDP port (${UOT_FREE_PORT}) at 1mbit, server-side"
+    else
+        bad "04-tc.sh does NOT cap the free UDP port (${UOT_FREE_PORT}) — free UDP would be bounded only by the client, which a modified client controls"
+    fi
+
+    if grep -Eq "create_tc_service[[:space:]]+\"eco-udp\"[[:space:]]+\"[0-9:]+\"[[:space:]]+\"1mbit\"[[:space:]]+${UOT_FREE_PORT}" "$TC_MOD"; then
+        ok "04-tc.sh's tc-eco-udp-cap.service uses the same 1mbit rate"
+    else
+        bad "04-tc.sh's free-UDP reboot unit disagrees with the applied cap"
+    fi
+
+    # The paid UDP port must NOT be shaped: capping a latency-sensitive flow to
+    # protect bandwidth is the wrong trade for a plan sold on 100 Mbps.
+    if grep -Eq "apply_tc_now[[:space:]]+8446" "$TC_MOD"; then
+        bad "04-tc.sh shapes the PAID UDP port (8446) — that can add latency to exactly the traffic the paid plan exists for"
+    else
+        ok "04-tc.sh does not shape the paid UDP port"
+    fi
+
+    # Two-sided: the firewall must admit both listeners, or clients sit on an
+    # advertised port that nothing answers.
+    # ANCHORED ON THE COMMAND, not on a bare mention of the port variable.
+    #
+    # The first draft of this check grepped for `${UOT_PORT_FREE:-8447}` and
+    # stayed GREEN when both `ufw allow` lines were deleted — because the port
+    # also appears in the surrounding `log` lines. That is the same
+    # "a check on a value is not a check on what the code does with it" defect
+    # §23(f) and the macOS section both record, so it is anchored on `ufw allow`
+    # now and was re-observed failing against the deleted-rule tree.
+    if [ -f "$FW" ]; then
+        if grep -Eq '^[[:space:]]*ufw allow[[:space:]]+"\$\{UOT_PORT_FREE:-8447\}"/(tcp|udp)' "$FW"; then
+            ok "08-firewall.sh actually opens the free UDP port (8447) with ufw"
+        else
+            bad "08-firewall.sh does not open the free UDP port with ufw allow — the hub would advertise it and refuse it"
+        fi
+    fi
+
+    # (g) THE PROSE ABOUT THE PAID CAP, not just the cap (§23(g)'s lesson one
+    #     tier over). Two documents restate it and both are ones a reader meets
+    #     first. A prose copy that reintroduces the retired 200 Mbps now fails.
+    if [ -f "$REPO/README.md" ]; then
+        if grep -Eq 'tc caps \(1/100 Mbps\)' "$REPO/README.md"; then
+            ok "README.md's tier-cap summary agrees with the merged ladder (1/100 Mbps)"
+        else
+            bad "README.md restates the tier caps and disagrees with the tree — expected 'tc caps (1/100 Mbps)'"
+        fi
+        if grep -Eq 'Stealth [0-9]+ ?Mbps|5M tc' "$REPO/README.md"; then
+            bad "README.md still restates a retired tier's cap"
+        else
+            ok "README.md does not restate a retired tier's cap"
+        fi
+    fi
+fi
+
+
+echo
+echo "24. The macOS updater payload is a .app.tar.gz, and three sites agree on that"
+#
+# WHY THIS EXISTS
+#
+# A macOS student on 3.2.24 reported "the update wasn't offered". The hub half of
+# the cause was that BOTH sides named a bare Mach-O (`locus-darwin-arm64`) in a
+# macOS update slot, while `tauri_plugin_updater` extracts a tar of an `.app`
+# bundle on macOS. The download verified and the install could not work.
+#
+# Nothing checked this, so it shipped. §1 covers the Windows installer name and
+# §1c covers the macOS human-download zip, but no section covered what a macOS
+# CLIENT downloads to replace itself — which is why the mismatch survived.
+#
+# FOUR sites must agree, and this asserts the AGREEMENT rather than each one:
+#
+#   1. CI       — `.github/workflows/client.yml`, the manifest's platform map
+#   2. the hub  — `fetch-release.py` PLATFORMS
+#   3. publish  — `publish-release.sh` PLATFORMS
+#   4. the doc  — docs/operate/UPDATE-SYSTEM.md, which tells an operator what
+#                 each slot carries
+#
+# And one NEGATIVE, the property that actually protects the fleet: a bare Mach-O
+# must NOT appear as a macOS update payload anywhere. That is the defect this
+# section was written for.
+WORKFLOW="$REPO/.github/workflows/client.yml"
+FETCH="$SCRIPTS/fetch-release.py"
+PUBLISH="$SCRIPTS/publish-release.sh"
+
+for target in "$WORKFLOW" "$FETCH" "$PUBLISH"; do
+    [ -f "$target" ] || { bad "macOS updater guard cannot run: $target is missing"; continue; }
+    want_tgz='locus-darwin-(amd64|arm64)\.app\.tar\.gz'
+    if grep -Eq "$want_tgz" "$target"; then
+        ok "$(basename "$target") names the macOS payload as .app.tar.gz"
+    else
+        bad "$(basename "$target") does not name a .app.tar.gz for a macOS update slot"
+    fi
+done
+
+# The negative: a bare `locus-darwin-<arch>` must not be what a macOS slot
+# RESOLVES TO. Checked on the PLATFORMS declarations specifically, not on the
+# whole file: `fetch-release.py` keeps a `LEGACY_MACOS_NAMES` map holding the old
+# bare names ON PURPOSE, as the narrow fallback for releases published before the
+# packaging step. A whole-file grep cannot tell that deliberate fallback from an
+# accidental re-advertisement, and a guard that fails on intent-correct code is
+# one people learn to bypass.
+#
+# So this reads the lines that BUILD the payload list.
+if [ -f "$FETCH" ]; then
+    if sed -n '/^NEW_PLATFORMS = \[/,/^\]/p' "$FETCH" | grep -E 'locus-darwin-(amd64|arm64)["'"'"',:)]' \
+        | grep -v 'app\.tar\.gz' >/dev/null 2>&1; then
+        bad "fetch-release.py's NEW_PLATFORMS advertises a bare Mach-O in a macOS slot"
+    else
+        ok "fetch-release.py's NEW_PLATFORMS names no bare Mach-O"
+    fi
+fi
+if [ -f "$PUBLISH" ]; then
+    if sed -n '/^PLATFORMS=(/,/^)/p' "$PUBLISH" | grep -E 'locus-darwin-(amd64|arm64)' \
+        | grep -v 'app\.tar\.gz' >/dev/null 2>&1; then
+        bad "publish-release.sh's PLATFORMS advertises a bare Mach-O in a macOS slot"
+    else
+        ok "publish-release.sh's PLATFORMS names no bare Mach-O"
+    fi
+fi
+if [ -f "$WORKFLOW" ]; then
+    # The manifest's platform map, which is the declaration CI publishes.
+    if sed -n '/platforms = {/,/}/p' "$WORKFLOW" | grep -E '"macos_(intel|arm)":' \
+        | grep -v 'app\.tar\.gz' >/dev/null 2>&1; then
+        bad "client.yml's manifest platform map advertises a bare Mach-O in a macOS slot"
+    else
+        ok "client.yml's manifest platform map names no bare Mach-O"
+    fi
+fi
+
+# The client side of the contract: the updater's own guard must accept a gzip
+# and refuse a Mach-O. A hub that publishes the right artifact is useless if the
+# client refuses it, or — worse — if the client accepts the wrong one.
+INSTALL_RS="$REPO/client/src-tauri/src/locus/update/install.rs"
+if [ -f "$INSTALL_RS" ]; then
+    if grep -q 'app\.tar\.gz\|gzip' "$INSTALL_RS"; then
+        ok "the client's payload guard is aware of the macOS tarball"
+    else
+        warn "install.rs does not mention the macOS tarball — check is_installer_payload still accepts it"
+    fi
+    # The Mach-O refusal is what makes a bare binary fail loudly rather than
+    # fall through as an unrecognised "container".
+    #
+    # Anchored on the actual MAGIC BYTES, not the words "Mach-O": those also
+    # appear in the doc comment explaining the rule, so a word-level grep stays
+    # green with the matching arms deleted — the same "check that cannot fail"
+    # defect §23 hit on its first draft. The escaped byte literals are the code.
+    # Scoped to `is_bare_executable`'s body, NOT the whole file: the same magic
+    # bytes appear in this file's own TESTS, so a whole-file grep stays green
+    # with the implementation arm deleted. (It did — that is why this is scoped.)
+    if sed -n '/^fn is_bare_executable/,/^}/p' "$INSTALL_RS" \
+        | grep -Fq 'xcf\xfa\xed\xfe'; then
+        ok "the client's payload guard matches Mach-O magic (a bare macOS binary is refused, not forwarded)"
+    else
+        bad "install.rs's is_bare_executable does not match Mach-O magic — a bare macOS binary would fall through as an unknown container"
+    fi
+
+    # (f2) The tarball needs its OWN `.sig`, and the upload must carry it.
+    #      minisign signs exact bytes and the plugin verifies the bytes it
+    #      DOWNLOADED — which on macOS is the tarball, not the Mach-O inside it.
+    #      Shipping the raw binary's `.sig` alongside the tarball is a release
+    #      that downloads, fails verification, and installs nothing.
+    if grep -q 'app\.tar\.gz\.sig' "$WORKFLOW" 2>/dev/null; then
+        ok "CI uploads the macOS tarball's own .sig"
+    else
+        bad "CI does not upload the macOS tarball's .sig — the updater would verify the tarball against the raw binary's signature and refuse it"
+    fi
+    # And the hub must accept that name.
+    if grep -q 'app\.tar\.gz\.sig\|name + "\.sig"' "$FETCH" 2>/dev/null; then
+        ok "the hub's allow-list admits the tarball's .sig"
+    else
+        bad "fetch-release.py would refuse the macOS tarball's .sig as an unknown filename"
+    fi
+
+    # (f3) The RELEASE must actually PUBLISH the tarballs. This is the check
+    #      whose absence let a green run produce a release whose manifest
+    #      advertised files the release did not carry:
+    #
+    #        manifest.json:  macos_arm -> locus-darwin-arm64.app.tar.gz
+    #        release assets: locus-darwin-arm64  (the bare binary)
+    #
+    #      Both halves were individually valid — only the agreement was broken —
+    #      so nothing failed. The `Create the release` step's `files:` list is
+    #      what decides the assets, and it must name the tarballs.
+    #
+    #      Scoped to the `files:` block itself, not the surrounding step: the
+    #      step's own comment quotes the tarball name while explaining the bug,
+    #      so a step-wide grep stays green with the entry deleted. (It did — this
+    #      is the third assertion in this section to make that mistake, which is
+    #      why every one of them is now checked against a deliberate break.)
+    release_files=$(sed -n '/^ *files: |$/,/^ *draft: false/p' "$WORKFLOW" \
+        | sed -n '/^ *release\//p')
+    if printf '%s\n' "$release_files" | grep -q 'locus-darwin-.*\.app\.tar\.gz$'; then
+        ok "the release publishes the macOS .app.tar.gz assets"
+    else
+        bad "the release's file list omits the macOS .app.tar.gz — the manifest would advertise files the release does not carry"
+    fi
+    #      And its signature, for the reason in (f2).
+    if printf '%s\n' "$release_files" | grep -q 'locus-darwin-.*\.app\.tar\.gz\.sig$'; then
+        ok "the release publishes the tarball signatures too"
+    else
+        bad "the release's file list omits the macOS tarball .sig — the updater verifies mandatorily and would refuse the download"
+    fi
+
+    # (g) ORDERING: the `update-*` upload must come AFTER the macOS packaging
+    #     step. This is not style — the tarball does not exist until the bundle
+    #     has been signed and packed, so an upload above it ships a payload set
+    #     with no macOS artifact.
+    #
+    #     This is exactly what happened on the first 3.2.27 run: all four builds
+    #     passed, packaging printed a clean 85 MB tarball, and the release job
+    #     then failed with "refusing to publish a partial release — missing:
+    #     locus-darwin-*.app.tar.gz". The manifest guard caught it correctly, but
+    #     only after a ~30 minute build. This makes the same mistake a two-second
+    #     local failure instead.
+    pack_line=$(grep -n 'name: Package the macOS updater payload' "$WORKFLOW" | head -1 | cut -d: -f1)
+    upload_line=$(grep -n 'name: update-\${{ matrix.label }}' "$WORKFLOW" | head -1 | cut -d: -f1)
+    if [ -z "$pack_line" ] || [ -z "$upload_line" ]; then
+        warn "could not locate the macOS packaging and update-upload steps — ordering unchecked"
+    elif [ "$upload_line" -gt "$pack_line" ]; then
+        ok "the update upload is below the macOS packaging step (order is correct)"
+    else
+        bad "the update-* upload (line $upload_line) is ABOVE the macOS packaging step (line $pack_line) — the .app.tar.gz would not exist yet, and the release would refuse to publish"
+    fi
+
+    # (h) THE SILENT FALLBACK MUST NOT EXIST.
+    #
+    #     `resolve_platform_names(available=…)` used to return the pre-fix bare
+    #     Mach-O when a release carried no `.app.tar.gz`, log a WARNING, and
+    #     carry on. It therefore PUBLISHED a live `update_config` row pointing a
+    #     macOS slot at a payload no macOS client can install — which is exactly
+    #     how v3.2.26 reached the live hub, and why a student on 3.2.24 was
+    #     offered an update that failed with "not an installer (48150583 bytes)".
+    #
+    #     Sections §24(a)–(g) all check that the *declarations* agree. Not one
+    #     of them could see this, because the declarations were correct — the
+    #     defect was a runtime branch that DOWNGRADED a correct declaration into
+    #     a broken artifact. So this asserts the branch is a REFUSAL, not a
+    #     fallback: inside the macOS arm of `resolve_platform_names`, the legacy
+    #     name may only appear in a `raise FetchError(…)`, never as an assignment
+    #     to `resolved`.
+    #
+    #     Scoped to the function body and to the assignment shape on purpose:
+    #     `LEGACY_MACOS_NAMES` is a legitimate map and its *name* appears in
+    #     comments and the allow-list, so a whole-file grep (or a grep for the
+    #     identifier alone) stays green with the fallback restored. This checks
+    #     the thing that does the damage — `resolved = legacy`.
+    if [ -f "$FETCH" ]; then
+        fetch_body=$(sed -n '/^def resolve_platform_names/,/^def /p' "$FETCH")
+        if printf '%s\n' "$fetch_body" | grep -Eq '^[[:space:]]*resolved[[:space:]]*=[[:space:]]*legacy'; then
+            bad "fetch-release.py silently downgrades a macOS slot to the bare Mach-O (resolved = legacy) — a release with no .app.tar.gz would publish an uninstallable row instead of refusing"
+        else
+            ok "fetch-release.py refuses a macOS slot with no .app.tar.gz instead of silently serving the bare Mach-O"
+        fi
+        #     The refusal must be a FetchError that says WHY, or the operator is
+        #     back to "no updates, and nothing says why".
+        if printf '%s\n' "$fetch_body" | grep -q 'raise FetchError('; then
+            ok "fetch-release.py's macOS refusal raises FetchError (visible at publish time)"
+        else
+            bad "fetch-release.py's macOS slot-refusal path does not raise FetchError — the operator would see a crash, not a reason"
+        fi
+    fi
+
+    # (i) ONE ANSWER, NOT TWO.
+    #
+    #     The manifest cross-check must compare against the SAME list the staging
+    #     loop fetched — `resolved`, built with `available=set(assets)`. It used
+    #     to re-call `resolve_platform_names(version)` with NO `available=`,
+    #     which answers "what does the hub *prefer*"; staging asked "what will
+    #     the hub *fetch*". The two agreed only while every release carried every
+    #     preferred name, so the check could pass while a different file was
+    #     served — the "two sources of truth with no reconciliation" shape this
+    #     whole script exists to catch.
+    #
+    #     The invariant is narrow and stated as AGREEMENT, not shape: the loop
+    #     that builds `mismatches` iterates the list staging produced. Not a
+    #     "zero calls" rule — `verify_and_report` and the signature-fold resolve
+    #     the *preferred* names on purpose, to look up platform KEYS (which are
+    #     version-independent) and to read the staged filename back out of
+    #     `results`. Asserting "no second call" would fail intent-correct code,
+    #     which is how a guard gets bypassed (§24's own recurring lesson).
+    #
+    #     Scoped to the block between the staged-list binding and the signature
+    #     fold: that is the cross-check, and `mismatches.append` is inside it.
+    if [ -f "$FETCH" ]; then
+        if grep -q 'resolved = resolve_platform_names(version, available=set(assets))' "$FETCH"; then
+            ok "fetch-release.py binds the staged platform list from the release's own assets"
+        else
+            bad "fetch-release.py no longer binds \`resolved\` from available=set(assets) — staging and the cross-check can disagree again"
+        fi
+        # The cross-check iterating anything other than the staged `resolved`
+        # list is the bug. Anchored on the loop that feeds `mismatches`.
+        xcheck=$(sed -n '/mismatches = \[\]/,/mismatches.append/p' "$FETCH")
+        if printf '%s\n' "$xcheck" | grep -Eq 'for key, name, _ in resolved:'; then
+            ok "fetch-release.py's manifest cross-check compares against the staged list (what is served is what is checked)"
+        else
+            bad "fetch-release.py's manifest cross-check does not iterate the staged \`resolved\` list — it re-resolves the names and can pass while a different file is served"
+        fi
+    fi
+
+    # (j) THE BEHAVIOUR, not the text.
+    #
+    #     (h) and (i) above are greps — fast, but they can only prove the code
+    #     LOOKS right. The property that matters is behavioural: a pre-fix
+    #     release is REFUSED, not served. `smoke-macos-payload-resolution.sh`
+    #     imports the shipped `resolve_platform_names` and asserts exactly that,
+    #     so a rewrite that keeps the identifiers but restores the fallback
+    #     fails here even if every grep above is satisfied.
+    #
+    #     Run from the fast gate so it is enforced, not merely available: the
+    #     other smoke scripts are documented manual tools and nothing in CI ran
+    #     them, so a rule they asserted could be broken with every check green.
+    #     This one is wired in. It is offline and deterministic (it imports the
+    #     module and calls one function), so it costs a Python start-up.
+    SMOKE_MACOS="$SCRIPTS/smoke-macos-payload-resolution.sh"
+    if [ -f "$SMOKE_MACOS" ]; then
+        if smoke_out=$(bash "$SMOKE_MACOS" 2>&1); then
+            ok "the macOS payload resolution refuses a pre-fix release and serves the tarball otherwise (behavioural)"
+        else
+            bad "smoke-macos-payload-resolution.sh FAILED — a macOS slot could be served a payload no client can install:"
+            printf '%s\n' "$smoke_out" | sed 's/^/        /' >&2
+        fi
+    else
+        warn "no smoke-macos-payload-resolution.sh — the behavioural half of this contract is unenforced"
+    fi
+else
+    warn "no install.rs — cannot check the client side of the macOS payload contract"
+fi
+
+# ─────────────────────────────────────────────────────────────
+# 25. Front-matter conformance — status is structure, not a banner.
+#
+# WHY THIS EXISTS
+#
+# `docs/README.md` rule 1 and `docs/STATE.md` rule 3 both say a document's status
+# is a front-matter FIELD (`audience:` / `status:`), not a prose banner, and that
+# a retired document lives in `archive/`/`history/`, where the FOLDER carries the
+# status. Nothing enforced it, so the rule held only where someone remembered it.
+#
+# It came apart in the redesign corpus: 17 files under `docs/business/redesign/`
+# and its `implementation/` subdirectory had a banner but no `status:` field, so
+# a reader — and any guard — had to parse prose to learn whether a file described
+# live code or a removed design. Three of them described the *removed* device
+# binding as if live. That is exactly the `dev-vs-code-drift` class this repo
+# keeps re-learning: the doc was right when written and the world moved.
+#
+# WHAT IT ENFORCES, and why each is safe to require:
+#   * Every `.md` under `docs/` and `client/docs/` EXCEPT `archive/` and
+#     `history/` opens with a fenced front-matter block carrying `audience:` and
+#     `status:`.
+#   * A file under `archive/` or `history/` need NOT (the folder is the status) —
+#     but if it DOES, that is fine (LAYOUT.md keeps its own).
+#   * `status:` is one of the three values the rule names.
+#   * Also: `README.md`, `AGENTS.md`, `CLAUDE.md`, `GEMINI.md` at the repo root are
+#     exempt by path — they are the entry points and predate the convention.
+#
+# ─────────────────────────────────────────────────────────────
+# 26. The landing page: one hostname, four download slots, two sides agreeing.
+#
+# WHY THIS EXISTS
+#
+# The landing page is a second hostname on the hub box, and it introduces exactly
+# the class of drift this script is for. Two things must agree and NOTHING in
+# the tree made them:
+#
+#   (a) THE HOSTNAME. It is written in four places with four different jobs:
+#       the Caddyfile generator (which block to serve), the manual-reference
+#       template (so a hand-built hub matches), docs/state.toml (the recorded
+#       fact), and the page itself (the canonical link, which is what a search
+#       engine treats as the page's identity). Three of those can be edited
+#       without the fourth, and the failure is quiet: a canonical link naming a
+#       host that serves nothing tells Google the real page is elsewhere.
+#
+#   (b) THE DOWNLOAD FILENAMES. The page's four buttons are rendered from the
+#       release manifest's platforms map — the same map publish-release.sh's
+#       PLATFORMS list and fetch-release.py resolve against. The macOS entries
+#       name .app.tar.gz tarballs, and the Windows entry is the NSIS installer
+#       rather than the raw .exe. Getting one wrong is not a visible break: the
+#       button renders, the page loads, and the download 404s.
+#
+# THIS SECTION CHECKS THE AGREEMENT, NOT EACH SIDE. That is section 24's lesson,
+# applied here: a check that each half is individually valid passes happily while
+# the two halves disagree — which is how the v3.2.12 Windows outage shipped.
+# ─────────────────────────────────────────────────────────────
+echo
+echo "26. The landing page — hostname and download slots agree everywhere"
+
+# Read the entry by scanning from its header to the next header, NOT a fixed
+# number of lines: this entry carries a long comment block, and a fixed offset
+# silently returned nothing (the guard fired with "<missing>" on its first run,
+# which is how the bug was found — worth keeping the shape that exposed it).
+#
+# The value is taken with an explicit quote split rather than a greedy gsub: the
+# first attempt used `gsub(/.*"|".*/,"")`, which strips the whole line because
+# the second alternative matches a quote followed by anything, including the
+# closing quote and the value between them.
+LANDING_TOML=$(awk '/^\[site\.domain\]/{f=1;next} /^\[/{f=0} f && /^value/{n=split($0,a,"\"");print a[2];exit}' \
+    "$REPO/docs/state.toml" 2>/dev/null)
+LANDING_MODULE=$(grep -oE 'LANDING_DOMAIN="\$\{LANDING_DOMAIN:-[^}]*\}"' "$REPO/server/modules/05-caddy.sh" 2>/dev/null \
+    | sed 's/.*:-\(.*\)}"/\1/' | head -1)
+LANDING_TEMPLATE=$(grep -oE '^[a-z0-9.-]+ \{' "$REPO/server/templates/Caddyfile" 2>/dev/null \
+    | grep -vi 'domain' | sed 's/ {//' | head -1)
+LANDING_PAGE=$(grep -oE '<link rel="canonical" href="https://[^/"]+' "$REPO/server/site/index.html" 2>/dev/null \
+    | sed 's|.*https://||' | head -1)
+
+echo "  state.toml      : ${LANDING_TOML:-<missing>}"
+echo "  05-caddy.sh     : ${LANDING_MODULE:-<missing>}"
+echo "  templates/      : ${LANDING_TEMPLATE:-<missing>}"
+echo "  site/index.html : ${LANDING_PAGE:-<missing>}"
+
+if [ -z "$LANDING_TOML" ] || [ -z "$LANDING_MODULE" ] || [ -z "$LANDING_TEMPLATE" ] || [ -z "$LANDING_PAGE" ]; then
+    bad "landing hostname could not be read from all four sites — one is missing"
+else
+    LAND_OK=1
+    [ "$LANDING_MODULE" = "$LANDING_TOML" ]   || { bad "05-caddy.sh LANDING_DOMAIN='${LANDING_MODULE}' != state.toml site.domain='${LANDING_TOML}'"; LAND_OK=0; }
+    [ "$LANDING_TEMPLATE" = "$LANDING_TOML" ] || { bad "templates/Caddyfile block '${LANDING_TEMPLATE}' != state.toml site.domain='${LANDING_TOML}'"; LAND_OK=0; }
+    [ "$LANDING_PAGE" = "$LANDING_TOML" ]     || { bad "site/index.html canonical '${LANDING_PAGE}' != state.toml site.domain='${LANDING_TOML}'"; LAND_OK=0; }
+    [ "$LAND_OK" = "1" ] && ok "landing hostname agrees across all four sites"
+fi
+
+# The four slots must exist in the page, one per FROZEN platform key. A missing
+# slot is three buttons instead of four, which no other check would notice.
+MISSING_SLOTS=""
+for k in linux windows macos_intel macos_arm; do
+    grep -q "data-download=\"${k}\"" "$REPO/server/site/index.html" 2>/dev/null \
+        || MISSING_SLOTS="$MISSING_SLOTS $k"
+done
+if [ -n "$MISSING_SLOTS" ]; then
+    bad "server/site/index.html is missing download slot(s):${MISSING_SLOTS}"
+    bad "  Each platform key needs one — they are the keys section 1 pins."
+else
+    ok "index.html carries all four download slots"
+fi
+
+# And the renderer must cover the same set. A slot the renderer does not know
+# about ships as href="#" — a dead button on a page that otherwise looks right.
+RENDER_SLOTS=$(grep -oE '^SLOTS = \[.*\]' "$REPO/server/scripts/deploy-site.sh" 2>/dev/null \
+    | grep -oE '"[a-z_]+"' | tr -d '"' | sort | tr '\n' ' ')
+EXPECT_SLOTS="linux macos_arm macos_intel windows "
+if [ "$RENDER_SLOTS" != "$EXPECT_SLOTS" ]; then
+    bad "deploy-site.sh SLOTS='${RENDER_SLOTS:-<missing>}' != expected '${EXPECT_SLOTS}'"
+    bad "  The renderer and the page must cover the same four platform keys."
+else
+    ok "deploy-site.sh renders the same four slots the page carries"
+fi
+
+# The landing block must never serve the hub's surfaces. This is the property a
+# future "just add a handle" edit removes with no symptom on the page itself.
+if awk '/^locusvpn\.jadedns\.uk \{/,/^\}/' "$REPO/server/templates/Caddyfile" 2>/dev/null \
+    | grep -qE '^[[:space:]]*(handle|handle_path|reverse_proxy|try_files)'; then
+    bad "the landing block in templates/Caddyfile contains a handle/proxy directive"
+    bad "  It must be a bare file_server: the hub's /updates/, /api/* and /admin/"
+    bad "  must not be reachable from the indexable hostname."
+else
+    ok "landing block serves static files only (no handle, no proxy)"
+fi
+
+# ─────────────────────────────────────────────────────────────
+# 25. Front-matter conformance (status is structure, not a banner)
+#
+# WHAT IT DOES NOT ENFORCE: that the declared status is TRUE. A guard cannot read
+# a design record and know it is superseded. This catches the missing field and
+# the invented value; the honest value is still a human's job.
+# ─────────────────────────────────────────────────────────────
+echo
+echo "25. Front-matter conformance (status is structure, not a banner)"
+fm_report=$(cd "$REPO" && python3 - <<'PY'
+import os, re, sys
+
+ALLOWED_STATUS = {"live", "reference", "design-record"}
+missing, badvalue = [], []
+
+def md_files(root):
+    for dirpath, dirs, files in os.walk(root):
+        if any(part in dirpath for part in ('node_modules', 'target', '.git', 'dist')):
+            continue
+        for fn in files:
+            if fn.endswith('.md'):
+                yield os.path.join(dirpath, fn)
+
+def front_matter(path):
+    """The keys in the leading fenced block, or None if there is no block."""
+    with open(path, encoding="utf-8", errors="replace") as fh:
+        lines = fh.read().splitlines()
+    # Skip a leading H1 (the docs put the front-matter block AFTER the title).
+    i = 0
+    while i < len(lines) and not lines[i].strip():
+        i += 1
+    if i < len(lines) and lines[i].startswith("# "):
+        i += 1
+    while i < len(lines) and not lines[i].strip():
+        i += 1
+    if i >= len(lines) or not lines[i].startswith("```"):
+        return None
+    i += 1
+    keys = {}
+    while i < len(lines) and not lines[i].startswith("```"):
+        m = re.match(r'^([a-z-]+):\s*(.*)$', lines[i].strip())
+        if m:
+            keys[m.group(1)] = m.group(2).strip()
+        i += 1
+    return keys
+
+for root in ("docs", "client/docs"):
+    for path in md_files(root):
+        rel = path.replace(os.sep, "/")
+        # Archived/historical material: the folder carries the status.
+        if rel.startswith("docs/archive/") or rel.startswith("docs/history/"):
+            continue
+        keys = front_matter(path)
+        if keys is None:
+            missing.append(rel)
+            continue
+        if "audience" not in keys:
+            missing.append(rel + "  (no `audience:`)")
+        if "status" not in keys:
+            missing.append(rel + "  (no `status:`)")
+        elif keys["status"] not in ALLOWED_STATUS:
+            badvalue.append(f"{rel}  status = {keys['status']!r} (allowed: {sorted(ALLOWED_STATUS)})")
+
+for f in sorted(set(missing)):
+    print("MISSING\t" + f)
+for f in sorted(set(badvalue)):
+    print("BADVALUE\t" + f)
+PY
+)
+
+if [ -z "$fm_report" ]; then
+    ok "every live document declares audience: and status: in its front-matter"
+else
+    while IFS="$(printf '\t')" read -r kind detail; do
+        case "$kind" in
+            MISSING)  bad "no front-matter (or a missing key): $detail" ;;
+            BADVALUE) bad "invalid status: $detail" ;;
+        esac
+    done <<EOF
+$fm_report
+EOF
+    bad "Fix: give each file a fenced block after its H1 with \`audience:\` and"
+    bad "\`status: live|reference|design-record\` — or move it to archive/history."
 fi
 
 echo

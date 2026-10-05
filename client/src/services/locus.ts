@@ -76,7 +76,47 @@ export interface LocusStatus {
    * `src-tauri/src/core/manager/traffic_probe.rs`.
    */
   trafficFlowing: boolean
+
+  /**
+   * The free tier's allowance state — what the usage bar, the warning and the
+   * throttle banner all read.
+   *
+   * A tagged union rather than loose numbers, mirroring the Rust enum. The
+   * distinction that matters is `unlimited` versus a metered zero: a paying tier
+   * (or an older hub) has no allowance at all and must render no bar and throttle
+   * nothing, where a free student who has used nothing must see a bar at 0%.
+   * Collapsing the two is how a paying student gets shown a free-tier banner.
+   *
+   * The backend has already classified it; the UI renders these values and does
+   * no arithmetic of its own, so the warning line and the throttle line cannot
+   * drift between the two languages.
+   */
+  allowance: AllowanceStatus
 }
+
+/**
+ * The free tier's allowance, as the backend classified it.
+ *
+ * `unlimited` is the answer for every paying tier and for a hub that predates
+ * the free tier. It is deliberately not "metered with an allowance of zero" —
+ * a zero allowance would throttle every student, and an absent key must never
+ * gate a paying user's traffic.
+ */
+export type AllowanceStatus =
+  | { state: 'unlimited' }
+  | {
+      state: 'metered'
+      /** Bytes counted in the current 30-day window. */
+      usedBytes: number
+      /** The window's allowance, in bytes. */
+      allowanceBytes: number
+      /** Percentage used, clamped to 0–100. Ready to render. */
+      percent: number
+      /** Past the 80% line but not yet spent. */
+      warning: boolean
+      /** The allowance is spent; the connection carries the throttle. */
+      throttled: boolean
+    }
 
 /**
  * The subscription state, already decided by the backend.
@@ -233,6 +273,29 @@ export interface UpdateStatus {
    * nothing has been offered — which is NOT the same as "up to date".
    */
   offeredVersion: string | null
+
+  /**
+   * Why no update is being offered, when the last heartbeat did not offer one.
+   *
+   * The answer to "why is this device not updating?", which had no answer before
+   * — every reason was logged at `debug` and the default level is `Info`, so a
+   * suppressed offer left no trace anywhere. A macOS student on 3.2.24 reported
+   * exactly that and there was nothing on the machine to diagnose it with.
+   *
+   * `null` means nothing to report: either an offer exists, or no beat has run.
+   * Deliberately not set for the ordinary "up to date" case.
+   */
+  noOfferReason: string | null
+
+  /**
+   * Whether automatic update checking is enabled.
+   *
+   * Surfaced because it is the one cause a student can fix themselves, and the
+   * one most likely to be stuck: the field is inherited from upstream Clash
+   * Verge Rev, so it can be `false` from an era when the Account row was
+   * mis-wired to auto-launch. The UI points at that control directly.
+   */
+  automaticChecksEnabled: boolean
 }
 
 /** Reports the update state. Never touches the network. */

@@ -110,13 +110,87 @@ def installer_name(version):
     return INSTALLER_NAME_TEMPLATE % version
 
 
-PLATFORMS = [
+## What each platform's UPDATER PAYLOAD is called, on the GitHub Release.
+##
+## The macOS entries carry `.app.tar.gz`, and that is NOT cosmetic. It is the
+## fix for a live defect: a macOS client on 3.2.24 was offered nothing, and the
+## hub half of the reason is that this list named a bare Mach-O executable
+## (`locus-darwin-arm64`) for the macOS slots.
+##
+## `tauri_plugin_updater` does not consume a bare binary on macOS. Its install
+## path is `GzDecoder` + `tar::Archive` expecting
+##
+##     Locus.app.tar.gz
+##     └── Locus.app/
+##         └── Contents/...
+##
+## and its `extract_path` there is the `.app` BUNDLE, not a single file
+## (`extract_path_from_executable`). Handed a raw Mach-O it fails at extraction
+## — after a ~48 MB download the student paid for and a signature that verified
+## fine. There is no path in which a bare binary updates a macOS app.
+##
+## Linux and Windows keep the bare artifacts they always had: their install
+## paths take the executable/installer directly, so the old names were correct
+## for them.
+##
+## `resolve_platform_names` below falls back to the bare name when the tarball
+## is absent from a release, so publishing a version built before this fix
+## degrades rather than failing outright.
+NEW_PLATFORMS = [
     ("linux", "locus-linux-amd64", "download_linux"),
     ("windows", None, "download_windows"),  # resolved by installer_name()
-    ("macos_intel", "locus-darwin-amd64", "download_macos_intel"),
-    ("macos_arm", "locus-darwin-arm64", "download_macos_arm"),
+    ("macos_intel", "locus-darwin-amd64.app.tar.gz", "download_macos_intel"),
+    ("macos_arm", "locus-darwin-arm64.app.tar.gz", "download_macos_arm"),
 ]
+
+## The pre-fix macOS payload names, kept ONLY as a fallback for releases that
+## predate the packaging step. Never preferred: a bare Mach-O in a macOS update
+## slot is the defect, not the behaviour.
+LEGACY_MACOS_NAMES = {
+    "macos_intel": "locus-darwin-amd64",
+    "macos_arm": "locus-darwin-arm64",
+}
+
+PLATFORMS = NEW_PLATFORMS
 MANIFEST_NAME = "manifest.json"
+
+## ── HUMAN-FACING INSTALLERS, WHICH ARE NOT UPDATE PAYLOADS ──
+##
+## These are deliberately SEPARATE from PLATFORMS above, and the separation is
+## the whole safety property. PLATFORMS decides what a client downloads and
+## EXECUTES to replace itself: those bytes are cross-checked against CI's
+## manifest and written into `update_<platform>`. This list decides what a
+## PERSON downloads from the console, and nothing here may ever reach
+## `update_config` — a compressed app bundle handed to `tauri_plugin_updater`
+## is the raw-Windows-PE mistake again, in a different costume: a legitimate
+## release asset that is wrong in the update slot.
+##
+## The macOS zip carries the ad-hoc-signed `Locus.app`. It exists because the
+## `.dmg` cannot serve the one case that matters: a student whose download is
+## quarantined and refused, where the remedy is a bundle that survives
+## transport intact so macOS reports the bypassable "unidentified developer"
+## dialog rather than "damaged and can't be opened". See
+## docs/operate/OPS.md ("Notes & limitations") and check-consistency.sh §20.
+##
+## The Windows installer is ALSO an updater payload and IS already in PLATFORMS
+## — it is not listed here, because listing it twice would invite the two
+## definitions to drift. This list is only for artifacts no client fetches.
+##
+## `%s` is the version; `%s` the arch. Filled by `installer_zip_names()`.
+MACOS_ZIP_TEMPLATE = "installer-Locus_%s_%s.zip"
+MACOS_ZIP_ARCHES = ("amd64", "arm64")
+
+
+def installer_zip_names(version):
+    """The macOS human-download archives CI produces for `version`.
+
+    Both architectures, by the same names the release job asserts are present.
+    Kept as a function so the template exists once and can be pinned — the
+    Windows installer learned this the hard way when CI's manifest and the
+    hub's fetcher drifted apart on a filename and no check compared them.
+    """
+    return [MACOS_ZIP_TEMPLATE % (version, arch) for arch in MACOS_ZIP_ARCHES]
+
 
 ## manifest.json is a few hundred bytes and is NOT a binary, so it must not be
 ## held to the executable floor below — doing so rejects a perfectly good
@@ -142,7 +216,7 @@ def log(msg):
     print("[fetch %s] %s" % (time.strftime("%H:%M:%S"), msg), flush=True)
 
 
-def resolve_platform_names(version):
+def resolve_platform_names(version, available=None):
     """The asset name carrying each platform, for a given version.
 
     One place decides what the hub fetches for each platform, so the names can
@@ -150,10 +224,58 @@ def resolve_platform_names(version):
     the filename comparison in `verify_and_stage`, and it is the one that catches
     the hub and CI drifting apart on an asset name. The Windows entry is
     version-bearing because Tauri names its NSIS bundle with the version.
+
+    `available` is the set of asset names the release actually carries. When it
+    is supplied and a macOS tarball is ABSENT, this **refuses** (raises
+    `FetchError`) rather than falling back to the pre-fix bare Mach-O.
+
+    # Why the fallback that used to live here was removed
+
+    It used to return the legacy bare binary, log a WARNING, and carry on. That
+    is the retired client's worst failure mode reproduced on the hub side: an
+    update is published, it looks perfectly healthy from the operator's seat,
+    and every macOS client that accepts it downloads 48 MB it can never install.
+    It is *exactly* how v3.2.26 reached the live hub pointing `macos_arm` at a
+    bare Mach-O — the release genuinely predated the packaging step, the
+    fallback "degraded gracefully", and the result was a live `update_config` row
+    no macOS client could act on.
+
+    Degrading to an uninstallable payload is worse than refusing, because a
+    refusal is visible at publish time and a broken row is not. The rules this
+    repository already learned, applied literally:
+
+      * "An update that is advertised and then ignored is indistinguishable from
+        a stable release with no update" — so it must fail loudly, not log.
+      * A check that can silently take the wrong branch reads exactly like a
+        check that passed.
+
+    `available=None` (no release context, used by the filename cross-check and
+    by callers that only want the *preferred* names) still returns the preferred
+    names without a refusal — there is nothing to reconcile against.
     """
     names = []
     for key, name, column in PLATFORMS:
-        names.append((key, installer_name(version) if name is None else name, column))
+        if name is None:
+            resolved = installer_name(version)
+        elif available is not None and name not in available:
+            legacy = LEGACY_MACOS_NAMES.get(key)
+            if legacy and legacy in available:
+                raise FetchError(
+                    "the v%s release has no %s but carries the pre-fix bare "
+                    "binary %s. A bare Mach-O in a macOS update slot is "
+                    "downloadable and uninstallable — `tauri_plugin_updater` "
+                    "extracts a tar of an `.app` bundle on macOS, so a student "
+                    "would pay for ~48 MB and install nothing. Refusing to "
+                    "publish rather than degrade to an artifact no macOS client "
+                    "can install. Cut a new release from a build whose CI ran "
+                    "the `Package the macOS updater payload` step."
+                    % (version, name, legacy),
+                    400,
+                )
+            resolved = name
+        else:
+            resolved = name
+        names.append((key, resolved, column))
     return names
 
 
@@ -174,6 +296,11 @@ VERSION_RE = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+([-.][0-9A-Za-z.]+)?$")
 # without them is not installable by any client.
 ALLOWED_FILENAMES = {name for _, name, _ in PLATFORMS if name} | {MANIFEST_NAME}
 ALLOWED_FILENAMES |= {name + ".sig" for _, name, _ in PLATFORMS if name}
+# The pre-fix macOS names stay ALLOWED as a fallback source, but are never
+# preferred — `resolve_platform_names` only reaches for them when the tarball is
+# genuinely absent from the release.
+ALLOWED_FILENAMES |= set(LEGACY_MACOS_NAMES.values())
+ALLOWED_FILENAMES |= {name + ".sig" for name in LEGACY_MACOS_NAMES.values()}
 
 
 def validate_version(version):
@@ -378,11 +505,15 @@ def fetch_release(version, force=False):
     target_dir = os.path.join(UPDATES_DIR, version)
     assets = resolve_release(version)
 
-    wanted = [(key, name) for key, name, _ in resolve_platform_names(version)]
-    # The signature for each binary is required, not optional: a published
+    # Pass the release's own asset names so a macOS tarball is used when it
+    # exists and the legacy bare binary is only a fallback.
+    # `resolve_release` returns {name: (url, size)}.
+    resolved = resolve_platform_names(version, available=set(assets))
+    wanted = [(key, name) for key, name, _ in resolved]
+    # The signature for each payload is required, not optional: a published
     # update nobody can install is worse than no update, because it looks like
     # it worked from the operator's seat.
-    wanted += [("sig_" + key, name + ".sig") for key, name, _ in resolve_platform_names(version)]
+    wanted += [("sig_" + key, name + ".sig") for key, name, _ in resolved]
     wanted += [("manifest", MANIFEST_NAME)]
     missing = [name for _, name in wanted if name not in assets]
     if missing:
@@ -395,6 +526,22 @@ def fetch_release(version, force=False):
             % (version, ", ".join(missing)),
             400,
         )
+
+    # ── The macOS human download: WANTED, BUT NOT REQUIRED ──
+    #
+    # Deliberately not in `wanted` above, and the asymmetry is the point. That
+    # list is all-or-nothing because a missing UPDATE payload is a fleet that
+    # silently cannot update. A missing macOS zip is one less convenience
+    # download on the console page — and failing the whole publish for it would
+    # mean a Windows or Linux hotfix could not ship because a macOS packaging
+    # step had broken. That trade is wrong in the direction that matters: it
+    # would let a cosmetic gap block a security fix.
+    #
+    # So it is staged when present, reported when absent, and never fatal. The
+    # console shows the result either way, so "absent" is visible to an operator
+    # rather than silent.
+    optional = [("zip_macos_" + arch, name)
+                for arch, name in zip(MACOS_ZIP_ARCHES, installer_zip_names(version))]
 
     os.makedirs(target_dir, exist_ok=True)
     staged = {}
@@ -479,7 +626,83 @@ def fetch_release(version, force=False):
                 pass
             raise
 
-    # ── Cross-check the filenames against CI's manifest ──
+    # ── The macOS human download, staged AFTER the required set ──
+    #
+    # Runs only once every required artifact is on disk and verified, so a
+    # broken CI release still fails on the artifacts that matter before we spend
+    # bandwidth on a convenience copy. Absence is reported, never raised — see
+    # the note where `optional` is built.
+    #
+    # The `.zip` gets its own floor rather than the 1 MB binary floor. Both
+    # would pass a real zip, but the reason differs: a zip is not an executable
+    # and the binary floor's meaning ("this is not a truncated pointer for an
+    # executable") does not apply to it. A few hundred KB is a plausible
+    # compressed .app on a good day; a few hundred BYTES is a pointer or an
+    # error page. Deliberately loose, because the check that the archive holds a
+    # real bundle lives in CI (`unzip -l` assertions) where the bundle is
+    # actually present.
+    MIN_ARCHIVE_BYTES = 64 * 1024
+
+    for key, name in optional:
+        if name not in assets:
+            log("  ~ %s not in the v%s release — the console will show no macOS download"
+                % (name, version))
+            results[key] = {"filename": name, "absent": True}
+            continue
+        url, asset_size = assets[name]
+        if asset_size and asset_size > MAX_ASSET_BYTES:
+            raise FetchError(
+                "%s is %d bytes according to GitHub — larger than the %d byte cap"
+                % (name, asset_size, MAX_ASSET_BYTES),
+                400,
+            )
+
+        final_path = os.path.join(target_dir, name)
+        if not force and os.path.isfile(final_path) and os.path.getsize(final_path) >= MIN_ARCHIVE_BYTES:
+            existing = _sha256_file(final_path)
+            log("  = %s already present (%s)" % (name, existing[:16]))
+            results[key] = {"filename": name, "sha256": existing,
+                            "bytes": os.path.getsize(final_path), "skipped": True}
+            continue
+
+        fd, tmp_path = tempfile.mkstemp(prefix=".fetch-", dir=target_dir)
+        os.close(fd)
+        try:
+            log("  ↓ %s (macOS download)" % name)
+            sha, size = _download(url, tmp_path, MIN_ARCHIVE_BYTES, MAX_ASSET_BYTES,
+                                  what="archive")
+
+            # The archive must actually BE a zip. This is the same class of check
+            # as the ELF/PE/Mach-O slot validation: a wrong file in a slot is the
+            # realistic failure, and a compressed app that is not an archive
+            # would be served to a student as a "zip" and fail to open. Local
+            # magic rather than a content scan — `PK\x03\x04` is the local file
+            # header, and an empty archive is the only legitimate case that
+            # lacks it, which is not something CI produces.
+            with open(tmp_path, "rb") as fh:
+                magic = fh.read(4)
+            if magic[:2] != b"PK":
+                raise FetchError(
+                    "%s is not a zip archive (starts with %r) — refusing to "
+                    "publish it as the macOS download"
+                    % (name, magic[:4]),
+                    400,
+                )
+
+            os.chmod(tmp_path, 0o644)
+            os.replace(tmp_path, final_path)
+            with open(final_path + ".sha256", "w") as f:
+                f.write("%s  %s\n" % (sha, name))
+            os.chmod(final_path + ".sha256", 0o644)
+            results[key] = {"filename": name, "sha256": sha, "bytes": size,
+                            "format": "zip archive", "skipped": False}
+            log("    %d bytes sha256=%s" % (size, sha[:16]))
+        except Exception:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+            raise
     #
     # THE DEFECT THIS EXISTS FOR. `manifest.json` names, per platform, the file
     # CI intends a client to install from itself — and for Windows that has been
@@ -508,8 +731,18 @@ def fetch_release(version, force=False):
             )
 
         advertised = published.get("platforms") or {}
+
+        # Compare the manifest against what the hub WILL ACTUALLY SERVE — that
+        # is `resolved`, the same list the staging loop above used (built with
+        # `available=set(assets)`). It used to re-call `resolve_platform_names`
+        # with NO `available`, which answers a DIFFERENT question: the names the
+        # hub *prefers*, not the names it will fetch. The two agreed only while
+        # every release carried every preferred name, so the check could pass
+        # while staging served something else — the "two sources of truth with
+        # no reconciliation" shape this project keeps paying for. One call site,
+        # one answer: the thing compared is the thing staged.
         mismatches = []
-        for key, name, _ in resolve_platform_names(version):
+        for key, name, _ in resolved:
             stated = (advertised.get(key) or {}).get("file")
             if not stated:
                 # Not fatal here: a platform CI chose not to advertise is the
@@ -527,9 +760,14 @@ def fetch_release(version, force=False):
                 "the hub's platform filenames disagree with CI's manifest for "
                 "v%s — refusing to publish, because serving a file other than "
                 "the one CI named is how a Windows client was handed a raw "
-                "executable it could not install: %s. Update PLATFORMS in "
-                "fetch-release.py (and publish-release.sh) to match the "
-                "manifest." % (version, "; ".join(mismatches)),
+                "executable it could not install, and how a macOS client was "
+                "handed a bare Mach-O it cannot install: %s. This is almost "
+                "always a STALE DEPLOYED fetch-release.py: the names live in "
+                "PLATFORMS here, and the host runs its own copy. Re-deploy it "
+                "with `server/scripts/hooks-sync.sh --fetch-service`, then "
+                "re-run the fetch. If the deployed copy is current, the release "
+                "genuinely predates the packaging step — cut a new one rather "
+                "than republishing." % (version, "; ".join(mismatches)),
                 400,
             )
         log("  ✓ platform filenames agree with manifest.json")
@@ -700,20 +938,88 @@ def verify_artifact_kind(path, platform_key):
             return False, "not an ELF executable"
         return True, "ELF"
     if platform_key in ("macos_intel", "macos_arm"):
-        if not (is_macho_thin(head) or is_macho_fat(head)):
-            return False, "not a Mach-O executable"
-        # Architecture of a FAT binary is only resolvable by walking the
-        # headers, so a universal binary is accepted for either slot.
-        if is_macho_fat(head):
-            return True, "Mach-O (universal)"
-        little = head[:4] in (b"\xcf\xfa\xed\xfe", b"\xfe\xed\xfa\xcf")
-        cputype = int.from_bytes(head[4:8], "little" if little else "big")
-        if cputype == 0x0100000C:  # ARM64
-            return (platform_key == "macos_arm"), "Mach-O arm64"
-        if cputype == 0x01000007:  # x86_64
-            return (platform_key == "macos_intel"), "Mach-O x86_64"
-        return True, "Mach-O"
+        # The macOS updater payload is a `.app.tar.gz`, and the check reads INSIDE
+        # it rather than at its first bytes. That is not a weakening: a bare
+        # Mach-O is now REFUSED here, which is the point — the updater cannot
+        # install one, so accepting it at publish time would be exactly the
+        # silent mis-slotting this function exists to catch.
+        if head[:2] == b"\x1f\x8b":
+            return _check_macos_app_tarball(path, platform_key, is_macho_thin, is_macho_fat)
+        if is_macho_thin(head) or is_macho_fat(head):
+            return False, (
+                "a bare Mach-O binary, but the macOS updater slot needs a "
+                "`*.app.tar.gz` — `tauri_plugin_updater` extracts a tar of an "
+                ".app bundle, so a raw executable downloads, verifies, and then "
+                "fails to install. Re-run CI on a commit that packages the bundle."
+            )
+        return False, "not a gzip archive (expected an .app.tar.gz)"
     return True, "unknown"
+
+
+## The first tar member of a `.app.tar.gz` that is the bundle directory.
+_APP_BUNDLE_RE = re.compile(r"^[^/]+\.app/")
+
+
+def _check_macos_app_tarball(path, platform_key, is_macho_thin, is_macho_fat):
+    """Validate a macOS updater payload: a tar.gz holding `<Name>.app/Contents/MacOS/`.
+
+    Three properties, each of which the updater depends on and none of which is
+    visible from the file's first bytes:
+
+    1. **It is a real gzip+tar** — not a truncated upload.
+    2. **Entries begin `<Name>.app/`** — the plugin strips one leading path
+       component (`entry.path()?.iter().skip(1)`), so a tarball rooted at
+       `Contents/` would extract a bundle with no name and the swap would find
+       nothing to move.
+    3. **The inner executable is the right architecture** — a universal binary
+       is accepted for either slot, matching the per-slot rule the bare-Mach-O
+       check used to apply.
+
+    Checked by streaming the members rather than extracting to disk: this runs
+    on the hub, and unpacking an untrusted 100 MB archive into the working
+    directory to inspect it would be its own problem.
+    """
+    import tarfile
+
+    try:
+        with tarfile.open(path, "r:gz") as tar:
+            names = []
+            exe_member = None
+            for member in tar:
+                if not member.isfile():
+                    continue
+                if not names:
+                    names.append(member.name)
+                    if not _APP_BUNDLE_RE.match(member.name):
+                        return False, (
+                            "the tarball does not start with a `.app/` directory "
+                            "(first member: %r) — the updater strips one leading "
+                            "path component and would find no bundle" % member.name
+                        )
+                if member.name.endswith("/Contents/MacOS/locus") or (
+                    "/Contents/MacOS/" in member.name
+                    and not member.name.endswith("/")
+                ):
+                    # The bundle's main executable; the exact name is Tauri's.
+                    exe_member = member
+                    break
+            if exe_member is None:
+                return False, "no Contents/MacOS/ executable inside the .app bundle"
+            head = tar.extractfile(exe_member).read(8)
+    except (tarfile.TarError, OSError, EOFError) as exc:
+        return False, "unreadable .app.tar.gz: %s" % exc
+
+    if not (is_macho_thin(head) or is_macho_fat(head)):
+        return False, "the .app's executable is not Mach-O"
+    if is_macho_fat(head):
+        return True, "app.tar.gz (Mach-O universal)"
+    little = head[:4] in (b"\xcf\xfa\xed\xfe", b"\xfe\xed\xfa\xcf")
+    cputype = int.from_bytes(head[4:8], "little" if little else "big")
+    if cputype == 0x0100000C:  # ARM64
+        return (platform_key == "macos_arm"), "app.tar.gz (Mach-O arm64)"
+    if cputype == 0x01000007:  # x86_64
+        return (platform_key == "macos_intel"), "app.tar.gz (Mach-O x86_64)"
+    return True, "app.tar.gz (Mach-O)"
 
 
 def verify_signature_file(path):

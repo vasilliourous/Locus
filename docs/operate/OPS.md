@@ -4,7 +4,7 @@
 audience:    human-operator
 status:      live
 authoritative-for: day-to-day operation of the hub (health, backups, restore)
-verified-against: docs/STATE.md
+verified-against: server/scripts/, server/setup.sh
 ```
 
 > Day-to-day management of the Locus server.
@@ -35,7 +35,9 @@ export ADMIN_TOKEN="your-admin-api-token"
 ### All Services
 
 ```bash
-ssh $VPS "systemctl is-active caddy pocketbase shadowsocks-eco shadowsocks-stealth shadowsocks-strike"
+ssh $VPS "systemctl is-active caddy pocketbase shadowsocks-eco shadowsocks-strike"
+# On an upgraded box, confirm the retired tier is gone:
+ssh $VPS "systemctl is-enabled shadowsocks-stealth 2>&1"   # expect: not-found / disabled
 ```
 
 Expected output:
@@ -49,7 +51,7 @@ active
 
 ### Congestion Control
 
-All three tiers use **BBR** (Linux kernel built-in) — no kernel modules to maintain.
+Both plans use **BBR** (Linux kernel built-in) — no kernel modules to maintain.
 
 ```bash
 # Confirm BBR is the system default
@@ -62,18 +64,18 @@ ssh $VPS "sysctl net.ipv4.tcp_congestion_control"
 # Check tc classes exist
 ssh $VPS "tc -s class show dev \$(ip route show default | awk '\$5{print\$5;exit}')"
 
-# Eco class (1:10) should show traffic — 5 Mbps
-# Stealth class (1:20) should show traffic — 100 Mbps
-# Strike class (1:30) should show traffic — 200 Mbps
+# Free/Eco class (1:10) should show traffic — 1 Mbps
+# Full/Strike class (1:30) should show traffic — 100 Mbps
+# Class 1:20 (retired Stealth) should NOT exist. If it does, the old
+# tc-stealth-cap.service survived the merge — remove it (business/14-risks.md §14.8).
 ```
 
 ### Logs
 
 ```bash
 # Shadowsocks per-tier
-ssh $VPS "journalctl -u shadowsocks-eco -n 20 --no-pager"
-ssh $VPS "journalctl -u shadowsocks-stealth -n 20 --no-pager"
-ssh $VPS "journalctl -u shadowsocks-strike -n 20 --no-pager"
+ssh $VPS "journalctl -u shadowsocks-eco -n 20 --no-pager"    # the free plan
+ssh $VPS "journalctl -u shadowsocks-strike -n 20 --no-pager" # the paid plan
 
 # PocketBase
 ssh $VPS "journalctl -u pocketbase -n 20 --no-pager"
@@ -329,7 +331,7 @@ ssh root@new-vps 'bash -s' < server/restore.sh
 ```bash
 # Shadowsocks
 ssh $VPS "systemctl restart shadowsocks-eco"
-ssh $VPS "systemctl restart shadowsocks-stealth"
+ssh $VPS "systemctl restart shadowsocks-strike"
 ssh $VPS "systemctl restart shadowsocks-strike"
 
 # Caddy
@@ -339,22 +341,23 @@ ssh $VPS "caddy fmt --overwrite /etc/caddy/Caddyfile && systemctl reload caddy"
 ssh $VPS "systemctl restart pocketbase"
 
 # tc rules after reboot
-ssh $VPS "systemctl restart tc-eco-cap tc-stealth-cap tc-strike-cap"
+ssh $VPS "systemctl restart tc-eco-cap tc-strike-cap"
 ```
 
 ### One-command deploy (`server/scripts/deploy.sh`)
 
 `setup.sh` is the *blank-box* path. For routine changes to a running hub, use
-**`server/scripts/deploy.sh`** — it does hooks + console + staging + verify in one
-command, and it is **idempotent and diff-based** (unchanged hooks are not
+**`server/scripts/deploy.sh`** — it does hooks + console + site + staging + verify
+in one command, and it is **idempotent and diff-based** (unchanged hooks are not
 uploaded, nothing is restarted unless something changed). It never writes a
 record, so deploying code cannot withdraw a release or reset a rollout.
 
 ```bash
-server/scripts/deploy.sh              # hooks + console + staging + verify
+server/scripts/deploy.sh              # hooks + console + site + staging + verify
 server/scripts/deploy.sh --check      # dry run, changes nothing
 server/scripts/deploy.sh --hooks      # hooks only
 server/scripts/deploy.sh --console    # console only
+server/scripts/deploy.sh --site       # landing page only
 ```
 
 What each step covers, and why:
@@ -363,9 +366,10 @@ What each step covers, and why:
 |---|---|---|
 | hooks | `/opt/pocketbase/pb_hooks/` | uploaded to `.new`, hash-verified, then `install -o pocketbase`. A NEW hook needs a restart to register, so it restarts. |
 | console | `/var/www/admin/` | built, tarred, uploaded, extracted, and **served-verified** (`/admin/` must 200). |
+| site | `/var/www/site/` | the public landing page. Rendered from the release manifest's `platforms` map (so its four download URLs name the version the hub actually serves), tarred, uploaded, and **served-verified** — including that `/updates/` is NOT reachable on the landing host. |
 | staging | `/root/server/` | `setup.sh` deploys FROM here, not from the repo. Leaving it stale is how a re-run reverts hooks. |
 | locus-fetch | restart | it runs FROM the staging copy, so a changed script has no effect until the process is recycled. |
-| verify | — | health, `/api/update`, `/api/release`, heartbeat, hook-drift. |
+| verify | — | health, `/api/update`, `/api/release`, heartbeat, hook-drift, and the landing page's four download links. |
 
 **SSH access.** Key auth is installed; nothing prompts. `~/.ssh/config` defines a
 `Host locus-hub` alias (HostName = the hub domain, User root, IdentityFile the
@@ -713,10 +717,39 @@ the served bytes, and exits non-zero if anything disagrees.
 
 - **sing-box is not updated** by this pipeline — it is bundled in the installer.
   Updating it means shipping a new installer and re-publishing.
-- **macOS builds are unsigned**, so Gatekeeper blocks first launch
-  (right-click → Open). Tracked as gap #3, out of scope. The `.dmg` carries a
-  README with the exact steps, including the `xattr -cr` fallback for the
-  "damaged and can't be opened" variant.
+- **macOS builds are ad-hoc signed, not Developer-ID signed**, so Gatekeeper
+  still warns on first launch. Tracked as gap #3; notarization remains out of
+  scope. What the ad-hoc signature buys is the *kind* of warning:
+
+  | Build | What macOS says | Can the student get past it? |
+  |---|---|---|
+  | Unsigned (before 2026-10) | *"Locus" is damaged and can't be opened. You should move it to the Trash.* | **No** — no "Open Anyway"; Terminal only |
+  | Ad-hoc signed (now) | *"…cannot be opened because Apple cannot check it for malicious software."* | **Yes** — System Settings → Privacy & Security → **Open Anyway** |
+
+  Gatekeeper treats a signature that exists but is not from a Developer ID as an
+  identity/notarization problem rather than corruption, which is what moves the
+  app from the unbypassable class to the bypassable one. The step lives in
+  `.github/workflows/client.yml` ("Ad-hoc sign the macOS bundle"): it mounts the
+  `.dmg` Tauri produced, signs the bundle inside the image with
+  `codesign --force --deep --sign -`, **verifies the result**
+  (`codesign --verify --deep --strict`) and prints the signature, rebuilds the
+  image, then re-mounts and re-verifies the bundle that actually shipped.
+  `check-consistency.sh` §20 fails the tree if the signing step, its
+  verification half, or its macOS gating go missing.
+
+  **The `.dmg` no longer carries a `READ ME FIRST.txt`, and that is deliberate.**
+  It used to, telling the student to run `xattr -cr` in Terminal. That advice was
+  accurate and it was a dead end: the remedy required a command line, which is
+  not a remedy for someone who cannot evaluate one. Ad-hoc signing is the
+  replacement, and two remedies that disagree about which is primary is worse
+  than one — so §20 now asserts the file is **gone** rather than present. If a
+  future change needs it back, say so here and update that section; do not ship
+  both.
+
+  **Unverified:** that a student on a given macOS version meets the bypassable
+  dialog rather than the Trash prompt. The step is guarded in the tree and the
+  artifact is re-verified on the runner, but nothing here launches the app on
+  real hardware — see `../reference/STILL-OPEN.md`.
 - **Where a client installs decides whether it can update itself.** An installed
   copy (Program Files / Applications / `~/.local/bin`) self-updates reliably; a
   portable copy stages privately inside its own directory. The client reports
@@ -950,7 +983,7 @@ pre-existing clients are unaffected either way.
 The tc cap services are oneshot — after a kernel/reboot change, re-apply them:
 
 ```bash
-ssh $VPS "systemctl restart tc-eco-cap tc-stealth-cap tc-strike-cap"
+ssh $VPS "systemctl restart tc-eco-cap tc-strike-cap"
 ssh $VPS "tc -s class show dev \$(ip route show default | awk '\$5{print\$5;exit}')"
 ```
 

@@ -4,7 +4,7 @@
 audience:    human-operator
 status:      live
 authoritative-for: release signing, key custody under .locus-keys/
-verified-against: docs/STATE.md
+verified-against: client/scripts/, .github/workflows/client.yml
 ```
 
 > **The private key is a single point of failure in both directions.** Losing it

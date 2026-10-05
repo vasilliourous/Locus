@@ -4,18 +4,19 @@
 audience:    human-operator
 status:      live
 authoritative-for: the commercial plan and how to run the business
-verified-against: docs/STATE.md
+verified-against: docs/state.toml, docs/operate/CLAIMS.md
 ```
 
 The commercial plan for the product as it actually ships (current client version
 in [`../STATE.md`](../STATE.md)). Split into one file per section so each can be
 read, edited, and cited on its own.
 
-> **Status convention in this directory.** This index and the two nested
-> READMEs carry a structured front-matter block. The 19 numbered plan files and
-> the redesign sections each open with a `> **Status: ...**` line instead —
-> "decided", "LARGELY BUILT", and so on. Read that line first; a redesign file
-> whose status is a design decision, not "built", is describing intent.
+> **Status convention in this directory.** Every file here — this index, the 19
+> numbered plan files and the nested READMEs — carries the standard front-matter
+> block (`audience` / `status` / `authoritative-for` / `verified-against`),
+> matching [`../README.md`](../README.md) rule 1. A file whose `status` is
+> `design-record` is describing intent, not what is built; read
+> `verified-against` to see what the file was checked against.
 
 **The rule that governs every file here: the code wins.** Every checkable
 claim was checked against the tree. Where the legacy prose disagrees with
@@ -58,14 +59,20 @@ anything that assumes growth.
 
 ## The design record
 
-[`redesign/`](redesign/) holds the reasoning behind the term model, renewal and
-one-code-per-device rules — designed, then implemented in `9a91da1`. It records
-what was built, what was deliberately deferred, and what is still unverified.
-Start at [`redesign/00-README.md`](redesign/00-README.md).
+[`redesign/`](redesign/) holds the reasoning behind the **term model and
+renewal** — designed, then implemented in `9a91da1`. Start at
+[`redesign/00-README.md`](redesign/00-README.md).
 
-**Everything in this directory is now measured against a hub where a code
-carries a term, a renewal is a real audited operation, and one device holds one
-code.** Where a file describes a fixed expiry date set at mint, it is stale.
+**Read it for *why*, never as a spec for *what is*.** It is a design record with
+its own status field, and parts of it were **superseded rather than shipped**:
+its device-binding design (one code per device, a durable device identity) was
+**removed** in 2026-10. The live model is a single-use, unbound code that the
+client keeps in a machine store — [`../reference/DEVICE-IDENTITY.md`](../reference/DEVICE-IDENTITY.md).
+
+**Everything live in this directory is measured against a hub where a code
+carries a term, a renewal is a real audited operation, and a code is single-use
+and tied to nothing.** Where a file describes a fixed expiry date set at mint,
+or a code bound to a device, it is stale.
 
 ---
 

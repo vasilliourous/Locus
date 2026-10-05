@@ -17,6 +17,24 @@ const fn should_wait_for_service(tun_enabled: bool, service_ready: bool, is_admi
     tun_enabled && !service_ready && !is_admin
 }
 
+/// Whether startup should ask for the Service install because it is absent.
+///
+/// Split out as a pure predicate so the macOS rule is testable without an app
+/// handle, a config store, or a real launchd — the same reason
+/// `should_wait_for_service` above is separated from `wait_for_service_if_needed`.
+/// A rule that can only be exercised by dragging an app out of a `.dmg` on a Mac
+/// is a rule that will not be exercised, which is how the deadlock it exists to
+/// break survived a green pipeline.
+///
+/// `absent` is the Service being `NotInstalled`; `no_pending_action` is the Run
+/// State not already carrying an install request. The second matters because
+/// `require_install_for_session` is also how the *dialog* is raised: re-requesting
+/// while one is pending would churn state and re-announce on every start.
+#[cfg(any(target_os = "macos", test))]
+const fn should_request_install_for_absent_service(absent: bool, no_pending_action: bool) -> bool {
+    absent && no_pending_action
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum StartupDecision {
     Service,
@@ -459,6 +477,46 @@ impl CoreManager {
         {
             return StartupDecision::Wait;
         }
+
+        // ── macOS: an absent Service is itself the reason to install ──
+        //
+        // WHY THIS IS SEPARATE FROM THE `service_required` BRANCH ABOVE
+        //
+        // That branch only fires when `enable_tun_mode` is ALREADY true. On
+        // Windows that is sufficient, because the NSIS installer registers the
+        // Service during setup — so a fresh install is never `NotInstalled`, and
+        // the flag only has to cover the reinstall case.
+        //
+        // macOS has no installer step that does this. A `.app` dragged out of the
+        // `.dmg` is `NotInstalled` on first launch, with `enable_tun_mode`
+        // defaulting to `false` (`config/config.rs`), and the only code that sets
+        // it true is the Connect path — which sits BEHIND the `tun_capable()`
+        // refusal that an absent Service causes. That is a closed loop:
+        //
+        //     no Service → Connect refused → TUN never enabled
+        //     TUN disabled → install never requested → no Service
+        //
+        // A real student hit exactly this: installed from the `.dmg`, got the
+        // "damaged and can't be opened" Gatekeeper message (fixed separately),
+        // then "the Locus service is not available on this device", with no way
+        // forward. The three service binaries were sitting in the bundle's
+        // `Contents/Resources/resources/` the whole time, never invoked.
+        //
+        // So on macOS the condition is the Service's ABSENCE, not the TUN
+        // preference. Requesting the install raises the state the UI renders as
+        // the install prompt; it deliberately does NOT write `enable_tun_mode`,
+        // because a refusal or a failed elevation must not leave the preference
+        // flipped on for the next launch to trip over (the bug `cmd/locus.rs`
+        // documents at the refusal).
+        #[cfg(target_os = "macos")]
+        if should_request_install_for_absent_service(
+            matches!(SERVICE_MANAGER.current().await, ServiceStatus::NotInstalled),
+            crate::core::runstate::RUN_STATE.state().pending.is_none(),
+        ) && SERVICE_MANAGER.require_install_for_session().is_err()
+        {
+            return StartupDecision::Wait;
+        }
+
         startup_decision(&SERVICE_MANAGER.current().await, service_required)
     }
 
@@ -492,7 +550,8 @@ mod tests {
     use super::{
         CoreManager, ProxyRestoreExpectation, StartupDecision, run_controlled_stop_transition,
         run_core_replacement_transition, run_core_start_transition, run_ready_core_start_transition,
-        run_service_config_replacement_transition, should_wait_for_service, startup_decision,
+        run_service_config_replacement_transition, should_request_install_for_absent_service, should_wait_for_service,
+        startup_decision,
     };
     use crate::core::{manager::RunningMode, service::ServiceStatus};
     use parking_lot::Mutex;
@@ -887,6 +946,39 @@ mod tests {
         assert!(!should_wait_for_service(true, false, true));
         assert!(!should_wait_for_service(true, true, false));
         assert!(!should_wait_for_service(false, false, false));
+    }
+
+    /// An absent Service is itself grounds to request the install on macOS.
+    ///
+    /// This is the deadlock break, and the assertion is deliberately about the
+    /// ABSENT case specifically — the behavior it replaces only asked when
+    /// `enable_tun_mode` was already true, which on a fresh macOS install it
+    /// never is, because the only writer is the Connect path that the absent
+    /// Service refuses. Asserting "absent => ask" is what stops that loop being
+    /// reintroduced.
+    #[test]
+    fn an_absent_service_is_grounds_to_request_the_install() {
+        assert!(
+            should_request_install_for_absent_service(true, true),
+            "a missing Service on first run must raise the install request"
+        );
+    }
+
+    /// But not while an answer is already outstanding.
+    ///
+    /// `require_install_for_session` is also how the dialog is raised, so asking
+    /// again while a request is pending would churn Run State and re-announce on
+    /// every start. This is the guard on that.
+    #[test]
+    fn an_install_already_asked_for_is_not_asked_again() {
+        assert!(!should_request_install_for_absent_service(true, false));
+    }
+
+    /// A present Service is never grounds for an install request.
+    #[test]
+    fn a_present_service_is_not_grounds_to_request_the_install() {
+        assert!(!should_request_install_for_absent_service(false, true));
+        assert!(!should_request_install_for_absent_service(false, false));
     }
 
     #[test]

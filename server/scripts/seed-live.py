@@ -201,8 +201,14 @@ def main():
         print(f"  update_config: exists ({len(recs)} record(s))")
 
     # ── tier_configs (passwords from /etc/shadowsocks/*.json) ──
-    for t in ("eco", "stealth", "strike"):
-        path = f"/etc/shadowsocks/{t}.json"
+    # (tier, on-box config source). `free` shares the Eco endpoint — same port,
+    # same password, same 1mbit tc class — and has no /etc/shadowsocks/free.json
+    # of its own. `free` is the name new codes are minted against and what the
+    # console lists; `eco` is the frozen legacy name still carried by codes
+    # already in the field. See docs/business/04-tiers.md §4.5.
+    for t, src in (("eco", "eco"), ("free", "eco"),
+                   ("stealth", "stealth"), ("strike", "strike")):
+        path = f"/etc/shadowsocks/{src}.json"
         if not os.path.exists(path):
             print(f"  tier {t}: MISSING {path} — skipping")
             continue
@@ -276,7 +282,7 @@ def main():
     names = [c.get("name") for c in
              curl("GET", "/api/collections", token=token).get("items", [])]
     print("  collections:", names)
-    for t in ("eco", "stealth", "strike"):
+    for t in ("eco", "free", "stealth", "strike"):
         recs = curl("GET",
                     f"/api/collections/tier_configs/records?filter=(tier='{t}')",
                     token=token).get("items", [])

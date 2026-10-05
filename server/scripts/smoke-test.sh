@@ -30,7 +30,7 @@ EOF
 
 # ── 1. Verify all systemd services are active ──
 log "Step 1/9: Checking systemd services..."
-for svc in caddy pocketbase shadowsocks-eco shadowsocks-stealth shadowsocks-strike; do
+for svc in caddy pocketbase shadowsocks-eco shadowsocks-strike; do
     if systemctl is-active --quiet "$svc" 2>/dev/null; then
         pass "${svc} is running"
     else
@@ -39,18 +39,24 @@ for svc in caddy pocketbase shadowsocks-eco shadowsocks-stealth shadowsocks-stri
     fi
 done
 
-# ── 2. Verify Stealth tc cap ──
-log "Step 2/9: Checking Stealth tc cap..."
+# ── 2. Verify the paid tier's tc cap ──
+log "Step 2/9: Checking the paid tier's tc cap..."
 IFACE=$(ip -4 route show default | awk '{print $5}' | head -1)
 # NOTE: do not write this as `tc class show ... | grep -q ...`.
 # `grep -q` exits at the first match, which SIGPIPEs `tc`; under `set -o pipefail`
 # the pipeline then reports 141 and the check fails even though the class exists.
 # Capture once, then test the captured text (observed 2026-09-19).
 TC_NOW=$(tc class show dev "$IFACE" 2>/dev/null || true)
-if [ -n "$IFACE" ] && printf '%s\n' "$TC_NOW" | grep -q "1:20"; then
-    pass "tc Stealth class (1:20) exists — 100 Mbps cap"
+if [ -n "$IFACE" ] && printf '%s\n' "$TC_NOW" | grep -q "1:30"; then
+    pass "tc paid-tier class (1:30) exists — 100 Mbps cap"
 else
-    warn "tc Stealth class (1:20) not found — check: systemctl status tc-stealth-cap.service"
+    warn "tc paid-tier class (1:30) not found — check: systemctl status tc-strike-cap.service"
+fi
+# The retired Stealth class (1:20) must NOT be shaping anything any more. It is
+# a warning rather than a failure: an upgraded box still carries the old unit
+# until an operator removes it (docs/business/14-risks.md §14.8).
+if [ -n "$IFACE" ] && printf '%s\n' "$TC_NOW" | grep -q "1:20"; then
+    warn "retired Stealth class (1:20) is still present — remove the old tc-stealth-cap.service"
 fi
 
 # ── 3. Verify BBR is default CC ──
@@ -73,9 +79,13 @@ if [ -n "$IFACE" ]; then
     # "class not found" warnings on a perfectly healthy host (2026-09-19).
     # Match against the full output instead.
     TC_CLASSES=$(tc class show dev "$IFACE" 2>/dev/null)
-    echo "$TC_CLASSES" | grep -q "1:10" && pass "tc Eco class (1:10) exists" || warn "tc Eco class not found"
-    echo "$TC_CLASSES" | grep -q "1:20" && pass "tc Stealth class (1:20) exists" || warn "tc Stealth class not found"
-    echo "$TC_CLASSES" | grep -q "1:30" && pass "tc Strike class (1:30) exists" || warn "tc Strike class not found"
+    echo "$TC_CLASSES" | grep -q "1:10" && pass "tc free-tier class (1:10) exists" || warn "tc free-tier class not found"
+    echo "$TC_CLASSES" | grep -q "1:30" && pass "tc paid-tier class (1:30) exists" || warn "tc paid-tier class (1:30) not found"
+    # 1:20 (Stealth) is retired. Still present => the old unit survived the
+    # merge and only an operator can remove it (04-tc.sh retires it best-effort).
+    if echo "$TC_CLASSES" | grep -q "1:20"; then
+        warn "retired Stealth class (1:20) still present — remove the old tc-stealth-cap.service"
+    fi
 else
     warn "Could not detect primary interface"
 fi

@@ -32,8 +32,31 @@
 # Added 2026-09-29.
 
 [client.version]
-value      = "3.2.23"
+value      = "3.2.28"
 source     = "client/package.json, client/src-tauri/Cargo.toml, client/src-tauri/tauri.conf.json"
+provenance = "derived"
+
+[client.version_sites]
+# Every file `pnpm release-version` rewrites — the FIVE sites a release must keep
+# in agreement. This is here so no document has to restate the count: four
+# documents ("three version sites", "five version sites", "ALL FIVE version
+# sites") drifted against each other, and one of them contradicted the others in
+# prose. A count in a sentence is a Class B fact and cannot be recomputed; this
+# list can, and §17 recomputes it.
+#
+# WHY FIVE AND NOT THREE. Three sites must agree at RUNTIME and are guarded by
+# `client/src-tauri/tests/version_consistency.rs` (Cargo.toml, package.json,
+# tauri.conf.json). The bump script additionally writes Cargo.lock (guarded by
+# `cargo fetch --locked` in CI) and this file's `[client.version]` (guarded by §7
+# and §9). Both statements are true of different sets; the list below is the
+# union, i.e. what a bump must touch.
+#
+# §17 asserts this list equals the sites it finds in release-version.mjs, so a
+# sixth site added to the script — and not here, and not in the prose that links
+# here — fails the build. The order is the checker's (sorted), not the script's,
+# so a harmless reorder of the updater calls cannot fail the build.
+value      = ["client/Cargo.lock", "client/package.json", "client/src-tauri/Cargo.toml", "client/src-tauri/tauri.conf.json", "docs/state.toml"]
+source     = "client/scripts/release-version.mjs (the five update*Version() calls)"
 provenance = "derived"
 
 [client.first_shipped]
@@ -94,6 +117,41 @@ value      = "/_/"
 source     = "server/setup.sh (log line: 'PocketBase UI: https://${DOMAIN}/_/')"
 provenance = "derived"
 
+[site.domain]
+# The PUBLIC landing page, a second hostname on the SAME box as the hub.
+#
+# It is deliberately not the hub's hostname and must never become it. The hub
+# serves /updates/ (every published build), /api/* and /admin/; the landing page
+# is the one hostname here that is INDEXED. Serving them from one name would
+# publish the build tree and the API surface on a page whose whole purpose is to
+# be crawled. modules/05-caddy.sh generates a separate site block for it, and the
+# landing block contains no `handle` at all.
+#
+# The hub keeps its own name because that name is baked into every deployed
+# client (the activation response hands out `server`, the updater resolves
+# `update_url`) — renaming it would strand the fleet.
+value      = "locusvpn.jadedns.uk"
+source     = "server/modules/05-caddy.sh (LANDING_DOMAIN default)"
+provenance = "derived"
+
+[site.document_root]
+value      = "/var/www/site/"
+source     = "server/modules/05-caddy.sh (deploy_site target)"
+provenance = "derived"
+
+[site.download_path]
+# Where the four download buttons point. The hub's own release path — chosen
+# because GitHub will only serve an asset from a URL on the repository
+# (/releases/download/<tag>/<file>), so a link to a GitHub asset lands the
+# visitor on the repo's download page, which is what the page must not do.
+#
+# `%s` is the version, from the release manifest. The page is NOT linked to
+# "latest": the version is rendered at deploy time from manifest.json, because a
+# button pointing at a version the hub does not serve 404s silently.
+value      = "https://networkingguides.duckdns.org/updates/<version>/<file>"
+source     = "server/scripts/deploy-site.sh; server/scripts/publish-release.sh (PLATFORMS)"
+provenance = "derived"
+
 [hub.deploy_staging]
 value      = "/root/server/"
 source     = "server/setup.sh; server/scripts/hooks-sync.sh"
@@ -117,7 +175,7 @@ provenance = "unverified"
 #
 # Note the ordering is part of the value: it is the order the dropdown renders,
 # and the first entry is what the control shows when nothing is stored.
-value      = ["default-dark", "default-light", "midnight", "paper", "high-contrast", "forest"]
+value      = ["default-dark", "default-light", "slate", "dawn", "ember", "moss", "linen", "sepia", "contrast"]
 source     = "client/src/pages/_themes.ts (the THEMES registry)"
 provenance = "derived"
 
@@ -127,6 +185,62 @@ provenance = "derived"
 # Enforced by check-consistency.sh §1.
 value      = ["linux", "windows", "macos_intel", "macos_arm"]
 source     = "client/src-tauri/src/locus/contract.rs; server/pb_hooks/*.pb.js"
+provenance = "derived"
+
+[tiers.free]
+# The free tier's endpoint, recomputable from the tree — a CLASS B fact, so it
+# does not belong in a sentence in docs/business/04-tiers.md.
+#
+# `free` and `eco` are the SAME endpoint: port 8443, the Eco password, the
+# `shadowsocks-eco.service` unit. Both tier_configs rows are seeded on purpose —
+# `free` for codes minted now, `eco` so codes already in the field keep
+# resolving. The customer-facing name is Free; the on-box name stays eco. See
+# docs/business/04-tiers.md §4.5.
+#
+# check-consistency.sh §23 recomputes the cap and the port from 04-tc.sh and
+# compares them here, and separately asserts the seed rows and the heartbeat key
+# agree — the whole point is that four files describe one endpoint, and the
+# AGREEMENT is what must be pinned, not any single file.
+#
+# The allowance is NOT a fact here: it lives in heartbeat.pb.js so the operator
+# can change it without a release, and pinning it in this file would make a
+# deliberate, runtime-changeable value look like a build constant.
+value      = { port = 8443, cap = "1mbit", tier_rows = ["eco", "free"] }
+source     = "server/modules/04-tc.sh; server/scripts/seed-pb.py"
+provenance = "derived"
+
+[tiers.paid]
+# The paid tier's endpoint, recomputable from the same three files.
+#
+# THERE IS ONE PAID TIER. Stealth (port 8444) was retired when the paid ladder
+# was merged into one plan: Stealth and Strike were the same tier at two rates,
+# and the only real difference was Strike's UDP-over-TCP endpoint. Retiring it
+# also retired the faster class the second paid tier existed to advertise; the
+# paid cap is now 100 Mbps, which is the rate Stealth already sold at and far
+# above what any game needs. See docs/business/04-tiers.md §4.2.4.
+#
+# The retired rate is deliberately NOT written down here, even as history. A
+# number in a comment is a number the next person copies back into the code —
+# which is exactly why check-consistency.sh §27(c) fails the build on it in
+# 04-tc.sh. (A ratified `provenance = "derived"` value is the only number this
+# file may state.)
+#
+# `strike` is the FROZEN row name, for the same reason `eco` is: a code in the
+# field carries that string in its `tier` field, and activation/heartbeat resolve
+# a tier by looking that string up in `tier_configs`. The customer-facing name is
+# "Full"; renaming the row would strand every paid code in the field. See
+# docs/business/04-tiers.md §4.6.
+#
+# check-consistency.sh §27 recomputes the cap and the port from 04-tc.sh, asserts
+# the seed row and its udp_relay gating, asserts the retired tier is NOT seeded,
+# and asserts the console's placeholder names this row — the AGREEMENT across
+# four files, not any single file.
+#
+# The `udp_relay`/`uot_port` split is NOT a fact here: like the free allowance it
+# is set at deploy time (ENABLE_UOT / UOT_PORT) so the operator can move the UoT
+# endpoint without a release.
+value      = { port = 8445, cap = "100mbit", tier_rows = ["strike"], retired_rows = ["stealth"] }
+source     = "server/modules/04-tc.sh; server/scripts/seed-pb.py"
 provenance = "derived"
 
 [world]

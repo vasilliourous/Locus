@@ -348,8 +348,24 @@ fn is_container(bytes: &[u8]) -> bool {
 /// enough to be ambiguous is not something to guess about, and treating `M` as a
 /// PE would make a one-byte file "a bare executable" while `is_installer_payload`
 /// treats it as an installer.
+///
+/// **Mach-O is included, and that is the macOS half of the same bug.** A raw
+/// macOS binary was previously not recognised as a bare executable (`MZ` is PE
+/// and `\x7fELF` is Linux), so it fell through to `is_container` — whose
+/// allow-list does not name it either, meaning it was refused, but for a reason
+/// that read as "unrecognised payload" rather than "this is the wrong artifact
+/// for this slot". Naming it here makes the refusal say what is actually wrong:
+/// the updater needs a `.app.tar.gz`, and a bare Mach-O is what the hub used to
+/// (wrongly) advertise for macOS.
 fn is_bare_executable(bytes: &[u8]) -> bool {
-    bytes.starts_with(b"MZ") || bytes.starts_with(b"\x7fELF")
+    if bytes.starts_with(b"MZ") || bytes.starts_with(b"\x7fELF") {
+        return true;
+    }
+    // Mach-O: thin (both endiannesses) and fat/universal.
+    matches!(
+        bytes.get(..4),
+        Some(b"\xcf\xfa\xed\xfe" | b"\xce\xfa\xed\xfe" | b"\xfe\xed\xfa\xcf" | b"\xfe\xed\xfa\xce")
+    ) || matches!(bytes.get(..4), Some(b"\xca\xfe\xba\xbe" | b"\xbe\xba\xfe\xca"))
 }
 
 /// A substring search over the artifact's leading bytes.
@@ -722,6 +738,48 @@ mod tests {
         assert!(
             is_installer_payload(b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"),
             "an .msi"
+        );
+    }
+
+    /// The macOS updater payload is a `.app.tar.gz`, and it must be ACCEPTED.
+    ///
+    /// This is the artifact kind the hub now publishes for macOS. Before this
+    /// existed the hub published a bare Mach-O, which could not install —
+    /// `tauri_plugin_updater` extracts a tar of an `.app` bundle on macOS, so
+    /// the download verified and then failed.
+    #[test]
+    fn the_macos_app_tarball_is_an_installer_payload() {
+        let mut tarball = b"\x1f\x8b\x08\x00".to_vec();
+        tarball.extend_from_slice(&[0u8; 256]);
+        assert!(
+            is_installer_payload(&tarball),
+            "a .app.tar.gz is a gzip container the plugin extracts on macOS"
+        );
+    }
+
+    /// A bare Mach-O must be REFUSED, and named as the wrong artifact kind.
+    ///
+    /// This is the macOS form of the Windows bug the NSIS check exists for: the
+    /// hub used to advertise `locus-darwin-arm64` (a raw Mach-O) in the macOS
+    /// update slot. It is not installable there. It must not pass as a
+    /// "container" merely because it is not a PE or an ELF.
+    #[test]
+    fn a_bare_macho_is_not_an_installer_payload() {
+        // Thin Mach-O, little-endian 64-bit arm64 header (magic + cputype).
+        let mut macos_binary = b"\xcf\xfa\xed\xfe".to_vec();
+        macos_binary.extend_from_slice(&[0x0c, 0x00, 0x00, 0x01]); // CPU_TYPE_ARM64
+        macos_binary.extend_from_slice(&[0u8; 512]);
+        assert!(
+            !is_installer_payload(&macos_binary),
+            "a bare Mach-O is the application, not a package the plugin can install"
+        );
+
+        // Fat/universal header, same conclusion.
+        let mut fat = b"\xca\xfe\xba\xbe".to_vec();
+        fat.extend_from_slice(&[0u8; 512]);
+        assert!(
+            !is_installer_payload(&fat),
+            "a universal Mach-O is still a bare application"
         );
     }
 

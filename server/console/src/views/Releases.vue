@@ -38,6 +38,17 @@ interface Release {
   version: string
   active: boolean
   platforms: Record<string, Platform>
+  /**
+   * Human-facing installers the hub has staged for this version, keyed the same
+   * way the fetch result is (`zip_macos_amd64`, `zip_macos_arm64`). Optional
+   * because a hub that predates this field, or a release published before the
+   * macOS packaging step existed, simply has none — and that must render as
+   * "not published" rather than as an error.
+   *
+   * `releases.get` may not return this yet; the page prefers the live fetch
+   * result and falls back to this, so the table is populated either way.
+   */
+  installers?: Record<string, FetchArtifact | undefined>
 }
 
 // The filenames the client's updater looks for. If these do not match, updates
@@ -241,6 +252,35 @@ const publishedCount = computed(
 )
 const allPublished = computed(() => publishedCount.value === EXPECTED.length)
 
+// ── The macOS human download ──
+//
+// Mirrors `installer_zip_names()` in fetch-release.py: two architectures, named
+// `installer-Locus_<version>_<arch>.zip`. This is a CONTRACT with the hub and
+// with CI, and it is the one place the console names a non-updater asset — if
+// the template changes there, this must change with it. Deliberately NOT added
+// to EXPECTED above: that array drives the "all four platforms published"
+// warning and the offer guard, and a missing human download must never be able
+// to block offering an update.
+//
+// The read-out prefers the last FETCH RESULT (which carries the hub's own
+// verified size/hash/format) and falls back to the published release row, so a
+// page reload still shows what is on the hub rather than an empty table.
+const MAC_ARCHES = [
+  { key: 'zip_macos_amd64', arch: 'amd64', label: 'macOS (Intel)' },
+  { key: 'zip_macos_arm64', arch: 'arm64', label: 'macOS (Apple Silicon)' },
+] as const
+
+const macDownloads = computed(() => {
+  const v = (release.value?.version || version.value).trim().replace(/^v/, '')
+  if (!v) return []
+  return MAC_ARCHES.map((a) => ({
+    key: a.key,
+    label: a.label,
+    filename: `installer-Locus_${v}_${a.arch}.zip`,
+    art: fetched.value?.[a.key] ?? release.value?.installers?.[a.key] ?? undefined,
+  }))
+})
+
 onMounted(() => {
   loadRelease()
 })
@@ -290,11 +330,16 @@ onMounted(() => {
   <div class="card">
     <h2>Publish from GitHub</h2>
     <p class="muted">
-      The hub downloads the four raw binaries and <code>manifest.json</code> from
-      the GitHub Release tagged <code>v&lt;version&gt;</code>, verifies every file,
-      and points the hub at them. CI must have finished and the tag must be pushed.
-      Do <strong>not</strong> use the <code>.zip</code> bundles — the updater
-      replaces the app binary directly and cannot unpack a zip.
+      The hub downloads the four raw binaries, their signatures and
+      <code>manifest.json</code> from the GitHub Release tagged
+      <code>v&lt;version&gt;</code>, verifies every file, and points the hub at
+      them. CI must have finished and the tag must be pushed.
+    </p>
+    <p class="muted">
+      The macOS <code>.zip</code> download is fetched too, but it is
+      <strong>not</strong> an update payload — it is the compressed, signed app a
+      person downloads. It appears below, never in the platform table, because
+      the updater replaces the app binary directly and cannot unpack a zip.
     </p>
 
     <div class="row">
@@ -334,6 +379,54 @@ onMounted(() => {
       Verified and recorded in {{ fetchElapsed }}s. Rollout is unchanged — choose
       it below.
     </p>
+
+    <!-- ── The macOS human download ──
+         Deliberately a SEPARATE card from the platform table above, and outside
+         it. Those rows are what a client fetches and executes to replace itself;
+         this is a file a person downloads and runs. Presenting them in one table
+         is how the two would eventually be confused, and confusing them is the
+         mistake that stopped every Windows client updating for three releases.
+
+         The read-out is the point of showing it at all: the operator should be
+         able to hand a student a link and a hash, and see that the hub actually
+         verified the archive rather than trusting a "published" toast. -->
+    <div v-if="macDownloads.length" class="mac-downloads">
+      <h3>macOS download (for people, not clients)</h3>
+      <p class="muted">
+        The compressed, ad-hoc-signed <code>Locus.app</code> for each
+        architecture. A student who cannot open the <code>.dmg</code> should be
+        given this instead — the signature moves the Gatekeeper failure into
+        System Settings → Privacy &amp; Security → <strong>Open Anyway</strong>,
+        so no Terminal is needed.
+      </p>
+      <table class="grid">
+        <thead>
+          <tr><th>Architecture</th><th>File</th><th>Size</th><th>Detected</th><th>SHA-256</th></tr>
+        </thead>
+        <tbody>
+          <tr v-for="d in macDownloads" :key="d.key">
+            <td>{{ d.label }}</td>
+            <td class="mono">
+              <!-- Served by Caddy from /updates/<version>/, the same
+                   directory the platform artifacts live in. It is fetched by
+                   the hub from the GitHub Release, so no upload is involved. -->
+              <a :href="`/updates/${release?.version || version}/${d.filename}`">{{ d.filename }}</a>
+            </td>
+            <td>{{ d.art ? fmtBytes(d.art.bytes) : '—' }}</td>
+            <td>{{ d.art?.format || '—' }}</td>
+            <td class="mono">
+              {{ d.art?.sha256 ? d.art.sha256.slice(0, 16) + '…' : '— not published —' }}
+            </td>
+          </tr>
+        </tbody>
+      </table>
+      <div v-if="macDownloads.some((d) => !d.art)" class="msg warn">
+        One or more macOS downloads are absent from this release. That does not
+        block the update — a missing human download never does — but students on
+        macOS will have only the <code>.dmg</code>, which needs Terminal to get
+        past Gatekeeper.
+      </div>
+    </div>
   </div>
 
   <!-- ── One-shot trigger links ── -->

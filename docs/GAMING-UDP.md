@@ -3,9 +3,27 @@
 ```
 audience:    builder
 status:      live
-authoritative-for: the UoT (UDP-over-TCP) transport for the Strike gaming tier, server side
-verified-against: docs/STATE.md
+authoritative-for: the UoT (UDP-over-TCP) transport for the paid tier, server side
+verified-against: server/modules/02-shadowsocks.sh, server/modules/08-firewall.sh, server/scripts/seed-pb.py
 ```
+
+> **Naming, as of the Free/Full merge (2026-10).** This document says "Strike"
+> throughout because that is the **frozen on-box name** — the `tier_configs`
+> row, the shadowsocks config, the UoT credentials and the systemd unit are all
+> `strike`, and that must not change (a code in the field carries the string and
+> the hub resolves it by that string). The **customer-facing plan is "Full"**, and
+> it is now the *only* paid plan: Stealth was retired into it, and the paid `tc`
+> cap is 100 Mbps rather than 200. Read every "Strike" below as "the paid tier,
+> on-box name `strike`". See
+> [`business/04-tiers.md`](business/04-tiers.md) §4.6.
+>
+> **Superseded in part (2026-10): UoT is no longer paid-only.** There are now TWO
+> sing-box listeners — `sing-box-uot-strike.service` on 8446 (uncapped) and
+> `sing-box-uot-eco.service` on 8447 (capped to the free plan's 1 Mbps). Every
+> statement below about UoT being "the Strike tier's" describes the *original*
+> single-listener design; the mechanism is unchanged and is simply instantiated
+> once per plan now, each with its own credentials. See
+> [`business/04-tiers.md`](business/04-tiers.md) §4.3.1.
 
 > **Engine note — read before trusting any "sing-box client" claim below.** The
 > **server** half of this document is current. The **client** was the Go + Wails +
@@ -15,22 +33,36 @@ verified-against: docs/STATE.md
 > **historical**. The Strike UoT seam is cross-engine (sing-box inbound ↔ mihomo
 > outbound); see §2's correction.
 >
-> **Status: LIVE on the current host — enabled 2026-09-19**
+> **Status: the CODE is live (default-on); the deployment is a world claim.**
 >
-> `sing-box-uot` is active and listening on **TCP+UDP 8446**, and the strike tier
-> advertises `udp_relay=true` + `uot_port=8446`. Verified end-to-end on the live
-> host: a sing-box client with `udp_over_tcp: true` → 127.0.0.1:8446 → sing-box
-> server → UDP to 8.8.8.8:53 → DNS reply returned. The server log confirms the
-> mechanism explicitly:
+> Two different statements were run together here, and they are different kinds
+> of fact — see [`operate/CLAIMS.md`](operate/CLAIMS.md) §2:
 >
-> ```
-> inbound/shadowsocks[strike-uot]: inbound connection to sp.v2.udp-over-tcp.arpa:0
-> inbound/shadowsocks[strike-uot]: inbound UoT connection to 8.8.8.8:53
-> outbound/direct: outbound packet connection
-> ```
+> - **In this tree (derivable, so not prose):** `02-shadowsocks.sh` and `setup.sh`
+>   build the UoT endpoint unless `ENABLE_UOT=0`, `08-firewall.sh` opens the UoT
+>   port on TCP+UDP, and `seed-pb.py` advertises `uot_port` on the strike tier. So
+>   a fresh deployment gets game-UDP handling with no extra flags. Opting out is
+>   the exception and needs `ENABLE_UOT=0` **plus** a re-seed, or clients are told
+>   to use a port nothing listens on.
+> - **On the deployed host (a world claim, dated):** `sing-box-uot` is listening
+>   on **TCP+UDP 8446**, and the strike tier advertises `udp_relay=true` +
+>   `uot_port=8446`. **As last verified 2026-09-19** on the then-current host: a
+>   sing-box client with `udp_over_tcp: true` → `127.0.0.1:8446` → sing-box server
+>   → UDP to `8.8.8.8:53` → DNS reply returned, and the server log confirmed the
+>   mechanism explicitly:
 >
-> The same test also confirmed **raw** UDP (via the ordinary 8445 shadowsocks
-> port) relays correctly on this host.
+>   ```
+>   inbound/shadowsocks[strike-uot]: inbound connection to sp.v2.udp-over-tcp.arpa:0
+>   inbound/shadowsocks[strike-uot]: inbound UoT connection to 8.8.8.8:53
+>   outbound/direct: outbound packet connection
+>   ```
+>
+>   The same test confirmed **raw** UDP (via the ordinary 8445 shadowsocks port)
+>   relays correctly. *(This is not in the `CLAIMS.md §5` register because it is a
+>   `systemctl status sing-box-uot` on the host, not a `curl` from here — the
+>   date above is the honest form until it is re-checked. The `verify-live.sh`
+>   method for it is `ssh <hub> systemctl is-active sing-box-uot` plus a
+>   `ss -lntup | grep 8446` that shows both `tcp` and `udp`.)*
 >
 > **Still outstanding: a real game session on a school network.** The transport
 > is proven; the acceptance gate in §P1 (5-minute SCP:SL or similar, on N4L,
@@ -42,13 +74,6 @@ verified-against: docs/STATE.md
 > recorded here — see [`operate/CLAIMS.md`](operate/CLAIMS.md) §6). The current
 > hub was deployed while UoT was still opt-in, which is why this needed enabling
 > by hand.
->
-> **Default now:** `02-shadowsocks.sh` and `setup.sh` build the UoT endpoint
-> unless `ENABLE_UOT=0` is set, `08-firewall.sh` opens 8446 TCP+UDP, and
-> `seed-pb.py` advertises `uot_port` on the strike tier. So a fresh deployment
-> gets working game-UDP handling with no extra flags. Opting out is the
-> exception and needs `ENABLE_UOT=0` **plus** a re-seed, or clients are told to
-> use a port nothing is listening on.
 >
 > **Testing note (learned the hard way):** do not test the UDP path by sending a
 > bare DNS datagram at a `mixed` inbound. The client engine (sing-box at the time;

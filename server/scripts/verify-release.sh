@@ -48,9 +48,32 @@ case "$VERSION" in
     *) echo "error: '${VERSION}' does not look like a version" >&2; exit 1 ;;
 esac
 
-VPS="${VPS:-root@networkingguides.duckdns.org}"
+# Prefer the `locus-hub` ssh alias, which carries the deploy key and needs no
+# password; fall back to the bare host for a machine set up differently.
+#
+# WHY THIS PROBE EXISTS, because the failure it prevents is a HANG, not an error:
+# the bare hostname has no key installed here, so `ssh` with BatchMode=yes and
+# no alias falls through to an interactive password prompt. Under a pipe (a
+# script, a CI job, a redirected log) there is nothing to type, so it waits
+# forever and looks like "the check is slow" rather than "the check cannot
+# authenticate". `deploy.sh` learned this first; `verify-release.sh` and
+# `publish-release.sh` both shipped without it and both hang the same way.
+#
+# It still fails rather than hanging: ConnectTimeout bounds the probe, and the
+# fallback keeps working on a host where the bare name does have key auth.
+_site_pick_ssh_target() {
+    if [ -n "${VPS:-}" ]; then printf '%s' "$VPS"; return; fi
+    if ssh -o BatchMode=yes -o ConnectTimeout=5 locus-hub true 2>/dev/null; then
+        printf 'locus-hub'
+    else
+        printf 'root@networkingguides.duckdns.org'
+    fi
+}
+_VPS_CHOSEN="$(_site_pick_ssh_target)"
+VPS="${_VPS_CHOSEN}"
 PB_API="${PB_API:-https://networkingguides.duckdns.org}"
 SSH="${SSH:-ssh}"
+SSH="${SSH} -o BatchMode=yes -o ConnectTimeout=15"
 LOCAL_DIR=""
 if [ "${2:-}" = "--local" ]; then LOCAL_DIR="${3:-}"; fi
 
@@ -215,6 +238,49 @@ if [ -n "$LOCAL_DIR" ]; then
             bad "${f} differs: local=${local_sha:0:16}… host=${remote_sha:0:16}…"
         fi
     done
+fi
+
+# ── 7. The public landing page offers THIS version ─────────────────────────
+#
+# WHY THIS EXISTS
+#
+# The page's four download buttons are RENDERED from the release manifest by
+# `deploy-site.sh`, which is what stops a version being baked into index.html.
+# But the renderer only moves when it RUNS, and nothing in the release pipeline
+# runs it: CI builds artifacts, the hub serves them, and the public page goes on
+# offering the previous version's files — which still exist, so every button
+# still downloads a real file and nothing looks broken.
+#
+# That is a silent staleness of exactly the kind CLAIMS.md §1 describes, and it
+# is invisible from inside the repo: nothing in the tree knows what the deployed
+# page says. This check closes the loop by reading the SERVED page.
+#
+# A page that is BEHIND is a failure (step 5 of RELEASING.md was skipped).
+# A page that is AHEAD is fine — you are verifying an older release while a newer
+# one is public — so that is reported as a note, not a failure.
+echo
+echo "7. The landing page offers ${VERSION}"
+LANDING="${LANDING_DOMAIN:-locusvpn.jadedns.uk}"
+page="$(curl -s -m 20 "https://${LANDING}/" 2>/dev/null || true)"
+if [ -z "$page" ]; then
+    note "could not fetch https://${LANDING}/ — page state UNKNOWN (not a pass)"
+else
+    # Every version the page names, across all four download slots.
+    page_versions="$(printf '%s' "$page" | grep -oE 'updates/[0-9]+\.[0-9]+\.[0-9]+' \
+        | sed 's|updates/||' | sort -u | tr '\n' ' ')"
+    buttons="$(printf '%s' "$page" | grep -cE 'data-download="[a-z_]+" href="https://[^"]+/updates/[0-9]+\.[0-9]+\.[0-9]+/' || true)"
+
+    if [ "$buttons" -lt 4 ]; then
+        bad "the landing page has ${buttons} wired download button(s), expected 4"
+        note "an unrendered page has href=\"#\" — re-run: server/scripts/deploy.sh --site"
+    elif printf '%s' "$page_versions" | grep -qw "$VERSION"; then
+        ok "the landing page offers ${VERSION} (${buttons} buttons wired)"
+    else
+        bad "the landing page offers '${page_versions}' — it does not name ${VERSION}"
+        note "the page is STALE: re-render and upload it with"
+        note "    server/scripts/deploy.sh --site"
+        note "step 5 of docs/operate/RELEASING.md — skipping it is silent"
+    fi
 fi
 
 # ── Verdict ────────────────────────────────────────────────────────────────

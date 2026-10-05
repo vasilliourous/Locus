@@ -167,7 +167,7 @@
       "metricPending": "Not reported yet",
       "speed": "Speed",
       "needsActivation": "This device needs an activation code before it can connect.",
-      "requiresSetup": "Locus cannot turn the VPN on yet: it needs administrator rights, and the Locus service is not installed. Installing Locus with the installer sets this up automatically.",
+      "requiresSetup": "Locus cannot turn the VPN on yet: it needs administrator rights, and its helper service is not installed. Locus will ask for permission to set this up when it starts — approve that prompt, then try again.",
       "subscriptionLapsed": "Your Locus subscription has expired, so the VPN will not connect. Contact the person who sold you the code to renew it.",
       "subscriptionExpiresToday": "Your Locus subscription expires today. Contact the person who sold you the code to renew it.",
       "subscriptionExpiresIn": "Your Locus subscription expires in {{count}} days. Contact the person who sold you the code to renew it.",
@@ -197,10 +197,13 @@
         "theme": "Theme",
         "themeDefaultDark": "Locus",
         "themeDefaultLight": "Locus (light)",
-        "themeMidnight": "Midnight",
-        "themePaper": "Paper",
-        "themeHighContrast": "High contrast",
-        "themeForest": "Forest",
+        "themeSlate": "Slate",
+        "themeDawn": "Dawn",
+        "themeEmber": "Ember",
+        "themeMoss": "Moss",
+        "themeLinen": "Linen",
+        "themeSepia": "Sepia",
+        "themeContrast": "Contrast",
         "themeHint": "Sets the look of the app. Leave it on Default to keep following the appearance setting above.",
         "autoUpdate": "Check for updates automatically",
         "on": "On",
@@ -218,11 +221,22 @@
         "confirmedDaysAgo": "{{count}} d ago",
         "neverConfirmed": "Not confirmed with the server yet",
         "checkingStatus": "Checking…",
-        "notActivatedToCheck": "Activate a code first — there is nothing to confirm yet."
+        "notActivatedToCheck": "Activate a code first — there is nothing to confirm yet.",
+        "updateCheckOff": "Automatic update checking is off, so Locus is not being told about new versions. Turn it on above to receive fixes.",
+        "updateCheckOffAction": "Turn on automatic updates",
+        "updateBlocked": "Locus cannot update itself right now: {{reason}}",
+        "updateUpToDate": "Locus is up to date."
       },
       "cancel": "Cancel",
       "toggleHint": "Press Enter to turn the VPN on or off",
-      "takingLonger": "Still connecting. This can take a few seconds on a school network — you can cancel and try again."
+      "takingLonger": "Still connecting. This can take a few seconds on a school network — you can cancel and try again.",
+      "support": "Need help?",
+      "supportEmail": "maillcontainer@proton.me",
+      "freeData": "Free data",
+      "freeDataUsed": "{{used}} of {{total}} used",
+      "freeDataNearlyOut": "{{used}} of {{total}} used — nearly out of free data",
+      "freeDataThrottled": "{{used}} of {{total}} used — slowed until your allowance resets",
+      "freeDataThrottledUpgrade": "To get full speed back now, contact the person who sold you your code about Full."
     }
   }
 }

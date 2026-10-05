@@ -94,7 +94,7 @@ DIVERGED=0
 GENERATED_LIST=""
 if [ "${TIER_PASSWORDS_GENERATED:-0}" = "1" ]; then
     DIVERGED=1
-    GENERATED_LIST="${GENERATED_LIST}  - Shadowsocks tier passwords (eco/stealth/strike)\n"
+    GENERATED_LIST="${GENERATED_LIST}  - Shadowsocks tier passwords (eco/strike)\n"
 fi
 if [ "${ADMIN_TOKEN_GENERATED:-0}" = "1" ]; then
     DIVERGED=1
@@ -152,8 +152,6 @@ cat <<EOF
 ──────────────────────────────────────────────────────────────────────
 ECO     (port 8443, tcp_only)      ${ECO_PASS}
                                    source: ${ECO_SRC}
-STEALTH (port 8444, tcp_only)      ${STEALTH_PASS}
-                                   source: ${STEALTH_SRC}
 STRIKE  (port 8445, tcp_and_udp)   ${STRIKE_PASS}
                                    source: ${STRIKE_SRC}
 

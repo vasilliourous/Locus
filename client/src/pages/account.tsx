@@ -22,7 +22,7 @@ import {
   alpha,
   useTheme,
 } from '@mui/material'
-import { useCallback, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { TierBadge } from '@/components/connection/tier-badge'
@@ -34,6 +34,7 @@ import { useVerge } from '@/hooks/use-verge'
 import { cardSx } from '@/pages/_surfaces'
 import { isThemeId as isValidThemeId, THEMES, THEME_IDS } from '@/pages/_themes'
 import { supportedLanguages } from '@/services/i18n'
+import { locusUpdateStatus, type UpdateStatus } from '@/services/locus'
 import { showNotice } from '@/services/notice-service'
 
 /**
@@ -62,6 +63,29 @@ const AccountPage = () => {
   // flag would make one appear to be doing the other's work.
   const [refreshing, setRefreshing] = useState(false)
   const [refreshNote, setRefreshNote] = useState<string | null>(null)
+
+  // The update-check state, read once on mount.
+  //
+  // Read locally (no network) through the same command the update prompt uses,
+  // so the page and the prompt cannot disagree about whether an update exists.
+  // This exists to answer "why is this device not updating?", which was
+  // unanswerable before: every reason was logged at `debug` while the default
+  // level is `Info`, so a suppressed offer left no trace on the machine.
+  const [updateStatus, setUpdateStatus] = useState<UpdateStatus | null>(null)
+  useEffect(() => {
+    let cancelled = false
+    locusUpdateStatus()
+      .then((s) => {
+        if (!cancelled) setUpdateStatus(s)
+      })
+      .catch(() => {
+        // Failing to *describe* the update state is harmless; a broken page is
+        // not. The row simply does not render.
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   const subscription = status?.subscription ?? { state: 'unknown' as const }
 
@@ -432,6 +456,75 @@ const AccountPage = () => {
               : t('home.components.connection.account.off')}
           </Button>
         </Box>
+
+        {/* Why this device is (or is not) updating.
+            Shown ONLY when there is a real obstacle, and only once a heartbeat
+            has actually run — a fresh install has nothing to say and is not
+            broken. This is the answer to a question that previously had none:
+            "the update wasn't offered" is invisible otherwise, because the
+            reasons were logged at `debug` and the default level is `Info`.
+
+            The auto-checks-off case gets its own wording and a shortcut,
+            because it is the one cause a student can fix without support and
+            the one most likely to be stuck on from an era when this row was
+            mis-wired to auto-launch. */}
+        {updateStatus &&
+          !updateStatus.offeredVersion &&
+          !updateStatus.automaticChecksEnabled && (
+            <Box
+              sx={{
+                display: 'flex',
+                alignItems: 'flex-start',
+                gap: 1.5,
+                py: 1,
+              }}
+            >
+              <ErrorOutlineRounded
+                fontSize="small"
+                sx={{ color: 'warning.main', mt: 0.25 }}
+              />
+              <Box sx={{ flexGrow: 1 }}>
+                <Typography variant="body2" color="warning.main">
+                  {t('home.components.connection.account.updateCheckOff')}
+                </Typography>
+                <Button
+                  size="small"
+                  variant="text"
+                  sx={{ mt: 0.25, px: 0 }}
+                  onClick={() => {
+                    void patchVerge({ auto_check_update: true })
+                      .then(() =>
+                        // Re-read so the notice clears the moment it is fixed,
+                        // rather than lingering until the next mount and making
+                        // the toggle look like it did nothing.
+                        locusUpdateStatus().then(setUpdateStatus),
+                      )
+                      .catch(onError)
+                  }}
+                >
+                  {t('home.components.connection.account.updateCheckOffAction')}
+                </Button>
+              </Box>
+            </Box>
+          )}
+
+        {/* Any OTHER reason the offer did not appear — a version that is not
+            newer, a release missing this platform's build. Support-facing, so
+            it is plain text rather than a control. */}
+        {updateStatus &&
+          !updateStatus.offeredVersion &&
+          updateStatus.automaticChecksEnabled &&
+          updateStatus.noOfferReason && (
+            <Typography
+              variant="caption"
+              color="text.secondary"
+              sx={{ display: 'block', py: 0.5, lineHeight: 1.5 }}
+            >
+              {t('home.components.connection.account.updateBlocked', {
+                reason: updateStatus.noOfferReason,
+              })}
+            </Typography>
+          )}
 
         {/* "Auto Launch". A separate row because it is a separate setting.
             It had no control of its own before: the update row above was wired

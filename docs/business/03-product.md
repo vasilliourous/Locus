@@ -1,5 +1,12 @@
 # 3. Product
 
+```
+audience:    human-operator
+status:      live
+authoritative-for: what the customer buys, and what the activation code is commercially
+verified-against: docs/reference/DEVICE-IDENTITY.md
+```
+
 ## 3.1 The three moving parts
 
 The customer buys a signed desktop app plus an activation code. Under the
@@ -7,14 +14,16 @@ hood there are three parts, and only one of them is the customer's.
 
 | Part | What it is | Where |
 |---|---|---|
-| **Client** | Tauri 2 + React desktop app, forked from Clash Verge Rev v2.5.5, tunnelling via mihomo. The Locus logic is ~5,800 lines of Rust. Ships as a 3.x release (current version in [`../STATE.md`](../STATE.md)). | `client/` |
+| **Client** | Tauri 2 + React desktop app, forked from Clash Verge Rev v2.5.5, tunnelling via mihomo. The Locus logic is its own `locus/` module tree in Rust. Ships as a 3.x release (current version: `[client.version]` in [`../state.toml`](../state.toml)). | `client/` |
 | **Hub** | One DigitalOcean droplet running PocketBase + Caddy + the Shadowsocks/BBR/tc stack. Holds codes, tiers, releases, and the admin console. | `server/` |
 | **Retired clients** | Go + Wails and Go + Fyne predecessors. Reference only — they paid for the behavioural contract the fork reproduces. | `legacy/` |
 
 ## 3.2 What the customer is allowed to see
 
 The UI shows plan name, connection status, connection metrics, and (for the
-free tier) usage against the monthly allowance. It does **not** show protocol
+free tier) usage against the monthly allowance. It does **not** mention UDP:
+it is a given on both plans, so there is nothing to advertise — the difference
+the student feels is speed. It does **not** show protocol
 names, ports, or the tech stack.
 
 This is a deliberate product decision inherited from the legacy plan (custom
@@ -38,33 +47,38 @@ cash, and activated **once**. Everything about distribution
 ([`08-distribution.md`](08-distribution.md)) and lifecycle
 ([`10-lifecycle.md`](10-lifecycle.md)) follows from this object's shape.
 
-> **Refinement (`9a91da1`): a code is a VOUCHER, not the entitlement itself.**
-> Activating it creates the entitlement — a running term, bound to one device —
-> and the card is spent from that moment. The student then keeps access without
-> the card for as long as the term is renewed, because the hub addresses the
-> entitlement by the device's fingerprint rather than by the code.
+> **Refinement (`9a91da1`, corrected 2026-10): a code is a VOUCHER, and it is
+> also the credential.** Activating it spends the card and starts a running term.
+> The student then keeps access without the card in hand, because **the client
+> keeps the code itself** in a machine-scoped store — it is re-read on every
+> launch and survives an uninstall and a reinstall. `verge.yaml` holds the
+> primary copy; `/var/lib/locus` (Linux), `/Library/Application Support/Locus`
+> (macOS) and `%PROGRAMDATA%\Locus` (Windows) hold the mirror.
 >
-> This is what makes a thrown-away card survivable. Before, losing the card lost
-> the only handle on the account; now the machine is the handle, the card was
-> only ever the purchase. See
-> [`redesign/04-card-and-credential.md`](redesign/04-card-and-credential.md).
+> This is what makes a thrown-away card survivable: the code was the purchase,
+> and the app remembers it. **It is not addressed by a device fingerprint** —
+> device identity and recognition were removed (2026-10); a code is single-use
+> and tied to nothing. See
+> [`../reference/DEVICE-IDENTITY.md`](../reference/DEVICE-IDENTITY.md).
 
 The code also carries a **term** (`term_days`): how long one purchase lasts,
 measured from *activation* rather than from the day the card was printed. A
 ~70-day term is a school term; ~30 days is a month. The term is what makes the
 product repeatable — see [`07-billing.md`](07-billing.md).
 
-> The code carries **no identity** — installing it on a device binds that
-> device's fingerprint, but the code itself is anonymous. That anonymity is
-> deliberate and load-bearing: it is why there is no signup, no account and no
-> PII to breach, and it is also why per-user traffic accounting is not possible
-> today, which is the central constraint on the free tier
+> The code carries **no identity**, and nothing else is bound to it either. It
+> is anonymous and unbound. That anonymity is deliberate and load-bearing: it is
+> why there is no signup, no account and no PII to breach, and it is also why
+> per-user traffic accounting is not possible today, which is the central
+> constraint on the free tier
 > ([`04-tiers.md`](04-tiers.md#44-the-free-tier-in-full)).
 >
-> **One code works on one device.** A second code activated on an already-bound
-> device is refused, so the anonymity does not extend to allowing a device to
-> hold several entitlements ([`redesign/03-device-binding.md`](redesign/03-device-binding.md)).
-> constraint on the free tier ([`04-tiers.md`](04-tiers.md#44-the-free-tier-in-full)).
+> **A code is single-use, not device-bound.** Once activated it carries an
+> `activated_at` stamp and cannot be activated a second time — but it is not
+> tied to which machine did it, so the same student reinstalling on the same
+> laptop simply re-enters the same code. Moving back to a fresh machine is a
+> re-entry, not an operator operation; `codes.unbind` (release) exists only to
+> hand the code to a *different* student.
 
 ## 3.4 What the customer never touches
 

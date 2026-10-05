@@ -4,7 +4,7 @@
 audience:    builder
 status:      design-record
 authoritative-for: the 2026-09 layout change and what it repointed
-verified-against: docs/STATE.md
+verified-against: client/ (layout), docs/reference/FIXES.md
 ```
 
 > Records the layout change and everything that must be repointed. The old layout

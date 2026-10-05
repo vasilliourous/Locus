@@ -309,14 +309,18 @@ async fn enforce_grace_period() {
 ///
 /// The rejection reason is logged, because "an update was advertised and silently
 /// ignored" is the exact failure this whole path exists to avoid.
-async fn record_update_offer(response: &crate::locus::heartbeat::HeartbeatResponse) {
+async fn record_update_offer(response: &crate::locus::heartbeat::HeartbeatResponse) -> Option<crate::locus::update::NoOfferReason> {
     let Some(platform) = crate::locus::update::Platform::current() else {
-        // Not a build target we ship updates for. Not an error.
-        return;
+        // Not a build target we ship updates for.
+        let reason = crate::locus::update::NoOfferReason::UnsupportedPlatform;
+        logging!(info, Type::System, "[locus] no update offered: {}", reason.describe());
+        return Some(reason);
     };
 
     let Some(version) = offered_version_to_record(response, platform.key(), env!("CARGO_PKG_VERSION")) else {
-        return;
+        // `offered_version_to_record` logs the specific reason at info level —
+        // it must not be silent, see `NoOfferReason`.
+        return None;
     };
 
     // Honour the student's "check for updates automatically" preference. Read it
@@ -335,18 +339,24 @@ async fn record_update_offer(response: &crate::locus::heartbeat::HeartbeatRespon
         .auto_check_update
         .unwrap_or(true);
     if !auto {
-        logging!(
-            debug,
-            Type::System,
-            "[locus] update {version} is available but automatic checking is off; not offering"
-        );
-        return;
+        // Logged at WARN, not debug, and returned so the Account page can say so.
+        //
+        // This is the case a student cannot diagnose themselves: they are told
+        // nothing, the setting is on a page they may never open, and the field is
+        // inherited from upstream — so it can be `false` from an era when the row
+        // was mis-labelled. A debug-level line meant this left no trace at all.
+        let reason = crate::locus::update::NoOfferReason::AutomaticChecksOff {
+            version: version.to_owned(),
+        };
+        logging!(warn, Type::System, "[locus] no update offered: {}", reason.describe());
+        return Some(reason);
     }
 
     logging!(info, Type::System, "[locus] the hub is offering update {version}");
     if let Err(error) = store::record_update_offer(version).await {
         logging!(warn, Type::System, "[locus] could not record the offered update: {error:#}");
     }
+    None
 }
 
 /// Whether a heartbeat's update signal is worth prompting a student about.
@@ -379,15 +389,19 @@ fn offered_version_to_record<'a>(
     let version = response.update_available.as_deref().filter(|v| !v.is_empty())?;
 
     if let Some(reason) = crate::locus::update::rejection_reason(version, current_version) {
-        logging!(debug, Type::System, "[locus] the advertised update is not actionable: {reason}");
+        // INFO, not debug. A rejection that leaves no trace at the default log
+        // level is how "the update wasn't offered" became undiagnosable; see
+        // `NoOfferReason`.
+        logging!(info, Type::System, "[locus] no update offered: {reason}");
         return None;
     }
 
     if response.download_url(platform).is_none() {
         logging!(
-            debug,
+            warn,
             Type::System,
-            "[locus] update {version} carries no artifact for {platform}"
+            "[locus] no update offered: {version} carries no artifact for {platform} — \
+             the release is incomplete for this platform"
         );
         return None;
     }
@@ -433,6 +447,54 @@ async fn handle_success(response: &crate::locus::heartbeat::HeartbeatResponse) {
         );
     }
 
+    // Cache the free-tier allowance the hub advertised, so a status read can
+    // classify usage without a live beat — the Connection screen polls far more
+    // often than the client beats.
+    //
+    // Written on EVERY beat, and to `None` when the hub sends nothing, because
+    // here the absence is the answer rather than a gap: a code that moved to a
+    // paying tier must stop being metered, and a hub that stops sending the
+    // allowance is the operator switching the quota off. Leaving a stale
+    // allowance in place would throttle a student the hub had released.
+    //
+    // (This is the opposite rule from `expires_at` above, and the difference is
+    // deliberate: an absent expiry means "this hub cannot tell you", where an
+    // absent allowance means "no allowance applies".)
+    if let Some(raw) = response.free_allowance_mb
+        && raw > crate::locus::usage::MAX_SANE_ALLOWANCE_MB
+    {
+        // The hub sent a figure the arithmetic cannot trust. The client clamps
+        // it (see `usage::sane_allowance_mb`), so the student is safe either
+        // way — but this is the ONE place the bad value is still visible, and
+        // an operator seeing it here can fix the row before it reaches anyone
+        // else. Silently clamping would hide a server-side fault that the next
+        // client version might not clamp.
+        logging!(
+            warn,
+            Type::Config,
+            "[locus] the hub advertised an implausible free-tier allowance ({} MB); \
+             clamping to {} MB. The student is unaffected, but the hub's tier row is wrong.",
+            raw,
+            crate::locus::usage::MAX_SANE_ALLOWANCE_MB
+        );
+    }
+    if let Err(error) = store::store_allowance(response.free_allowance_mb).await {
+        logging!(
+            warn,
+            Type::Config,
+            "[locus] could not store the free-tier allowance: {error:#}"
+        );
+    }
+    // …and the speed to drop to once it is spent. Same rule: the hub's latest
+    // word replaces the previous one, including when that word is "nothing".
+    if let Err(error) = store::store_throttle_mbps(response.free_throttle_mbps).await {
+        logging!(
+            warn,
+            Type::Config,
+            "[locus] could not store the free-tier throttle speed: {error:#}"
+        );
+    }
+
     // An update signal is RECORDED, not installed. Installing is the student's
     // decision: doing it silently mid-session would drop their connection
     // without warning, and on a school network that is the worst moment.
@@ -442,7 +504,18 @@ async fn handle_success(response: &crate::locus::heartbeat::HeartbeatResponse) {
     // could never appear because nothing had recorded anything. The signal is now
     // actually decoded (which also applies the no-downgrade gate a second time,
     // client-side) and the offered version is persisted for the prompt.
-    record_update_offer(response).await;
+    //
+    // A reason for *not* offering is persisted too, so the Account page can
+    // answer "why is this device not updating?" — the question a student asks
+    // when nothing appears, and could not answer at all before.
+    let no_offer = record_update_offer(response).await;
+    if let Err(error) = store::record_update_check_reason(no_offer.as_ref()).await {
+        logging!(
+            warn,
+            Type::Config,
+            "[locus] could not record the update-check reason: {error:#}"
+        );
+    }
 }
 
 /// Applies a config the hub supplied on a heartbeat, if it actually changed.
@@ -629,6 +702,8 @@ mod tests {
             server_config: None,
             udp_relay: false,
             expires_at: None,
+            free_allowance_mb: None,
+            free_throttle_mbps: None,
             update_available: version.map(str::to_owned),
             update_linux: for_key("linux"),
             update_windows: for_key("windows"),

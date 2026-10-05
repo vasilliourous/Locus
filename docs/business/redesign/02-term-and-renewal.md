@@ -1,5 +1,12 @@
 # 2. Term model and renewal
 
+```
+audience:    human-operator
+status:      design-record
+authoritative-for: the term model and renewal decisions
+verified-against: docs/reference/DEVICE-IDENTITY.md, docs/reference/FIXES.md
+```
+
 > **Decisions (operator):** expiry is a **term length measured from
 > activation**; renewal **extends from the existing expiry**, so paying early
 > never loses days.

@@ -4,7 +4,7 @@
 audience:    human-operator
 status:      live
 authoritative-for: cutting a release (tag → CI → hub publish)
-verified-against: docs/STATE.md
+verified-against: client/scripts/release-version.mjs, server/scripts/publish-release.sh
 ```
 
 > **Note:** the old release-cutting machinery is gone. `scripts/release-cut.sh`,
@@ -30,6 +30,12 @@ verified-against: docs/STATE.md
 > appears, add it to `client/scripts/release-version.mjs`. `cargo fetch --locked`
 > separately catches a stale `Cargo.lock` in each build job.
 >
+> **The list is data, not prose.** `docs/state.toml` `[client.version_sites]`
+> holds exactly these five paths with `provenance = "derived"`, and
+> `check-consistency.sh` §9 recomputes it from `release-version.mjs` and fails on
+> disagreement — so "all five" cannot drift, and a sixth site fails the build
+> instead of silently invalidating this sentence.
+>
 > **Read `UPDATE-SYSTEM.md` for the full pipeline**, and `client/docs/SIGNING.md`
 > for key custody. The short version:
 
@@ -46,7 +52,44 @@ verified-against: docs/STATE.md
            POST /api/admin/fetch-release {"version":"X.Y.Z"}
      → the hub pulls from GitHub, verifies format + SHA-256 + signature
 4. Publish: writes update_config. The console does 3 and 4 in one button.
+5. RE-RENDER THE LANDING PAGE — this is a real step, not a nicety:
+       server/scripts/deploy.sh --site
+     → re-renders the four download buttons from the new manifest and uploads it
 ```
+
+> **Step 5 is the one people skip, and skipping it is silent.** The public page's
+> four download URLs are *rendered from the release manifest* by
+> `deploy-site.sh` — they are not hand-written, precisely so a version cannot be
+> baked into `index.html`. But that means the page only moves when the renderer
+> RUNS, and nothing in steps 1–4 does that: CI builds artifacts, the hub serves
+> them, and the landing page goes on advertising the previous version's files.
+>
+> Nothing fails. The page is not broken — it is offering last release's binaries,
+> which still exist on the hub, so every button still downloads a real file. The
+> only symptom is that new visitors get the old version, and that is invisible
+> from inside the repo.
+>
+> **Verify it, do not assume it.** `verify-release.sh` re-reads the SERVED page
+> and fails when its buttons do not name the version just published — see
+> "Checking the page is current" below.
+
+### Checking the page is current
+
+The page is a **Class A world claim**: what is deployed is not derivable from the
+tree. Two ways to check it, both read-only:
+
+```bash
+# 1. What the page actually offers, right now.
+curl -s https://locusvpn.jadedns.uk/ \
+  | grep -oE 'updates/[0-9]+\.[0-9]+\.[0-9]+/[^"]*'
+
+# 2. Does it match the version the hub is serving?
+server/scripts/verify-release.sh <version>
+```
+
+Everything under `/updates/<version>/` must name `<version>`. A page naming an
+older version is not an error state the repo can see — it is a page nobody
+re-rendered, and the fix is step 5.
 
 > **CI does not bump versions — it labels the release from the tag name.**
 > `github.ref_name` supplies the release title and the manifest's `version`
@@ -71,6 +114,10 @@ verified-against: docs/STATE.md
 > **Windows clients cannot update at all right now?** That is a different
 > situation from a normal release — see
 > [`RECOVER-WINDOWS-UPDATE.md`](RECOVER-WINDOWS-UPDATE.md).
+>
+> **macOS clients offered a bare binary?** *"the update to <version> is not an
+> installer (<N> bytes)"* on macOS means the hub served a bare Mach-O instead of
+> the `.app.tar.gz` — see [`RECOVER-MACOS-UPDATE.md`](RECOVER-MACOS-UPDATE.md).
 
 ### Before the *first* tag in a repository: set the signing secret
 
@@ -134,6 +181,28 @@ server/scripts/verify-release.sh 3.1.0      # read-only; hashes the SERVED bytes
 
 `verify-release.sh` is the right tool: it checks the `update_config` row **and**
 re-downloads each artifact to confirm the served bytes match the recorded hash.
+
+### The macOS download, which is not an update
+
+CI also produces `installer-Locus_<v>_amd64.zip` and `..._arm64.zip` — the
+compressed, **ad-hoc-signed** `Locus.app`. The hub fetches them, and the console's
+Releases page links them with the verified size, format and SHA-256.
+
+They are **not** update payloads and never appear in `update_config`, CI's
+`manifest.json` platform map, or the hub's `PLATFORMS`. Both sides actively refuse
+a `.zip` in an update slot (`check-consistency.sh` §1c), because a compressed
+bundle handed to the updater is the 2026-10-01 Windows mistake in a new costume —
+a legitimate release asset that is wrong in the slot.
+
+**A missing macOS zip does not block a publish.** It is staged when present and
+reported when absent, so a broken macOS packaging step can never stop a Windows or
+Linux hotfix shipping. The console shows it either way.
+
+**Why it exists:** ad-hoc signing moves the Gatekeeper failure from
+*"damaged and can't be opened"* (no bypass, Terminal only) to *"unidentified
+developer"* (System Settings → Privacy & Security → **Open Anyway**). The `.dmg`
+is still the normal install; the zip is what to hand a student whose download was
+refused. See [`OPS.md`](OPS.md) → "Notes & limitations".
 
 ### ⚠️ There is no rollout, and no automatic downgrade
 

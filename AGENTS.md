@@ -8,7 +8,7 @@ then the guide for the area you are touching.
 | Path | What it is | Its own guide |
 |---|---|---|
 | `client/` | The desktop app (Tauri 2 + React). Product logic in `src-tauri/src/locus/`. | [`client/AGENTS.md`](client/AGENTS.md) |
-| `server/` | The hub: PocketBase, Caddy, the Shadowsocks/BBR/tc stack, `pb_hooks/`. | — |
+| `server/` | The hub: PocketBase, Caddy, the Shadowsocks/BBR/tc stack, `pb_hooks/`. Also `server/site/` (the public landing page) and `server/console/` (the operator console). | — |
 | `docs/` | Live documentation. `docs/README.md` is the index. | — |
 | `legacy/` | Retired clients. **Reference only — read it, never build it.** | — |
 
@@ -78,6 +78,10 @@ git push origin vX.Y.Z              # the tag is what triggers the release build
   not match `client/package.json`, and `release` needs `verify`, so a bad tag
   cannot publish. `cargo fetch --locked` separately catches a stale `Cargo.lock`.
   These are safety nets — they do not replace the sequence above.
+- **"All five sites" is data, not prose.** The list lives in `docs/state.toml`
+  `[client.version_sites]` and `check-consistency.sh` §9 recomputes it from
+  `client/scripts/release-version.mjs`, so a sixth version site fails the build
+  instead of silently invalidating any sentence that says "five".
 - **`main` and the tag are separate pushes.** CI runs on both; only the tag
   build creates a Release.
 - **Full procedure, and the hub-publish step that comes after:** 

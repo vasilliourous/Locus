@@ -100,19 +100,26 @@ export interface TranslationResources {
             refreshFailed: string
             subscription: string
             theme: string
+            themeContrast: string
             themeDark: string
+            themeDawn: string
             themeDefaultDark: string
             themeDefaultLight: string
-            themeForest: string
-            themeHighContrast: string
+            themeEmber: string
             themeHint: string
             themeLight: string
-            themeMidnight: string
-            themePaper: string
+            themeLinen: string
+            themeMoss: string
+            themeSepia: string
+            themeSlate: string
             themeSystem: string
             thisDevice: string
             title: string
             today: string
+            updateBlocked: string
+            updateCheckOff: string
+            updateCheckOffAction: string
+            updateUpToDate: string
           }
           activeConnections: string
           cancel: string
@@ -122,6 +129,11 @@ export interface TranslationResources {
           connecting: string
           disconnect: string
           disconnecting: string
+          freeData: string
+          freeDataNearlyOut: string
+          freeDataThrottled: string
+          freeDataThrottledUpgrade: string
+          freeDataUsed: string
           metricPending: string
           metricsWhenConnected: string
           needsActivation: string
@@ -133,6 +145,8 @@ export interface TranslationResources {
           subscriptionExpiresIn: string
           subscriptionExpiresToday: string
           subscriptionLapsed: string
+          support: string
+          supportEmail: string
           takingLonger: string
           toggleHint: string
         }

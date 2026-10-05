@@ -4,7 +4,7 @@
 audience:    builder
 status:      live
 authoritative-for: keeping the frontend and backend translation bundles in sync
-verified-against: docs/STATE.md
+verified-against: client/src/locales/
 ```
 
 Thanks for helping localize Clash Verge Rev. This guide reflects the current architecture, where the React frontend and the Tauri backend keep their translation bundles separate. Follow the steps below to keep both sides in sync without stepping on each other.

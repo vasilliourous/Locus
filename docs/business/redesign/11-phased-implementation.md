@@ -1,5 +1,12 @@
 # 11. Phased implementation
 
+```
+audience:    builder
+status:      design-record
+authoritative-for: the phased plan (phases 0–3,5 built; 4 deferred)
+verified-against: docs/reference/DEVICE-IDENTITY.md, docs/reference/FIXES.md
+```
+
 > **STATUS `983a254`: phases 0–3 and 5 are BUILT. Phase 4 (the client
 > fingerprint fix) is NOT, and was deferred deliberately — see below.**
 >

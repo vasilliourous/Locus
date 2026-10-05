@@ -4,7 +4,7 @@
 audience:    all
 status:      reference
 authoritative-for: the record of documentation/source layout changes
-verified-against: docs/STATE.md
+verified-against: docs/ (the tree it records)
 ```
 
 This file records every restructure of the repository and the `docs/` tree, so a

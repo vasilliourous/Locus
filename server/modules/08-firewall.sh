@@ -44,18 +44,24 @@ log "✓ Shadowsocks ports 8443, 8444, 8445 (TCP) allowed"
 ufw allow 8445/udp 2>/dev/null || true
 log "✓ Strike UDP (8445/udp) allowed"
 
-# ── Strike UDP-over-TCP (sing-box, port 8446) ──
-# Part of the default deployment, so the port is opened by default too.
-# Without this the sing-box-uot service would listen but be unreachable from
-# the internet, and Strike clients would sit on the advertised uot_port until
-# they timed out and fell back — a silent, confusing failure.
-# ENABLE_UOT=0 skips both the service and this rule.
+# ── UDP-over-TCP (sing-box) — ONE PORT PER PLAN ──
+# Part of the default deployment, so the ports are opened by default too.
+# Without these the sing-box listeners would accept connections but be
+# unreachable from the internet, and clients would sit on the advertised
+# uot_port until they timed out and fell back — a silent, confusing failure.
+#
+# BOTH ports, not just the paid one. UDP is carried by both plans now; opening
+# only 8446 would leave every free client's game traffic failing on a port the
+# hub advertises but does not admit.
+# ENABLE_UOT=0 skips both the services and both rules.
 if [ "${ENABLE_UOT:-1}" = "1" ]; then
     ufw allow "${UOT_PORT:-8446}"/tcp 2>/dev/null || true
     ufw allow "${UOT_PORT:-8446}"/udp 2>/dev/null || true
-    log "✓ Strike UoT port ${UOT_PORT:-8446} (TCP+UDP) allowed"
+    ufw allow "${UOT_PORT_FREE:-8447}"/tcp 2>/dev/null || true
+    ufw allow "${UOT_PORT_FREE:-8447}"/udp 2>/dev/null || true
+    log "✓ UoT ports allowed: paid ${UOT_PORT:-8446}, free ${UOT_PORT_FREE:-8447} (TCP+UDP each)"
 else
-    log "UoT disabled (ENABLE_UOT=0) — port ${UOT_PORT:-8446} not opened"
+    log "UoT disabled (ENABLE_UOT=0) — ports ${UOT_PORT:-8446}/${UOT_PORT_FREE:-8447} not opened"
 fi
 
 # ── Enable UFW (safe — SSH is already allowed) ──

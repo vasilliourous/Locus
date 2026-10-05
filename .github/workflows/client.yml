@@ -957,16 +957,20 @@ jobs:
           echo "Signed ${{ matrix.artifact }}:"
           cat "artifacts/${{ matrix.artifact }}.sig"
 
-      - uses: actions/upload-artifact@v4
-        with:
-          name: update-${{ matrix.label }}
-          # The binary AND its signature, always together. They are published as
-          # a pair and a release with one and not the other is refused.
-          path: |
-            client/artifacts/${{ matrix.artifact }}
-            client/artifacts/${{ matrix.artifact }}.sig
-          if-no-files-found: error
-
+      # The `update-<label>` artifact upload is NOT here, deliberately.
+      #
+      # It used to be, and that is the defect this comment marks. On macOS the
+      # `.app.tar.gz` payload is produced FURTHER DOWN — it must be built after
+      # the bundle is ad-hoc signed, because the tarball has to carry the signed
+      # app — so an upload at this point captured `artifacts/` before the tarball
+      # existed. The release job then failed with
+      #
+      #     refusing to publish a partial release — missing:
+      #     locus-darwin-amd64.app.tar.gz, locus-darwin-arm64.app.tar.gz
+      #
+      # which is the manifest guard working: it prefers publishing nothing to
+      # advertising a payload the hub cannot fetch. The upload now sits below the
+      # packaging step; see "Upload the updater payload".
       # ── Stage the human-facing installer ──
       #
       # `tauri build` already produced a real bundle above (NSIS on Windows, .app
@@ -1022,6 +1026,336 @@ jobs:
             find target -path '*/bundle*' -type f 2>/dev/null | head -40
             exit 1
           fi
+
+      # ── Ad-hoc sign the macOS bundle ──
+      #
+      # WHY THIS STEP EXISTS
+      #
+      # Locus ships without an Apple Developer ID (gap #3), so a quarantined
+      # .app is refused by Gatekeeper. macOS draws a distinction that matters
+      # more than it looks: a bundle with NO signature at all is reported as
+      # *corrupt* —
+      #
+      #   "Locus" is damaged and can't be opened. You should move it to the Trash.
+      #
+      # — and that dialog offers no "Open Anyway". A bundle with a signature
+      # that exists but is not from a Developer ID is reported as *unverified*:
+      #
+      #   "Locus" cannot be opened because Apple cannot check it for malicious
+      #   software.
+      #
+      # which macOS 15 surfaces in System Settings > Privacy & Security with an
+      # "Open Anyway" button. So ad-hoc signing does not make the app trusted;
+      # it moves the failure from a class the student cannot bypass to one they
+      # can, without a Terminal.
+      #
+      # WHY NOT A README
+      #
+      # The previous mitigation was a "READ ME FIRST.txt" staged into the .dmg
+      # telling the student to run `xattr -cr` in Terminal. It was accurate and
+      # it was a dead end: the remedy required a command line, and a student who
+      # cannot evaluate a shell command has no path forward but to follow
+      # instructions they must take on faith. The file is gone; signing replaces
+      # it. If you are tempted to restore it, read check-consistency.sh §20 —
+      # two remedies that disagree about which is primary is worse than one.
+      #
+      # WHY `--deep` AND AN ENTITLEMENTS FILE
+      #
+      # `--deep` signs the nested helper binaries (the `verge-mihomo` sidecars)
+      # with the same identity. Without it the outer bundle carries a signature
+      # while its contents do not, which is the state that produces the
+      # "damaged" dialog even when `codesign` reported success — the app is
+      # *signed*, and its own sidecar is not, so the bundle fails validation.
+      #
+      # The entitlements file is the one already configured in
+      # `tauri.macos.conf.json`, so signing here cannot disagree with what the
+      # bundler intended. It is passed explicitly because `tauri build` was told
+      # `signingIdentity: null` and passes no `--sign` at all — nothing has been
+      # signed up to this point.
+      #
+      # NOT A SUBSTITUTE FOR DEVELOPER ID + NOTARIZATION. Both are still gaps.
+      # This step does not remove the warning; it changes which warning appears.
+      - name: Ad-hoc sign the macOS bundle
+        if: startsWith(matrix.label, 'macos')
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          # The .app lives inside the .dmg Tauri produced; signing the copy in
+          # installer/ would sign nothing a student receives. Mount, sign the
+          # bundle in the staging copy, rebuild the image — the same read-out /
+          # modify / rebuild shape the repack used, for the same reason: writing
+          # into the volume being read makes `hdiutil create` its own input.
+          dmg=""
+          for f in installer/*.dmg; do
+            [ -f "$f" ] || continue
+            if [ -n "$dmg" ]; then
+              echo "::error::more than one .dmg staged: '$dmg' and '$f'"
+              exit 1
+            fi
+            dmg="$f"
+          done
+          if [ -z "$dmg" ]; then
+            echo "::error::no .dmg in installer/ — expected Tauri's dmg bundle for ${{ matrix.label }}"
+            ls -la installer/ || true
+            exit 1
+          fi
+
+          work="$(mktemp -d)"
+          mount="$work/mnt"
+          stage="$work/stage"
+          mkdir -p "$mount" "$stage"
+
+          echo "Signing the app inside $dmg"
+          hdiutil attach "$dmg" -nobrowse -noverify -readonly -mountpoint "$mount"
+
+          # Copy the CONTENTS out (dotfiles and the /Applications symlink
+          # included), so the rebuild cannot be handed a half-written source.
+          cp -R "$mount"/. "$stage"/ || {
+            hdiutil detach "$mount" || true
+            echo "::error::could not read the contents of $dmg"
+            exit 1
+          }
+          hdiutil detach "$mount"
+
+          app="$stage/Locus.app"
+          if [ ! -d "$app" ]; then
+            echo "::error::no Locus.app in $dmg"
+            ls -la "$stage" || true
+            exit 1
+          fi
+
+          # `--force` replaces any signature Tauri left; `-` is the ad-hoc
+          # identity (the literal hyphen, not a name). `--options runtime` is the
+          # hardened runtime, which is what a notarized build would use and what
+          # keeps this step truthful if a Developer ID is ever added.
+          #
+          # This is NOT best-effort. The retired Wails script logged and
+          # continued when codesign was unavailable, which means a runner where
+          # signing failed still published a .dmg that looks identical in the
+          # release list and behaves exactly like the unsigned build this step
+          # exists to replace. A failure here must fail the build.
+          codesign --force --deep --sign - \
+            --options runtime \
+            --entitlements src-tauri/packages/macos/entitlements.plist \
+            "$app"
+
+          # ── Read it back ──
+          #
+          # `codesign --sign` exiting 0 is not evidence the bundle validates:
+          # `--deep` can sign nested binaries in an order that leaves the outer
+          # seal inconsistent, and that is precisely the state that still shows
+          # the "damaged" dialog on a student's machine while the log is clean.
+          # So the signature is verified, and the identity is PRINTED — an
+          # ad-hoc signature reports "Signature=adhoc", and seeing that in the
+          # log is what distinguishes this step having worked from it having
+          # silently done nothing.
+          codesign --verify --deep --strict --verbose=2 "$app"
+          echo "--- signature as the bundle actually carries it ---"
+          codesign -dv --verbose=4 "$app" 2>&1 | sed 's/^/    /'
+
+          # Rebuild the image from the signed staging folder.
+          rm -f "$dmg"
+          hdiutil create -volname "Locus" -srcfolder "$stage" -ov -format UDZO "$dmg"
+
+          # Re-mount and confirm the SIGNED app is inside the rebuilt image. An
+          # `hdiutil create` that dropped or reverted the bundle exits 0, so the
+          # artifact — not the step's exit status — is what is checked.
+          verify="$work/verify"
+          mkdir -p "$verify"
+          hdiutil attach "$dmg" -nobrowse -noverify -readonly -mountpoint "$verify"
+          ok=0
+          if [ -d "$verify/Locus.app" ] && codesign --verify --deep --strict "$verify/Locus.app" 2>/dev/null; then
+            ok=1
+          fi
+          hdiutil detach "$verify"
+
+          if [ "$ok" -ne 1 ]; then
+            echo "::error::$dmg does not contain a validly ad-hoc-signed Locus.app"
+            ls -la "$verify" || true
+            exit 1
+          fi
+
+          echo "Verified: $dmg carries a signed Locus.app (ad-hoc, no Developer ID)"
+
+      # ── Package the macOS updater payload as a .app.tar.gz ──
+      #
+      # WHY THIS STEP EXISTS (the defect it fixes)
+      #
+      # The macOS slot in `update_config` used to carry `locus-darwin-arm64` — a
+      # bare Mach-O executable copied out of `target/<triple>/release/`. That is
+      # what Linux and Windows consume, so it looked consistent. It is not what
+      # the updater consumes on macOS, and the mismatch was invisible until a
+      # student reported no update being offered on 3.2.24.
+      #
+      # `tauri_plugin_updater`'s macOS install path is `GzDecoder` + `tar::Archive`
+      # expecting:
+      #
+      #     [AppName].app.tar.gz
+      #     └── [AppName].app/
+      #         └── Contents/...
+      #
+      # and its `extract_path` on macOS is the `.app` BUNDLE (resolved with
+      # `extract_path_from_executable`), not a single file. Handed a raw Mach-O,
+      # the extraction fails — after the student has downloaded ~48 MB and the
+      # signature has verified. There is no path in which a bare binary updates a
+      # macOS app.
+      #
+      # WHY THE TAR IS BUILT FROM THE SIGNED BUNDLE
+      #
+      # The archive must contain the AD-HOC-SIGNED app, and it must be built after
+      # the signing step above — packaging the unsigned bundle first would hand
+      # students an app that fails Gatekeeper with the "damaged" dialog, which is
+      # the exact failure the signing step exists to move away from.
+      #
+      # The `tar` layout matters too: the plugin strips one leading path component
+      # (`entry.path()?.iter().skip(1)`), so the archive must hold `Locus.app/...`
+      # rather than a bare `Contents/...`. Archiving from the parent directory
+      # produces that shape.
+      #
+      # NO `--options runtime` HERE, unlike the .dmg bundle: this lands in the
+      # updater's swap, not in a download a student double-clicks, and the
+      # signature is already on the bundle.
+      - name: Package the macOS updater payload
+        if: startsWith(matrix.label, 'macos')
+        shell: bash
+        env:
+          # The same key the artifact signing step uses; see client/docs/SIGNING.md.
+          LOCUS_UPDATE_KEY: ${{ secrets.LOCUS_UPDATE_KEY }}
+        run: |
+          set -euo pipefail
+
+          # Re-mount the signed .dmg — the signing step rebuilt it, so this reads
+          # the bytes a student would actually get rather than the pre-sign
+          # staging copy.
+          dmg=""
+          for f in installer/*.dmg; do
+            [ -f "$f" ] || continue
+            dmg="$f"
+          done
+          if [ -z "$dmg" ]; then
+            echo "::error::no .dmg to repackage for ${{ matrix.label }}"
+            ls -la installer/ || true
+            exit 1
+          fi
+
+          work="$(mktemp -d)"
+          mount="$work/mnt"
+          mkdir -p "$mount"
+          hdiutil attach "$dmg" -nobrowse -noverify -readonly -mountpoint "$mount"
+          cp -R "$mount/Locus.app" "$work/" || {
+            hdiutil detach "$mount" || true
+            echo "::error::no Locus.app inside $dmg"
+            exit 1
+          }
+          hdiutil detach "$mount"
+
+          # The published name stays what the hub's allowlist expects, so no
+          # server-side change is needed: the SLOT keeps its name and only its
+          # CONTENTS change type. `fetch-release.py` and the hub's PLATFORMS map
+          # both key on `matrix.artifact`.
+          tarball="artifacts/${{ matrix.artifact }}.app.tar.gz"
+
+          # `tar` from the parent so entries begin `Locus.app/`, which is what
+          # the plugin's `skip(1)` expects. `--no-xattrs` keeps resource forks
+          # out; `gzip -9` because a 100 MB app is a student's download.
+          ( cd "$work" && tar --no-xattrs -czf - Locus.app ) > "$tarball"
+
+          # ── Read it back ──
+          #
+          # Prove the archive is the shape the plugin will accept, from the
+          # artifact rather than from the step's exit status: a tar that captured
+          # the wrong depth exits 0 and installs nothing.
+          if ! tar -tzf "$tarball" | head -1 | grep -q '^Locus\.app/'; then
+            echo "::error::$tarball does not start with Locus.app/ — the updater's skip(1) would miss it"
+            tar -tzf "$tarball" | head -10 || true
+            exit 1
+          fi
+          if ! tar -tzf "$tarball" | grep -q '^Locus\.app/Contents/MacOS/'; then
+            echo "::error::$tarball is missing Locus.app/Contents/MacOS/ — not a runnable bundle"
+            exit 1
+          fi
+
+          size=$(wc -c < "$tarball")
+          if [ "$size" -lt 1000000 ]; then
+            echo "::error::$tarball is only $size bytes — the bundling step produced a stub"
+            exit 1
+          fi
+
+          echo "Packaged $(basename "$tarball") ($size bytes)"
+          tar -tzf "$tarball" | head -5 | sed 's/^/    /'
+
+          # ── Sign the tarball, as its own artifact ──
+          #
+          # A SEPARATE signature from the raw binary's, and not interchangeable.
+          # `tauri_plugin_updater` calls
+          #
+          #     verify_signature(&buffer, &self.signature, &pubkey)
+          #
+          # over the bytes it DOWNLOADED (updater.rs), and on macOS the bytes it
+          # downloads are this tarball. minisign signs exact bytes, so the raw
+          # Mach-O's `.sig` verifies only the raw Mach-O — the hub's manifest
+          # cross-check caught exactly that, refusing a macOS entry whose
+          # signature did not accompany its payload.
+          #
+          # Signing the ARCHIVE is correct rather than a workaround: the plugin
+          # verifies before it extracts, so the signature has to cover what
+          # arrives over the wire. The `.app` inside is additionally ad-hoc
+          # signed, which is what Gatekeeper sees once it is on disk. The two
+          # signatures answer different questions.
+          #
+          # The key is written HERE rather than reused from the earlier signing
+          # step: that step deletes `$RUNNER_TEMP/locus.key` when it finishes, so
+          # by this point the file is gone. Depending on a file another step
+          # cleans up is the kind of cross-step coupling that works until someone
+          # reorders the steps.
+          KEY="$RUNNER_TEMP/locus-tarball.key"
+          printf '%s' "${LOCUS_UPDATE_KEY:-}" > "$KEY"
+          chmod 600 "$KEY"
+          if [ ! -s "$KEY" ]; then
+            echo "::error::LOCUS_UPDATE_KEY is not set, so the macOS updater payload cannot be signed (see client/docs/SIGNING.md)."
+            exit 1
+          fi
+          "$RUNNER_TEMP/minisign/minisign" -S -s "$KEY" -m "$tarball" \
+            -x "$tarball.sig" -t "Locus ${{ matrix.label }} app bundle"
+          rm -f "$KEY"
+
+          if [ ! -s "$tarball.sig" ]; then
+            echo "::error::$tarball.sig is empty — the updater verifies mandatorily and would refuse this release"
+            exit 1
+          fi
+          echo "Signed $(basename "$tarball"):"
+          cat "$tarball.sig"
+
+      # ── Upload the updater payload ──
+      #
+      # LAST among the payload steps, and that placement is load-bearing on
+      # macOS: the `.app.tar.gz` above does not exist until the bundle has been
+      # signed and packaged. An upload earlier in the job silently ships an
+      # artifact set with no macOS payload, and the release job's manifest guard
+      # then refuses the whole publish — a correct refusal, but a confusing one
+      # to diagnose from the release list.
+      #
+      # The payload AND its signature, always together: they are published as a
+      # pair, and a release carrying one without the other is refused downstream.
+      #
+      # On macOS the tarball is what the hub is pointed at (`fetch-release.py`
+      # PLATFORMS), while the raw Mach-O the `.sig` was computed over is still
+      # published — it is harmless, and it is what pre-3.2.27 responses named.
+      # The hub's macOS payload is the tarball, guarded by
+      # check-consistency.sh §24.
+      - uses: actions/upload-artifact@v4
+        with:
+          name: update-${{ matrix.label }}
+          # The macOS tarball AND ITS OWN `.sig`. The two signatures are not
+          # interchangeable — minisign signs exact bytes, and the plugin verifies
+          # the bytes it downloaded, which on macOS is the tarball.
+          path: |
+            client/artifacts/${{ matrix.artifact }}
+            client/artifacts/${{ matrix.artifact }}.sig
+            client/artifacts/${{ matrix.artifact }}.app.tar.gz
+            client/artifacts/${{ matrix.artifact }}.app.tar.gz.sig
+          if-no-files-found: error
 
       # ── Sign the Windows installer ──
       #
@@ -1121,6 +1455,124 @@ jobs:
           echo "Signed ${setup}:"
           cat "${setup}.sig"
 
+      # ── The human download: a compressed, signed copy of the .app ──
+      #
+      # WHY A SECOND ARTIFACT
+      #
+      # The `.dmg` above is the drag-to-Applications install a person runs. This
+      # zip exists for the case the .dmg cannot serve: a student whose download
+      # arrives quarantined and refused, where the advice is to keep the bundle
+      # and clear the flag. A `.zip` of a signed `.app` is the form macOS itself
+      # treats as an app bundle in transit — extracting it with Finder or
+      # `ditto -x -k` restores a `Locus.app` that still carries the ad-hoc
+      # signature, and `ditto` preserves the bundle metadata and the symlinks
+      # inside `Contents/Frameworks` that a naive `zip` would flatten.
+      #
+      # WHAT THIS DOES NOT DO, and it matters because it is the obvious
+      # assumption: a zip does NOT arrive unquarantined. Quarantine is applied
+      # by whatever DOWNLOADS the file — a browser fetching it from the GitHub
+      # Release stamps the archive, and the extracted `.app` inherits the flag
+      # from its parent. So this is not a way to avoid Gatekeeper; it is a way
+      # to deliver the same signed bundle in a form that survives transport
+      # intact, so the student meets the bypassable "unidentified developer"
+      # dialog (see "Ad-hoc sign the macOS bundle" above) rather than a corrupt
+      # archive.
+      #
+      # NAME: it carries the version and the architecture, and it is NOT an
+      # updater payload. `fetch-release.py` resolves updater assets from an
+      # allowlist and `manifest.json` names what a client installs from itself;
+      # neither includes this file. The release job's collision guard rejects
+      # any installer whose name begins `locus-`, and this one deliberately does
+      # not — so it can never be mistaken for the thing the updater fetches.
+      - name: Package the macOS app for download
+        if: startsWith(matrix.label, 'macos')
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          # Reuse the signed bundle the previous step verified. It is inside
+          # installer/ only as the .dmg, so the staging copy is re-extracted
+          # from the image we just rebuilt and re-verified — meaning the bytes
+          # zipped here are the bytes that were checked, not a re-derivation.
+          dmg=""
+          for f in installer/*.dmg; do
+            [ -f "$f" ] || continue
+            dmg="$f"
+          done
+          if [ -z "$dmg" ]; then
+            echo "::error::no .dmg in installer/ to extract the signed app from"
+            exit 1
+          fi
+
+          work="$(mktemp -d)"
+          mount="$work/mnt"
+          mkdir -p "$mount"
+          hdiutil attach "$dmg" -nobrowse -noverify -readonly -mountpoint "$mount"
+          app_src="$mount/Locus.app"
+          if [ ! -d "$app_src" ]; then
+            hdiutil detach "$mount" || true
+            echo "::error::no Locus.app inside $dmg"
+            exit 1
+          fi
+
+          # Which architecture this slice is, for the filename. `matrix.label`
+          # is `macos-intel` / `macos-arm`; the artifact names use the same
+          # words CI already uses for the updater payloads (`darwin-amd64`,
+          # `darwin-arm64`), kept in step deliberately so one naming table
+          # describes both.
+          case "${{ matrix.label }}" in
+            macos-intel) arch="amd64" ;;
+            macos-arm)   arch="arm64" ;;
+            *) echo "::error::unexpected macOS label '${{ matrix.label }}'"; exit 1 ;;
+          esac
+
+          ver="$(node -p "require('./package.json').version")"
+          out="installer/Locus_${ver}_${arch}.zip"
+
+          # `--keepParent` so the archive contains `Locus.app/` rather than the
+          # bundle's CONTENTS at the archive root. Without it, extracting gives
+          # a loose `Contents/` directory and the result is not an app at all —
+          # Finder shows a folder, and there is nothing to drag to Applications.
+          # `--sequesterRsrc` keeps resource forks in `__MACOSX`, and `-c -k`
+          # is the PKZip form.
+          ditto -c -k --sequesterRsrc --keepParent "$app_src" "$out"
+          hdiutil detach "$mount"
+
+          echo "Packaged $out ($(du -h "$out" | cut -f1))"
+
+          # ── Read it back ──
+          #
+          # `ditto` exiting 0 is not evidence the archive holds a usable app: a
+          # zip missing `--keepParent`, or one that lost the bundle's structure,
+          # extracts to something that is not an app and looks identical in
+          # `ls`. So the archive is listed, and the two things that must be in
+          # it are asserted BY NAME — the bundle directory and its executable.
+          listing="$(unzip -l "$out")"
+          printf '%s\n' "$listing" | head -20 | sed 's/^/    /'
+          bad=0
+          printf '%s' "$listing" | grep -q 'Locus\.app/' || {
+            echo "::error::$out does not contain Locus.app/ — the bundle root is missing"
+            bad=1
+          }
+          printf '%s' "$listing" | grep -q 'Locus\.app/Contents/MacOS/' || {
+            echo "::error::$out does not contain Locus.app/Contents/MacOS/ — the executable is missing"
+            bad=1
+          }
+          [ "$bad" -eq 0 ] || exit 1
+
+          # And the extracted bundle must still VERIFY as signed. This is the
+          # check that makes the artifact's purpose true: the whole reason this
+          # zip exists is that the student receives a bundle macOS recognises as
+          # signed-but-untrusted rather than as corrupt. Extracting here proves
+          # the round trip preserves the signature, which a zip that mangles
+          # file modes would not.
+          extract="$work/extract"
+          mkdir -p "$extract"
+          ditto -x -k "$out" "$extract"
+          codesign --verify --deep --strict "$extract/Locus.app"
+          echo "Verified: $out extracts to a validly signed Locus.app"
+
+          ls -la installer/
       - uses: actions/upload-artifact@v4
         with:
           name: installer-${{ matrix.label }}
@@ -1188,6 +1640,33 @@ jobs:
             exit 1
           fi
           echo "Staged $count installer asset(s)."
+
+          # ── The macOS download must be present, and named for a human ──
+          #
+          # Asserted by SHAPE rather than by an exact version, so a bump does not
+          # turn this into a false failure: `installer-Locus_<v>_<arch>.zip` for
+          # both architectures. The failure this catches is the one the 3.2.14
+          # Windows outage was made of — a build job that did not produce the
+          # artifact, and a release that publishes anyway, with the omission
+          # invisible from the release list until a student downloads nothing.
+          #
+          # It is NOT a `.dmg` check: the .dmg is the drag-to-install image a
+          # person runs, and it is still published. This asserts the zip, which
+          # is the artifact whose whole purpose is that its contents survive
+          # transport with the bundle intact.
+          zip_count=0
+          for z in release/installer-Locus_*_amd64.zip release/installer-Locus_*_arm64.zip; do
+            [ -f "$z" ] || continue
+            zip_count=$((zip_count + 1))
+            echo "  macOS download present: $(basename "$z")"
+          done
+          if [ "$zip_count" -lt 2 ]; then
+            echo "::error::expected two macOS download zips (amd64 and arm64), found $zip_count"
+            ls -la release/ || true
+            echo "::error::the 'Package the macOS app for download' step is macOS-gated; if it"
+            echo "::error::was renamed or un-gated, one or both slices stopped producing this"
+            exit 1
+          fi
 
       - name: List what will be published
         run: ls -la release/
@@ -1257,12 +1736,33 @@ jobs:
 
           # Platform key -> filename. The keys say macos_*, the files say darwin-*:
           # that asymmetry is frozen and must not be "tidied".
+          #
+          # macOS names the `.app.tar.gz`, NOT the raw Mach-O. This is the same
+          # class of bug as the Windows entry below, and it shipped: the raw
+          # macOS binary was advertised in the update slot while
+          # `tauri_plugin_updater` expects a tar of an `.app` bundle there, so a
+          # macOS client could not install what it was offered. The hub resolves
+          # exactly these names (fetch-release.py PLATFORMS), and its
+          # cross-check refuses to publish when the two disagree — which is what
+          # makes this a single decision rather than two that can drift.
           platforms = {
               "linux": "locus-linux-amd64",
               "windows": windows_installer(),
-              "macos_intel": "locus-darwin-amd64",
-              "macos_arm": "locus-darwin-arm64",
+              "macos_intel": "locus-darwin-amd64.app.tar.gz",
+              "macos_arm": "locus-darwin-arm64.app.tar.gz",
           }
+
+          # GUARD: the macOS entries must be the packaged bundle. A bare Mach-O
+          # in a macOS update slot is exactly the defect above, so a future edit
+          # that "restores" it fails here rather than on a student's machine.
+          for _key in ("macos_intel", "macos_arm"):
+              if not platforms[_key].endswith(".app.tar.gz"):
+                  raise SystemExit(
+                      f"{_key} must name the .app.tar.gz updater payload, not "
+                      f"{platforms[_key]!r}. A macOS client extracts a tar of an "
+                      ".app bundle; a bare Mach-O downloads and verifies and then "
+                      "fails to install."
+                  )
 
           # GUARD: the Windows entry must not be the raw updater binary. This is
           # the mechanical form of the bug, so a future edit that "restores" it
@@ -1271,6 +1771,24 @@ jobs:
               raise SystemExit(
                   "refusing to publish: the windows platform entry is the raw "
                   "updater executable, which a client cannot install from itself"
+              )
+
+          # GUARD: no entry may name a .zip. A zip is a HUMAN download — it is
+          # the compressed, signed .app a student extracts — and it is not
+          # something the updater can execute or a macOS client can replace
+          # itself with. `tauri_plugin_updater` would try to treat it as one and
+          # fail on the client, which is the same class of mistake as serving the
+          # raw Windows PE: an artifact that is legitimate in the release and
+          # wrong in the update slot. The zip is deliberately absent from
+          # `platforms`, and this asserts that it stays that way rather than
+          # leaving it to whoever edits the map next.
+          zipped = [k for k, v in platforms.items() if v.endswith(".zip")]
+          if zipped:
+              raise SystemExit(
+                  "refusing to publish: the manifest names a .zip for "
+                  + ", ".join(zipped)
+                  + " — a compressed app bundle is a human download, not an "
+                  "artifact a client installs from itself"
               )
 
           out = {"version": os.environ["VERSION"].lstrip("v"), "platforms": {}}
@@ -1375,6 +1893,26 @@ jobs:
           #
           # The OTHER platforms' installers are human-only and remain unfetched
           # by `fetch-release.py`.
+          # THIS LIST MUST MATCH WHAT manifest.json ADVERTISES.
+          #
+          # The macOS entries name the `.app.tar.gz` payloads, NOT the bare
+          # Mach-O binaries — the same names `manifest.json` declares and
+          # `fetch-release.py` resolves. This list used to name the raw
+          # `locus-darwin-*` binaries while the manifest had already been
+          # switched to the tarballs, so the release was published WITHOUT the
+          # files the hub would try to fetch:
+          #
+          #   manifest.json: macos_arm -> locus-darwin-arm64.app.tar.gz
+          #   release assets: locus-darwin-arm64   (the bare binary)
+          #
+          # The run went green and the release looked complete, because both
+          # halves were individually valid — only the agreement was broken. That
+          # is the failure `fetch-release.py`'s "the v%s release is missing"
+          # check exists to catch, and §24 now pins the agreement so it cannot
+          # be re-broken here.
+          #
+          # The bare macOS binaries are still uploaded as assets: they are
+          # harmless, and pre-3.2.27 hub rows referenced them.
           files: |
             release/locus-linux-amd64
             release/locus-linux-amd64.sig
@@ -1384,6 +1922,10 @@ jobs:
             release/locus-darwin-amd64.sig
             release/locus-darwin-arm64
             release/locus-darwin-arm64.sig
+            release/locus-darwin-amd64.app.tar.gz
+            release/locus-darwin-amd64.app.tar.gz.sig
+            release/locus-darwin-arm64.app.tar.gz
+            release/locus-darwin-arm64.app.tar.gz.sig
             release/manifest.json
             release/installer-*
           draft: false

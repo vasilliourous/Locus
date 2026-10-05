@@ -1,5 +1,12 @@
 # 12. Scale and the ceiling
 
+```
+audience:    human-operator
+status:      live
+authoritative-for: how big this can get, and the honest ambition
+verified-against: docs/state.toml
+```
+
 ## 12.1 The numbers
 
 - **Target per school:** 50–500 students reachable via middlemen.
@@ -13,11 +20,11 @@ The free tier changes what "scale" means here, in both directions:
 - **It raises the headcount ceiling.** A free tier can plausibly reach
   *most* of a school, where a $2 floor could not.
 - **It lowers revenue per head** by roughly half
-  ([`05-pricing.md`](05-pricing.md#541-how-this-compares-to-the-old-ladder)).
+  ([`05-pricing.md`](05-pricing.md#541-how-this-compares-to-the-ladders-before-it)).
 - **So the bet is headcount over margin** — and it only pays if free users
   convert ([`11-growth.md`](11-growth.md#113-the-free-tier-as-the-acquisition-engine)).
 
-At 1,000 users (65% free), the ladder produces roughly **$2,500/mo net**
+At 1,000 users (60% paid), the offer produces roughly **$2,200/mo net**
 ([`05-pricing.md`](05-pricing.md#54-sensitivity)). That is a real number at
 pocket-money scale, and still not a business that rewards chasing 10× effort.
 

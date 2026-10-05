@@ -331,7 +331,7 @@ mod tests {
         assert_eq!(cfg.uot_port, 8446);
     }
 
-    /// A tier with no UoT endpoint is the normal case for eco and stealth, and
+    /// A tier with no UoT endpoint is the normal case for the free plan, and
     /// must not be an error.
     #[test]
     fn a_tier_without_uot_parses_and_reports_disabled() {

@@ -9,10 +9,10 @@ receive wrong/stale passwords and the Shadowsocks server rejects them with
 "An existing connection was forcibly closed by the remote host".
 
 WHAT THIS DOES:
-  1. Reads the GROUND-TRUTH passwords from /etc/shadowsocks/{eco,stealth,strike}.json
+  1. Reads the GROUND-TRUTH passwords from /etc/shadowsocks/{eco,strike}.json
   2. Authenticates against PocketBase using /root/.pb_admin_creds (PB_TOKEN)
   3. Replaces every tier_configs record with a fresh one matching the live
-     ssserver configs (server = the configured DOMAIN, ports 8443/8444/8445)
+     ssserver configs (server = the configured DOMAIN, ports 8443/8445)
   4. Prints the final state + the collection schema (diagnostics)
 
 RUN (on the VPS, as root):
@@ -38,11 +38,35 @@ SS_CONFIG_DIR = "/etc/shadowsocks"
 # "udp_over_tcp v2" option, but that protocol is proprietary to sing-box —
 # shadowsocks-rust closes those connections (RST, observed 2026-08-01).
 # UDP flows via standard ss UDP (server mode tcp_and_udp).
+#
+# (tier, port, udp, source_tier)
+# `source_tier` is the on-box shadowsocks config this row's credentials come
+# from. It exists for `free`, which shares the Eco endpoint (port 8443, same
+# password, same 1mbit tc class) and has no /etc/shadowsocks/free.json of its
+# own. `free` is what new codes are minted against and what the console lists;
+# `eco` stays so codes already in the field keep resolving. See
+# docs/business/04-tiers.md §4.5.
 TIERS = [
-    ("eco", 8443, False),
-    ("stealth", 8444, False),
-    ("strike", 8445, False),
+    ("eco", 8443, False, "eco"),
+    ("free", 8443, False, "eco"),
+    ("strike", 8445, False, "strike"),
 ]
+
+# TIER ROWS THIS SCRIPT MUST NOT DELETE.
+#
+# `stealth` was retired when the paid ladder merged into one plan
+# (docs/business/04-tiers.md §4.2.4), so it is no longer repaired here — but it
+# is also not deleted, because a code in the field may still carry that tier
+# string and resolve against this row. Removing it would strand real students.
+#
+# This matters because the repair below REPLACES every unsanctioned row it finds.
+# Dropping `stealth` from TIERS alone would silently delete the row on the next
+# repair run; the preset disposition is therefore explicit, so an operator can
+# see what happens to it rather than discovering it.
+#
+# If the live probe (docs/operate/CLAIMS.md §5) shows no code carries the string,
+# remove this entry and delete the row from the console.
+PRESERVE_ROWS = ["stealth"]
 
 
 def log(msg):
@@ -75,8 +99,8 @@ def main():
 
     # ── 1. Ground-truth passwords from live ssserver configs ──
     live = {}
-    for tier, port, _udp in TIERS:
-        path = os.path.join(SS_CONFIG_DIR, f"{tier}.json")
+    for tier, port, _udp, src in TIERS:
+        path = os.path.join(SS_CONFIG_DIR, f"{src}.json")
         try:
             with open(path) as f:
                 cfg = json.load(f)
@@ -85,7 +109,8 @@ def main():
                 "port": cfg.get("server_port", port),
                 "method": cfg.get("method", SS_METHOD),
             }
-            log(f"  {tier}: ssserver on :{live[tier]['port']} (method {live[tier]['method']})")
+            note = "" if src == tier else f" (shared with {src})"
+            log(f"  {tier}: ssserver on :{live[tier]['port']} (method {live[tier]['method']}){note}")
         except Exception as ex:
             log(f"ERROR: cannot read {path}: {ex}")
             sys.exit(1)
@@ -124,14 +149,44 @@ def main():
         log("  Create it by re-running the seed script, or in the admin UI.")
 
     # ── 4. Replace all tier_configs records with the live passwords ──
+    #
+    # The delete-and-recreate is what makes this script trustworthy — it
+    # reconciles stale passwords against the live ssserver configs. It is also
+    # what makes it dangerous: a row omitted from TIERS is a row this script
+    # DELETES. `stealth` is exactly that case (retired from the code, but a live
+    # code may still carry the string), which is why PRESERVE_ROWS exists and is
+    # honoured here rather than being a comment somebody has to remember.
     existing = api("GET", "/api/collections/tier_configs/records?perPage=200", token=token)
     items = existing.get("items", []) if isinstance(existing, dict) else []
     log(f"  existing records: {len(items)}")
+
+    preserved = []
+    for rec in items:
+        if rec.get("tier") in PRESERVE_ROWS:
+            preserved.append(rec)
+            log(f"    preserving {rec.get('tier')} (retired, but a live code may still carry it)")
+
     for rec in items:
         resp = api("DELETE", f"/api/collections/tier_configs/records/{rec['id']}", token=token)
         log(f"    deleted {rec.get('tier')} ({rec['id'][:12]}) -> {resp.get('code', 'ok')}")
 
-    for tier, port, udp in TIERS:
+    # Re-post the preserved rows verbatim: their config is NOT reconciled against
+    # /etc/shadowsocks, because their service is gone. Their endpoint is whatever
+    # it was when they were retired, which is what a stranded code needs.
+    for rec in preserved:
+        body = {
+            "tier": rec.get("tier"),
+            "config": rec.get("config"),
+            "active": rec.get("active", True),
+            "udp_relay": rec.get("udp_relay", False),
+        }
+        resp = api("POST", "/api/collections/tier_configs/records", body, token=token)
+        if resp.get("id"):
+            log(f"  ✓ restored preserved row {rec.get('tier')}")
+        else:
+            log(f"  ✗ FAILED to restore preserved row {rec.get('tier')}: {resp}")
+
+    for tier, port, udp, _src in TIERS:
         body = {
             "tier": tier,
             "config": json.dumps({

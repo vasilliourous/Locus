@@ -4,7 +4,7 @@
 audience:    builder
 status:      live
 authoritative-for: the dated defect log (append-only; newest first)
-verified-against: docs/STATE.md
+verified-against: docs/state.toml (version/release facts)
 ```
 
 Everything below is a dated, append-only log of real defects and their fixes, in
@@ -24,6 +24,445 @@ corrections are marked. For what is *still* broken, read `STILL-OPEN.md`.
 > are active as soon as the matching version installs. A heartbeat that lacks
 > `enforcement_version` in its response is proof the hook is still stale — see
 > `STILL-OPEN.md`.
+
+---
+
+## THE DOCS DESCRIBED REMOVED MECHANISMS AS LIVE, AND TWO PROSE COPIES OF A CAP WERE WRONG (2026-10-05, docs + guards)
+
+**Not a code defect — a documentation set that had drifted from the code it
+described, in the specific class the doc architecture exists to prevent.** The
+tree's own guards were all green throughout: `check-consistency.sh` passed 24
+sections, every link and anchor resolved, and every *value* it recomputed agreed.
+What it could not see was the prose.
+
+The audit that found this, and the fixes:
+
+1. **The claim register contradicted itself.** `operate/CLAIMS.md` §5 A1 ("the
+   hub answers `/api/health`") was marked `unverified`, and the file's own closing
+   paragraph said the environment had *"no route to the hub"* — while
+   `verify-live.sh` returned `A1 PASS` and `/api/health` returned 200. A1 was
+   advanced to a dated verification and the paragraph was re-scoped from a
+   present-tense claim to dated history.
+
+2. **The verifier's date disagreed with the project's dateline.**
+   `verify-live.sh` suggested `today's date` from `date -u` (UTC), but every
+   register entry is written in the operator's NZ dateline (see `git log`), which
+   is up to a day ahead. A date copied from the script would have been a day
+   behind its neighbours. The script now prints the register's date, and A1 uses
+   it (2026-10-05).
+
+3. **Two prose copies of the free-tier cap were wrong.** The root `README.md`
+   said `Eco 5Mbit ... tc caps (5/100/200 Mbps)` and `04-tc.sh`'s own header
+   comment said `Eco (port 8443): 5 Mbps` — both the **pre-rename** value, above
+   code that applies `1mbit`, for months, with every value-check green. Fixed, and
+   **§23(g)** now pins those two restatements against `state.toml`. *A check on a
+   value is not a check on what a document says about it.*
+
+4. **The `uot_port` contract was documented backwards.** `client/docs/LOGIC-INVENTORY.md`
+   claimed *"the hub hook renames on the way out"*; the hook passes the tier
+   config **verbatim** and it is the **client** that tolerates both spellings
+   (`contract.rs`). The doc is the bug; corrected.
+
+5. **Three documents named a "client is 3.0.0" / "three version sites" fact in
+   present tense**, contradicting the five-site rule the release path enforces.
+   The count moved into `docs/state.toml` `[client.version_sites]` (derived, §9),
+   and the prose links it, so a sixth site fails the build.
+
+6. **The redesign corpus described removed device binding as live.** 17 files
+   under `docs/business/redesign/**` had banners but no front-matter `status:`;
+   three presented the removed one-code-per-device rule as current. All now carry
+   front-matter, the removed mechanisms are marked in-place, and **§25** fails the
+   build on a live document with no `audience:`/`status:` or an invented value —
+   which immediately caught a seventh (`DEPLOY-3.2.7.md` had prose in its
+   `status:` field).
+
+7. **A permanent 14-file WARN wall was read as green.** §7 reported every
+   document naming a non-current 3.x version, with a note that *"some are
+   legitimately historical"* — and nobody triaged it. The historical ones are now
+   excluded by exact path with a reason, so §7 is a real check: it reports only
+   genuine drift and was observed failing against a seeded one.
+
+Each new guard (§23(g), §25, the §9 `version_sites` fact, §7's triage) was
+**observed failing** against the defect it catches before being kept, and the
+suite is green after each fix.
+
+
+| | |
+|---|---|
+| **Reported as** | *"the update to 3.2.26 is not an installer (48150583 bytes); refusing to execute it — this build cannot install a raw executable, and neither can the platform installer"*, from a client on 3.2.24. Concurrently, the admin console's *Fetch & publish* refused a **v3.2.28** publish with *"the hub's platform filenames disagree with CI's manifest … macos_intel: the hub would serve `locus-darwin-amd64`, but CI's manifest advertises `locus-darwin-amd64.app.tar.gz`"* |
+| **Files** | `server/scripts/fetch-release.py` (`resolve_platform_names`, `fetch_release`), `server/scripts/check-consistency.sh` §24 (h)/(i)/(j), `server/scripts/smoke-macos-payload-resolution.sh` (new), `docs/operate/RECOVER-MACOS-UPDATE.md` (new) |
+
+### The client was right; the hub served the wrong file
+
+The error is precise, and every figure matches the live hub:
+
+| Fact | Value |
+|---|---|
+| Error reports | `48150583 bytes` |
+| `locus-darwin-arm64` `Content-Length` | `48150584` (48150583 == its exact byte count) |
+| First bytes of that file | `cf fa ed fe 0c 00 00 01` — a **Mach-O 64-bit arm64** |
+| `/api/update?version=3.2.24&platform=macos_arm` | `"version":"3.2.26"`, url `…/locus-darwin-arm64` |
+| `…/locus-darwin-arm64.app.tar.gz` | **HTTP 404** |
+
+`tauri_plugin_updater`'s macOS path is `GzDecoder` + `tar::Archive` over an
+`.app` bundle. It cannot apply a bare Mach-O. The client's `is_installer_payload`
+refused it — correctly — and **the hub had published an artifact no macOS client
+could install**.
+
+### Two defects, not one
+
+**(1) The silent fallback published it.** `resolve_platform_names(available=…)`
+returned the pre-fix bare Mach-O when a release carried no `.app.tar.gz`, logged
+a WARNING at a level nobody reads, and carried on. v3.2.26 genuinely predates the
+macOS packaging step (see the 2026-10-04 entry below), so the fallback fired and
+wrote a live `update_config` row pointing every macOS client at a payload its
+installer can never apply. **Degrading to an uninstallable payload is worse than
+refusing:** a refusal is visible at publish time; a broken row looks healthy from
+the operator's seat. This is the retired client's worst failure mode — *an update
+advertised and then unable to install, with nothing saying why* — re-created on
+the hub side.
+
+**(2) The cross-check answered a different question from staging.** The staging
+loop resolved the names *with* `available=set(assets)` ("what will the hub
+fetch?"), while the manifest cross-check re-called `resolve_platform_names(version)`
+*without* it ("what does the hub prefer?"). The two agreed only while every
+release carried every preferred name, so the check could pass while a different
+file was served — the "two sources of truth with no reconciliation" shape this
+project keeps paying for.
+
+### Why three existing guards passed
+
+- §24's six assertions check that the **declarations agree** (CI's map, the hub's
+  `NEW_PLATFORMS`, `publish-release.sh`'s `PLATFORMS`, the doc). They did agree.
+  The defect was a **runtime branch that downgraded a correct declaration into a
+  broken artifact** — invisible to a declaration-only check.
+- `publish-release.sh` (the CLI route) was already safe: it hard-codes the
+  tarball names and refuses a partial publish. Only the **fetch** route had the
+  fallback. The console error was the CLI-shaped guard firing on a version whose
+  release genuinely lacked the tarball.
+- The macOS hash cross-check hashed whichever file the *manifest* named, so it
+  agreed with itself by construction — the 2026-10-01 lesson, unlearned for a
+  second slot.
+
+### The fix
+
+1. **The fallback is gone.** `resolve_platform_names(available=…)` now **raises
+   `FetchError`** for a macOS slot with no `.app.tar.gz`, naming the platform, the
+   missing file, and the pre-fix binary it refused to serve.
+2. **One answer.** The manifest cross-check iterates the *staged* `resolved` list,
+   so what is verified is what is served. The mismatch message now points at the
+   real remedy first — *almost always a stale deployed `fetch-release.py`* — and
+   `hooks-sync.sh --fetch-service`.
+3. **Guards, each shown to fail** against the code it catches (the repository's
+   rule):
+   - §24(h) — `resolved = legacy` must not exist; the refusal must `raise FetchError`.
+   - §24(i) — staging binds `resolved` from `available=set(assets)`; the
+     cross-check iterates that list.
+   - §24(j) — runs `smoke-macos-payload-resolution.sh`, which **imports the
+     shipped function** and asserts the behaviour. Proven necessary: an evasive
+     rewrite (`resolved = (legacy)`) slips past the (h) grep and is caught only
+     by (j).
+
+### Verified / not verified
+
+| | Status |
+|---|---|
+| The live hub serves a bare Mach-O for `3.2.26` macOS slots | **Verified** (read-only `curl`; bytes and length match the report) |
+| v3.2.26 predates the packaging step; v3.2.28 carries the tarballs + `.sig` | **Verified** (GitHub Release asset lists and both manifests) |
+| The fallback, reproduced, published a bare Mach-O | **Verified** (imported the module; before/after in the session) |
+| Each new guard fails against the pre-fix code | **Verified** (§24 (h)/(i)/(j) each shown red on a reverted copy) |
+| The deployed host's `fetch-release.py` is the stale half | **Not verified** — needs `hooks-sync.sh --fetch-service --dry-run` on the host |
+| A real end-to-end macOS update installs | **Not verified** — needs macOS hardware; recovery is `RECOVER-MACOS-UPDATE.md` |
+
+---
+
+## A MACOS STUDENT WAS OFFERED NOTHING, AND NOTHING SAID WHY (2026-10-04, v3.2.27)
+
+| | |
+|---|---|
+| Severity | 🔴 macOS auto-update had never worked, and every path that suppressed an offer was invisible |
+| **Reported as** | *"The update wasn't offered to a mac user on 3.2.24"* |
+| **Files:** | `.github/workflows/client.yml`, `server/scripts/fetch-release.py`, `server/scripts/publish-release.sh`, `client/src-tauri/src/locus/update/{mod.rs,install.rs}`, `client/src-tauri/src/locus/{runtime.rs,store.rs}`, `client/src-tauri/src/config/verge.rs`, `client/src-tauri/src/cmd/locus.rs`, `client/src/pages/account.tsx`, `client/src/services/locus.ts`, `server/scripts/check-consistency.sh` §24 |
+| **Fixed in:** | 3.2.27 |
+
+### Two defects, and the one that explained the report
+
+**First, the reason was unobservable.** Every path that suppresses an update
+offer logged at **`debug`**, and the default log level is **`Info`**:
+
+```rust
+logging!(debug, Type::System, "[locus] update {version} is available but automatic checking is off; not offering");
+```
+
+So an offer could be silently dropped and the machine would carry **no trace at
+all** — not in the log, not on screen. That is the report exactly: "it wasn't
+offered", with nothing anywhere saying why. An update advertised and then
+ignored is indistinguishable from a stable release with no update, which is the
+failure mode this whole path exists to avoid.
+
+Fixed by promoting those lines to `warn`/`info` and making the reason a **type**
+(`NoOfferReason`) rather than a log call — then surfacing it on the Account page,
+so the question "why is this device not updating?" has an answer on screen.
+
+The trigger is most likely `auto_check_update`, which is **inherited from
+upstream Clash Verge Rev** and whose Account-page row was once mis-wired to
+auto-launch — so a stale `false` can persist across upgrades. That case now gets
+its own wording and a one-tap fix.
+
+**Second, macOS could not install what it was offered.** The hub's macOS slots
+named a bare Mach-O (`locus-darwin-arm64`), while `tauri_plugin_updater` on macOS
+runs `GzDecoder` + `tar::Archive` expecting:
+
+```
+Locus.app.tar.gz
+└── Locus.app/
+    └── Contents/...
+```
+
+and resolves `extract_path` to the `.app` **bundle**, not a single file. A bare
+Mach-O downloads ~48 MB, verifies its signature, and then fails at extraction.
+There was never a path in which a macOS client updated itself.
+
+Fixed by packaging the ad-hoc-signed bundle as `*.app.tar.gz` in CI (after
+signing, from the rebuilt `.dmg`), and repointing all three sites that name the
+payload: CI's manifest, `fetch-release.py` `PLATFORMS`, and
+`publish-release.sh` `PLATFORMS`.
+
+### Why no guard caught this
+
+§1 covers the Windows installer name and §1c covers the macOS *human download*
+zip, but **nothing checked what a macOS client downloads to replace itself** —
+so the mismatch survived every green pipeline. §24 now asserts the agreement
+across all three sites, plus the negative (no bare Mach-O in a macOS update slot)
+and the client-side half (`is_bare_executable` must match Mach-O magic, so a bare
+macOS binary is refused as the wrong artifact kind rather than falling through as
+an unknown "container").
+
+§24's first draft had the defect it exists to catch: its client-side check grepped
+for the words "Mach-O", which also appear in the doc comment and the tests. Both
+scoped checks were observed **failing** against a deleted implementation before
+being kept.
+
+### Verified / not verified
+
+- **Verified:** 603 lib tests (5 new); `cargo clippy -D warnings`, `tsc`, `lint`,
+  96 frontend tests, `check-consistency.sh` (109 checks). All six §24 assertions
+  and the client-side check observed **failing** against the exact defect, then
+  restored. The hub's macOS format check now reads the tarball and confirms the
+  inner bundle's architecture.
+- **Not verified:** **that a macOS client installs the new payload.** No Mac was
+  involved, and the packaged tarball has never been consumed by a real updater.
+  The change is verified as far as "the artifact is the shape the plugin
+  documents", which is a structural argument, not a measurement. See
+  `STILL-OPEN.md`.
+
+---
+
+## THE FREE TIER'S ADVICE FIELDS COULD BREAK THE WHOLE HEARTBEAT, AND FOUR OTHER PRE-EMPTIVE FIXES (2026-10-04, v3.2.26)
+
+| | |
+|---|---|
+| Severity | 🟠 Advisory free-tier data could fail a beat that carries contract data; three arithmetic edge cases could throttle or un-throttle a student wrongly |
+| **Reported as** | *"Start patching gaps and writing in pre-emptive safety checks/error messages"* |
+| **Files:** | `client/src-tauri/src/locus/{heartbeat.rs,usage.rs,store.rs,runtime.rs}`, `client/src-tauri/src/config/verge.rs`, `client/src/components/connection/usage-bar{,-model}.{tsx,ts}`, `client/src/locales/en/home.json`, `server/scripts/check-consistency.sh` §23 |
+| **Fixed in:** | 3.2.26 (client only — no hook change, so nothing to redeploy) |
+
+### The defects, each a latent failure rather than a reported one
+
+None of these had been observed in the field. Each is a case where a *bad or
+merely unusual* input produces a wrong outcome silently, which is the class this
+project has repeatedly paid for.
+
+1. **An advisory field could fail the whole beat.** `free_allowance_mb` was typed
+   `Option<u64>`, so a hub sending `-1`, `5.5` or `"5120"` made the entire
+   `HeartbeatResponse` fail to parse — which `classify_response` reads as
+   `Unreachable`. The beat is then **discarded**, taking the `server_config`, the
+   `expires_at` and any update signal with it, for a field that does not apply to
+   a paying student at all. Fixed with a tolerant deserializer: the advisory
+   fields degrade to `None`, everything else parses. This is deliberately the
+   **opposite** rule from `uot_port` and the frozen wire names, where a wrong
+   value *should* be loud — advisory data tolerates, contract data does not.
+
+2. **An absurd allowance read as a permanent throttle.** At `u64::MAX` mebibytes
+   the byte conversion saturates, and the saturated value then overflows
+   `used * 10` in `classify` — so `>=` misreads every window as spent. The
+   student is throttled instantly and permanently, on a hub that believes it sent
+   an enormous allowance. Now clamped to 1 PiB (`sane_allowance_mb`), which
+   degrades toward *unlimited* — the safe direction — and the runtime **logs**
+   the bad value, because clamping silently would hide a server-side fault.
+
+3. **A future-dated window underflowed the elapsed-time maths.** A window start
+   ahead of `now` makes `now - start` wrap in release to an enormous value that
+   reads as "the window just rolled" on every call: the quota silently ceases to
+   exist and the student gets a fresh allowance on every poll. Now repaired
+   (`window_start_is_skewed`, five-minute tolerance for ordinary clock noise).
+
+4. **A corrupt counter reset with no trace.** `store::usage` treated an
+   unreadable value as absent — correct, since a counter must never block a
+   connection — but it did so **silently**, so "my free data keeps resetting" was
+   a support report with no diagnosable cause. Now logged, via a pure
+   `decode_usage` that is directly testable.
+
+5. **The upgrade route did not exist.** The throttle state said what happened and
+   that it resets, but offered nowhere to go. Now followed by a sentence naming
+   the action. It deliberately does **not** offer a purchase: there is no
+   self-serve checkout — a code is a physical card bought from a middleman — so a
+   "Buy now" button would have nowhere to go.
+
+### The guard was wrong on its first draft, in the way it warns about
+
+§23's two new hub-key assertions grepped for the key name, and the key also
+appears in the file's own comments and in its enforcement-version note. Deleting
+the assignment therefore left the check **green** — a check that cannot fail,
+which is the exact defect this whole section exists to catch, written by a change
+quoting it. Both now anchor on the assignment (`response.free_allowance_mb =`),
+and were observed failing against a deleted assignment before being kept.
+
+A sixth assertion was added for a subtler no-op: a value that is **stored but
+never read**. `free_throttle_mbps` is exactly that today — parsed, persisted, and
+applied to nothing — so the guard asserts a reader exists, which makes the
+remaining gap explicit and greppable rather than hidden behind a field that looks
+wired.
+
+### Verified / not verified
+
+- **Verified:** 597 lib tests pass (10 new across `usage`, `heartbeat` and
+  `store`); `cargo clippy --all-targets --features clippy -- -D warnings` is
+  clean; `tsc`, `lint`, 96 frontend tests and the web build pass;
+  `check-consistency.sh` exits 0 with 101 checks. Each new guard was **observed
+  failing** against the defect it catches — the removed skew repair, the strict
+  `u64` field, the deleted hub assignment, and the removed store reader — then
+  restored.
+- **Not verified:** that any of this behaves differently on a **live Core**,
+  because none of it was run against one. In particular the throttle is still not
+  applied, and the clamping only triggers on a hub sending a value no deployed
+  hub sends. See `STILL-OPEN.md`.
+
+---
+
+## THE FREE TIER HAD NO ENFORCEMENT, AND THE BUSINESS PLAN READ AS IF IT DID (2026-10-04)
+
+> **Follow-up entry below (3.2.26) covers the safety guards and the upgrade route.
+> Read this one first — it is the build the follow-up hardens.**
+
+| | |
+|---|---|
+| Severity | 🟠 A whole tier was specified in the plan and absent from the tree; the docs read as though it shipped |
+| **Reported as** | *"Let's start getting to work on the undone work mentioned in business(free)"* |
+| **Files:** | `server/modules/04-tc.sh`, `server/scripts/seed-pb.py`, `server/scripts/seed-live.py`, `server/scripts/fix-tier-configs.py`, `server/pb_hooks/heartbeat.pb.js`, `client/src-tauri/src/locus/{usage.rs,heartbeat.rs,store.rs,runtime.rs,mod.rs}`, `client/src-tauri/src/cmd/locus.rs`, `client/src/config/verge.rs`, `client/src/services/locus.ts`, `client/src/components/connection/usage-bar.{tsx,ts}`, `client/src/pages/connection.tsx`, `server/scripts/check-consistency.sh` §23, `docs/business/*` |
+| **Fixed in:** | next tag (client) + the hook and `tc` module, deployed on a `setup.sh` re-run |
+
+### The defect, in one line
+
+`docs/business/04-tiers.md` described a free tier at 1 Mbps with a 5 GB
+client-counted allowance; the tree had `create_tc_service "eco" … "5mbit" 8443`
+and a client that had never heard of an allowance. Nothing was broken by this —
+nothing had been built yet — but the document's own table called itself
+"code-verified" while its §4.5 conceded the cap was "proposed".
+
+### What was built, and the two things that were nearly got wrong
+
+The enforcement now exists end to end: a 1 Mbps `tc` cap on 8443, a `free`
+`tier_configs` row beside the legacy `eco` one, an allowance sent on every
+heartbeat, and a client that counts its own window and renders it.
+
+Two traps, both of which the §23 guard exists to catch:
+
+1. **The cap lives in two places in one file.** `04-tc.sh` applies the class
+   *and* writes the `tc-eco-cap.service` oneshot that rebuilds it at boot. Editing
+   only the first is a change that works until the next reboot — the classic
+   half-applied fix. §23 asserts both, and was observed failing against each.
+2. **The hub key needs a client reader.** This is the UoT failure mode again
+   (`FIXES.md` 29): a wire key with no reader is a *silent no-op*, not an error.
+   The guard's client-side assertion greps the **field declaration**, not a bare
+   mention of the name — the first draft matched the doc comments and would have
+   passed with the field renamed. It was observed failing against exactly that.
+
+### The genuinely soft part, stated rather than hidden
+
+The quota is counted **client-side** and is tamperable. That is a decision, not an
+oversight: the hub has no per-user accounting, because each tier is one
+shadowsocks instance with a single shared password, so free users are
+indistinguishable on the wire. The threat model is a student who wants free fast
+internet, not an adversary. The alternative is P4 in `18-open-items.md`.
+
+The counter is **not** reported back to the hub, deliberately — doing so would
+create the per-user record this product's design refuses to keep.
+
+### Verified / not verified
+
+- **Verified:** 587 client lib tests pass (11 new for `usage`, 3 for the
+  allowance wire shape); `cargo clippy --all-targets --features clippy -- -D warnings`
+  is clean; `pnpm exec tsc --noEmit`, `pnpm lint` and `pnpm test` (95 tests) pass;
+  `pnpm run web:build` succeeds; `check-consistency.sh` exits 0. Every §23
+  assertion was **observed failing** against the defect it catches (the 5 Mbps
+  cap, the missing `free` row, the missing heartbeat key, the ungated allowance,
+  and the renamed client field), then restored.
+- **Not verified:** that the client applies the slower cap to a **live Core** —
+  the classification is tested, the effect on a running tunnel is not. No hub was
+  redeployed, so **none of the server half is live**. Both are in `STILL-OPEN.md`.
+
+---
+
+## macOS SHIPPED A TERMINAL-ONLY REMEDY: A README THE STUDENT COULD NOT ACT ON (2026-10-03)
+
+| | |
+|---|---|
+| Severity | 🟠 Every macOS student who met the Gatekeeper dialog needed a command line to get past it |
+| **Reported as** | *"remove the read me text from the macos install, really unnecessary"* |
+| **Files:** | `.github/workflows/client.yml`, `client/src-tauri/packages/macos/READ ME FIRST.txt` (deleted), `server/scripts/check-consistency.sh` §20, `docs/operate/OPS.md` |
+| **Fixed in:** | next tag (macOS only) |
+
+### The defect, in one line
+
+The mitigation for an unsigned macOS build told the student to run `xattr -cr` in
+**Terminal** — which is not a remedy for someone who cannot evaluate a shell
+command, and it was the only path forward, because an unsigned + quarantined
+`.app` produces *"damaged and can't be opened"*, a dialog with **no** "Open
+Anyway".
+
+### Why the fix is signing, not better wording
+
+The wording was already accurate. What was wrong was the class of failure: macOS
+distinguishes a bundle with **no** signature (reported as corrupt) from one with a
+signature that is **not a Developer ID** (reported as unverified), and only the
+second is surfaced in System Settings → Privacy & Security with an actionable
+button. So `codesign --force --deep --sign -` does not make the app trusted — it
+moves the failure into the class the student can escape **without a Terminal**.
+
+The README was removed rather than kept alongside it. Two remedies that disagree
+about which is primary is worse than one, so `check-consistency.sh` §20 now
+asserts the file is **gone** and that the signing step exists — inverting a guard
+that previously asserted the opposite.
+
+### The guard was wrong twice before it was right, and both times were instructive
+
+`§20`'s replacement is an inverted assertion, and the first two drafts failed on
+**their own documentation**:
+
+1. A bare `grep 'READ ME FIRST'` matched the comment explaining *why* the file was
+   removed. The cheapest way to make it green would have been to delete the
+   explanation — a guard passing for the wrong reason, with the reasoning lost.
+   Fixed by matching the **mechanism** (`cp`/`install` of that path, or a read-back
+   of it) rather than the name.
+2. The doc check then flagged the sentence "the `.dmg` **no longer** carries a
+   README" — a sentence that *agrees* with the removal. Fixed by asserting the
+   operational verb and filtering explicit negations.
+
+This is the §3 class ("a check that cannot distinguish a right answer from a wrong
+one reads exactly like a check that passed") found in a guard written by the same
+change that was quoting it — which is the argument for probing a guard before
+keeping it, not after.
+
+### Verified / not verified
+
+- **Verified:** all five §20 assertions and all eleven §1c assertions were
+  observed **failing** against the defect each catches, then restored; the workflow
+  and both embedded scripts parse; `check-consistency.sh` exits 0 (89 OK / 0 BAD);
+  the console builds and type-checks.
+- **Not verified:** that macOS actually draws the corrupt-vs-unverified distinction
+  for this build, that "Open Anyway" appears, and that a student can open the
+  extracted `.app`. No Mac was involved. See `STILL-OPEN.md`.
 
 ---
 

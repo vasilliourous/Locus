@@ -1,5 +1,12 @@
 # 9. Impact on the live plan
 
+```
+audience:    human-operator
+status:      design-record
+authoritative-for: the per-file delta against docs/business/ (all rows applied)
+verified-against: docs/reference/DEVICE-IDENTITY.md, docs/reference/FIXES.md
+```
+
 > A per-file delta against the twenty files in `docs/business/`.
 >
 > **STATUS `33b3901`: ALL ROWS BELOW HAVE BEEN APPLIED.** The live plan in

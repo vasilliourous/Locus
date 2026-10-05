@@ -1,5 +1,12 @@
 # 7. Wire contract and compatibility
 
+```
+audience:    human-operator
+status:      design-record
+authoritative-for: the additive-wire-change rule
+verified-against: docs/reference/DEVICE-IDENTITY.md, docs/reference/FIXES.md
+```
+
 > **The rule:** a deployed client cannot be forced to update — the updater has
 > never successfully installed anything — so every wire change must be
 > **additive**, and every frozen name must stay frozen.

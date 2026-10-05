@@ -19,6 +19,7 @@ import { useTranslation } from 'react-i18next'
 
 import { TierBadge } from '@/components/connection/tier-badge'
 import { TrafficGraph } from '@/components/connection/traffic-graph'
+import { UsageBar } from '@/components/connection/usage-bar'
 import { useConnection } from '@/components/connection/use-connection'
 import { useTrafficSummary } from '@/components/connection/use-traffic-summary'
 import { useSubscription } from '@/hooks/use-subscription'
@@ -206,6 +207,15 @@ const ConnectionPage = () => {
             Only shown once the user has a tier to show — an unactivated device
             has none, and an empty badge would read as a rendering fault. */}
         {status?.tier && <TierBadge tier={status.tier} />}
+
+        {/* The free tier's allowance, always visible while it applies.
+            This is the decided behaviour from docs/business/04-tiers.md §4.4.4:
+            a throttled student must know *why* the connection is slow and know
+            what fixes it, because a silently slow app reads as a broken product.
+            The component renders nothing at all for a paying tier, so this needs
+            no conditional here — `allowance.state === 'unlimited'` is the
+            component's own early return. */}
+        {status && <UsageBar allowance={status.allowance} />}
 
         <Button
           size="large"
@@ -500,6 +510,41 @@ const ConnectionPage = () => {
           </Paper>
         )
       })()}
+
+      {/* The support route, at the foot of the page.
+          //
+          // The activation screen deliberately sends a student to the card they
+          // were sold ("the code is printed on it, beside who to ask"), but this
+          // is the screen a student sits on for the whole session — and when
+          // something is wrong with the tunnel there is nothing on it that says
+          // who to tell. Everything else a student might report (the device id,
+          // the tier, the subscription state) is on Account; this is the one
+          // piece that has to be reachable from where the problem is felt.
+          //
+          // A `mailto:` link rather than plain text: the address is the action,
+          // and "copy this out of a rendered label" is a step that produces
+          // mistyped addresses and support tickets that never arrive. It is a
+          // caption in secondary text, centred, so it reads as a footnote rather
+          // than as another control competing with Connect. */}
+      <Typography
+        variant="caption"
+        color="text.secondary"
+        sx={{ display: 'block', textAlign: 'center', mt: 0.5 }}
+      >
+        {t('home.components.connection.support')}{' '}
+        <Box
+          component="a"
+          href={`mailto:${t('home.components.connection.supportEmail')}`}
+          sx={{
+            color: 'text.secondary',
+            textDecoration: 'underline',
+            textUnderlineOffset: '2px',
+            '&:hover': { color: 'text.primary' },
+          }}
+        >
+          {t('home.components.connection.supportEmail')}
+        </Box>
+      </Typography>
     </Box>
   )
 }

@@ -9,8 +9,9 @@
 #
 #   1. hooks    -> /opt/pocketbase/pb_hooks/   (diffed, uploaded atomically, restarted)
 #   2. console  -> /var/www/admin/             (built, uploaded, verified)
-#   3. staging  -> /root/server/               (so a later setup.sh re-run does not revert)
-#   4. verify   -> health, the update endpoint, and hook drift
+#   3. site     -> /var/www/site/              (rendered from the release manifest, uploaded)
+#   4. staging  -> /root/server/               (so a later setup.sh re-run does not revert)
+#   5. verify   -> health, the update endpoint, and hook drift
 #
 # It is IDEMPOTENT and DIFF-BASED: files whose content already matches are not
 # uploaded, and nothing is restarted unless something actually changed.
@@ -33,6 +34,7 @@
 #   server/scripts/deploy.sh                 # everything
 #   server/scripts/deploy.sh --hooks         # hooks only
 #   server/scripts/deploy.sh --console       # console only
+#   server/scripts/deploy.sh --site          # landing page only
 #   server/scripts/deploy.sh --check         # dry run: report drift, change nothing
 #   server/scripts/deploy.sh --no-console    # skip the console build (slow)
 #
@@ -63,19 +65,31 @@ PB_API="${PB_API:-https://networkingguides.duckdns.org}"
 
 REMOTE_HOOKS="/opt/pocketbase/pb_hooks"
 REMOTE_CONSOLE="/var/www/admin"
+REMOTE_SITE="/var/www/site"
 REMOTE_STAGING="/root/server"
+
+# The landing page is served from its own hostname (see LANDING_DOMAIN in
+# modules/05-caddy.sh). Used for the post-deploy verification only; the bundle
+# itself goes to /root/server/site-dist.tar.gz and deploy_site() in
+# modules/05-caddy.sh extracts it. Two callers, one filename — asserted by
+# check-consistency.sh rather than trusted, because that is the drift that
+# produced the 2026-10-01 Windows outage.
+LANDING_DOMAIN="${LANDING_DOMAIN:-locusvpn.jadedns.uk}"
 
 DO_HOOKS=1
 DO_CONSOLE=1
+DO_SITE=1
 DO_STAGING=1
 CHECK_ONLY=0
 
 for arg in "$@"; do
     case "$arg" in
-        --hooks)      DO_CONSOLE=0; DO_STAGING=0 ;;
-        --console)    DO_HOOKS=0; DO_STAGING=0 ;;
+        --hooks)      DO_CONSOLE=0; DO_SITE=0; DO_STAGING=0 ;;
+        --console)    DO_HOOKS=0; DO_SITE=0; DO_STAGING=0 ;;
+        --site)       DO_HOOKS=0; DO_CONSOLE=0; DO_STAGING=0 ;;
         --no-console) DO_CONSOLE=0 ;;
-        --staging)    DO_HOOKS=0; DO_CONSOLE=0 ;;
+        --no-site)    DO_SITE=0 ;;
+        --staging)    DO_HOOKS=0; DO_CONSOLE=0; DO_SITE=0 ;;
         --check)      CHECK_ONLY=1 ;;
         -h|--help)    sed -n '2,40p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
         *) echo "unknown option: $arg" >&2; exit 1 ;;
@@ -226,6 +240,36 @@ if [ "$DO_CONSOLE" = "1" ]; then
     fi
 fi
 
+# ── 2b. landing page ──
+#
+# Delegated to deploy-site.sh rather than reimplemented here, for the reason the
+# console build is NOT delegated: the console is a plain "build a SPA and upload
+# it", but the landing page has to RENDER its four download URLs from the release
+# manifest first (see deploy-site.sh's header). That renderer must live in exactly
+# one place, because two copies of it would drift and one of them would render
+# stale version numbers with nothing visible on the page to say so.
+#
+# VPS is passed through explicitly: deploy-site.sh requires it and intentionally
+# has no default (the same reasoning deploy-console.sh documents at length).
+if [ "$DO_SITE" = "1" ]; then
+    step "Landing page"
+    if [ "$CHECK_ONLY" = "1" ]; then
+        ok "(skipped in --check: renders and uploads)"
+    else
+        SITE_LOG=/tmp/locus-site-deploy.log
+        if ! VPS="$VPS" LANDING_DOMAIN="$LANDING_DOMAIN" \
+             bash "${REPO_ROOT}/server/scripts/deploy-site.sh" > "$SITE_LOG" 2>&1; then
+            tail -30 "$SITE_LOG" >&2
+            die "landing page deploy failed (see $SITE_LOG)" 4
+        fi
+        # Surface the renderer's summary (the four resolved URLs) without
+        # replaying the whole log — those lines are the evidence that the buttons
+        # point at the version that is actually published.
+        grep -E '^\s+(windows|linux|macos_arm|macos_intel)\s+->' "$SITE_LOG" | sed 's/^/  /' || true
+        ok "deployed to $REMOTE_SITE"
+    fi
+fi
+
 # ── 3. staging copy ──
 # `setup.sh` deploys from /root/server/, NOT from the repo. Leaving it stale is
 # how a re-run silently reverts hooks to an older version.
@@ -285,6 +329,36 @@ esac
 # The public manifest, which the client uses as a fallback.
 rel=$(curl -s -o /dev/null -w '%{http_code}' -m 20 "$PB_API/api/release" || echo 000)
 [ "$rel" = "200" ] && ok "/api/release reachable" || { warn "/api/release returned $rel"; fail=1; }
+
+# ── The landing page ──
+#
+# Verified from the PUBLIC hostname, because that is what a search engine and a
+# visitor see, and because the whole reason this host exists is to be reached
+# from outside. A 200 here plus the four download links is the property that
+# matters; a missing page is a failure (the block is in the Caddyfile, so the
+# hostname is served and a 404 means the bundle never arrived).
+if [ "$DO_SITE" = "1" ]; then
+    land=$(curl -s -o /dev/null -w '%{http_code}' -m 20 "https://$LANDING_DOMAIN/" || echo 000)
+    if [ "$land" = "200" ]; then
+        ok "landing page 200 at https://$LANDING_DOMAIN/"
+        body=$(curl -s -m 20 "https://$LANDING_DOMAIN/" || true)
+        wired=0
+        for key in windows linux macos_arm macos_intel; do
+            printf '%s' "$body" | grep -q "data-download=\"$key\" href=\"$PB_API/updates/" && wired=$((wired + 1))
+        done
+        [ "$wired" -eq 4 ] && ok "all 4 download links resolve to $PB_API/updates/" \
+            || { warn "only $wired of 4 download links are wired to $PB_API/updates/"; fail=1; }
+
+        # The hub's build tree must not be reachable from the landing hostname.
+        # A 200 here would mean the two hosts had been merged and every published
+        # build was now exposed on an indexable page.
+        leak=$(curl -s -o /dev/null -w '%{http_code}' -m 20 "https://$LANDING_DOMAIN/updates/" || echo 000)
+        [ "$leak" = "404" ] && ok "/updates/ not exposed on the landing host (404)" \
+            || { warn "/updates/ returned $leak on the landing host — expected 404"; fail=1; }
+    else
+        warn "landing page returned $land on https://$LANDING_DOMAIN/"; fail=1
+    fi
+fi
 
 # Anything a client's heartbeat needs, so a hook error does not go unnoticed.
 hb=$(curl -s -o /dev/null -w '%{http_code}' -m 20 -X POST "$PB_API/api/heartbeat" \

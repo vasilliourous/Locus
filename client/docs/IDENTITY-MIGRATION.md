@@ -4,7 +4,7 @@
 audience:    builder
 status:      live
 authoritative-for: the app-id / service-name migration and what must NOT be renamed
-verified-against: docs/STATE.md
+verified-against: client/src-tauri/tauri.conf.json, client/src-tauri/src/locus/
 ```
 
 > **Implemented for the app-data root; the privileged service name is deliberately NOT renamed.**

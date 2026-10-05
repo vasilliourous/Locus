@@ -19,13 +19,20 @@ Bypasses N4L's Palo Alto firewall using Shadowsocks TCP (no TLS fingerprinting, 
 
 The client is **tailored and functional**. It is no longer a branding-only copy
 of Clash Verge Rev: it has Locus logic — activation, tiers, a heartbeat, a
-hub-mediated updater — and the connect path has been verified end to end against
-the live hub:
+hub-mediated updater. Its product behaviour is pinned by the tree's tests and by
+`check-consistency.sh`; the **live** verification of the connect path was a set
+of dated observations against the deployed hub, not a standing property:
 
 - activation validated against the deployed `/api/activate` and `/api/code-lookup`
 - a generated tier config accepted by the real `mihomo` binary
 - traffic egressing from the VPS rather than the local address
 - a real heartbeat returning the strike tier's config
+
+*(Those observations are historical — see [`docs/reference/STILL-OPEN.md`](docs/reference/STILL-OPEN.md)
+for what is still unverified and [`docs/operate/CLAIMS.md`](docs/operate/CLAIMS.md) §5
+for the dated register. Do not read this list as a claim about the hub today;
+`/api/health` is the one live claim that is currently dated, and it is dated in
+that register.)*
 
 The product surface is a first-run **activation gate** and a single
 **Connect / Disconnect**; a student never sees a profile, a node or a proxy mode.
@@ -42,7 +49,8 @@ versioned **only** the archived Wails client and is **deleted**.
 
 `client/src-tauri/Cargo.toml`, `client/package.json` and
 `client/src-tauri/tauri.conf.json` carry the client's version and **must agree**
-(current value in `docs/STATE.md`); `client/src-tauri/tests/version_consistency.rs` asserts it.
+(current value: `[client.version]` in [`docs/state.toml`](docs/state.toml));
+`client/src-tauri/tests/version_consistency.rs` asserts it.
 CI lives at **`.github/workflows/client.yml`** — it must be at the repo root,
 because GitHub ignores a workflow under `client/.github/` — and on a `v*` tag it
 builds, **signs** and releases the four platform artifacts plus `manifest.json`.
@@ -108,12 +116,12 @@ research (business model, N4L threat analysis) is preserved in `docs/history/`.
 │       │                         │  • Act. │       │
 │       │                         │  • HB   │       │
 │       │                         └─────────┘       │
-│  ┌────┴────┐  ┌──────────┐  ┌──────────┐          │
-│  │ Eco     │  │ Stealth  │  │ Strike   │          │
-│  │ :8443   │  │ :8444    │  │ :8445    │          │
-│  │ BBR     │  │ BBR      │  │ BBR+UDP  │          │
-│  │ 5M tc   │  │ 100M tc  │  │ 200M tc  │          │
-│  └─────────┘  └──────────┘  └──────────┘          │
+│  ┌────────────────┐  ┌────────────────┐          │
+│  │ Free (eco)     │  │ Full (strike)  │          │
+│  │ :8443          │  │ :8445          │          │
+│  │ BBR            │  │ BBR+UDP        │          │
+│  │ 1M tc          │  │ 100M tc        │          │
+│  └────────────────┘  └────────────────┘          │
 │                                                   │
 │  Backups → Backblaze B2 (hourly, 7-day retention)  │
 └─────────────────────────────────────────────────┘
@@ -126,24 +134,31 @@ the `locus` binary plus a bundled **`verge-mihomo`** sidecar as the tunnel engin
 
 ---
 
-## The Three Tiers
+## The Two Plans
 
-| Tier | Price | Port | Server CC | Bandwidth | UDP | Experience |
-|------|-------|:----:|:---------:|:---------:|:---:|------------|
-| **Eco** | $2/mo | 8443 | BBR (system) | 5 Mbps (tc capped) | ❌ | Text loads, video buffers. Exists to sell Stealth. |
-| **Stealth** | $4/mo | 8444 | BBR (system) | 100 Mbps (tc capped) | ❌ | Fast streaming. BBR keeps bufferbloat low. |
-| **Strike** | $8/mo | 8445 | BBR (system) | 200 Mbps (tc capped) | ✅ raw (UoT on 8446) | Gaming. 4K streaming. |
+| Plan | Price | TCP | UDP (UoT) | Server CC | Bandwidth | Experience |
+|------|-------|:---:|:---------:|:---------:|:---------:|------------|
+| **Free** | $0/mo | 8443 | ✅ 8447 | BBR | 1 Mbps (tc capped, both) | 10 GB/mo of chat, browsing, and light gaming (Roblox/Minecraft). The funnel. |
+| **Full** | $5/mo | 8445 | ✅ 8446 | BBR | 100 Mbps TCP; UDP uncapped | Everything: streaming, downloads, competitive FPS. |
 
-> **This table describes the deployed system** (`server/modules/04-tc.sh`, live
-> on the hub). **The commercial plan changes it** — it replaces Eco with a free
-> 1 Mbps tier and drops the ladder to $0/$4/$7 — and that change is **proposed,
-> not yet in the tree**. The canonical comparison, including exactly what is and
-> is not built, is [`docs/business/04-tiers.md`](docs/business/04-tiers.md) §4.1
-> and [`docs/business/17-not-built.md`](docs/business/17-not-built.md).
+> **UDP is on both plans; the rate is the difference.** Each plan has its **own**
+> UDP-over-TCP listener, because a sing-box inbound is bound to one password —
+> 8447 serves the free plan's credentials and is capped at 1 Mbps at the hub,
+> 8446 serves the paid plan's and is not capped. See
+> [`docs/business/04-tiers.md`](docs/business/04-tiers.md) §4.1, §4.3.1 and §4.10.
+
+> **Two plans, and `Full` is `strike` on the box.** The paid tier's row, password
+> and systemd units keep the name `strike` because a code in the field already
+> carries that string and the hub resolves it by that string; the customer-facing
+> name is **Full**. Stealth (8444) was retired when the ladder was merged into one
+> paid plan — Stealth and Strike were the same tier at two rates, differing only
+> by the UDP endpoint. See [`docs/business/04-tiers.md`](docs/business/04-tiers.md)
+> §4.2.4 and §4.6, and [`docs/business/17-not-built.md`](docs/business/17-not-built.md)
+> for what is and is not built.
 >
 > All tiers are **BBR + tc**: no kernel modules to maintain, caps enforced with
 > HTB classes plus `fq_codel` leaf qdiscs to keep latency flat under load.
-> Strike's UDP-over-TCP endpoint (8446) is live on the hub — see
+> The paid tier's UDP-over-TCP endpoint (8446) is live on the hub — see
 > [`docs/GAMING-UDP.md`](docs/GAMING-UDP.md).
 
 Activation codes are **`RQ-XXXX-XXXX-XXXX-C`** (15 chars, Luhn-mod-N checksum,
@@ -214,11 +229,12 @@ SOCKS5 layer, no per-app configuration.
 
 ### Tiers & Congestion Control
 
-All three tiers use **BBR** (Bottleneck Bandwidth and Round-trip propagation time), Linux's default CC — fair, stable, and bufferbloat-friendly. (An earlier design used the `tcp-brutal` kernel module for Stealth, but its aggressive rate-filling caused bufferbloat and jitter on the school network, so it was removed — see `docs/reference/FIXES.md`.) Bandwidth is capped purely with `tc` HTB classes on the VPS:
+Both tiers use **BBR** (Bottleneck Bandwidth and Round-trip propagation time), Linux's default CC — fair, stable, and bufferbloat-friendly. (An earlier design used the `tcp-brutal` kernel module for the retired Stealth tier, but its aggressive rate-filling caused bufferbloat and jitter on the school network, so it was removed — see `docs/reference/FIXES.md`.) Bandwidth is capped purely with `tc` HTB classes on the VPS:
 
-- **Eco**: 5 Mbps (class 1:10, port 8443) — the plan renames this to a free tier at 1 Mbps; not yet in the tree
-- **Stealth**: 100 Mbps (class 1:20, port 8444)
-- **Strike**: 200 Mbps (class 1:30, port 8445)
+- **Free** (`eco` on the box): 1 Mbps (class 1:10, port 8443)
+- **Full** (`strike` on the box): 100 Mbps (class 1:30, port 8445)
+
+Class `1:20` (the retired Stealth tier) no longer exists in `04-tc.sh`.
 
 ### Activation Flow
 
@@ -287,8 +303,8 @@ scp -r server age-key.txt root@your-vps:/root/server/
 ssh root@your-vps "/root/server/setup.sh"
 ```
 
-This provisions: BBR, 3× Shadowsocks, tc shaping (Eco 5 / Stealth 100 / Strike 200
-Mbps, all with fq_codel), the Strike UDP-over-TCP endpoint on :8446, Caddy + TLS
+This provisions: BBR, 2× Shadowsocks, tc shaping (Free 1 / Full 100 Mbps, both
+with fq_codel), the paid tier's UDP-over-TCP endpoint on :8446, Caddy + TLS
 (serving `/admin/` and `/updates/`), PocketBase (+ collections/admin/hooks/tier
 configs), the admin console, the release fetch service (`locus-fetch`), B2
 backups, UFW + fail2ban.
@@ -335,8 +351,11 @@ happen at `https://<domain>/admin/` — no SSH required.
 
 ```bash
 # Console: Codes & Clients -> Generate. Or from the CLI:
-./scripts/generate_codes.sh https://networkingguides.duckdns.org YOUR_PB_ADMIN_JWT eco 50
-./scripts/print_codes.sh eco-codes.txt eco-cards.pdf
+./scripts/generate_codes.sh https://networkingguides.duckdns.org YOUR_PB_ADMIN_JWT free 50
+./scripts/print_codes.sh free-codes.txt free-cards.pdf
+
+# The paid plan is minted against the `strike` row and prints as "Full".
+./scripts/generate_codes.sh https://networkingguides.duckdns.org YOUR_PB_ADMIN_JWT strike 20
 ```
 
 The generator needs the **PocketBase admin JWT** (PB 0.22 rejects
@@ -409,8 +428,8 @@ connection, heartbeat, and update.
 
 ```bash
 ssh root@your-vps "
-  systemctl is-active caddy pocketbase shadowsocks-eco shadowsocks-stealth shadowsocks-strike
-  tc class show dev eth0 | grep -E '1:10|1:20|1:30'
+  systemctl is-active caddy pocketbase shadowsocks-eco shadowsocks-strike
+  tc class show dev eth0 | grep -E '1:10|1:30'
   sysctl net.ipv4.tcp_congestion_control
   tc -s class show dev eth0 | head -10
 "
@@ -451,20 +470,25 @@ appear on a fresh host. A re-run is not a deploy test.
 |--------|:------:|-------|
 | 00-env | ✅ | OS, arch, root, disk, memory all validated (memory guard fixed for 512MB droplets) |
 | 01-bbr | ✅ | BBR active, TCP tuning params set |
-| 02-shadowsocks | ✅ | 3 instances installed and enabled |
-| 04-tc | ✅ | Eco 5Mbit, Stealth 100Mbit, Strike 200Mbit classes active (+ fq_codel) |
+| 02-shadowsocks | ✅ | 2 instances installed and enabled |
+| 04-tc | ✅ | Free 1Mbit, Full 100Mbit classes active (+ fq_codel) |
 | 05-caddy | ✅ | Caddy with ratelimit plugin; also serves `/admin/` and `/updates/` |
 | 06-pocketbase | ✅ | 0.22.21 installed; bootstrap failure is now fatal, not a warning |
 | 07-backups | ✅ | Timer enabled; verification hashes the **downloaded** artifact, restore proven |
 | 08-firewall | ✅ | UFW active, all ports open, SSH protected by **fail2ban** |
 
-All 3 Shadowsocks services active (8443/8444/8445). All tiers on BBR with tc caps (5/100/200 Mbps).
+All 2 Shadowsocks services active (8443/8445). All tiers on BBR with tc caps (1/100 Mbps).
 Caddy + PocketBase serving the API, the admin console, and release binaries.
 
-**Live host:** see [`docs/STATE.md`](docs/STATE.md) for the current host, its
-specs and DNS. Earlier hosts are retired.
+**Live host:** the only stable identifier for the deployed system is the
+**domain** — `[hub.domain]` in [`docs/state.toml`](docs/state.toml). There is
+deliberately no address or host-spec fact here or in `STATE.md` (an address moves
+and goes stale in silence); the hub's reachability is a dated claim in
+[`docs/operate/CLAIMS.md`](docs/operate/CLAIMS.md) §5, and earlier hosts are
+retired.
 End state of the blank-box run: all 8 modules exit 0, `setup.sh` re-runs are
-idempotent, and `smoke-test.sh` reports **23 passed / 0 failed / 0 warnings**.
+idempotent, and `smoke-test.sh` reports **23 passed / 0 failed / 0 warnings**
+*(this run is dated history, not a claim about today's hub)*.
 
 > ⚠️ **Live customer data.** The hub holds real activation codes in daily use.
 > Never bulk-delete `codes` or `code_events` — suspend or unbind instead.

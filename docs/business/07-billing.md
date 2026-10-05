@@ -1,5 +1,12 @@
 # 7. Billing
 
+```
+audience:    human-operator
+status:      live
+authoritative-for: how the student actually pays, and how the operator collects
+verified-against: docs/reference/DEVICE-IDENTITY.md
+```
+
 > **The term pass is now a product the system can sell.** It could not before:
 > the code stored one absolute `expires_at` fixed at **mint** time, so there was
 > no way to express "10 weeks from when the student activates", and no way to
@@ -46,7 +53,7 @@ top. Paying early is never punished — which is the property that makes
 ## 7.2 The term structure
 
 NZ school terms run about 10 weeks each, four per year
-([`05-pricing.md`](05-pricing.md#55-term-passes)):
+([`05-pricing.md`](05-pricing.md#56-term-passes)):
 
 | | Approx. dates | Notes |
 |---|---|---|
@@ -66,9 +73,9 @@ The free tier changes the economics of billing:
   allowance reset at the start of term, and who now wants to game with
   friends, is the most likely convert — and that is exactly when the
   middleman is collecting anyway.
-- **Fewer collection events matter more as the paid tier gets cheaper.**
-  Collecting $4 monthly costs more middleman effort per dollar than
-  collecting $10 per term.
+- **Fewer collection events matter more as the paid plan gets cheaper.**
+  Collecting $5 monthly costs more middleman effort per dollar than
+  collecting $12 per term.
 
 > **Practical implication:** the term pass should be positioned as the
 > *default* paid product, with monthly as the trial-friendly fallback. See

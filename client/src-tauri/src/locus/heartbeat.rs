@@ -45,6 +45,44 @@ const REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
 /// moment it recovers.
 const JITTER: f64 = 0.1;
 
+/// A tolerant `Option<u64>`: anything that is not a non-negative integer becomes
+/// `None` instead of failing the deserialization.
+///
+/// Used for the **advisory** free-tier fields. Their whole class is "a number
+/// the hub sends to help the client meter itself"; none of them is load-bearing
+/// for a connection, and none of them can be trusted to be well-formed by a
+/// client that did not send them. A negative, a float or a string therefore
+/// degrades to "no allowance", never to "this beat is malformed" — because
+/// failing the beat would also discard the `server_config`, the `expires_at`
+/// and the update signal, which have nothing to do with the free tier.
+///
+/// This is deliberately the opposite of the rule for `uot_port` and the other
+/// frozen wire names, where a wrong value *should* be loud: those are needed to
+/// connect, and a silent `None` there is the bug that killed UoT fleet-wide
+/// (`FIXES.md` 29). Advisory data tolerates; contract data does not.
+fn tolerant_u64<'de, D>(deserializer: D) -> Result<Option<u64>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let raw = Option::<serde_json::Value>::deserialize(deserializer)?;
+    Ok(match raw {
+        Some(serde_json::Value::Number(n)) => n.as_u64(),
+        _ => None,
+    })
+}
+
+/// A tolerant `Option<u32>`, for [`tolerant_u64`]'s reason.
+fn tolerant_u32<'de, D>(deserializer: D) -> Result<Option<u32>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let raw = Option::<serde_json::Value>::deserialize(deserializer)?;
+    Ok(match raw {
+        Some(serde_json::Value::Number(n)) => n.as_u64().and_then(|v| u32::try_from(v).ok()),
+        _ => None,
+    })
+}
+
 /// The subset of the heartbeat response the client acts on.
 #[derive(Debug, Clone, Deserialize)]
 pub struct HeartbeatResponse {
@@ -70,6 +108,44 @@ pub struct HeartbeatResponse {
     /// at the point of display, so there is one parser and one dialect.
     #[serde(default)]
     pub expires_at: Option<String>,
+
+    /// The free tier's monthly allowance, in **mebibytes**, sent by the hub.
+    ///
+    /// **Advisory, and absent for a paying tier.** The hub has no per-user
+    /// accounting (one shared password per tier means free users are
+    /// indistinguishable on the wire), so the client counts its own bytes —
+    /// see [`crate::locus::usage`]. It is a wire field rather than a constant
+    /// precisely so the operator can change the allowance without shipping a
+    /// release.
+    ///
+    /// **Absence means unlimited, not zero.** A paying tier omits this key, and
+    /// so does an older hub that predates the free tier. Reading a missing
+    /// allowance as "no bytes allowed" would silently throttle every user of a
+    /// client built from this tree, so [`Self::allowance_bytes`] maps `None` to
+    /// `None` and the callers treat that as "no quota to enforce".
+    ///
+    /// **A malformed value must not fail the whole beat.** `deserialize_with`
+    /// drops a value that is not a non-negative integer (a negative count, a
+    /// float, a string) to `None` rather than erroring, because this field is
+    /// ADVISORY: a hub that sent a bad allowance must still be able to hand this
+    /// device its config, its expiry and its update signal. Without this, one
+    /// bad free-tier field would turn every beat into `Unreachable` — a paying
+    /// student's tunnel quietly stops refreshing over a number that does not
+    /// apply to them.
+    #[serde(default, deserialize_with = "tolerant_u64")]
+    pub free_allowance_mb: Option<u64>,
+
+    /// The speed a free user drops to once the allowance is spent, in Mbps.
+    ///
+    /// The decided behaviour is *throttled further, not cut off*
+    /// (`docs/business/04-tiers.md` §4.4.5): the app stays usable so the
+    /// student does not uninstall it, while the paid tier becomes obviously
+    /// worth it. Absent alongside a missing allowance.
+    ///
+    /// Tolerant of a malformed value for the same reason as
+    /// [`Self::free_allowance_mb`] — see that field's note.
+    #[serde(default, deserialize_with = "tolerant_u32")]
+    pub free_throttle_mbps: Option<u32>,
 
     /// The advertised version, present only when this device is inside the
     /// rollout bucket. Absence is the normal case, not an error.
@@ -145,6 +221,27 @@ impl HeartbeatResponse {
     #[must_use]
     pub fn is_ok(&self) -> bool {
         self.status == "ok"
+    }
+
+    /// The free tier's monthly allowance as bytes, or `None` for "no quota".
+    ///
+    /// `None` means **unlimited**, which is the answer for every paying tier and
+    /// for any hub that predates the free tier. It is deliberately not `Some(0)`:
+    /// a zero allowance would throttle every client built from this tree, and an
+    /// unknown key must never gate a paying user's traffic. An explicit
+    /// `free_allowance_mb = 0` is treated the same way — the operator's way of
+    /// turning the quota off without a release.
+    ///
+    /// The figure is **clamped** before conversion ([`crate::locus::usage::sane_allowance_mb`]).
+    /// An absurd value straight off the wire saturates the multiply below, and
+    /// the saturated byte count then overflows `used * 10` in the classifier —
+    /// which misreads every window as spent and throttles the student instantly
+    /// and permanently. Clamping degrades toward "unlimited" instead.
+    #[must_use]
+    pub fn allowance_bytes(&self) -> Option<u64> {
+        self.free_allowance_mb
+            .filter(|mb| *mb > 0)
+            .map(|mb| crate::locus::usage::sane_allowance_mb(mb) * crate::locus::usage::MIB)
     }
 }
 
@@ -751,6 +848,8 @@ mod tests {
             server_config: None,
             udp_relay: false,
             expires_at: None,
+            free_allowance_mb: None,
+            free_throttle_mbps: None,
             update_available: Some("2.0.0".into()),
             update_linux: Some("https://hub/updates/2.0.0/locus-linux-amd64".into()),
             update_windows: Some("https://hub/updates/2.0.0/locus-windows-amd64.exe".into()),
@@ -786,6 +885,8 @@ mod tests {
             server_config: None,
             udp_relay: false,
             expires_at: None,
+            free_allowance_mb: None,
+            free_throttle_mbps: None,
             update_available: Some("2.0.0".into()),
             update_linux: None,
             update_windows: None,
@@ -816,6 +917,8 @@ mod tests {
             server_config: None,
             udp_relay: false,
             expires_at: None,
+            free_allowance_mb: None,
+            free_throttle_mbps: None,
             update_available: None,
             update_linux: None,
             update_windows: None,
@@ -861,6 +964,83 @@ mod tests {
             "nested uot_port must survive deserialisation or the Strike tier loses UDP"
         );
         assert!(config.uot_enabled(response.udp_relay));
+    }
+
+    /// A malformed allowance must not fail the whole beat.
+    ///
+    /// The allowance is ADVISORY. If a bad free-tier number made the response
+    /// unparseable, the beat would be discarded as `Unreachable` — and with it
+    /// the `server_config`, the `expires_at` and any update signal. A paying
+    /// student's tunnel would quietly stop refreshing over a field that does not
+    /// even apply to them.
+    #[test]
+    fn a_malformed_allowance_does_not_fail_the_beat() {
+        for bad in ["-1", "5.5", "\"5120\"", "null", "{}"] {
+            let json = format!(
+                r#"{{"status":"ok","tier":"free","free_allowance_mb":{bad},"free_throttle_mbps":{bad}}}"#
+            );
+            let response: HeartbeatResponse = serde_json::from_str(&json)
+                .unwrap_or_else(|e| panic!("a bad allowance ({bad}) must not fail the beat: {e}"));
+            assert!(response.is_ok(), "the beat itself is still good ({bad})");
+            assert_eq!(
+                response.free_allowance_mb, None,
+                "a malformed allowance reads as absent, not as a number ({bad})"
+            );
+            assert_eq!(response.allowance_bytes(), None);
+            assert_eq!(
+                response.tier.as_deref(),
+                Some("free"),
+                "the rest of the payload survives ({bad})"
+            );
+        }
+    }
+
+    /// A well-formed allowance still parses, including zero.
+    ///
+    /// The tolerance must not swallow real values — the failure mode of an
+    /// over-eager guard is that it silently disables the feature it protects.
+    #[test]
+    fn a_well_formed_allowance_still_parses() {
+        let json = r#"{"status":"ok","tier":"free","free_allowance_mb":5120,"free_throttle_mbps":1}"#;
+        let response: HeartbeatResponse =
+            serde_json::from_str(json).expect("a good allowance must parse");
+        assert_eq!(response.free_allowance_mb, Some(5120));
+        assert_eq!(response.free_throttle_mbps, Some(1));
+        assert_eq!(response.allowance_bytes(), Some(5120 * 1024 * 1024));
+
+        // Zero is the operator switching the quota off, and must survive as a
+        // real value — not be treated as malformed.
+        let off = r#"{"status":"ok","tier":"free","free_allowance_mb":0}"#;
+        let response: HeartbeatResponse =
+            serde_json::from_str(off).expect("zero must parse");
+        assert_eq!(response.free_allowance_mb, Some(0));
+        assert_eq!(
+            response.allowance_bytes(),
+            None,
+            "zero means no quota, not zero bytes allowed"
+        );
+    }
+
+    /// An absurd allowance is clamped before it becomes bytes.
+    ///
+    /// Straight off the wire, `u64::MAX` saturates the multiply and the saturated
+    /// value then overflows `used * 10` in the classifier, which misreads every
+    /// window as spent — the student is throttled instantly and permanently.
+    /// Clamping degrades toward "unlimited", the safe direction.
+    #[test]
+    fn an_absurd_allowance_is_clamped_to_a_usable_byte_count() {
+        let json = format!(
+            r#"{{"status":"ok","tier":"free","free_allowance_mb":{}}}"#,
+            u64::MAX
+        );
+        let response: HeartbeatResponse =
+            serde_json::from_str(&json).expect("an absurd allowance must still parse");
+        let bytes = response.allowance_bytes().expect("a quota is still applied");
+        assert_eq!(
+            bytes,
+            crate::locus::usage::MAX_SANE_ALLOWANCE_MB * crate::locus::usage::MIB,
+            "the absurd value must be clamped, not saturated into nonsense"
+        );
     }
 
     /// A beat requested through the control handle must **resolve**, not return
