@@ -74,8 +74,11 @@ async fn resolve_setup() {
     #[cfg(target_os = "macos")]
     crate::core::network_watch::start();
 
+    // A synchronous body in an `async` block: `join!` needs a future, and
+    // `init_core_manager` no longer has an await of its own (it stopped starting
+    // the core — see its doc comment). The block is the await point.
     let core_init = AsyncHandler::spawn(|| async {
-        init_core_manager().await;
+        init_core_manager();
     });
 
     let _ = futures::join!(
@@ -212,8 +215,15 @@ async fn init_service_manager() {
     SERVICE_MANAGER.detect_startup_status().await;
 }
 
-async fn init_core_manager() -> bool {
-    match CoreManager::global().init().await {
+/// Reports whether the core is running at launch. It is not, and that is the
+/// point — see `CoreManager::init`.
+///
+/// Not `async` for the same reason its callee is not: it has nothing to await
+/// any more, and `clippy -D warnings` rejects an `async fn` with no await. The
+/// spawn site below wraps it in an `async` block, which supplies the await point
+/// the `join!` needs.
+fn init_core_manager() -> bool {
+    match CoreManager::global().init() {
         Ok(initialized) => initialized,
         Err(error) => {
             logging!(error, Type::Setup, "core manager initialization failed: {error:#}");

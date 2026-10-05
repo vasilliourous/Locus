@@ -420,7 +420,15 @@ impl CoreManager {
     /// is a fact about this run that the connect path must not trip over later —
     /// but the cheap guard is here so a blocked launch is reported exactly as
     /// before rather than surfacing at the first press.
-    pub async fn init(&self) -> Result<bool> {
+    ///
+    /// NOT `async`, deliberately — and that is the honest signature rather than a
+    /// style choice. Once this stopped starting the core it had no `await` left,
+    /// and `cargo clippy -D warnings` rejects an `async fn` with no await
+    /// ("unused `async` for function with no await statements"). The first cut of
+    /// this change kept `async` and **failed CI's Rust-lints step on the Linux
+    /// build** — caught 2026-10-05 only because the workflow reports it, since
+    /// nothing in the local test suite lints. The caller no longer awaits.
+    pub fn init(&self) -> Result<bool> {
         if let Some(reason) = crate::config::Config::startup_core_block_reason() {
             anyhow::bail!("core startup blocked after mixed proxy port fallback failure: {reason}");
         }
