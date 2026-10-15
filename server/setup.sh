@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # Locus Modular VPS Setup — Orchestrator
 # Usage:
-#   1. scp -r server age-key.txt root@your-vps:/root/server/
-#   2. ssh root@your-vps "/root/server/setup.sh"
+#   1. scp -r server root@your-vps:/root/server/          (no key file — see below)
+#   2. ssh root@your-vps "LOCUS_SECRETS_PASSPHRASE_FILE=/root/pw /root/server/setup.sh"
 #
-# Secrets are auto-decrypted from secrets.env.age using age.
+# Secrets are auto-decrypted from secrets.env.age using a PASSPHRASE.
 # See docs/operate/SECRETS-MANAGEMENT.md for setup instructions.
 #
 # Each module is idempotent and can be re-run independently.
@@ -21,11 +21,27 @@ log()  { echo -e "${GREEN}[$(date +%H:%M:%S)]${NC} $*" | tee -a "$LOGFILE"; }
 warn() { echo -e "${YELLOW}[WARN]${NC} $*" | tee -a "$LOGFILE"; }
 fail() { echo -e "${RED}[FAIL]${NC} $*" | tee -a "$LOGFILE"; exit 1; }
 
-# ── Age-encrypted secrets auto-decrypt ──
+# ── Passphrase-encrypted secrets auto-decrypt ──
 # Decrypts secrets.env.age at startup so all modules see the credentials.
-# Key sources (in order of precedence):
-#   1. AGE_KEY environment variable (CI/CD, SSH pipe)
-#   2. age-key.txt file alongside this script (local deploy)
+#
+# HISTORY: this used an age KEYPAIR (`age -d -i age-key.txt`, or $AGE_KEY). The
+# private half lived in the gitignored `age-key.txt`, was lost with the rest of
+# the gitignored working tree, and was only recovered because a copy happened to
+# still be on the deployed host. A secret recoverable only from a box you might
+# delete is not a backup, so the file is now encrypted to a PASSPHRASE and the
+# ciphertext is committed. Nothing in this script reads a key file any more.
+#
+# Passphrase sources (in order of precedence):
+#   1. LOCUS_SECRETS_PASSPHRASE       — the passphrase itself
+#   2. LOCUS_SECRETS_PASSPHRASE_FILE  — a file containing it
+# If neither is set, the deploy FAILS. There is no prompt: this script runs
+# non-interactively over ssh and in CI, where a prompt would hang forever.
+#
+# ⚠️  age has NO non-interactive passphrase input. It opens /dev/tty directly and
+# ignores stdin, so the passphrase is delivered through a pty allocated by
+# `script(1)`. Verified against age 1.3.2 — see server/scripts/secrets-encrypt.sh
+# for the evidence. `script` comes from util-linux and is present on Ubuntu
+# 22.04 (verified: `script --version` → util-linux 2.42.4).
 #
 # FIX: Uses temp file instead of process substitution (source <(cmd)).
 # Process substitution is unreliable in non-interactive SSH sessions —
@@ -43,29 +59,48 @@ if [ -f "$SECRETS_FILE" ]; then
 
     log "Decrypting ${SECRETS_FILE}..."
     SECRETS_TMP="/tmp/.secrets-$$.env"
-    if [ -n "${AGE_KEY:-}" ]; then
-        echo "$AGE_KEY" > "/tmp/age-key-$$.tmp"
-        age -d -i "/tmp/age-key-$$.tmp" "$SECRETS_FILE" > "$SECRETS_TMP" 2>/dev/null || \
-            { rm -f "/tmp/age-key-$$.tmp" "$SECRETS_TMP"; fail "Failed to decrypt secrets. Check AGE_KEY."; }
-        rm -f "/tmp/age-key-$$.tmp"
-    elif [ -f "${SCRIPT_DIR}/age-key.txt" ]; then
-        age -d -i "${SCRIPT_DIR}/age-key.txt" "$SECRETS_FILE" > "$SECRETS_TMP" 2>/dev/null || \
-            { rm -f "$SECRETS_TMP"; fail "Failed to decrypt secrets. Check age-key.txt."; }
+
+    # Resolve the passphrase SOURCE without ever echoing the value.
+    if [ -n "${LOCUS_SECRETS_PASSPHRASE:-}" ]; then
+        PASSPHRASE_FEED="${LOCUS_SECRETS_PASSPHRASE}"
+        PASSPHRASE_SRC="LOCUS_SECRETS_PASSPHRASE"
+    elif [ -n "${LOCUS_SECRETS_PASSPHRASE_FILE:-}" ]; then
+        [ -f "${LOCUS_SECRETS_PASSPHRASE_FILE}" ] || \
+            fail "LOCUS_SECRETS_PASSPHRASE_FILE is not a file: ${LOCUS_SECRETS_PASSPHRASE_FILE}"
+        PASSPHRASE_FEED="$(cat "${LOCUS_SECRETS_PASSPHRASE_FILE}")"
+        PASSPHRASE_SRC="LOCUS_SECRETS_PASSPHRASE_FILE"
     else
         cat >&2 << 'KEYERR'
 
 ╔══════════════════════════════════════════════════════════════╗
-║  FATAL: secrets.env.age found but no age key available.     ║
+║  FATAL: secrets.env.age found but no passphrase available.  ║
 ║                                                            ║
-║  Provide the key in one of these ways:                     ║
-║    1. Set AGE_KEY environment variable (CI/CD / pipe)      ║
-║    2. Place age-key.txt in the server/ directory            ║
+║  Provide it in one of these ways:                          ║
+║    1. Set LOCUS_SECRETS_PASSPHRASE=<passphrase>            ║
+║    2. Set LOCUS_SECRETS_PASSPHRASE_FILE=<path>             ║
+║                                                            ║
+║  There is deliberately NO prompt: this script runs          ║
+║  non-interactively, where a prompt would hang.              ║
 ║                                                            ║
 ║  See SECRETS-MANAGEMENT.md in docs/operate/ for setup.     ║
 ╚══════════════════════════════════════════════════════════════╝
 KEYERR
-        fail "No age key available for secrets.env.age"
+        fail "No passphrase available for secrets.env.age"
     fi
+
+    [ -n "$PASSPHRASE_FEED" ] || fail "Passphrase source ${PASSPHRASE_SRC} is EMPTY."
+    command -v script &>/dev/null || \
+        fail "'script' (util-linux) is required to decrypt secrets. Install: apt-get install bsdutils"
+
+    # age reads the passphrase from a terminal, so give it one. The pty transcript
+    # goes to /dev/null so the passphrase never lands in a file, and stdout is
+    # discarded because a pty echoes what it reads.
+    if ! printf '%s\n' "$PASSPHRASE_FEED" | \
+         script -qec "age -d -o '$SECRETS_TMP' '$SECRETS_FILE'" /dev/null >/dev/null 2>&1; then
+        rm -f "$SECRETS_TMP"
+        fail "Failed to decrypt secrets from ${PASSPHRASE_SRC}. Wrong passphrase, or corrupt ${SECRETS_FILE##*/}."
+    fi
+    unset PASSPHRASE_FEED
 
     # Source from temp file (reliable in all shell environments)
     set -a

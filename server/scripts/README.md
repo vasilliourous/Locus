@@ -56,3 +56,16 @@ Two conventions hold across this directory:
 | Script | What it does |
 |---|---|
 | `enable-uot.sh` | Idempotently install and start the sing-box UDP-over-TCP endpoint on an already-deployed host, then advertise `uot_port` + `udp_relay=true` for Strike. A fresh deploy enables UoT by default — this is for an older host |
+
+## Secrets
+
+| Script | What it does | Safe to re-run? |
+|---|---|---|
+| `secrets-encrypt.sh` | Encrypt a plaintext env file into `server/secrets.env.age` with a **passphrase**, then decrypt it again and compare byte-for-byte before reporting success. Backs up any existing ciphertext to a gitignored `.bak`. Refuses to run if the plaintext lacks `DOMAIN` or `ADMIN_API_TOKEN` | Yes |
+| `secrets-decrypt.sh` | Decrypt `server/secrets.env.age` to stdout, or `--check` to verify it decrypts without printing it. Decrypts into a temp file first, so a wrong passphrase writes nothing | Yes |
+
+Both read the passphrase from `LOCUS_SECRETS_PASSPHRASE` or
+`LOCUS_SECRETS_PASSPHRASE_FILE`. See
+[`../../docs/operate/SECRETS-MANAGEMENT.md`](../../docs/operate/SECRETS-MANAGEMENT.md)
+for the model and the reason both wrap age in `script(1)` — age has no
+non-interactive passphrase input.

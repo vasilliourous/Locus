@@ -254,8 +254,8 @@ Deploying to a **blank** box is a tested path (validated 2026-09-19 on a fresh
 Ubuntu 22.04, 1 vCPU / 512MB droplet). Work through these steps in order.
 
 ```bash
-# 1. Copy server code (secrets.env.age + age-key.txt are required —
-#    setup.sh auto-decrypts them; without the key it hard-fails).
+# 1. Copy server code (secrets.env.age is required — setup.sh auto-decrypts
+#    it from a passphrase; without the passphrase it hard-fails).
 scp -r server root@new-vps:/root/
 
 # 2. Run setup. DNS must already point at this host or Caddy cannot get a
@@ -294,8 +294,10 @@ ssh root@new-vps "DOMAIN=networkingguides.duckdns.org bash /root/server/scripts/
   CLI (`pocketbase admin create`) because PB 0.22 has **no API** for it. If you
   ever bootstrap by hand, use the CLI — `/api/collections/_superusers/records`
   returns 404 on 0.22.x.
-- **Secrets**: `setup.sh` needs `age` installed *and* `age-key.txt` beside
-  `secrets.env.age`. Missing either aborts immediately (by design).
+- **Secrets**: `setup.sh` needs `age` installed *and* the passphrase in
+  `LOCUS_SECRETS_PASSPHRASE` (or `LOCUS_SECRETS_PASSPHRASE_FILE`). Missing it
+  aborts immediately (by design). There is no prompt — see
+  [`SECRETS-MANAGEMENT.md`](SECRETS-MANAGEMENT.md).
 - **SSH**: UFW allows 22/tcp plainly; brute-force protection is fail2ban
   (see below). **Do not** re-add `ufw limit 22/tcp` — 6 conns/30s breaks
   scripted deployment — and do not hand-inject limiter chains into

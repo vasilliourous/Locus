@@ -296,11 +296,12 @@ This binds an activation code to a specific device. If the device is lost or bro
 ### Step 1: Deploy Server
 
 ```bash
-# Copy the server tree AND the age key to the VPS
-scp -r server age-key.txt root@your-vps:/root/server/
+# Copy the server tree (no key file — the secrets are passphrase-encrypted)
+scp -r server root@your-vps:/root/
 
-# Run setup (~10-15 min). Secrets decrypt automatically from secrets.env.age.
-ssh root@your-vps "/root/server/setup.sh"
+# Run setup (~10-15 min). Secrets decrypt automatically from secrets.env.age
+# using the passphrase you supply.
+ssh root@your-vps "LOCUS_SECRETS_PASSPHRASE_FILE=/root/.pw /root/server/setup.sh"
 ```
 
 This provisions: BBR, 2× Shadowsocks, tc shaping (Free 1 / Full 100 Mbps, both

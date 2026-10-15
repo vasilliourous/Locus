@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 # Locus VPS Restore — Provision + restore from B2 backup
 # Usage:
-#   From-scratch restore (age key file on VPS):
-#     scp -r server age-key.txt root@new-vps:/root/server/
-#     ssh root@new-vps "/root/server/restore.sh"
+#   From-scratch restore (passphrase env var):
+#     scp -r server root@new-vps:/root/
+#     ssh root@new-vps "LOCUS_SECRETS_PASSPHRASE='...' /root/server/restore.sh"
 #
-#   From-scratch restore (pipe with AGE_KEY):
-#     AGE_KEY=$(cat age-key.txt) \
-#       ssh root@new-vps 'bash -s' < restore.sh
+#   From-scratch restore (passphrase in a file — avoids shell history):
+#     scp -r server root@new-vps:/root/
+#     ssh root@new-vps "LOCUS_SECRETS_PASSPHRASE_FILE=/root/pw /root/server/restore.sh"
 #
 #   Manual override (no secrets file):
 #     B2_APPLICATION_KEY_ID=xxx \
@@ -34,8 +34,14 @@ log()  { echo -e "${GREEN}[$(date +%H:%M:%S)]${NC} $*" | tee -a "$LOGFILE"; }
 warn() { echo -e "${YELLOW}[WARN]${NC} $*" | tee -a "$LOGFILE"; }
 fail() { echo -e "${RED}[FAIL]${NC} $*" | tee -a "$LOGFILE"; exit 1; }
 
-# ── Age-encrypted secrets auto-decrypt (same logic as setup.sh) ──
+# ── Passphrase-encrypted secrets auto-decrypt (same logic as setup.sh) ──
 # Decrypts secrets.env.age so B2 credentials and DOMAIN are available.
+#
+# This read an age KEYPAIR (`age -d -i age-key.txt`) until 2026-10-16. The key
+# file was gitignored, was lost with the working tree, and is no longer needed:
+# the ciphertext is encrypted to a PASSPHRASE. See server/setup.sh for the full
+# rationale, the AGENT NOTE on age having no non-interactive input, and the
+# `script(1)` pty mechanism. This block is deliberately kept in step with it.
 #
 # FIX: Uses temp file instead of process substitution (source <(cmd)).
 # Process substitution is unreliable in non-interactive SSH sessions —
@@ -53,29 +59,44 @@ if [ -f "$SECRETS_FILE" ]; then
 
     log "Decrypting ${SECRETS_FILE}..."
     SECRETS_TMP="/tmp/.secrets-$$.env"
-    if [ -n "${AGE_KEY:-}" ]; then
-        echo "$AGE_KEY" > "/tmp/age-key-$$.tmp"
-        age -d -i "/tmp/age-key-$$.tmp" "$SECRETS_FILE" > "$SECRETS_TMP" 2>/dev/null || \
-            { rm -f "/tmp/age-key-$$.tmp" "$SECRETS_TMP"; fail "Failed to decrypt secrets. Check AGE_KEY."; }
-        rm -f "/tmp/age-key-$$.tmp"
-    elif [ -f "${SCRIPT_DIR}/age-key.txt" ]; then
-        age -d -i "${SCRIPT_DIR}/age-key.txt" "$SECRETS_FILE" > "$SECRETS_TMP" 2>/dev/null || \
-            { rm -f "$SECRETS_TMP"; fail "Failed to decrypt secrets. Check age-key.txt."; }
+
+    if [ -n "${LOCUS_SECRETS_PASSPHRASE:-}" ]; then
+        PASSPHRASE_FEED="${LOCUS_SECRETS_PASSPHRASE}"
+        PASSPHRASE_SRC="LOCUS_SECRETS_PASSPHRASE"
+    elif [ -n "${LOCUS_SECRETS_PASSPHRASE_FILE:-}" ]; then
+        [ -f "${LOCUS_SECRETS_PASSPHRASE_FILE}" ] || \
+            fail "LOCUS_SECRETS_PASSPHRASE_FILE is not a file: ${LOCUS_SECRETS_PASSPHRASE_FILE}"
+        PASSPHRASE_FEED="$(cat "${LOCUS_SECRETS_PASSPHRASE_FILE}")"
+        PASSPHRASE_SRC="LOCUS_SECRETS_PASSPHRASE_FILE"
     else
         cat >&2 << 'KEYERR'
 
 ╔══════════════════════════════════════════════════════════════╗
-║  FATAL: secrets.env.age found but no age key available.     ║
+║  FATAL: secrets.env.age found but no passphrase available.  ║
 ║                                                            ║
-║  Provide the key in one of these ways:                     ║
-║    1. Set AGE_KEY environment variable (CI/CD / pipe)      ║
-║    2. Place age-key.txt in the server/ directory            ║
+║  Provide it in one of these ways:                          ║
+║    1. Set LOCUS_SECRETS_PASSPHRASE=<passphrase>            ║
+║    2. Set LOCUS_SECRETS_PASSPHRASE_FILE=<path>             ║
+║                                                            ║
+║  There is deliberately NO prompt — restore runs over ssh    ║
+║  and a prompt would hang forever.                          ║
 ║                                                            ║
 ║  See SECRETS-MANAGEMENT.md in docs/operate/ for setup.     ║
 ╚══════════════════════════════════════════════════════════════╝
 KEYERR
-        fail "No age key available for secrets.env.age"
+        fail "No passphrase available for secrets.env.age"
     fi
+
+    [ -n "$PASSPHRASE_FEED" ] || fail "Passphrase source ${PASSPHRASE_SRC} is EMPTY."
+    command -v script &>/dev/null || \
+        fail "'script' (util-linux) is required to decrypt secrets. Install: apt-get install bsdutils"
+
+    if ! printf '%s\n' "$PASSPHRASE_FEED" | \
+         script -qec "age -d -o '$SECRETS_TMP' '$SECRETS_FILE'" /dev/null >/dev/null 2>&1; then
+        rm -f "$SECRETS_TMP"
+        fail "Failed to decrypt secrets from ${PASSPHRASE_SRC}. Wrong passphrase, or corrupt ${SECRETS_FILE##*/}."
+    fi
+    unset PASSPHRASE_FEED
 
     # Source from temp file (reliable in all shell environments)
     set -a

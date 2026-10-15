@@ -132,3 +132,40 @@ release-worktrees/
 # matched nothing and `git add -A` staged the password (caught 2026-10-02, one
 # command short of committing a live credential to a public-looking repo).
 vpspassword.txt
+
+# Recovery bundle: live credentials pulled back from the hub and the CI secret
+# store (age private key, plaintext tier passwords, decrypted secrets). Kept in
+# the working tree so the operator has them to hand, for the same reason as
+# vpspassword.txt above — and with the same failure mode if this line is
+# missing: `git add -A` stages them. Like vpspassword.txt the pattern carries
+# NO `./` prefix. Never commit; never build from here.
+.recovered/
+
+# Temporary GitHub personal access token, generated to pull secrets back out of
+# the Actions store and deleted again afterwards. Caught 2026-10-15 sitting
+# untracked and unignored in the working tree — one `git add -A` from publishing
+# an admin:org + delete_repo + repo token to a public repository. The name is a
+# wildcard so an operator who numbers or suffixes the file is still covered.
+temp-ghp-token*
+
+# Passphrase for server/secrets.env.age — the file the deploy scripts decrypt.
+#
+# This is the highest-value file that can exist in this working tree. The
+# ciphertext is COMMITTED ON PURPOSE, so the passphrase is the only thing
+# between a public clone and every credential in the project (B2 keys,
+# PocketBase admin, tier passwords, the admin API token). A leaked ciphertext
+# alone is an offline-attack problem; a leaked ciphertext plus its passphrase is
+# total compromise with no brute force required.
+#
+# Added 2026-10-16: `encryption-password.txt` was created at the repo ROOT
+# during the migration, untracked and unignored — exactly the shape of the
+# vpspassword.txt and temp-ghp-token incidents. Same failure mode, same fix.
+#
+# Wildcards, so a suffixed or numbered file is covered; and NO `./` prefix, for
+# the reason recorded against vpspassword.txt above. server/.gitignore holds the
+# same patterns for the server/ subtree.
+encryption-password*
+secrets-passphrase*
+secrets-pass*
+.passphrase
+passphrase.txt

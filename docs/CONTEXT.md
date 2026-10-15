@@ -658,8 +658,10 @@ B2 bucket:          vpsvpnbackup
 
 All credentials are stored on the VPS at `/root/` — see `docs/operate/POCKETBASE-SETUP.md` for
 the full list of credential files and locations. Secrets never go in the repo in
-plaintext; they live age-encrypted in `server/secrets.env.age`
-(see `docs/operate/SECRETS-MANAGEMENT.md`).
+plaintext; they live **passphrase-encrypted** in `server/secrets.env.age`
+(see `docs/operate/SECRETS-MANAGEMENT.md`). The ciphertext is committed and the
+passphrase is held by the operator, so a fresh clone plus that passphrase is
+enough to deploy.
 
 ### Common pitfalls
 

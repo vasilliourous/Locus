@@ -136,6 +136,14 @@ installed client, so a replacement key produces updates those clients all refuse
 Full detail, including which operations do and do not preserve secrets, is in
 `client/docs/SIGNING.md` §4a.
 
+> ⚠️ **The command above needs a file you may not have.** `.locus-keys/locus_update.key`
+> is not in this repository, is not in the passphrase-encrypted secrets bundle
+> (`server/secrets.env.age`), and **cannot be extracted from GitHub** — Actions
+> secrets are write-only. If the secret is ever cleared and no offline copy
+> exists, this command has nothing to read and the fleet can never be updated
+> again. Read `client/docs/SIGNING.md` §4a and
+> `.recovered/RECOVERY-MANIFEST.md` before assuming custody of this key.
+
 ---
 
 ## Publishing a build to the hub

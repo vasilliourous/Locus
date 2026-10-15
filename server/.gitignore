@@ -1,11 +1,39 @@
 # Locus Server — Secrets and transient files
 
-# Age-encrypted secrets key (NEVER commit the private key)
-age-key.txt
-
-# Plain-text secrets file (NEVER commit — encrypt before committing)
+# Plain-text secrets file (NEVER commit — encrypt before committing).
+# The ENCRYPTED form, secrets.env.age, IS committed on purpose: it is encrypted
+# to a passphrase, and a clone plus that passphrase is the whole recovery story.
 .secrets.env
+
+# Passphrase material for secrets.env.age. These patterns exist because the
+# passphrase is the ONLY thing protecting the committed ciphertext, so a
+# plaintext copy of it in the working tree is the highest-value file in the
+# repo — higher than any single credential inside it.
+#
+# The patterns carry NO `./` prefix, for the reason recorded in the root
+# .gitignore: gitignore matches relative to the .gitignore's own directory, so a
+# `./name` pattern matched nothing and `git add -A` staged a live credential
+# (caught 2026-10-02, vpspassword.txt).
+#
+# Covers the documented env-var convention (LOCUS_SECRETS_PASSPHRASE put in a
+# file for an agent or a script to read) and the obvious ad-hoc names.
+encryption-password*
+secrets-passphrase*
+secrets-pass*
+.passphrase
+passphrase.txt
+
+# NOTE: the age KEYPAIR files are gone. `age-key.txt` was gitignored here until
+# 2026-10-16; the secrets file is now encrypted to a passphrase, so no key file
+# exists to ignore. If you still have an old checkout with one, delete it — it
+# can no longer decrypt anything in this repo.
 
 # VPS-specific runtime files (created by setup.sh on the VPS)
 *.tmp
 /tmp/myvpn-*
+
+# Backup copies written by scripts/secrets-encrypt.sh before it overwrites the
+# ciphertext. An old ciphertext is not secret, but it is confusing: it no longer
+# matches what the deploy scripts expect, and a future reader will not know
+# which passphrase opens which copy.
+secrets.env.age.bak.*

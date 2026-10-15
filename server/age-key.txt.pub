@@ -1,1 +1,16 @@
 age146elndvlr8kj3269r7emktzg7gwl9h002jcnjeyf96m2q82wm44sjkh8dv
+
+# RETIRED 2026-10-16. This is the PUBLIC half of the age keypair that used to
+# decrypt a keypair-encrypted server/secrets.env.age. That ciphertext has been
+# replaced with a passphrase-encrypted one, and the private key
+# (server/age-key.txt) is gone — it cannot decrypt anything here any more.
+#
+# Kept because it is a PUBLIC key (safe to publish) and because the retired
+# ciphertext still exists in git history, where this is the only record of which
+# key opened it.
+#
+# The key line is FIRST because callers pass this file's text as a single `-r`
+# recipient, and that form cannot tolerate comments. Verified 2026-10-16:
+#   age -R <this file>          → works, comments ignored
+#   age -r "$(cat this file)"   → "invalid recipient encoding: mixed case"
+# Both forms work when the key is the first line, so it stays first.

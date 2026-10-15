@@ -207,6 +207,30 @@ The **same key must be used**, not a freshly generated one: the matching public
 half is compiled into every already-installed client, and a new key produces
 updates those clients will all refuse (§5).
 
+### ⚠️ This key is NOT in the passphrase-encrypted secrets bundle
+
+Every *other* server credential moved into a committed, passphrase-encrypted file
+on 2026-10-16 (`server/secrets.env.age`, see
+[`../../docs/operate/SECRETS-MANAGEMENT.md`](../../docs/operate/SECRETS-MANAGEMENT.md)).
+**This key was not included, and could not be.** The reason is not a policy
+choice, it is a dead end:
+
+- the key exists **only** in the GitHub Actions secret store;
+- Actions secrets are **write-only by design** — no API, `gh` command, or UI
+  action returns the value, with or without a token;
+- therefore there has never been a copy on any machine to encrypt.
+
+So a fresh clone gives you every credential needed to **deploy and develop**, and
+still gives you no ability to **sign a release**. That asymmetry is the single
+most important caveat of the 2026-10-16 secrets migration, and it is why §5
+(key lost, clients in the field) remains the operative disaster scenario rather
+than a hypothetical. See `.recovered/RECOVERY-MANIFEST.md` for the full record of
+the attempts to extract it.
+
+If you ever obtain a copy of `locus_update.key`, put it in `.locus-keys/` **and**
+add a passphrase-encrypted backup of it to the secrets bundle at that point —
+the tooling supports it, and until then there is simply nothing to encrypt.
+
 ### The check that cannot be done locally
 
 Nothing in the repo can prove the *secret* is set — that state lives on GitHub.

@@ -64,29 +64,29 @@ Quick summary:
 
 ```bash
 # 1. Install age
-curl -sLO "https://github.com/FiloSottile/age/releases/download/v1.2.1/age-v1.2.1-linux-amd64.tar.gz"
-tar -xzf age-v1.2.1-linux-amd64.tar.gz
-sudo cp age/age age/age-keygen /usr/local/bin/
+sudo apt-get install -y age
 
-# 2. Generate a key pair
-age-keygen -o age-key.txt
+# 2. Choose a passphrase (there is no key pair any more)
+openssl rand -base64 24    # store it in your password manager
 
 # 3. Create .secrets.env with all credentials:
 #    DOMAIN, ADMIN_API_TOKEN, B2_APPLICATION_KEY_ID/KEY, B2_BUCKET,
 #    ECO_PASS, STRIKE_PASS, STEALTH_PASS (retired port, still validated),
-#    PB_ADMIN_EMAIL, PB_ADMIN_PASS
+#    PB_ADMIN_EMAIL, PB_ADMIN_PASS, RELEASE_FETCH_SECRET
 #    (See SECRETS-MANAGEMENT.md for the full template)
 
-# 4. Encrypt it
-age -r "$(age-keygen -y age-key.txt)" -o server/secrets.env.age .secrets.env
+# 4. Encrypt it — the script verifies its own round trip
+LOCUS_SECRETS_PASSPHRASE_FILE=~/passphrase.txt \
+  server/scripts/secrets-encrypt.sh .secrets.env
 shred -u .secrets.env
 
 # 5. Commit the encrypted file
 git add server/secrets.env.age
 ```
 
-Once this is done, **all credentials are auto-injected at deploy time** from
-`secrets.env.age`. You never type them again.
+Once this is done, **all credentials are auto-injected at deploy time** by
+decrypting `secrets.env.age` with the passphrase. You never type the individual
+credentials again.
 
 ---
 
@@ -109,7 +109,8 @@ So on a **fresh** host the order is:
 
 ```bash
 # 1. Stage the server tree (fetch-release.py comes along; the bundles do not)
-scp -r server age-key.txt root@your-vps:/root/server/
+#    NOTE: no key file any more — the deploy scripts read a passphrase.
+scp -r server root@your-vps:/root/server/
 
 # 2. Build + upload the console bundle to /root/server/console-dist.tar.gz
 VPS=root@your-vps DOMAIN=hub.example.com \
@@ -235,25 +236,33 @@ ssh locus-hub 'uptime'
   authenticate non-interactively. See [`OPS.md`](OPS.md) for the askpass
   fallback and the pre-flight deadman-switch technique.
 
-### Option A: Local Machine with Key File (Recommended)
+### Option A: Local Machine with Passphrase File (Recommended)
 
 ```bash
-# Copy server code AND age key to the VPS
-scp -r server age-key.txt root@your-vps:/root/server/
+# Copy server code, then the passphrase to a temp path you delete afterwards
+scp -r server root@your-vps:/root/server/
+scp passphrase.txt root@your-vps:/root/.pw
 
-# One-command deploy — secrets auto-decrypt from age-key.txt
-ssh root@your-vps "/root/server/setup.sh"
+# One-command deploy — secrets auto-decrypt from the passphrase file
+ssh root@your-vps "chmod 600 /root/.pw && \
+  LOCUS_SECRETS_PASSPHRASE_FILE=/root/.pw /root/server/setup.sh && \
+  rm -f /root/.pw"
 ```
 
-No environment variables needed — `DOMAIN`, `ADMIN_API_TOKEN`, B2 creds,
-tier passwords, and PB admin credentials are all decrypted from
-`secrets.env.age` automatically.
+`LOCUS_SECRETS_PASSPHRASE_FILE` is preferred over passing the passphrase inline:
+it keeps it out of your shell history and out of `ps`.
 
-### Option B: Pipe with AGE_KEY (CI/CD or no key file on disk)
+`DOMAIN`, `ADMIN_API_TOKEN`, B2 creds, tier passwords, and PB admin credentials
+are all decrypted from `secrets.env.age` automatically.
+
+### Option B: Pipe with the Passphrase Inline
 
 ```bash
-AGE_KEY=$(cat age-key.txt) ssh root@your-vps 'bash -s' < server/setup.sh
+LOCUS_SECRETS_PASSPHRASE='...' ssh root@your-vps 'bash -s' < server/setup.sh
 ```
+
+> ⚠️ An inline passphrase is visible to anything that can read your shell history
+> or the process table. Use it for one-off deploys, not in a shared terminal.
 
 ### Option C: Manual Env Vars (No Secrets File)
 
@@ -441,17 +450,17 @@ PB_TOKEN=$(ssh root@your-vps "grep PB_TOKEN /root/.pb_admin_creds | cut -d= -f2"
 When credentials change (e.g., B2 application key rotated):
 
 ```bash
-# Decrypt, edit, re-encrypt
-age -d -i age-key.txt server/secrets.env.age > .secrets.env
-vim .secrets.env
-age -r "$(age-keygen -y age-key.txt)" -o server/secrets.env.age .secrets.env
-shred -u .secrets.env
+# Decrypt, edit, re-encrypt — use the scripts, which verify the round trip
+LOCUS_SECRETS_PASSPHRASE_FILE=~/passphrase.txt server/scripts/secrets-decrypt.sh > /tmp/.secrets.env
+vim /tmp/.secrets.env
+LOCUS_SECRETS_PASSPHRASE_FILE=~/passphrase.txt server/scripts/secrets-encrypt.sh /tmp/.secrets.env
+shred -u /tmp/.secrets.env
 git add server/secrets.env.age
 git commit -m "Update credentials"
 ```
 
-See [`SECRETS-MANAGEMENT.md`](SECRETS-MANAGEMENT.md) for full details on key
-rotation, CI/CD integration, and troubleshooting.
+See [`SECRETS-MANAGEMENT.md`](SECRETS-MANAGEMENT.md) for full details on
+passphrase rotation, CI/CD integration, and troubleshooting.
 
 ---
 
@@ -460,12 +469,9 @@ rotation, CI/CD integration, and troubleshooting.
 ### Using Age Secrets (Recommended)
 
 ```bash
-# With key file on VPS:
-scp -r server age-key.txt root@new-vps:/root/server/
-ssh root@new-vps "/root/server/restore.sh"
-
-# Or with AGE_KEY via pipe:
-AGE_KEY=$(cat age-key.txt) ssh root@new-vps 'bash -s' < server/restore.sh
+# With the passphrase in a temp file on the VPS:
+scp -r server root@new-vps:/root/
+ssh root@new-vps "LOCUS_SECRETS_PASSPHRASE='...' /root/server/restore.sh"
 ```
 
 ### Manual Override
@@ -489,6 +495,9 @@ This will:
 8. Verify: codes count from the restored DB, JS hooks loaded (400 "Missing code"), health endpoints
 
 > **One-command recovery = plug-n-play.** A blank Ubuntu 22.04 VPS + this repo
-> + `age-key.txt` is all you need: `setup.sh` for a fresh deploy, `restore.sh`
-> for a full migration/disaster recovery. Both were validated live on
-> 2026-08-01 (see `../reference/FIXES.md`).
+> + the **passphrase** is all you need: `setup.sh` for a fresh deploy, `restore.sh`
+> for a full migration/disaster recovery. No key file: the ciphertext is in the
+> repo and the passphrase is the only thing you must supply. The scripts were
+> originally validated live on 2026-08-01 (see `../reference/FIXES.md`); the
+> passphrase path was verified by round trip on 2026-10-16 but has not yet been
+> run against a blank host.
