@@ -136,13 +136,15 @@ installed client, so a replacement key produces updates those clients all refuse
 Full detail, including which operations do and do not preserve secrets, is in
 `client/docs/SIGNING.md` §4a.
 
-> ⚠️ **The command above needs a file you may not have.** `.locus-keys/locus_update.key`
-> is not in this repository, is not in the passphrase-encrypted secrets bundle
-> (`server/secrets.env.age`), and **cannot be extracted from GitHub** — Actions
-> secrets are write-only. If the secret is ever cleared and no offline copy
-> exists, this command has nothing to read and the fleet can never be updated
-> again. Read `client/docs/SIGNING.md` §4a and
-> `.recovered/RECOVERY-MANIFEST.md` before assuming custody of this key.
+> ⚠️ **This is the current state, not a warning about the future.** As of
+> 2026-10-16 **no copy of `.locus-keys/locus_update.key` exists on any machine**:
+> not in this repository, not in the passphrase-encrypted secrets bundle
+> (`server/secrets.env.age`), and **not retrievable from GitHub** — Actions
+> secrets are write-only. The release command below therefore **cannot run**, and
+> the fleet cannot be offered an update, until an offline copy is found. Read
+> `client/docs/SIGNING.md` §4a and the operator's recovery manifest at
+> `~/.locus-secrets/RECOVERY-MANIFEST.md` (kept outside this repository) before
+> assuming custody of this key.
 
 ---
 

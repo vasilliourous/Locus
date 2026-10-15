@@ -224,8 +224,15 @@ So a fresh clone gives you every credential needed to **deploy and develop**, an
 still gives you no ability to **sign a release**. That asymmetry is the single
 most important caveat of the 2026-10-16 secrets migration, and it is why §5
 (key lost, clients in the field) remains the operative disaster scenario rather
-than a hypothetical. See `.recovered/RECOVERY-MANIFEST.md` for the full record of
-the attempts to extract it.
+than a hypothetical.
+
+> **Confirmed 2026-10-16:** there is **no copy of this key on any machine** —
+> not in this repository, not in the passphrase bundle, not retrievably in the
+> Actions store, and not in the operator's offline material. §5 is therefore the
+> *current* state of the fleet and not a scenario: **no further release can be
+> signed** until a copy is located. The record of the extraction attempts is kept
+> deliberately **outside** this repository, in the operator's recovery manifest
+> at `~/.locus-secrets/RECOVERY-MANIFEST.md`.
 
 If you ever obtain a copy of `locus_update.key`, put it in `.locus-keys/` **and**
 add a passphrase-encrypted backup of it to the secrets bundle at that point —

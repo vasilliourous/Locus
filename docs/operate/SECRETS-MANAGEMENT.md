@@ -30,7 +30,8 @@ The Locus server needs several credentials to run:
 
 **That list is 11 variables.** It is stated as a list rather than a number on
 purpose: a count in a sentence cannot be recomputed and drifts (this document's
-predecessor said "12" while listing 11 — see `.recovered/RECOVERY-MANIFEST.md`).
+predecessor said "12" while listing 11 — see the operator's recovery manifest at
+`~/.locus-secrets/RECOVERY-MANIFEST.md`, kept outside this repository).
 If you need the live count, decrypt the file and count it.
 
 These must be available at deploy time, but **must not be committed in
@@ -385,7 +386,10 @@ minisign private key that signs every client update (`client/docs/SIGNING.md`).
 It is **not present on any machine we control**: it lives only in the GitHub
 Actions secret store, which is write-only by design, so it cannot be read back to
 be encrypted. A passphrase-protected copy could only be committed if a copy were
-found offline first. See `.recovered/RECOVERY-MANIFEST.md`.
+found offline first. As of 2026-10-16 no offline copy exists, so the key cannot
+be included here at all. The record of the extraction attempts is kept outside
+this repository, in the operator's recovery manifest at
+`~/.locus-secrets/RECOVERY-MANIFEST.md`.
 
 ### Why not SOPS / Vault / git-crypt?
 
