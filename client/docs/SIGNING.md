@@ -80,12 +80,23 @@ negative cases are recorded here.
 
 | | |
 |---|---|
-| **Public key (as configured)** | `dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXkgNjRENjUwMjVFMkU0NzlGRApSV1Q5ZWVUaUpWRFdaRFo4aEZRN1RPRTZCVzdPRXdBUlcra1ZFVTdtMmpJbHhjamZpR1I5SW5LVwo=` |
-| **Underlying minisign key** | `RWT9eeTiJVDWZDZ8hFQ7TOE6BW7OEwARW+kVEU7m2jIlxcjfiGR9InKW` |
+> **ROTATED 2026-10-16.** The previous keypair (key ID `64D65025E2E479FD`) was
+> unrecoverable — it existed only in the write-only GitHub Actions secret store
+> and no offline copy existed anywhere. The table below describes the key in use
+> **now**. Clients built against the old key cannot auto-update; see §5.
+
+| | |
+|---|---|
+| **Public key (as configured)** | `dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXkgNERBOUI0OEYzOTI1MUNFRgpSV1R2SENVNWo3U3BUY1p3VnpKbjg1MkpVZEw0dnVMUEJWRC91RXBjTU1ibmx6dWxZeENKZjZoRgo=` |
+| **Underlying minisign key** | `RWTvHCU5j7SpTcZwVzJn852JUdL4vuLPBVD/uEpcMMbnlzulYxCJf6hF` |
 | **Where it lives** | `client/src-tauri/tauri.conf.json` → `plugins.updater.pubkey` |
 | **Secret key** | `.locus-keys/locus_update.key` (gitignored) |
-| **Where it must go** | GitHub Actions secret `LOCUS_UPDATE_KEY`, **and** an offline copy you control |
-| Key ID | `64D65025E2E479FD` (shown in the `.pub` comment line) |
+| **Where it must go** | GitHub Actions secret `LOCUS_UPDATE_KEY`, **and** an offline copy you control, **and** a passphrase-encrypted backup inside `server/secrets.env.age` |
+| Key ID | `4DA9B48F39251CEF` (shown in the `.pub` comment line) |
+
+The three-way custody in the last row is not decoration. The reason this rotation
+was necessary at all is that the previous key had only the *first* of those three
+copies, and it was the one that cannot be read back.
 
 ### ⚠️ The configured pubkey is base64 of the WHOLE `.pub` file — not the bare key
 
@@ -106,6 +117,10 @@ student sees
 The signature RWT9eeTiJVDWZDZ8hFQ7TOE6BW7OEwARW+kVEU7m2jIlxcjfiGR9InKW
 could not be decoded, please check if it is a valid base64 string.
 ```
+
+(The key in that transcript is the one retired 2026-10-16. The text is the
+message that was actually printed on 2026-09-29 and is kept verbatim; the value
+that would be printed today is the bare form of `RWTvHCU5…` above.)
 
 — an error naming the *signature* while the actual fault is the *pubkey*, because
 the plugin decodes the pubkey first. The configured value is derived
@@ -140,16 +155,27 @@ Only do this if the key is lost or must be rotated — see §5 for the
 consequences. Requires the real `minisign` tool (the crate in the registry,
 `minisign-verify`, is **verify-only** and cannot sign).
 
+> This procedure was executed on 2026-10-16 to produce the current key
+> (`4DA9B48F39251CEF`). It is kept as the procedure because a rotation will be
+> needed again, and the *custody* steps below are the ones that were missed last
+> time — the generation steps were never the problem.
+
 ```sh
-# Fetch minisign 0.11 (or newer) for your platform
+# Fetch minisign 0.12 (or newer) for your platform
 curl -sSL -o minisign.tar.gz \
-  https://github.com/jedisct1/minisign/releases/download/0.11/minisign-0.11-linux.tar.gz
+  https://github.com/jedisct1/minisign/releases/download/0.12/minisign-0.12-linux.tar.gz
 tar xzf minisign.tar.gz
 
 # -G generate, -W no passphrase (required for non-interactive CI signing)
+# The output paths place the key inside the gitignored .locus-keys/.
 ./minisign-linux/x86_64/minisign -G -W \
-  -p locus_update.pub -s locus_update.key \
+  -p .locus-keys/locus_update.pub -s .locus-keys/locus_update.key \
   -c "Locus client update signing key"
+
+# BEFORE anything else: confirm the private key cannot be committed.
+# Generating into a non-ignored path is how a live signing key becomes a
+# one-`git add -A` incident.
+git check-ignore -v .locus-keys/locus_update.key
 ```
 
 Then, **before shipping anything**:
@@ -157,11 +183,25 @@ Then, **before shipping anything**:
 1. Put the public key into `tauri.conf.json` → `plugins.updater.pubkey` as
    **base64 of the whole `.pub` file** — *not* its second line. See §3: the bare
    key line fails at the plugin's `base64_to_string` step. Derive it:
-   `base64 -w0 locus_update.pub`.
+   `base64 -w0 .locus-keys/locus_update.pub`.
 2. Put the whole `locus_update.key` file into the `LOCUS_UPDATE_KEY` GitHub
    secret — see §4a for the exact command.
-3. Keep an offline copy. Losing it is not recoverable by any means short of §5.
-4. Re-run the sign/verify round trip in §6.
+3. Put an offline copy somewhere you control: a password manager, and ideally a
+   second location. **This is the copy whose absence caused the 2026-10-16
+   rotation.** An Actions secret is not a backup — it is write-only, so it can
+   never be read back to become one.
+4. Add a passphrase-encrypted backup of the private key to
+   `server/secrets.env.age` (`server/scripts/secrets-encrypt.sh`), so the
+   committed, clone-recoverable bundle carries the key too. Until 2026-10-16
+   this bundle deliberately excluded it, on the reasoning that no copy existed to
+   encrypt; now that a key is generated locally first, that reasoning no longer
+   holds and the exclusion is what makes a lost Actions secret unrecoverable.
+5. Re-run the sign/verify round trip in §6, **including the negative cases**.
+6. Retarget the two key literals that pin the *shape* of the values: the bare key
+   in `client/src-tauri/tests/update_signature_contract.rs`
+   (`the_bare_public_key_is_not_a_valid_pubkey`) and the table in §3. Leaving the
+   old key in place there makes the guard test a value that no longer exists,
+   which reads exactly like a passing guard.
 
 ---
 
@@ -207,36 +247,28 @@ The **same key must be used**, not a freshly generated one: the matching public
 half is compiled into every already-installed client, and a new key produces
 updates those clients will all refuse (§5).
 
-### ⚠️ This key is NOT in the passphrase-encrypted secrets bundle
+### The key IS in the passphrase-encrypted secrets bundle (since 2026-10-16)
 
-Every *other* server credential moved into a committed, passphrase-encrypted file
-on 2026-10-16 (`server/secrets.env.age`, see
+Every server credential moved into a committed, passphrase-encrypted file on
+2026-10-16 (`server/secrets.env.age`, see
 [`../../docs/operate/SECRETS-MANAGEMENT.md`](../../docs/operate/SECRETS-MANAGEMENT.md)).
-**This key was not included, and could not be.** The reason is not a policy
-choice, it is a dead end:
 
-- the key exists **only** in the GitHub Actions secret store;
-- Actions secrets are **write-only by design** — no API, `gh` command, or UI
-  action returns the value, with or without a token;
-- therefore there has never been a copy on any machine to encrypt.
+**The old signing key could not be included, and that is exactly why it was
+lost.** It existed *only* in the GitHub Actions secret store; Actions secrets are
+write-only by design — no API, `gh` command, or UI action returns the value, with
+or without a token — so there was never a copy on any machine to encrypt. When
+that key needed to be used, it could not be retrieved, and the fleet it signed
+for could not be updated; the record of those attempts is in the operator's
+recovery manifest at `~/.locus-secrets/RECOVERY-MANIFEST.md`.
 
-So a fresh clone gives you every credential needed to **deploy and develop**, and
-still gives you no ability to **sign a release**. That asymmetry is the single
-most important caveat of the 2026-10-16 secrets migration, and it is why §5
-(key lost, clients in the field) remains the operative disaster scenario rather
-than a hypothetical.
+**The key in use now is backed up there deliberately**, per §4 step 4. The
+rotation changed the order of operations: generate locally *first*, encrypt a
+backup into the bundle, then set the Actions secret. That ordering is what makes
+the loss of an Actions secret survivable, and skipping step 4 recreates the
+2026-10-16 failure exactly.
 
-> **Confirmed 2026-10-16:** there is **no copy of this key on any machine** —
-> not in this repository, not in the passphrase bundle, not retrievably in the
-> Actions store, and not in the operator's offline material. §5 is therefore the
-> *current* state of the fleet and not a scenario: **no further release can be
-> signed** until a copy is located. The record of the extraction attempts is kept
-> deliberately **outside** this repository, in the operator's recovery manifest
-> at `~/.locus-secrets/RECOVERY-MANIFEST.md`.
-
-If you ever obtain a copy of `locus_update.key`, put it in `.locus-keys/` **and**
-add a passphrase-encrypted backup of it to the secrets bundle at that point —
-the tooling supports it, and until then there is simply nothing to encrypt.
+The result is an asymmetry worth stating plainly: a clone plus the passphrase is
+now enough to **sign a release**, which was not true before this rotation.
 
 ### The check that cannot be done locally
 
@@ -268,6 +300,27 @@ Therefore:
 
 **The public key is part of the app's identity.** Changing it is a breaking
 change on the same level as changing the app ID, and it must be planned as one.
+
+### This has now happened (2026-10-16)
+
+The rotation below is not hypothetical. The old key (`64D65025E2E479FD`) was
+lost, and the sequence actually executed was:
+
+- Every client built before the rotation trusts only the **old** public key, so
+  none of them can auto-update any more. The app identity is unchanged
+  (`com.locus.client`), so the fix is a **manual uninstall + reinstall** of the
+  new build for each affected device — not a new app.
+- The version ladder is deliberately **continuous across the rotation** (the
+  rotation itself shipped as `3.3.0`, following the `3.2.30` that preceded it).
+  A reinstall onto the new key therefore lands in the middle of the same ladder,
+  so the reinstalled client *can* auto-update to whatever follows. Had the ladder
+  been reset to a new major, every future release would also need a manual
+  install — which is the concrete reason the app identity was kept.
+- Because the hub advertises one active release to **every** client, a device
+  still running an old-key build will download the new release and fail at
+  signature verification. That failure is expected and is the signal that the
+  device has not been reinstalled yet; it is not a broken release.
+
 
 ---
 

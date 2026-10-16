@@ -13,6 +13,10 @@
 //! decoded, please check if it is a valid base64 string.
 //! ```
 //!
+//! (That key is the one retired on 2026-10-16 — the literal is kept here because
+//! it is a transcript of what was actually printed, not a live value. The key in
+//! `tauri.conf.json` today is the rotated one; see `client/docs/SIGNING.md` §3.)
+//!
 //! Two things were wrong, and neither was visible from inside either language:
 //!
 //! 1. `tauri.conf.json`'s `pubkey` held the **bare** minisign key (the second
@@ -142,9 +146,16 @@ fn the_configured_pubkey_is_base64_of_the_public_key_file() {
 /// regression test. The bare key is a *plausible* value — it is what
 /// `minisign -G` prints, and it is what an operator would copy out of the `.pub`
 /// file by hand — so the trap is worth pinning.
+///
+/// The literal is the bare key line of the CURRENT keypair (rotated
+/// 2026-10-16, key ID `4DA9B48F39251CEF`). It is retargeted rather than derived
+/// from `.locus-keys/locus_update.pub` on purpose: the point of this test is to
+/// pin the *shape* that fails, and a test that reads the value it is meant to
+/// reject would pass on any key, including a malformed one. When the key is
+/// rotated again, update this literal and the one in `SIGNING.md` §3 together.
 #[test]
 fn the_bare_public_key_is_not_a_valid_pubkey() {
-    let bare = "RWT9eeTiJVDWZDZ8hFQ7TOE6BW7OEwARW+kVEU7m2jIlxcjfiGR9InKW";
+    let bare = "RWTvHCU5j7SpTcZwVzJn852JUdL4vuLPBVD/uEpcMMbnlzulYxCJf6hF";
     let result = base64_to_string(bare);
     assert!(
         result.is_err(),
