@@ -8,7 +8,17 @@ verified-against: docs/state.toml, docs/operate/CLAIMS.md
 ```
 
 What I did **not** finish, and what a successor should know before picking it up.
-Ordered by whether I could have validated it here.
+
+**Grouped by what is blocking, not by when it was found.** Each entry ends with
+what would close it, so an entry is actionable in one read.
+
+| Section | Read it when |
+|---|---|
+| Work done in the tree but never run on the hub | You are about to rely on a change as if it were deployed |
+| Open, and blocked in this environment | You need a Windows machine, a Mac, a school network, or a live client |
+| Open, and needs a decision rather than work | The question is a product call, not a coding task |
+| Open, and fixable now | You have a checkout and an hour |
+| Closed | You are wondering why something is no longer listed |
 
 ---
 
@@ -130,6 +140,82 @@ shadowsocks units by hand.
 ---
 
 ## Open, and blocked in this environment
+
+### Three field reports from the 2026-10 investigation: what is fixed, and what is not
+
+**Added 2026-10.** Three reports arrived together and only one of them turned out
+to be a defect this repository could see. Recorded here so the next person does not
+re-derive the split.
+
+**Fixed in the tree (not yet released):**
+
+- *"Configuration validation is already running"* reported as a refusal. The
+  connect loop re-entered the config-apply path per poll; every poll after the
+  first met a guard and was shown to the student as a refused configuration. Now
+  separated into apply-once and poll-readiness, with `is_refusal()` deciding what
+  may be called a refusal. See `FIXES.md`.
+- *"Failed to compensate proxy apply failure … lock preferences"*. On macOS the
+  whole proxy configuration is one machine-wide lock taken with a **zero-second
+  wait**, and this client has several legitimate writers. Two writers overlapping
+  meant one reported a failure, then a *second* write to compensate met the same
+  lock. The write now waits for the lock and retries (3 attempts, 250 ms apart),
+  and only for that error — `commit`/`apply proxy configuration` failures still
+  fail once, because repeating them cannot help.
+- The macOS bundle's `com.apple.security.inherit` and its upstream app-group.
+  Removed, guarded by `check-consistency.sh` §30.
+- The free plan's verifier could not see the free plan at all: it checked the
+  retired single UoT listener. It now asserts each plan's listener against that
+  plan's own key and cap (§31), and `02-shadowsocks.sh` no longer rewrites
+  `/root/.tier_passwords` when it is not deploying from those values.
+- A stored hub override, delivered through the heartbeat, plus a Caddy alias
+  block, so a fleet behind a filtered hostname can be repointed without a release
+  (§32).
+
+**NOT verified — each needs a machine or a box, and each is a different claim:**
+
+- **That the Intel Mac's bundle fails to validate.** This is the hypothesis the
+  entitlement fix rests on, and it has not been observed. Read on the machine:
+  `codesign -dv --verbose=4 /Applications/Locus.app` and
+  `spctl -a -vvv -t install /Applications/Locus.app`. If both report the same as
+  on the silicon machine, the entitlement change is a *correctness* fix (it is
+  still correct) and is **not** the cause of the Intel difference — look to
+  `sysopt` timing next.
+- **That the free plan's UoT listener is running on the hub, with credentials
+  matching the seeded row.** `sing-box-uot-eco.service` must be `active` (not
+  merely `enabled`), `/etc/sing-box/eco.json`'s password must equal `ECO_PASS`, and
+  8447 must be shaped by `1:20`. `locus_status.udp` now reports what the *client*
+  believes; it cannot report what the hub is doing.
+  **Run `server/scripts/verify-ss2022.sh` on the box** — it now checks exactly
+  this pairing, which it previously could not.
+- **What the free-plan crash actually was.** No crash text was captured, and a
+  fix for it has not been attempted. This is the single most valuable missing
+  artifact: the macOS crash report or the log lines around the failure.
+- **That N4L will classify the new hostname favourably.** See below.
+
+### The hub hostname is blocked on a school network, and no client change can fix it
+
+**Added 2026-10.** A school network filtered `networkingguides.duckdns.org` as
+"unknown / uncategorised", which blocks activation, heartbeat **and** the update
+path — all three are served from that one name, so the device cannot fetch the
+build that would relieve it.
+
+This is a **world claim about a third party's classification**, not a code
+property, and it must be treated as one: it can be true today and false after any
+reclassification, and it can differ per school.
+
+**Fixable here:** which hostname the client dials. `locus::contract::resolve_hub_url`
+now honours a validated stored override (absolute https, no path), so a hub move is
+one operator-set value plus a Caddy site block — no release.
+
+**Not fixable here:** the categorisation itself. A dynamic-DNS subdomain
+(`*.duckdns.org`) is structurally likely to be classified as uncategorised or
+dynamic-DNS. A durable fix needs a hostname under a domain that is registered,
+has a reputation, and can be recategorised on request — that is an operator
+purchase, and it is **unverified** until a device on the school network has
+actually resolved and reached it.
+
+**Re-verify with:** a `curl` to `/api/release` from the school network. Success is
+the only evidence that counts; a successful `curl` from anywhere else says nothing.
 
 ### macOS auto-update is now the right SHAPE, but has never run on a Mac
 
@@ -600,7 +686,7 @@ entry above.
 
 ---
 
-## Open, and blocked in this environment
+## Open, and blocked in this environment (continued)
 
 ### The publish guard calls `atob`, which goja does not have — the fix is proven but not applied
 
@@ -1185,139 +1271,50 @@ Verified against the **live hub**, not only by unit tests:
    pkexec→sudo escalation and service, but nobody has run it. Linux is ~2% of
    clients and last in priority.
 
-### ~~The `proxies` page is still in the client~~ — REMOVED in 3.1.0 (2026-09-26)
+## Closed — kept for the reasoning, not the state
 
-Resolved by deletion rather than replacement. `pages/proxies.tsx` and the whole
-`components/proxy/` tree (~4,900 lines) are gone, and `proxies` is no longer a
-navigation entry.
+Finished items used to sit inside the open sections above, struck through. They
+are collected here so the live sections hold only live gaps. Nothing here needs
+work; **two gaps the 3.1.0 deletion left behind are still open and are listed
+above** (`test_delay`-backed latency, and the missing Locus logo asset).
 
-The one genuinely useful thing in there — **live latency**, which a student asking
-"is my connection good?" wants — was *not* carried over, and that is the gap this
-section leaves behind. The Connection screen shows live up/down speed and the traffic
-graph, which answer "is it working?" but not "is it fast?". A latency readout is still
-worth adding, and `test_delay` still exists to back it.
+- **Fork versioning (settled 2026-09-26).** The client's own line began at
+  **3.0.0**, not Clash Verge's inherited `2.5.5`. Publishing the inherited number
+  would have pushed the fleet above the hub's numbering permanently, with no
+  server-driven downgrade to recover from — a manual reinstall per device would
+  have been the only fix. **Two version-site sets exist and the difference is
+  deliberate:** three must agree at runtime (asserted by
+  `client/src-tauri/tests/version_consistency.rs`; drift there is a correctness
+  dependency of the updater, not hygiene), and `pnpm release-version` writes five
+  (adding `Cargo.lock`, repaired by Cargo and covered by `cargo fetch --locked`,
+  and `../state.toml`, covered by `check-consistency.sh` §7/§9). The list is
+  `[client.version_sites]` in [`../state.toml`](../state.toml) — link it, do not
+  restate the count. **Bump with `pnpm release-version`, never by hand.** There is
+  no root `VERSION` file; CI builds releases
+  ([`../operate/RELEASING.md`](../operate/RELEASING.md)).
+- **The Verge UI and the `proxies` page (3.1.0).** Deleted, not rebranded: two
+  tabs remain (Connection, Account); proxies, logs and settings (69 files) and the
+  whole `components/proxy/` tree are gone. The backend was untouched — profiles,
+  `enhance`, the service-vs-sidecar decision and `locus::tier` still drive
+  `locus_connect`. See the two open gaps above for what the deletion cost.
+- **`publish-update.sh` and the `updatecfg` comment (2026-09-23).**
+  `legacy/publish-update.sh.broken` was never live. It wrote no
+  `sha256_<platform>` columns (so nothing could verify a download) and named
+  `locus-macos-*` where CI produces `locus-darwin-*` (404). The `internal/updatecfg`
+  comment explained this as one script writing `update_linux`/`update_windows` and
+  the other `download_*`; **both write `download_*`**, corrected in the package
+  comment, `updatecfg_test.go` and `FIXES.md`. What survives is why it is recorded
+  at all: **there was no single definition of the `update_config` record**, so
+  nothing could notice two scripts describing it differently. `internal/updatecfg`
+  is that definition, and its three frozen field-name layers (record `download_*`
+  → response `update_*` → client struct) are the contract.
 
-**Partly addressed in 3.2.0 (2026-09-27):** the Connection screen gained a
-**Connection check** card — a manual public-IP probe that answers "is my traffic
-actually going through Locus?" (the app's own "connected" state cannot, because a
-tunnel can be up while nothing is carried). That closes the *is-it-working-at-all*
-half of the gap. **Latency is still missing** — the check proves routing, not speed,
-and a ping/round-trip readout backed by `test_delay` remains worth adding.
-
-### ~~Deferred: the Verge UI a student still meets~~ — DONE in 3.1.0 (2026-09-26)
-
-**This entire section is superseded.** It measured the problem — "8 of ~203 front-end
-files mention Locus at all" — and posed four open questions. All four were answered and
-the work is finished:
-
-| Surface | 3.1.0 state |
-|---|---|
-| Activation gate | Locus, rebranded (`UI-AESTHETICS.md` palette) |
-| Nav | **two tabs: Connection and Account** |
-| Proxies / Logs / Settings | **deleted** — 69 files, ~17,600 lines |
-| Home cards | replaced by the Connection screen |
-| Locale text | zero Verge product-name strings in all 13 languages |
-
-Answers, for the record:
-
-1. **Node selection does not exist.** One server per tier, so the ~4,900-line proxy
-   tree went. Nothing was kept "in case".
-2. **Logs was deleted rather than replaced.** A "Report a problem" affordance that
-   gathers what support needs is still the better answer, and is now the *only* gap
-   this section leaves behind — a student with a problem has the Account screen's
-   device ID and nothing to send with it.
-3. **Entitlements vs internals:** TUN-on, sysproxy, core choice, ports and DNS are
-   internals with **no UI at all**. Locus decides them. Only language, theme,
-   update-check and refresh became student-facing, inside Account.
-4. **The home cards did not shrink — they were deleted.** Live speed, the traffic graph
-   and the connection state live on Connection; the session totals live on Account.
-
-What replaced the connective tissue: `components/connection/use-connection.ts` (the
-tunnel state machine), `use-traffic-summary.ts` (one place the traffic numbers are
-computed) and `tier-badge.tsx`. The backend was not touched — profiles, config
-generation, `enhance`, the service/sidecar decision and `locus::tier` all still drive
-`locus_connect` exactly as before.
-
-**Still missing from this area:** there is no Locus logo asset in the repo.
-`src-tauri/icons/*` is the Clash Verge Rev mark; `UI-AESTHETICS.md` §4 asks for a 48×48
-`#2EA86A` shield. The activation screen shows the wordmark alone rather than
-substituting the old logo, deliberately — drawing a brand mark needs a human decision.
-
-### Fork versioning — RESOLVED (2026-09-26)
-
-This was an open decision; it is settled.
-
-**The client's own Locus line began at 3.0.0** (the line has moved on; the
-current version is `[client.version]` in [`../state.toml`](../state.toml)), not
-Clash Verge's inherited `2.5.5`. The reasoning is worth keeping, because the trap
-was real:
-
-```
-2.5.5 vs 2.2.6 -> strictly newer? true     (publishing 2.5.5 moves the fleet up)
-2.2.9 vs 2.5.5 -> strictly newer? false    (after which every 2.2.x is REFUSED)
-```
-
-The client reported the version it inherited from Verge while the hub served
-2.2.x. Publishing the inherited number would have pushed the fleet above the hub's
-numbering permanently, with no server-driven downgrade to recover from — a manual
-reinstall per device would be the only fix.
-
-**Two version-site sets, and the difference is deliberate** — do not "correct"
-one to the other:
-
-- **Three sites must agree at runtime**, and `client/src-tauri/tests/version_consistency.rs`
-  reads them from disk and fails when they do not: `client/src-tauri/Cargo.toml`
-  (compiled in — what the client reports), `client/package.json` (what the
-  frontend shows), and `client/src-tauri/tauri.conf.json` (what the bundler
-  names installers after). Drift here is a correctness dependency of the
-  updater, not hygiene: a build whose reported version disagrees with its
-  bundled one either refuses the update that would fix it or silently declines
-  every release, and neither says so.
-- **`pnpm release-version` writes five files**, adding `Cargo.lock` and
-  `../docs/state.toml` (the `[client.version]` derived fact) to the three above.
-  Those two are not covered by the Rust test on purpose — `Cargo.lock` is
-  repaired by Cargo before any test runs (and is covered by `cargo fetch
-  --locked` in CI instead), and `state.toml` is covered by
-  `check-consistency.sh` §7/§9. See the header of `client/scripts/release-version.mjs`.
-  The **five-site list is `[client.version_sites]` in
-  [`../state.toml`](../state.toml)** — link it rather than restating the count.
-
-The rule that matters either way: **bump with `pnpm release-version`, never by
-hand**, and let the guards disagree with you if you try.
-
-**No root `VERSION` file.** The fork versions itself in its own manifests.
-
-**Releases are built by CI** — see `../operate/RELEASING.md` and `../operate/UPDATE-SYSTEM.md`.
-Tag → CI builds, signs and releases → the hub fetches → publishes.
-
-### ~~`publish-update.sh` (repo root) has two real defects~~ — RESOLVED BY RETIREMENT (2026-09-23)
-
-The script is now `legacy/publish-update.sh.broken`, with both defects documented
-in its header. It was never live: nothing has been published through it, and
-`update_config` was at rollout 0 with empty URLs.
-
-1. **It writes no `sha256_<platform>` columns.** Verified: zero matches. It emits
-   an `assets: {…}` object, which is not an `update_config` column.
-2. **Its macOS URLs point at filenames CI does not produce.**
-   `locus-macos-amd64` / `locus-macos-arm64` vs CI's `locus-darwin-amd64` /
-   `locus-darwin-arm64` → 404.
-
-`publish-release.sh` is the correct path and does verify served bytes.
-
-### ~~Correct the `internal/updatecfg` doc comment~~ — DONE (2026-09-23)
-
-It stated that `publish-update.sh` writes `update_linux`/`update_windows` while
-`publish-release.sh` writes `download_*`, causing every platform to fetch the
-Linux binary. **That was not accurate**: both scripts write `download_*`, and
-`publish-update.sh` contains zero `update_linux`/`update_windows` occurrences.
-
-Corrected in three places: the `internal/updatecfg` package comment, the
-`updatecfg_test.go` header, and `FIXES.md` #31 (which carried the same claim).
-`publish-update.sh` itself is retired to `legacy/publish-update.sh.broken` with
-the correction in its header. The package remains a valid shared contract
-definition — only the stated cause of the bug was wrong.
+---
 
 ### Delete my backup files once the guard is confirmed good
+
+*Operator housekeeping left on the host, not a code item — recorded so it is not
+mistaken for one.*
 
 ```
 /root/data.db.pre-updateconfig-fix-1789795235
@@ -1364,8 +1361,10 @@ Recording these so they are not re-investigated:
 - **`/update.json`** — a stale placeholder written by `05-caddy.sh`. The updater
   reads `update_config`. Not a fault, but do not use it as a health check.
 - **The truncated fingerprint** in the `live-data-do-not-delete` memory note — I
-  flagged it but did not correct the memory. If you rely on that value, use the
-  full 64-char SHA-256 from `docs/history/SESSION-GOTCHAS.md` §1.
+  flagged it but did not correct the memory. A device fingerprint is always a
+  full 64-character SHA-256; if a note shows 16, it is a prefix, and testing with
+  it makes `/api/code-lookup` answer `bound_other` and `/api/activate` 403 for the
+  device that actually activated. Print the stored value before theorising.
 - **Making it so a future deploy cannot advertise unresolvable update URLs** — I
   added a guard for the *record* (`releases.set` checks URLs and hashes are
   present and version-matched), but the hook cannot stat the filesystem
@@ -1375,13 +1374,36 @@ Recording these so they are not re-investigated:
 
 ---
 
+## The key recovery path is documented but has never been run
+
+**Added 2026-10-05.** [`../operate/RELEASE-RECOVERY.md`](../operate/RELEASE-RECOVERY.md)
+was written after the 3.3.0 rotation, and its commands are derived from
+`secrets-decrypt.sh`'s interface and `client/docs/SIGNING.md` §6 — **not executed
+against a real recovery**. Specifically unverified:
+
+- That `LOCUS_UPDATE_KEY_B64` decodes to bytes `minisign` accepts. The encoding
+  is base64 of the whole file *because* the raw form breaks `source`; the decode
+  path has not been round-tripped since the runbook was written.
+- That a key recovered this way, once set as `LOCUS_UPDATE_KEY`, produces a CI
+  signature a client accepts. §2's round trip proves the private and public halves
+  match; it cannot prove the pair is the one the fleet trusts.
+- That a reinstalled 3.3.0 client then auto-updates. This is the same open item as
+  "no update has ever successfully been installed" above, seen from the other
+  side: the rotation gave that item a second population — every device still on
+  the old key — and nothing has re-run it.
+
+**What would close it:** decrypt the bundle on a throwaway host, decode the key,
+run §2's sign/verify round trip, then set the secret on a test branch and read the
+`build` job's output. No tag, no device, no fleet.
+
 ## If you are the next agent here
 
 1. **Read the "never met a database" section above first** — the term/renewal
    work is the largest unverified surface in the repo, and its detail is in
    `docs/business/redesign/implementation/05-not-yet-true.md`.
-2. Read `docs/history/SESSION-GOTCHAS.md` before testing against the live hub — it will
-   save you the two false diagnoses a previous session made.
+2. Before testing against the live hub, read this file's "deliberately left
+   alone" section — it records the false diagnoses already paid for (a truncated
+   fingerprint, a Luhn-invalid test code).
 3. Remember `setup.sh` deploys from `/root/server/`, not from the repo. Editing a
    file here changes nothing until the staging copy is updated. `server/scripts/hooks-sync.sh`
    does the copy and verifies it; to check drift by hand:

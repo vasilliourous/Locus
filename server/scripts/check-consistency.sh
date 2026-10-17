@@ -2397,7 +2397,14 @@ LIFECYCLE="$REPO/client/src-tauri/src/core/manager/lifecycle.rs"
 if [ ! -f "$LIFECYCLE" ]; then
     warn "no lifecycle.rs — this guard cannot run"
 else
-    if grep -q 'fn should_request_install_for_absent_service' "$LIFECYCLE"; then
+    # The existence checks below read the file, so an unreadable file is the
+    # GUARD failing, not the predicate disappearing. `grep` exits 2 on a read
+    # error; only exit 1 (no match) is evidence about the code.
+    predicate_grep=0
+    grep -q 'fn should_request_install_for_absent_service' "$LIFECYCLE" || predicate_grep=$?
+    if [ "$predicate_grep" = 2 ]; then
+        warn "lifecycle.rs is unreadable — these guards cannot run"
+    elif [ "$predicate_grep" = 0 ]; then
         ok "the absent-Service install predicate exists"
     else
         bad "should_request_install_for_absent_service is gone from lifecycle.rs"
@@ -2413,22 +2420,50 @@ else
     # matches the explanation, so deleting the call while keeping its comment
     # would read as a pass. That blind spot was found by falsifying this guard
     # rather than by writing it.
-    lifecycle_code="$(python3 - "$LIFECYCLE" <<'PY'
-import re, sys
+    # THE EXTRACTOR MUST NOT BE ABLE TO LIE ABOUT THE CODE.
+    #
+    # This check produced a FALSE BAD line ("prepare_startup does not CALL ...")
+    # on a tree where lifecycle.rs demonstrably called the predicate at line 512,
+    # and then went green on the identical tree seconds later.
+    #
+    # The mechanism: `$()` captures stdout, but a python traceback goes to
+    # stderr. If the extractor fails — an unreadable path, a permission problem,
+    # a truncated read while another tool writes the file — stdout is empty, an
+    # empty string does not contain the call, and the guard reports a defect it
+    # never looked for. That is DEBUGGING-METHOD §3's failure mode wearing a
+    # guard's clothes: the check cannot distinguish "the code is wrong" from
+    # "I could not read the code", so both read as BAD.
+    #
+    # So: keep stderr (2>&1) where a reader can see the traceback, and turn an
+    # empty result or a traceback into a WARN about the GUARD, never a BAD about
+    # the code.
+    lifecycle_code="$(python3 - "$LIFECYCLE" 2>&1 <<'PY'
+import sys
 text = open(sys.argv[1], encoding="utf-8", errors="replace").read()
-# Drop `//`-style comments (including doc comments) line by line.
 kept = []
 for line in text.splitlines():
-    stripped = line.strip()
-    if stripped.startswith("//"):
+    if line.strip().startswith("//"):
         continue
     kept.append(line)
 print("\n".join(kept))
 PY
 )"
 
+    extractor_broken=0
+    if [ -z "$lifecycle_code" ]; then
+        extractor_broken=1
+        warn "the lifecycle extractor returned nothing — this guard cannot run"
+    fi
+    case "$lifecycle_code" in
+        *Traceback*)
+            extractor_broken=1
+            warn "the lifecycle extractor failed (traceback above) — this guard cannot run" ;;
+    esac
+
     if printf '%s' "$lifecycle_code" | grep -q 'if should_request_install_for_absent_service('; then
         ok "the startup path calls the absent-Service predicate"
+    elif [ "$extractor_broken" = 1 ]; then
+        : # warned above; an unreadable file is not evidence about the call site
     else
         bad "prepare_startup does not CALL should_request_install_for_absent_service"
         bad "  the predicate existing is not enough: nothing raises the install request,"
@@ -2437,6 +2472,8 @@ PY
 
     if printf '%s' "$lifecycle_code" | grep -q 'require_install_for_session()'; then
         ok "the startup path still raises the install request"
+    elif [ "$extractor_broken" = 1 ]; then
+        : # guarded by the same warn as the call-site check — unreadable is not BAD
     else
         bad "prepare_startup no longer calls require_install_for_session()"
     fi
@@ -2447,11 +2484,19 @@ PY
     #
     # Checked as the cfg attribute IMMEDIATELY preceding the call, since the file
     # also carries a `#[cfg(target_os = "macos")]` elsewhere (the dev chmod path).
-    if python3 - "$LIFECYCLE" <<'PY'
+    # Same rule as above: this sub-check reads the file, so a read error is the
+    # GUARD failing rather than the code being wrong. The result is captured as a
+    # marked string so "could not read" and "read it, and the gate is missing"
+    # cannot be confused — a bare exit status is not enough distinction here.
+    cfg_gate="$(python3 - "$LIFECYCLE" 2>&1 <<'PY'
 import re, sys
+try:
+    text = open(sys.argv[1], encoding="utf-8", errors="replace").read()
+except OSError as exc:
+    print("UNREADABLE", exc)
+    raise SystemExit(0)
 code = "\n".join(
-    l for l in open(sys.argv[1], encoding="utf-8", errors="replace").read().splitlines()
-    if not l.strip().startswith("//")
+    l for l in text.splitlines() if not l.strip().startswith("//")
 )
 # An `if should_request_install_for_absent_service(` guarded by a macOS cfg on the
 # line directly above it.
@@ -2459,14 +2504,23 @@ ok = re.search(
     r'#\[cfg\(target_os = "macos"\)\]\s*\n\s*if should_request_install_for_absent_service\(',
     code,
 )
-sys.exit(0 if ok else 1)
+print("GATED" if ok else "NOT_GATED")
 PY
-    then
-        ok "the absent-Service request is cfg-gated to macOS at the call site"
-    else
-        bad "the absent-Service install request is not immediately cfg-gated to macOS"
-        bad "  it must not change Windows behaviour, where absence means removal"
-    fi
+)"
+    # `NOT_GATED` CONTAINS `GATED`. A `*GATED*` pattern therefore matched the
+    # failure case and reported OK — the guard passed while the macOS gate was
+    # deleted, which is the "check that cannot fail" defect this file documents
+    # in DEBUGGING-METHOD §3. Match the exact word, and keep the unreadable case
+    # first so a guard failure is never read as a code verdict.
+    case "$cfg_gate" in
+        *UNREADABLE*)
+            warn "the cfg-gate check could not read lifecycle.rs — this guard cannot run" ;;
+        GATED)
+            ok "the absent-Service request is cfg-gated to macOS at the call site" ;;
+        *)
+            bad "the absent-Service install request is not immediately cfg-gated to macOS"
+            bad "  it must not change Windows behaviour, where absence means removal" ;;
+    esac
 fi
 
 # The refusal wording. It used to say "Install the service from Settings", which
@@ -2725,21 +2779,33 @@ else
     # silence, which is the §7 lesson one level out: verifying the value is not
     # verifying what the documents SAY about it.
     #
-    # The value is in `state.toml` ([tiers.free].cap). These two files are the
-    # ones a reader meets first (the front door, and the module that owns the
-    # cap), so they are the ones pinned here. A prose copy that reintroduces the
-    # old number now fails the build rather than shipping.
+    # THAT GUARD ENFORCED THE DUPLICATION, AND WAS ITSELF THE BUG. It required
+    # `README.md` to contain the literal `tc caps (1/100 Mbps)` — so the only way
+    # to pass was to keep a second hand-maintained copy of the caps in prose. The
+    # copy was correct on the day the guard was written and had to be re-edited
+    # by hand every time a cap moved. Its failure mode was not "the docs are
+    # wrong", it was "nobody restated the caps here", which is the state
+    # `docs/STATE.md` rule 4 asks for: one home per fact.
+    #
+    # WHAT IT ASSERTS NOW. The cap has exactly one prose home
+    # (`docs/business/04-tiers.md`), backed by `state.toml` `[tiers.*].cap`, which
+    # §27 recomputes from `04-tc.sh`. `README.md` is a front door and must POINT,
+    # not restate. So the check is the negative: no cap string in `README.md` at
+    # all. That fails on a reintroduced copy (of either the current or a retired
+    # number) instead of failing on a removal.
+    #
+    # VERIFIED TO FAIL: re-adding "tc caps (1/100 Mbps)" to README.md, or the
+    # retired "Eco 5Mbit", each produces a BAD line. See the §23(g) note.
     README_MD="$REPO/README.md"
     if [ -f "$README_MD" ]; then
-        # The merged ladder: free 1 Mbps, paid 100 Mbps. NOTE this literal moved
-        # from (1/100/200) to (1/100) in the same commit as every other file that
-        # restated it — that is this guard doing its job, not a guard breaking.
-        # The paid-tier half of the same agreement is asserted by §27(g).
-        if grep -Eq 'tc caps \(1/100 Mbps\)' "$README_MD"; then
-            ok "README.md's tier-cap summary agrees with state.toml (1/100 Mbps)"
+        # Any "N/M Mbps" pairing of the two tiers is a restatement. Match the
+        # shapes a copy actually takes, current and retired.
+        if grep -Eq 'tc caps|tc caps \(|1/100 Mbps|5/100/200 Mbps|Eco 5Mbit|5M tc' "$README_MD"; then
+            bad "README.md restates the tier caps — the caps have one home (04-tiers.md + state.toml [tiers.*].cap); link to it instead"
         else
-            bad "README.md restates the tier caps and disagrees with state.toml — expected 'tc caps (1/100 Mbps)'"
+            ok "README.md does not restate the tier caps (one home: 04-tiers.md + state.toml)"
         fi
+        # The retired 5Mbit free-tier cap must never reappear, in any wording.
         if grep -Eq 'Eco 5Mbit' "$README_MD"; then
             bad "README.md still calls the free/Eco tier '5Mbit' — the cap was lowered to 1mbit"
         else
@@ -3009,13 +3075,17 @@ else
     fi
 
     # (g) THE PROSE ABOUT THE PAID CAP, not just the cap (§23(g)'s lesson one
-    #     tier over). Two documents restate it and both are ones a reader meets
-    #     first. A prose copy that reintroduces the retired 200 Mbps now fails.
+    #     tier over). This used to REQUIRE the literal `tc caps (1/100 Mbps)` in
+    #     `README.md`, which made a hand-maintained second copy of the caps the
+    #     condition for a green build — see the longer note at §23(g). It now
+    #     asserts the absence instead: README points at the owner, it does not
+    #     restate it. VERIFIED TO FAIL by re-adding either the current or a
+    #     retired cap string to README.md.
     if [ -f "$REPO/README.md" ]; then
-        if grep -Eq 'tc caps \(1/100 Mbps\)' "$REPO/README.md"; then
-            ok "README.md's tier-cap summary agrees with the merged ladder (1/100 Mbps)"
+        if grep -Eq 'tc caps|1/100 Mbps|5/100/200 Mbps|Stealth [0-9]+ ?Mbps|5M tc' "$REPO/README.md"; then
+            bad "README.md restates a tier cap — the caps have one home (04-tiers.md + state.toml); link to it instead"
         else
-            bad "README.md restates the tier caps and disagrees with the tree — expected 'tc caps (1/100 Mbps)'"
+            ok "README.md does not restate any tier cap (one home: 04-tiers.md + state.toml)"
         fi
         if grep -Eq 'Stealth [0-9]+ ?Mbps|5M tc' "$REPO/README.md"; then
             bad "README.md still restates a retired tier's cap"
@@ -3830,6 +3900,488 @@ EOF
     bad "  A tracked secret is in the HISTORY, not just the working tree. If this"
     bad "  ever contained a live credential, rotate that credential — removing the"
     bad "  file does not un-publish it, and rewriting history does not either."
+fi
+
+echo
+echo "════════════════════════════════════════════════════════════"
+echo "30. The macOS bundle claims no entitlement it does not own"
+
+# ── WHY THIS GUARD EXISTS ──
+#
+# `client/src-tauri/packages/macos/entitlements.plist` is inherited from the
+# upstream Clash Verge Rev fork, and for the whole life of this fork nobody had
+# asked what its keys ASSERT about Locus rather than about Verge. Two of them
+# asserted things that are not true of this bundle:
+#
+#   * `com.apple.security.inherit = true` — meaningful ONLY on a child process of
+#     a sandboxed parent. Locus is `app-sandbox = false` and is not sandboxed, so
+#     the key says "my entitlements come from my parent" about a process that has
+#     no sandboxed parent. It is also the one entitlement whose validity is judged
+#     per SIGNATURE SLICE, which is why an identical .app can behave differently
+#     on two architectures. Found while diagnosing a macOS Intel report
+#     ("configuration is already running" / "lock preferences").
+#
+#   * `com.apple.security.application-groups` — naming
+#     `io.github.clash-verge-rev.clash-verge-rev`, ANOTHER PRODUCT'S identifier.
+#     This app's identifier is `com.locus.client` (tauri.macos.conf.json), nothing
+#     in the tree creates that group container, and an ad-hoc signature cannot
+#     carry a group it does not own.
+#
+# ── WHAT THIS CHECKS ──
+#
+#   (a) `com.apple.security.inherit` is absent, or is `false`. Present-and-true is
+#       a contradiction against `app-sandbox = false`, and this guard reads BOTH
+#       keys so the contradiction cannot be reintroduced by flipping one of them.
+#   (b) Any `application-groups` entry names an identifier this bundle OWNS — i.e.
+#       it must contain the app's own identifier prefix from tauri.macos.conf.json.
+#   (c) The file parses as a plist. A malformed entitlements file makes `codesign`
+#       fail at build time on a macOS runner, which is expensive to discover; the
+#       same file is cheap to parse here.
+#
+# ── HOW IT WAS SHOWN TO FAIL ──
+#
+# Restoring either removed key (inherit=true, the Verge group) produces a BAD line.
+# See docs/reference/FIXES.md for the entry; a guard that cannot fail reads exactly
+# like a guard that passed.
+# ─────────────────────────────────────────────────────────────
+ENTLMTS="$REPO/client/src-tauri/packages/macos/entitlements.plist"
+MACOS_CONF="$REPO/client/src-tauri/tauri.macos.conf.json"
+if [ ! -f "$ENTLMTS" ]; then
+    bad "missing $ENTLMTS (the macOS bundle is configured to use it)"
+else
+    entitlements_report=$(python3 - "$ENTLMTS" "$MACOS_CONF" <<'PY'
+import json, plistlib, sys
+
+ent_path, conf_path = sys.argv[1], sys.argv[2]
+problems = []
+
+try:
+    with open(ent_path, "rb") as fh:
+        ent = plistlib.load(fh)
+except Exception as exc:  # noqa: BLE001 - any parse failure is the finding
+    print("BAD\tdoes not parse as a plist: %s" % exc)
+    raise SystemExit(0)
+
+sandboxed = bool(ent.get("com.apple.security.app-sandbox", False))
+
+# (a) inherit is only meaningful on a sandboxed child process.
+inherit = ent.get("com.apple.security.inherit", False)
+if inherit and not sandboxed:
+    problems.append(
+        "com.apple.security.inherit is true on a non-sandboxed bundle "
+        "(app-sandbox is false) — it asserts a sandboxed parent this app does not have"
+    )
+if inherit and sandboxed:
+    problems.append(
+        "com.apple.security.inherit is true — Locus is a top-level app, not a child "
+        "process; remove it unless a sandboxed parent is introduced deliberately"
+    )
+
+# (b) an app group must be one this bundle may own.
+try:
+    with open(conf_path, encoding="utf-8") as fh:
+        identifier = json.load(fh).get("identifier", "")
+except Exception as exc:  # noqa: BLE001
+    problems.append("could not read the app identifier from %s: %s" % (conf_path, exc))
+    identifier = ""
+
+for group in ent.get("com.apple.security.application-groups", []) or []:
+    if not identifier:
+        problems.append("application-groups entry %r cannot be checked: no app identifier" % group)
+        continue
+    # The bundle may only claim a group built on its own identifier family.
+    family = ".".join(identifier.split(".")[:2])
+    if identifier not in group and family not in group:
+        problems.append(
+            "application-groups entry %r is not this bundle's — the app identifier is %r"
+            % (group, identifier)
+        )
+
+for problem in problems:
+    print("BAD\t%s" % problem)
+PY
+)
+    if [ -z "$entitlements_report" ]; then
+        ok "entitlements.plist parses and claims only entitlements this bundle owns"
+    else
+        while IFS="$(printf '\t')" read -r _kind message; do
+            bad "ENTITLEMENTS: $message"
+        done <<EOF
+$entitlements_report
+EOF
+        bad "  File: client/src-tauri/packages/macos/entitlements.plist"
+        bad "  An entitlement is a claim about what the process may do. Never inherit"
+        bad "  one from the upstream fork without asking what it asserts about THIS"
+        bad "  bundle — see the comment block in the file itself."
+    fi
+fi
+
+echo
+echo "════════════════════════════════════════════════════════════"
+echo "31. Every per-plan UoT listener is checked by the verifier"
+
+# ── WHY THIS GUARD EXISTS ──
+#
+# `verify-ss2022.sh` is the script an operator runs ON THE HOST to answer "is
+# every listener serving SS2022 with the right key?". After the per-plan UoT
+# split (one sing-box listener per plan, `sing-box-uot-strike` on 8446 and
+# `sing-box-uot-eco` on 8447), it was still checking ONE listener — the retired
+# `sing-box-uot` — against ONE config, `/etc/sing-box/config.json`, which no
+# longer exists.
+#
+# The consequence was not a cosmetic warning. It compared the retired unit's key
+# against Strike and had no concept of the free plan's listener at all, so a free
+# key that did not match its own listener passed the whole script: TCP works, game
+# traffic is silently dead, and the verifier says the deployment is healthy. That
+# is the same class as §24 — a check that cannot fail, guarding the one pairing a
+# student notices.
+#
+# ── WHAT THIS CHECKS ──
+#
+#   (a) The verifier names each per-plan unit the deploy creates.
+#   (b) It does not rely on the retired single-listener unit or config as if they
+#       were current — both may appear, but only in a check that expects them to
+#       be ABSENT.
+#   (c) It compares each plan's UoT key against THAT PLAN's tier key, i.e. the
+#       agreement, not one side.
+# ─────────────────────────────────────────────────────────────
+VERIFY_SS="$SCRIPTS/verify-ss2022.sh"
+if [ ! -f "$VERIFY_SS" ]; then
+    bad "verify-ss2022.sh is missing — the host verifier cannot check anything"
+else
+    for unit in sing-box-uot-strike sing-box-uot-eco; do
+        if grep -q "$unit" "$VERIFY_SS"; then
+            ok "the verifier names ${unit}"
+        else
+            bad "verify-ss2022.sh does not name ${unit} — a listener nothing verifies"
+        fi
+    done
+
+    # The retired unit must only appear as a NEGATIVE assertion or in prose.
+    #
+    # A positive requirement and a negative assertion both contain
+    # `is-active --quiet sing-box-uot`, so the text alone cannot tell them apart —
+    # and the first version of this guard reported the fixed file (matching its own
+    # comment), while a naive "grep for the unit" version would also miss the real
+    # defect. What distinguishes them is the SUCCESS arm: a requirement reports
+    # PASS when the unit is up and FAIL when it is not; a negative assertion has no
+    # success arm at all, only a failure.
+    #
+    # So: the block is a positive requirement iff a `pass` appears inside it.
+    if awk '
+        /is-active --quiet sing-box-uot( |$)/ { inblock = 1; depth = 0 }
+        inblock && /pass / { found = 1 }
+        inblock && /^\s*fi\s*$/ { inblock = 0 }
+        END { exit found ? 0 : 1 }
+    ' "$VERIFY_SS"; then
+        bad "the verifier still reports success from the retired sing-box-uot.service"
+        bad "  (that unit binds :8446 and races the per-plan listener)"
+    else
+        ok "the retired single-listener unit is not required by the verifier"
+    fi
+
+    # The free plan's inbound must be paired with the FREE tier's key.
+    if grep -vE '^\s*#' "$VERIFY_SS" | grep -qE 'sing-box-uot-eco'; then
+        ok "the verifier pairs the free UoT listener with its own config"
+    else
+        bad "verify-ss2022.sh does not pair eco.json with sing-box-uot-eco"
+        bad "  A free listener whose key is never compared to the free tier key can"
+        bad "  be dead while the verifier reports healthy — see §24's lesson."
+    fi
+
+    # Stale path: the pre-split config names nothing that exists on a current box.
+    # Again code lines only, so the explanatory header cannot trip it.
+    if grep -vE '^\s*#' "$VERIFY_SS" | grep -q '/etc/sing-box/config\.json'; then
+        bad "verify-ss2022.sh still reads the retired /etc/sing-box/config.json"
+    else
+        ok "the verifier reads only the per-plan sing-box configs"
+    fi
+fi
+
+echo
+echo "════════════════════════════════════════════════════════════"
+echo "32. The hub alias and the client's hub override agree"
+
+# ── WHY THIS GUARD EXISTS ──
+#
+# A school network (N4L) classified the hub's hostname as uncategorised and
+# blocked it. That blocks activation, heartbeat AND the update path at once,
+# because all three are served from one name — so the device cannot fetch the
+# build that would relieve it.
+#
+# Two halves had to be added for that to be escapable, and each is useless alone:
+#
+#   * `modules/05-caddy.sh` serves a second hostname (`HUB_ALIAS_DOMAIN`) that
+#     redirects to the canonical hub — the SERVER half;
+#   * `locus::contract::resolve_hub_url` honours a stored override — the CLIENT
+#     half, which only helps if a build carrying it is already installed.
+#
+# The failure this guard prevents is the two halves disagreeing: an alias block
+# that redirects somewhere other than the canonical domain would send a stranded
+# fleet to a name that does not serve the API. Anchored on the redirect target,
+# which is the only value that has to be right.
+# ─────────────────────────────────────────────────────────────
+CADDY_MODULE="$REPO/server/modules/05-caddy.sh"
+if [ ! -f "$CADDY_MODULE" ]; then
+    bad "modules/05-caddy.sh is missing"
+else
+    if grep -q 'HUB_ALIAS_DOMAIN' "$CADDY_MODULE"; then
+        ok "the Caddy module can serve a second hub hostname"
+    else
+        bad "modules/05-caddy.sh no longer mentions HUB_ALIAS_DOMAIN — the alias half is gone"
+    fi
+
+    # The alias must redirect to the canonical domain, not to itself and not to a
+    # hardcoded literal: a literal would drift from DOMAIN the first time the box
+    # moves, which is the exact class of fact CLAIMS.md §1 exists for.
+    if grep -q 'redir https://__HUB_CANONICAL_DOMAIN__{uri}' "$CADDY_MODULE"; then
+        ok "the alias redirects to the canonical hub domain (substituted, not literal)"
+    else
+        bad "the hub alias redirect target is not __HUB_CANONICAL_DOMAIN__{uri}"
+        bad "  A hardcoded host here would drift from DOMAIN; a self-redirect loops."
+    fi
+
+    # The alias must not be enabled by default: a deployment that has not been
+    # given a second name must serve exactly what it served before.
+    if grep -q 'HUB_ALIAS_DOMAIN="\${HUB_ALIAS_DOMAIN:-}"' "$CADDY_MODULE"; then
+        ok "the hub alias is opt-in (empty by default)"
+    else
+        bad "the hub alias defaults to something — it must be opt-in"
+    fi
+
+    # The alias carries the API, so it must NOT silently extend the landing block,
+    # whose whole design reason is to be starved of handles (§26 pins that).
+    if awk '/^__HUB_ALIAS_DOMAIN__ \{/,/^\}/' "$CADDY_MODULE" | grep -qE '^\s*(handle|reverse_proxy)'; then
+        bad "the hub alias block serves handles directly instead of redirecting"
+        bad "  That duplicates the rate-limit zones and the admin check. If the"
+        bad "  alias ever must serve directly, extract a Caddy snippet instead."
+    else
+        ok "the hub alias redirects rather than duplicating the API handles"
+    fi
+fi
+
+# The client half must exist, or the server half has nothing to be reached by.
+if grep -q 'pub fn resolve_hub_url' "$RUST/contract.rs"; then
+    ok "the client can resolve a hub override (contract::resolve_hub_url)"
+else
+    bad "contract::resolve_hub_url is gone — a filtered fleet cannot be repointed"
+fi
+
+# ── The two-sided contract for the alias VALUE ──
+#
+# The hub validates the address before storing it and the client validates it
+# before adopting it. Those are two implementations of one rule, in two
+# languages, which is exactly the shape that has silently diverged three times in
+# this repository. The rule is: absolute https, no path, no query.
+#
+# A domain name is NOT matched by checking for the string "https://" in both
+# files — that would pass on a broken regex in either. Instead the hub's regex is
+# extracted and RUN against the same cases the client's unit test asserts, so a
+# hub-side pattern that accepts a path fails here.
+ADMIN_HOOK="$HOOKS/admin_console.pb.js"
+if grep -q 'hub_alias' "$ADMIN_HOOK" 2>/dev/null; then
+    ok "the hub accepts a hub_alias from the console"
+else
+    bad "admin_console.pb.js does not accept hub_alias — an operator cannot set it"
+fi
+
+if grep -q 'response.hub_alias' "$HOOKS/heartbeat.pb.js" 2>/dev/null; then
+    ok "the heartbeat delivers hub_alias to clients"
+else
+    bad "heartbeat.pb.js does not send hub_alias — a stored override would never reach a device"
+fi
+
+alias_rule_report=$(node -e '
+    const fs = require("fs");
+    const src = fs.readFileSync(process.argv[1], "utf8");
+    // Pull the exact regex literal the hook applies, so this checks the SHIPPED
+    // rule rather than a paraphrase of it. Deliberately a loose capture up to
+    // `/` followed by `.test(alias)` — a stricter character class here is how
+    // the first version of this check reported a pattern bug that did not exist
+    // (the harness, not the hook, was wrong).
+    const line = src.split("\n").find((l) => l.includes(".test(alias)"));
+    const m = line && line.match(/!\/(.+)\/\.test\(alias\)/);
+    if (!m) { console.log("NOPATTERN"); process.exit(0); }
+    const re = new RegExp(m[1]);
+    const cases = [
+      ["https://hub.example.org", true],
+      ["http://hub.example.org", false],
+      ["hub.example.org", false],
+      ["https://hub.example.org/api", false],
+      ["https://hub.example.org/?x=1", false],
+    ];
+    for (const [value, expected] of cases) {
+      // The hook stores the address as written; a trailing slash is accepted there
+      // because the client strips it. Everything else must be refused by BOTH.
+      if (re.test(value) !== expected) console.log("MISMATCH\t" + value);
+    }
+' "$ADMIN_HOOK" 2>/dev/null)
+
+if [ "$alias_rule_report" = "NOPATTERN" ]; then
+    bad "could not find the hub_alias validation rule in admin_console.pb.js"
+    bad "  Without it the console would store any string, and a client would"
+    bad "  silently ignore a value the operator believes is saved."
+elif [ -n "$alias_rule_report" ]; then
+    while IFS="$(printf '\t')" read -r _kind value; do
+        bad "the hub's hub_alias rule disagrees with the client on ${value}"
+    done <<EOF
+$alias_rule_report
+EOF
+    bad "  The client's rule is contract::resolve_hub_url; see its unit test."
+else
+    ok "the hub and the client agree on what a usable hub address is"
+fi
+echo
+echo "════════════════════════════════════════════════════════════"
+echo "33. The status wire struct and the TypeScript interface agree"
+
+# ── WHY THIS GUARD EXISTS ──
+#
+# `LocusStatus` is serialised by Rust with `rename_all = "camelCase"` and consumed
+# by a hand-written TypeScript interface. Nothing connected them. A field added on
+# one side only is invisible: Rust serialises it and the UI ignores it (a feature
+# that does nothing), or the UI reads a key that is never sent and gets
+# `undefined` (a value rendered as blank or NaN).
+#
+# This is the `uot_port` / `server_port_uot` class one layer out — a name
+# duplicated across languages with nothing enforcing agreement — and it was found
+# for real: the new `udp` field was added to the Rust struct and not to the
+# interface, which is precisely the drift this checks for.
+#
+# ── WHAT THIS CHECKS ──
+#
+# Every `pub` field of `LocusStatus`, camelCased, appears in the `LocusStatus`
+# interface, and every interface field corresponds to a struct field. Both
+# directions, because only one of them fails loudly at compile time (neither).
+# ─────────────────────────────────────────────────────────────
+WIRE_RUST="$REPO/client/src-tauri/src/cmd/locus.rs"
+WIRE_TS="$REPO/client/src/services/locus.ts"
+if [ ! -f "$WIRE_RUST" ] || [ ! -f "$WIRE_TS" ]; then
+    bad "cannot check the status wire shape: $WIRE_RUST or $WIRE_TS is missing"
+else
+    wire_report=$(python3 - "$WIRE_RUST" "$WIRE_TS" <<'PY'
+import re, sys
+
+rust = open(sys.argv[1], encoding="utf-8").read()
+ts = open(sys.argv[2], encoding="utf-8").read()
+
+def camel(name):
+    parts = name.split("_")
+    return parts[0] + "".join(p.capitalize() for p in parts[1:])
+
+m = re.search(r'pub struct LocusStatus \{(.*?)\n\}', rust, re.S)
+if not m:
+    print("BAD\tcould not find `pub struct LocusStatus` in cmd/locus.rs")
+    raise SystemExit(0)
+rust_fields = [camel(f) for f in re.findall(r'\n    pub (\w+):', m.group(1))]
+
+m = re.search(r'export interface LocusStatus \{(.*?)\n\}', ts, re.S)
+if not m:
+    print("BAD\tcould not find `interface LocusStatus` in services/locus.ts")
+    raise SystemExit(0)
+ts_fields = re.findall(r'\n  (\w+)\??:', m.group(1))
+
+for field in rust_fields:
+    if field not in ts_fields:
+        print("BAD\tRust sends %r but the TypeScript interface does not declare it" % field)
+for field in ts_fields:
+    if field not in rust_fields:
+        print("BAD\tthe TypeScript interface declares %r but Rust never sends it" % field)
+PY
+)
+    if [ -z "$wire_report" ]; then
+        ok "LocusStatus has the same fields on both sides of the wire"
+    else
+        while IFS="$(printf '\t')" read -r _kind message; do
+            bad "STATUS WIRE: $message"
+        done <<EOF
+$wire_report
+EOF
+        bad "  Add the field on BOTH sides in the same change."
+    fi
+fi
+
+echo
+echo "════════════════════════════════════════════════════════════"
+echo "34. Every Locus IPC command is defined, registered, and called"
+
+# ── WHY THIS GUARD EXISTS ──
+#
+# A Tauri command has THREE sites that must agree, and none of them is checked by
+# the compiler:
+#
+#   1. the `#[tauri::command]` definition in Rust,
+#   2. its entry in the `generate_handler!` list in lib.rs,
+#   3. the `invoke('name')` call in the frontend.
+#
+# Miss (2) and the function compiles, the frontend calls it, and the call fails at
+# runtime with "command not found" — the exact class of failure this project keeps
+# finding in production because a green build proves nothing about a name crossing
+# a boundary. Miss (3) and the code is dead surface that looks maintained.
+#
+# ── WHAT THIS CHECKS ──
+#
+# The set of command names is identical across all three sites. Names are compared
+# AFTER camelCasing the Rust identifiers, because Tauri's default command name is
+# the function name verbatim — these are all already snake_case and the frontend
+# uses snake_case too, so the comparison is exact and any future rename that
+# forgets one site fails here.
+# ─────────────────────────────────────────────────────────────
+command_report=$(python3 - "$REPO" <<'PY'
+import glob, re, sys
+
+repo = sys.argv[1]
+rust_sources = glob.glob(f"{repo}/client/src-tauri/src/**/*.rs", recursive=True)
+lib = open(f"{repo}/client/src-tauri/src/lib.rs", encoding="utf-8").read()
+ts_dir = f"{repo}/client/src"
+
+defined = set()
+for path in rust_sources:
+    src = open(path, encoding="utf-8").read()
+    for name in re.findall(r'#\[tauri::command\]\s*\npub (?:async )?fn (\w+)', src):
+        # Scope to the product's own surface; upstream Verge commands have their
+        # own callers and are not this project's contract to police.
+        if name.startswith("locus_"):
+            defined.add(name)
+
+registered = set(n for n in re.findall(r'\bcmd::(\w+)', lib) if n.startswith("locus_"))
+
+called = set()
+for path in glob.glob(f"{ts_dir}/**/*.ts*", recursive=True):
+    src = open(path, encoding="utf-8").read()
+    for name in re.findall(r"invoke(?:<[^>]*>)?\(\s*['\"](locus_\w+)['\"]", src):
+        called.add(name)
+
+# Some commands are called from JavaScript this repository INJECTS into a page
+# rather than from a .ts file — `locus_js_log` is the console bridge, called from
+# the injected script in utils/resolve/window_script.rs. A guard that only read
+# .ts/.tsx reported it as dead, which is a false positive of exactly the kind this
+# project documents: the check was scoped narrower than the thing it claims to
+# cover (§15's lesson, one layer down).
+for path in rust_sources:
+    src = open(path, encoding="utf-8").read()
+    for name in re.findall(r"invoke\(\s*['\"](locus_\w+)['\"]", src):
+        called.add(name)
+
+for name in sorted(defined - registered):
+    print("BAD\t%s is defined but not registered in lib.rs — calling it fails at runtime" % name)
+for name in sorted(registered - defined):
+    print("BAD\t%s is registered but no command defines it" % name)
+for name in sorted(defined - called):
+    print("BAD\t%s is defined and registered but the frontend never calls it" % name)
+for name in sorted(called - defined):
+    print("BAD\tthe frontend invokes %s, which no command defines" % name)
+PY
+)
+
+if [ -z "$command_report" ]; then
+    ok "every Locus IPC command is defined, registered and called"
+else
+    while IFS="$(printf '\t')" read -r _kind message; do
+        bad "IPC: $message"
+    done <<EOF
+$command_report
+EOF
 fi
 
 echo

@@ -125,6 +125,46 @@ setup_passwords() {
     fi
 
     # Persist to file so seed-pb.py and later runs can find them
+    #
+    # #91: ONLY when something is actually deployed from these values.
+    #
+    # `write_config` refuses to touch an existing config whose password already
+    # matches, and `write_service` refuses to rewrite an existing unit — both
+    # skip-if-exists, both deliberate. So on a box whose configs predate a secret
+    # rotation this file is the ONLY thing the re-run would change: it would
+    # record the new keys and leave the listeners on the old ones.
+    #
+    # That divergence is silent and plan-specific, and the free plan is the one it
+    # bites hardest: `seed-pb.py` builds the `free` tier row from ECO_PASS, so the
+    # hub would advertise a key the :8443 and :8447 listeners do not hold — TCP
+    # refused, and the free plan's own UDP listener unreachable — while every
+    # service reports `active`.
+    #
+    # The guard is not "never write" — a fresh box must write. It is: if nothing is
+    # being deployed from these values, do not rewrite the record either.
+    if [ -f "${PASS_FILE}" ] && [ "${TIER_PASSWORDS_GENERATED:-0}" != "1" ]; then
+        EXISTING_PASS=$(sed -n 's/^ECO_PASS=//p' "$PASS_FILE" 2>/dev/null | head -1)
+        if [ -n "$EXISTING_PASS" ] && [ "$EXISTING_PASS" != "$ECO_PASS" ]; then
+            warn "════════════════════════════════════════════════════════════"
+            warn "TIER PASSWORDS HAVE DRIFTED — NOT overwriting ${PASS_FILE}"
+            warn "The environment/secret now holds a different ECO_PASS than the"
+            warn "box is running. But the deployed configs are skip-if-exists, so"
+            warn "this run would change the RECORD and not the LISTENERS, and the"
+            warn "hub would advertise keys nothing serves."
+            warn ""
+            warn "To adopt the new secrets, force a rewrite of the configs:"
+            warn "    rm -f /etc/shadowsocks/eco.json /etc/shadowsocks/strike.json \\"
+            warn "          /etc/sing-box/eco.json /etc/sing-box/strike.json"
+            warn "    then re-run setup.sh and scripts/seed-pb.py"
+            warn "── or, to keep the box as it is, leave ${PASS_FILE} untouched."
+            warn "════════════════════════════════════════════════════════════"
+            # Keep the file. seed-pb.py reads it, and it still describes reality.
+            export ECO_PASS STEALTH_PASS STRIKE_PASS
+            log "✓ Tier passwords loaded (deployed values preserved)"
+            return 0
+        fi
+    fi
+
     cat > "$PASS_FILE" <<EOF
 ECO_PASS=$ECO_PASS
 STEALTH_PASS=$STEALTH_PASS

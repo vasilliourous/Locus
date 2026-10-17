@@ -38,6 +38,95 @@ const fn proxy_apply_steps(sys_enabled: bool, auto_enabled: bool) -> [ProxyApply
 /// Maximum guard drain time before OS state is unknown.
 const GUARD_DRAIN_TIMEOUT: Duration = Duration::from_secs(10);
 
+/// How many times the macOS proxy write is re-attempted against a busy preferences lock.
+///
+/// # Why the write is retried at all
+///
+/// `sysproxy` opens SystemConfiguration with `SCPreferencesLock(preferences, 0)` —
+/// a **zero-second wait**. On macOS the whole proxy configuration is one
+/// machine-wide lock: a second writer gets an immediate `false`, surfaced as
+/// `SystemConfiguration("lock preferences")`.
+///
+/// This client has more than one writer. The config-apply path can run proxy work
+/// from the heartbeat's refresh, the connect path, and the guard's own timer, and
+/// the retry that used to live *here* (as a spin on the readiness loop) was
+/// removed for good reason — it re-applied the whole config. So on macOS a
+/// momentary overlap between two legitimate writes is reported as a failure, and
+/// the failure is then "compensated" by a second write that meets the same lock,
+/// which is the pair of messages a student actually saw:
+///
+///     Failed to compensate proxy apply failure (… lock preferences) with direct mode.
+///
+/// The lock is released as soon as the other writer finishes — milliseconds — so
+/// the correct response to *this one error* is to wait and try again, not to
+/// report that the system proxy is broken.
+///
+/// # Why it is safe to repeat the steps
+///
+/// Both setters are absolute, not incremental: `set_system_proxy` and
+/// `set_auto_proxy` each write a complete desired state, so a repeat is
+/// idempotent. That is the same property `reset_sysproxy` already relies on.
+///
+/// # Why the count is small
+///
+/// A lock held for longer than this budget is not contention, it is a
+/// misconfiguration or a second copy of the app — and in that case the honest
+/// answer is the error, with the compensation path that follows it. Retrying
+/// forever would turn a diagnosable fault into a hang.
+const PREFERENCES_LOCK_ATTEMPTS: u32 = 3;
+
+/// How long to wait between attempts at a busy preferences lock.
+///
+/// Deliberately blunt and short: the competing writer holds the lock for the
+/// duration of one `SCPreferencesApplyChanges`, not for a network round trip.
+const PREFERENCES_LOCK_RETRY_GAP: Duration = Duration::from_millis(250);
+
+/// Whether an error is macOS refusing to take the preferences lock.
+///
+/// Matched on the message because that is all `sysproxy` exposes: its error type
+/// is `SystemConfiguration(&'static str)` with no structured code, and the
+/// alternative — matching every `SystemConfiguration` error — would silently retry
+/// genuine write failures (`commit proxy configuration`, `apply proxy
+/// configuration`) that a repeat cannot fix.
+///
+/// Retrying only on the lock keeps the property that matters: **no retry ever
+/// hides a real failure.** Anything else fails on the first attempt, exactly as
+/// before.
+///
+/// # Why the platform check lives in the CALLER, not here
+///
+/// The classification is a pure rule about a message, and it must be **testable on
+/// any host** — otherwise the guard that protects it passes vacuously on Linux CI,
+/// which is precisely the "a check that cannot fail" trap this repository keeps
+/// documenting. The first draft of this function returned `false` early off macOS,
+/// and its own test then passed against a deliberately broken matcher.
+///
+/// So the plan decides: [`plan_preferences_lock_retry`] is where "only on macOS"
+/// lives, and it is checked as a fact rather than assumed.
+fn is_preferences_lock_contention(error: &anyhow::Error) -> bool {
+    format!("{error:#}").contains("lock preferences")
+}
+
+/// Whether this failure should be retried, given the platform and the attempt count.
+///
+/// One function so the three conditions cannot be combined inconsistently at the
+/// call site: the platform must be macOS, the error must be the preferences lock,
+/// and there must be budget left. The retry exists because macOS takes one
+/// machine-wide preferences lock with a **zero-second wait**, so two legitimate
+/// writers momentarily overlap and the loser sees a failure it can simply retry.
+fn plan_preferences_lock_retry(
+    is_macos: bool,
+    error: &anyhow::Error,
+    attempt: u32,
+) -> bool {
+    is_macos && attempt < PREFERENCES_LOCK_ATTEMPTS && is_preferences_lock_contention(error)
+}
+
+/// The package version of `is_macos`, so tests can exercise both branches here.
+const fn host_is_macos() -> bool {
+    cfg!(target_os = "macos")
+}
+
 /// Authoritative OS state after a failed proxy write.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum AuthoritativeState {
@@ -491,16 +580,52 @@ impl Sysopt {
         };
 
         // Only a step that actually wrote is evidence the OS changed; a skipped one is not.
+        //
+        // The loop below is where the macOS preferences lock is waited out. It is
+        // per STEP rather than around the whole pair, because the two setters take
+        // the lock separately: a lock taken between them leaves the first one
+        // applied, and repeating only the one that failed keeps the write as small
+        // as the fault. `earlier_step_reached_os` therefore survives a retry —
+        // a repeat does not invalidate the evidence that an earlier step landed.
         let applied = tokio::task::spawn_blocking(move || {
             let mut earlier_step_reached_os = false;
             for step in apply_steps {
-                let written = match step {
-                    ProxyApplyStep::Autoproxy => skip_without_network_service(auto.enable, auto.set_auto_proxy()),
-                    ProxyApplyStep::Sysproxy => skip_without_network_service(sys.enable, sys.set_system_proxy()),
-                };
-                match written {
-                    Ok(reached_os) => earlier_step_reached_os |= reached_os,
-                    Err(error) => return Err((earlier_step_reached_os, error)),
+                let mut attempt = 0u32;
+                loop {
+                    attempt += 1;
+                    let written = match step {
+                        ProxyApplyStep::Autoproxy => {
+                            skip_without_network_service(auto.enable, auto.set_auto_proxy())
+                        }
+                        ProxyApplyStep::Sysproxy => {
+                            skip_without_network_service(sys.enable, sys.set_system_proxy())
+                        }
+                    };
+                    match written {
+                        Ok(reached_os) => {
+                            earlier_step_reached_os |= reached_os;
+                            break;
+                        }
+                        Err(error)
+                            if plan_preferences_lock_retry(
+                                host_is_macos(),
+                                &anyhow::anyhow!("{error:#}"),
+                                attempt,
+                            ) =>
+                        {
+                            // Another writer holds the machine-wide preferences
+                            // lock. Wait for it and take the lock again rather
+                            // than reporting that the system proxy is broken.
+                            logging!(
+                                warn,
+                                Type::Core,
+                                "the macOS preferences lock is held by another writer; \
+                                 retrying the system proxy write ({attempt}/{PREFERENCES_LOCK_ATTEMPTS})"
+                            );
+                            std::thread::sleep(PREFERENCES_LOCK_RETRY_GAP);
+                        }
+                        Err(error) => return Err((earlier_step_reached_os, error)),
+                    }
                 }
             }
             Ok(())
@@ -571,10 +696,12 @@ impl Sysopt {
 #[cfg(test)]
 mod tests {
     use super::{
-        AuthoritativeState, BYPASS_SEPARATOR, DEFAULT_BYPASS, OsProxyState, ProxyApplyStep, SystemProxyStateUnknown,
-        authoritative_state, authoritative_state_from, classify_os_proxy_state, disable_both,
-        disable_until_the_last_write_is_ours, first_failure, format_bypass, proxy_apply_steps,
-        recover_from_failed_write, target_is_already_in_place,
+        AuthoritativeState, BYPASS_SEPARATOR, DEFAULT_BYPASS, OsProxyState, PREFERENCES_LOCK_ATTEMPTS,
+        PREFERENCES_LOCK_RETRY_GAP, ProxyApplyStep, SystemProxyStateUnknown, authoritative_state,
+        authoritative_state_from, classify_os_proxy_state, disable_both,
+        disable_until_the_last_write_is_ours, first_failure, format_bypass,
+        plan_preferences_lock_retry,
+        proxy_apply_steps, recover_from_failed_write, target_is_already_in_place,
     };
     use parking_lot::Mutex;
     use std::collections::VecDeque;
@@ -1060,6 +1187,65 @@ mod tests {
         assert_eq!(
             proxy_apply_steps(true, false),
             [ProxyApplyStep::Autoproxy, ProxyApplyStep::Sysproxy]
+        );
+    }
+
+    /// Only a busy preferences lock is retried; every other failure still fails once.
+    ///
+    /// This is the rule that makes the retry safe. The lock is transient and
+    /// idempotent to re-attempt; `commit proxy configuration` and `apply proxy
+    /// configuration` are neither — repeating them cannot help and would delay the
+    /// compensation path that exists for them.
+    ///
+    /// The platform is a parameter rather than read from `cfg!` inside the
+    /// predicate, so **both** branches are exercised on whatever host runs the
+    /// suite. The first draft read `cfg!` inside the function; off macOS it
+    /// returned `false` unconditionally, and this test passed against a
+    /// deliberately broken matcher — the exact "a check that cannot fail" shape
+    /// `DEBUGGING-METHOD.md` §3 exists to prevent.
+    #[test]
+    fn only_a_busy_preferences_lock_is_worth_retrying() {
+        let lock = anyhow::anyhow!("SystemConfiguration operation failed: lock preferences");
+        let commit = anyhow::anyhow!("commit proxy configuration");
+        let apply = anyhow::anyhow!("apply proxy configuration");
+        let no_service = anyhow::anyhow!("resolve active network service");
+        let admin = anyhow::anyhow!("networksetup requires admin privileges");
+
+        // On macOS, with budget left, the lock and only the lock is retried.
+        assert!(plan_preferences_lock_retry(true, &lock, 1));
+        for error in [&commit, &apply, &no_service, &admin] {
+            assert!(
+                !plan_preferences_lock_retry(true, error, 1),
+                "{error:#} must fail on the first attempt: a repeat cannot fix it"
+            );
+        }
+
+        // Off macOS nothing is retried: the lock is an Apple API and cannot occur,
+        // so a retry there would be hiding something else.
+        for error in [&lock, &commit] {
+            assert!(!plan_preferences_lock_retry(false, error, 1));
+        }
+
+        // The budget bounds it: at the last attempt the answer is "fail", not
+        // "loop again".
+        assert!(!plan_preferences_lock_retry(true, &lock, PREFERENCES_LOCK_ATTEMPTS));
+        // And it really is a budget, not a single try.
+        assert!(plan_preferences_lock_retry(true, &lock, PREFERENCES_LOCK_ATTEMPTS - 1));
+    }
+
+    /// The attempt budget must be small enough that a genuinely stuck lock still
+    /// produces an error rather than a hang.
+    ///
+    /// A retry loop whose bound is never checked is the retired client's
+    /// forever-spinner in a new place, so the bound is asserted rather than
+    /// trusted.
+    #[test]
+    fn the_retry_budget_is_bounded_and_brief() {
+        const { assert!(PREFERENCES_LOCK_ATTEMPTS >= 2, "a budget of one is not a retry") };
+        const { assert!(PREFERENCES_LOCK_ATTEMPTS <= 5, "a large budget turns a fault into a hang") };
+        assert!(
+            PREFERENCES_LOCK_RETRY_GAP * PREFERENCES_LOCK_ATTEMPTS < std::time::Duration::from_secs(2),
+            "the whole retry budget must stay inside a user-visible pause"
         );
     }
 

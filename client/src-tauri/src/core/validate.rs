@@ -121,6 +121,22 @@ impl ValidationErrorKind {
 pub enum ValidationSkipReason {
     Exiting,
     Debounced,
+    /// Another validation holds the global guard.
+    ///
+    /// This is **not** the meaning of [`ValidationOutcome::Busy`], and the two are
+    /// deliberately distinct. `Busy` came from the *outer* `CoreManager` guard
+    /// (`try_start_config_update`) and reaches a caller that can legitimately wait
+    /// and retry — `locus_connect` does exactly that. This variant comes from
+    /// `CoreConfigValidator`'s own guard, which is held only for the duration of
+    /// one kernel check of one YAML string; a caller that waited on it would be
+    /// waiting for a workload that already validated *these bytes*, which yields no
+    /// new information.
+    ///
+    /// It exists so that case stops being reported as a verdict. It used to return
+    /// `Busy`, which `locus/apply.rs` formats into a refusal — a connect could be
+    /// told "the tunnel configuration was refused: Configuration validation is
+    /// already running", which is a sentence about the wrong thing entirely.
+    Validating,
 }
 
 impl fmt::Display for ValidationSkipReason {
@@ -128,6 +144,7 @@ impl fmt::Display for ValidationSkipReason {
         match self {
             Self::Exiting => write!(f, "application is exiting"),
             Self::Debounced => write!(f, "debounced"),
+            Self::Validating => write!(f, "another validation is in progress"),
         }
     }
 }
@@ -156,6 +173,17 @@ impl ValidationOutcome {
 
     pub const fn is_valid(&self) -> bool {
         matches!(self, Self::Valid)
+    }
+
+    /// Whether the config was **refused** — as opposed to not being judged yet.
+    ///
+    /// Only [`Self::Invalid`] is a refusal. `Busy` and `Skipped` both mean "no
+    /// verdict was reached", and callers that turn this outcome into words shown
+    /// to a student must use this predicate rather than `!is_valid()`, or they will
+    /// report a concurrency guard as a statement about the configuration.
+    #[must_use]
+    pub const fn is_refusal(&self) -> bool {
+        matches!(self, Self::Invalid { .. })
     }
 }
 
@@ -458,8 +486,13 @@ impl CoreConfigValidator {
     /// Skips the subprocess when these bytes were already accepted by the same core build.
     pub async fn validate_config_outcome_with(&self, yaml: &str) -> Result<ValidationOutcome> {
         if !self.try_start() {
+            // Deliberately NOT `Busy`: see `ValidationSkipReason::Validating`. The
+            // outer guard's `Busy` means "come back in a moment"; this one means
+            // "these exact bytes are being checked right now, by someone else".
             logging!(info, Type::Validate, "验证已在进行中，跳过新的验证请求");
-            return Ok(ValidationOutcome::Busy);
+            return Ok(ValidationOutcome::Skipped {
+                reason: ValidationSkipReason::Validating,
+            });
         }
         defer! {
             self.finish();

@@ -31,7 +31,87 @@ use serde::{Deserialize, Serialize};
 /// field in every tier config, so a hub move is a server-side change plus this
 /// line, never a per-client setting. A client that cannot reach its hub cannot
 /// activate, heartbeat, or update.
+///
+/// **"Never a per-client setting" is now "never a per-client *guess*".** The
+/// value still has one compiled default, but a network can refuse that default
+/// outright — N4L classifies `*.duckdns.org` as uncategorised and blocks it, which
+/// makes activation, heartbeat AND the update path unreachable at once, so the
+/// device cannot even fetch the build that would fix it. [`resolve_hub_url`] is
+/// the escape hatch: an operator-set override, validated, with this constant as
+/// the fallback.
 pub const HUB_URL: &str = "https://networkingguides.duckdns.org";
+
+/// The hub base URL this run should use, given a stored override.
+///
+/// # Why this is a pure function with the override injected
+///
+/// The rule is *"honour a valid override, ignore anything else, never fail"*, and
+/// the interesting cases are all the invalid ones. Taking `Option<&str>` means
+/// every one of them can be exercised in a unit test with no config file, no app
+/// handle and no network — which is the only way a rule about a *fallback* gets
+/// tested at all, since the fallback is by definition the path nobody exercises
+/// by hand.
+///
+/// # What it accepts
+///
+/// Only an absolute `https://` URL with a host. Everything else returns
+/// [`HUB_URL`]:
+///
+///   * empty or whitespace — the normal state of every device;
+///   * `http://` — a downgrade to plaintext for a credential-bearing API
+///     (`/api/activate` carries the code, `/api/heartbeat` carries it too) is a
+///     silent security regression, so it is refused rather than "helpfully"
+///     upgraded;
+///   * no scheme (`hub.example.com`) — ambiguous, and a typo here strands a
+///     device with no way back;
+///   * anything with no host, or with a path/query, because callers concatenate
+///     `{hub}/api/...` and a stray path would silently rewrite the API root.
+///
+/// A trailing `/` is stripped, so `https://h.example/` and `https://h.example`
+/// produce identical URLs. That is the one normalisation performed: without it
+/// every call site would form `https://h.example//api/activate`, which some
+/// servers 404 and some accept, which is the worst kind of difference.
+#[must_use]
+pub fn resolve_hub_url(override_url: Option<&str>) -> String {
+    let Some(raw) = override_url else {
+        return HUB_URL.to_owned();
+    };
+    let candidate = raw.trim();
+
+    if candidate.is_empty() {
+        return HUB_URL.to_owned();
+    }
+
+    let Ok(parsed) = url::Url::parse(candidate) else {
+        return HUB_URL.to_owned();
+    };
+
+    if parsed.scheme() != "https" {
+        return HUB_URL.to_owned();
+    }
+    if parsed.host_str().is_none_or(str::is_empty) {
+        return HUB_URL.to_owned();
+    }
+    if !matches!(parsed.path(), "" | "/") {
+        return HUB_URL.to_owned();
+    }
+    if parsed.query().is_some() || parsed.fragment().is_some() {
+        return HUB_URL.to_owned();
+    }
+
+    candidate.trim_end_matches('/').to_owned()
+}
+
+/// The hub URL for this run, read from the stored override.
+///
+/// The async wrapper around [`resolve_hub_url`]; every network call site goes
+/// through this rather than through [`HUB_URL`], so there is exactly one place the
+/// override can take effect and exactly one place to change if it ever needs to.
+pub async fn hub_url() -> String {
+    let verge = crate::config::Config::verge().await;
+    let stored = verge.latest_arc().locus_hub_override.clone();
+    resolve_hub_url(stored.as_deref())
+}
 
 /// Request body for `/api/activate` and `/api/code-lookup`.
 ///
@@ -296,6 +376,72 @@ pub const fn current_platform() -> Option<&'static str> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// **The N4L report, as a rule.**
+    ///
+    /// A school network refused `networkingguides.duckdns.org` outright, which
+    /// made activation, heartbeat and the update path unreachable at once — so
+    /// the device could not fetch the build that would have fixed it. The escape
+    /// hatch is a stored override; this pins what it must and must not accept.
+    ///
+    /// The valid cases are the easy half. The invalid ones are the reason the
+    /// function exists: an override that is silently accepted in a broken form
+    /// strands the device with no way back, because the thing it would use to
+    /// recover is the thing it broke.
+    #[test]
+    fn a_hub_override_is_honoured_only_when_it_is_unambiguously_a_hub() {
+        // ── Honoured ─────────────────────────────────────────────────────────
+        assert_eq!(
+            resolve_hub_url(Some("https://hub.example.org")),
+            "https://hub.example.org"
+        );
+        // A trailing slash is the ONE normalisation: call sites concatenate
+        // `{hub}/api/...`, and `https://h//api/...` is a different request.
+        assert_eq!(
+            resolve_hub_url(Some("https://hub.example.org/")),
+            "https://hub.example.org"
+        );
+        // Surrounding whitespace is a paste artefact, not a decision.
+        assert_eq!(
+            resolve_hub_url(Some("  https://hub.example.org  ")),
+            "https://hub.example.org"
+        );
+
+        // ── Falls back to the compiled default ───────────────────────────────
+        for bad in [
+            None,
+            Some(""),
+            Some("   "),
+            // Plaintext for an API that carries the activation code in its body.
+            Some("http://hub.example.org"),
+            // No scheme: ambiguous, and a typo here is unrecoverable.
+            Some("hub.example.org"),
+            // A path would silently rewrite the API root every caller appends to.
+            Some("https://hub.example.org/api"),
+            // Query and fragment have no meaning for a base URL.
+            Some("https://hub.example.org/?x=1"),
+            Some("https://hub.example.org/#x"),
+            // Not a URL at all.
+            Some("not a url"),
+        ] {
+            assert_eq!(
+                resolve_hub_url(bad),
+                HUB_URL,
+                "{bad:?} must not replace the compiled hub address"
+            );
+        }
+    }
+
+    /// The default itself must remain reachable-by-construction: absolute https.
+    ///
+    /// A compiled default that fails `resolve_hub_url`'s own rules would mean the
+    /// fallback path is the one path nobody had validated.
+    #[test]
+    fn the_compiled_default_passes_the_same_rule() {
+        assert_eq!(resolve_hub_url(Some(HUB_URL)), HUB_URL);
+        assert!(HUB_URL.starts_with("https://"));
+        assert!(!HUB_URL.ends_with('/'));
+    }
 
     /// The regression that motivated this module: the hub emits `uot_port`, and
     /// a client that does not land it silently loses UDP-over-TCP for the whole

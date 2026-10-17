@@ -205,6 +205,39 @@ routerAdd("POST", "/api/heartbeat", function(e) {
             // ────────────────────────────────────────────────────────────────
             try { response.server_config = JSON.parse(cfgRec.get("config")); } catch(ex) { response.server_config = cfgRec.get("config"); }
             response.udp_relay = cfgRec.get("udp_relay");
+
+            // ── A hub address the client should prefer ──────────────────────
+            //
+            // WHY THIS IS ON THE HEARTBEAT
+            //
+            // A school network can classify the hub's hostname as uncategorised
+            // and block it outright, which takes activation, heartbeat AND the
+            // update path down together — the device cannot fetch the build that
+            // would relieve it. The escape is a second hostname (Caddy alias) plus
+            // a client that will use it.
+            //
+            // The heartbeat is the only channel that can carry that to an ALREADY
+            // INSTALLED device without a release, and it is the channel the device
+            // is already using. Delivering it here means the fleet can be moved by
+            // one tier edit rather than by shipping a build nobody can download.
+            //
+            // ADDITIVE AND OPTIONAL — same rule as every other key here. An older
+            // client ignores an unknown key, so this changes nothing for builds
+            // already deployed. It is emitted only when the tier config actually
+            // carries one, so an ordinary deployment sends nothing extra.
+            //
+            // The client validates it (absolute https, no path) and falls back to
+            // its compiled default on anything else — see
+            // `locus::contract::resolve_hub_url`. The hub is offering a suggestion,
+            // not commanding a change it could not check.
+            if (cfgRec && cfgRec.get("config")) {
+                try {
+                    var cfgForAlias = JSON.parse(cfgRec.get("config"));
+                    if (cfgForAlias && cfgForAlias.hub_alias) {
+                        response.hub_alias = String(cfgForAlias.hub_alias);
+                    }
+                } catch (aliasErr) { /* malformed config: omit, never fail the beat */ }
+            }
         }
         response.tier = tier;
 

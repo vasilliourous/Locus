@@ -957,6 +957,13 @@ routerAdd("POST", "/api/admin/console", function(e) {
                     // udp_relay without being able to see uot_port is editing a
                     // setting whose effect they cannot observe.
                     uot_port: parseInt(cfg.uot_port || "0", 10) || 0,
+                    // A hub address this fleet should prefer, delivered on the
+                    // heartbeat. Surfaced for the same reason uot_port is: an
+                    // operator editing a value they cannot see is editing blind,
+                    // and this one exists specifically for the case where the
+                    // normal address is unreachable — the worst moment to be
+                    // guessing whether it was set.
+                    hub_alias: cfg.hub_alias || "",
                 });
             }
             return ok({tiers: tiers});
@@ -992,6 +999,28 @@ routerAdd("POST", "/api/admin/console", function(e) {
                 var uot = parseInt(body.uot_port, 10);
                 if (isNaN(uot) || uot < 0 || uot > 65535) return bad(400, "uot_port must be 0-65535");
                 if (uot === 0) { delete cfgT.uot_port; } else { cfgT.uot_port = uot; }
+            }
+            // ── Hub address to offer this fleet ──
+            //
+            // Validated HERE as well as in the client, because the two failures
+            // are different: a value the hub accepts but the client rejects is
+            // silently ignored forever, and the operator sees a saved setting
+            // that does nothing. Absolute https, no path — the same rule the
+            // client applies in `locus::contract::resolve_hub_url`.
+            //
+            // Empty string CLEARS it (the operator withdrawing the offer). A
+            // missing key leaves it alone, so an older console cannot wipe a
+            // setting it does not know about.
+            if (body.hub_alias !== undefined) {
+                var alias = String(body.hub_alias || "").trim();
+                if (alias === "") {
+                    delete cfgT.hub_alias;
+                } else {
+                    if (!/^https:\/\/[^/?#\s]+$/.test(alias)) {
+                        return bad(400, "hub_alias must be an absolute https URL with no path, e.g. https://hub.example.org");
+                    }
+                    cfgT.hub_alias = alias;
+                }
             }
             recT.set("config", JSON.stringify(cfgT));
             if (body.active !== undefined) recT.set("active", !!body.active);

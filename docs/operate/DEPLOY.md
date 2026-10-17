@@ -51,6 +51,50 @@ networkingguides.duckdns.org  A  YOUR_VPS_IP
 
 TTL of 60s recommended during initial setup. Increase to 300s+ after stable.
 
+### Optional: a second hub hostname, for filtered networks
+
+**Added 2026-10.** A school network can refuse the hub hostname outright. When it
+does, it takes down activation, heartbeat **and** the update path together — they
+are all served from that one name — so the device cannot fetch the build that
+would relieve it.
+
+There are two halves, and either alone does nothing:
+
+1. **The server must answer on a second name.**
+   ```sh
+   # On the box, or passed through setup.sh's environment:
+   HUB_ALIAS_DOMAIN=vpn.<your-domain>      # a name you control
+   ```
+   `modules/05-caddy.sh` appends a site block that `308`s every request to the
+   same path on `DOMAIN`. It redirects rather than repeating the handles, so the
+   rate-limit zones and the admin token check cannot drift between the two names.
+   Point the name's DNS at the same box first — Caddy obtains the certificate on
+   first request, and a name that does not resolve fails loudly at that point.
+
+2. **The client must be told to use it.**
+   ```sh
+   # Console → Tiers → "Hub address to offer"
+   https://vpn.<your-domain>
+   ```
+   The value rides the heartbeat, so an installed device picks it up on its next
+   beat and dials it from the *next launch*. The compiled default keeps working
+   for everyone else, so nothing breaks if this is blank.
+
+**What this does not fix.** The classification itself. A dynamic-DNS subdomain is
+structurally likely to be judged uncategorised, and the durable answer is a name
+with a reputation that can be recategorised on request. If a second name on the
+same domain family is still blocked, the problem is the family, not the name.
+
+**Verify it from the network that was failing**, not from anywhere else:
+
+```sh
+curl -sS https://vpn.<your-domain>/api/release | head -c 120
+```
+
+A redirect to the canonical hub is what success looks like. See
+[`../reference/STILL-OPEN.md`](../reference/STILL-OPEN.md) — "the hub hostname is
+blocked on a school network" — for why this is a world claim and not a code fact.
+
 ---
 
 ## 3. Secrets Setup (One-Time)

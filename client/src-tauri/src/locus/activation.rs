@@ -5,7 +5,7 @@
 //! semantics are not negotiable — they are the existing agreement with the hub
 //! and with codes already printed on physical cards.
 
-use crate::locus::contract::{ActivateResponse, CodeRequest, HUB_URL, LookupResponse, LookupStatus};
+use crate::locus::contract::{ActivateResponse, CodeRequest, LookupResponse, LookupStatus};
 use anyhow::{Context as _, Result, bail};
 use serde::Serialize;
 
@@ -366,7 +366,7 @@ where
     T: serde::de::DeserializeOwned,
     B: Serialize + Sync,
 {
-    let url = format!("{HUB_URL}{path}");
+    let url = format!("{}{path}", crate::locus::contract::hub_url().await);
 
     let response = http_client()?
         .post(&url)

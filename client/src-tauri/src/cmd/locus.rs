@@ -169,6 +169,51 @@ pub struct LocusStatus {
     /// behaviour, and a second implementation in TypeScript is how the warning
     /// line and the throttle line drift apart.
     pub allowance: AllowanceStatus,
+
+    /// How this tier's UDP-over-TCP endpoint is configured, or why there is not
+    /// one.
+    ///
+    /// # Why this is reported rather than left to be inferred
+    ///
+    /// The free plan now advertises a UoT endpoint of its own (8447, its own
+    /// sing-box listener, its own 1 Mbps class). When any of the three parts —
+    /// the `udp_relay` flag, the `uot_port`, or the listener behind it — is
+    /// missing or stale, the symptom a student reports is **not** "UDP is not
+    /// tunnelled". It is "the free plan does not connect", or a crash, because the
+    /// generated profile then carries a profile whose first rule points at an
+    /// outbound that cannot carry anything. The proxy group's default member is
+    /// the TCP proxy, so TCP keeps working while the very first rule in the
+    /// document sends every datagram at a dead endpoint.
+    ///
+    /// Nothing in the client could say which of those was true: the tier payload
+    /// is stored as one opaque blob, and the connect path reduces it to a single
+    /// boolean. This field is the missing sentence, so the next report of "free
+    /// does not work" starts from a fact instead of from a rebuild.
+    pub udp: UdpStatus,
+}
+
+/// Whether this tier's UDP path is configured, and what it is configured to do.
+///
+/// Deliberately a closed set: the three failure modes are distinct, and collapsing
+/// them (as a single `bool` does) is what made them indistinguishable in the field.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(tag = "kind", rename_all = "camelCase", rename_all_fields = "camelCase")]
+pub enum UdpStatus {
+    /// The hub advertises no UDP for this tier. UDP travels raw inside the TCP
+    /// proxy's `udp: true`, which is correct for a TCP-only tier and is what a
+    /// paying tier looked like before UoT existed.
+    None,
+    /// Configured and handed to the core: `udp_relay` is on and the port is
+    /// non-zero, so the profile carries `Locus-UoT` and pins UDP to it.
+    ///
+    /// **Configured is not the same as working.** It says the document is
+    /// coherent, not that the listener is up or that the credentials match. The
+    /// only observation that settles that is traffic through it, which is what
+    /// `traffic_flowing` and `ready` report.
+    Configured { port: u16 },
+    /// Advertised but unusable, with the reason. This is the state that used to
+    /// be invisible and present as "the plan is broken".
+    Unusable { reason: String },
 }
 
 /// What the Connection screen should show about the free tier's allowance.
@@ -395,6 +440,18 @@ pub async fn locus_status() -> LocusStatus {
         now_ms(),
     );
 
+    // The UDP path, classified from the same stored payload the connect path
+    // reads. Reported so that "the free plan does not connect" can be answered
+    // from a status dump instead of from a rebuild.
+    let udp = classify_udp(
+        store::tier_config(
+            activation.as_ref().map_or("", |a| a.tier.as_str()),
+        )
+        .await
+        .as_ref(),
+        verge_data.locus_udp_relay.unwrap_or(false),
+    );
+
     LocusStatus {
         activated: activation.is_some(),
         tier: activation.as_ref().map(|a| a.tier.clone()),
@@ -408,6 +465,7 @@ pub async fn locus_status() -> LocusStatus {
         last_confirmed_at: verge_data.last_heartbeat_ok,
         traffic_flowing,
         allowance,
+        udp,
     }
 }
 
@@ -587,6 +645,20 @@ pub async fn locus_activate(code: String) -> CmdResult<ActivationResult> {
                     match apply::apply_tier(tier_config, udp_relay).await {
                         Ok(apply::ApplyOutcome::Applied) => true,
                         Ok(apply::ApplyOutcome::StagedOnly) => true,
+                        // No verdict: the manager's guard was held by somebody else
+                        // at the moment of activation. Treating this as a failure
+                        // would put "the tunnel configuration was refused" in front
+                        // of a student who has just successfully activated — the
+                        // activation DID succeed, and the config is stored either
+                        // way, so the next connect applies it.
+                        Ok(apply::ApplyOutcome::Deferred { reason }) => {
+                            logging!(
+                                info,
+                                Type::Cmd,
+                                "[locus] tier config stored; apply deferred ({reason}) — connect will apply it"
+                            );
+                            true
+                        }
                         Ok(apply::ApplyOutcome::Rejected { reason }) => {
                             logging!(warn, Type::Cmd, "[locus] tier config rejected: {reason}");
                             false
@@ -647,6 +719,58 @@ pub struct ActivationResult {
     /// than implying the VPN is ready.
     pub config_applied: bool,
     pub message: String,
+}
+
+/// Classifies this tier's UDP-over-TCP configuration from the stored payload.
+///
+/// Split out from [`locus_status`] so every branch is testable without an app
+/// handle, an engine or a network — which matters because the interesting cases
+/// are the ones a healthy machine never produces.
+///
+/// # The three states, and why they must not collapse
+///
+/// The reason this is not a `bool` is that a single boolean is precisely what
+/// made the free-plan report unusable: `udp_relay = true` with `uot_port = 0`,
+/// `udp_relay = false` with a port, and a coherent pair whose listener is dead all
+/// rendered as "not connected", and none of them is the same fault.
+///
+/// * `udp_relay` off and no port — a TCP-only tier. UDP rides inside the proxy
+///   (`udp: true`), which is correct and needs nothing.
+/// * `udp_relay` on and a port — the profile carries `Locus-UoT` and pins UDP to
+///   it. Coherent. Whether it *works* is an observation (`ready`,
+///   `traffic_flowing`), never this.
+/// * Anything else — a half-configured tier, which is a hub-side data fault. The
+///   half-configurations are named individually because the operator fix differs:
+///   one is "you did not turn UoT on", the other is "you turned it on and
+///   advertised no endpoint".
+fn classify_udp(config: Option<&contract::TierConfig>, udp_relay: bool) -> UdpStatus {
+    let Some(config) = config else {
+        return UdpStatus::Unusable {
+            reason: "no connection details are stored for this tier — the tunnel cannot \
+                     be configured until activation completes"
+                .to_owned(),
+        };
+    };
+
+    // Matched on the three facts separately so the match is total without a guard:
+    // a guard would leave `(true, 1..=MAX)` formally uncovered, and the compiler
+    // is right — the pattern set should say what happens for every pair.
+    let port = config.uot_port;
+    match (udp_relay, port == 0) {
+        (false, true) => UdpStatus::None,
+        (true, false) => UdpStatus::Configured { port },
+        (true, true) => UdpStatus::Unusable {
+            reason: "the hub enabled UDP-over-TCP for this tier but advertised no \
+                     endpoint (uot_port is 0), so UDP has nowhere to go"
+                .to_owned(),
+        },
+        (false, false) => UdpStatus::Unusable {
+            reason: format!(
+                "the hub advertised UDP-over-TCP on port {port} but did not enable it for \
+                 this tier (udp_relay is false), so the endpoint is never used"
+            ),
+        },
+    }
 }
 
 /// Turns a refusal into something worth showing a student.
@@ -884,19 +1008,36 @@ pub async fn locus_connect() -> CmdResult<ConnectionResult> {
     // symptom was "games are broken on the tier I bought for games".
     let udp_relay = store::udp_relay().await;
 
-    match apply::apply_tier(&config, udp_relay).await {
-        Ok(apply::ApplyOutcome::Rejected { reason }) => {
-            return Err(super::coded_error(
-                "LOCUS_CONFIG_REJECTED",
-                format!("The tunnel configuration was refused: {reason}"),
-            ));
-        }
-        Ok(_) => {}
-        Err(error) => {
-            return Err(super::coded_error(
-                "LOCUS_CONFIG_FAILED",
-                format!("Could not write the tunnel configuration: {error:#}"),
-            ));
+    // ── Apply ONCE, then wait on readiness ──────────────────────────────────────
+    //
+    // This used to be one loop that re-entered `start_core()` — and therefore the
+    // whole config-apply path — every `CONNECT_READY_INTERVAL`. Two things went
+    // wrong with that, and the second is a bug a student sees:
+    //
+    //   1. It re-applied a config that had already been applied, once per 250 ms,
+    //      for the whole of a slow start. On macOS that means repeated service
+    //      staging; on any host it means hundreds of redundant kernel validations.
+    //   2. Every iteration after the first met the manager's global
+    //      `try_start_config_update` guard and came back `Busy`, which reached the
+    //      student as "The tunnel configuration was refused: Configuration
+    //      validation is already running". A connect that is merely still running
+    //      was reported as a refusal — and once that error resolved the command,
+    //      the readiness wait it was in the middle of was abandoned entirely.
+    //
+    // So the two responsibilities are separated: apply (bounded, retried a few
+    // times while the guard is held by somebody else) and wait (readiness only,
+    // no config writes). `apply_tier` now distinguishes "deferred" from
+    // "rejected", which is what makes the retry below possible.
+    match apply_tier_waiting_for_the_guard(&config, udp_relay, tokio::time::Instant::now()).await? {
+        ApplyWait::Done => {}
+        ApplyWait::Cancelled => {
+            // The student pressed Cancel while the guard was held. Report it the
+            // way the readiness loop reports a cancellation, and consume the flag
+            // there rather than here.
+            return Ok(ConnectionResult {
+                connected: false,
+                message: "Cancelled".to_owned(),
+            });
         }
     }
 
@@ -922,23 +1063,16 @@ pub async fn locus_connect() -> CmdResult<ConnectionResult> {
     // tunnel that is already carrying their traffic is ready by definition, and
     // this loop no longer waits for a delay test to agree before saying so.
     //
+    // The engine is started ONCE, before this loop, and not inside it: starting is
+    // the apply path's job, and re-entering it per poll is what produced the
+    // refusal above. `start_core_with_port_fallback` is still the entry point — it
+    // is called by `apply_tier_waiting_for_the_guard` on the first pass only.
+    //
     // Bounded, deliberately: an unbounded wait is the retired client's forever
     // spinner. On timeout this is a RESULT, not an error, so the screen can say
     // "still starting" and keep the cancel affordance alive.
     let started = tokio::time::Instant::now();
     loop {
-        // The port-fallback variant, not the bare `start_core`: the mixed-port
-        // retry used to live in the launch-time `CoreManager::init`, which this
-        // app no longer calls because a launch-time start is an auto-connect. A
-        // student whose mixed port is taken would otherwise get a hard
-        // `LOCUS_CONNECT_FAILED` where they used to get a silent fallback.
-        match CoreManager::global().start_core_with_port_fallback().await {
-            Ok(_) => {}
-            Err(error) => {
-                return Err(super::coded_error("LOCUS_CONNECT_FAILED", format!("{error:#}")));
-            }
-        }
-
         if CoreManager::global().observe_readiness().await.is_ready() {
             return Ok(ConnectionResult {
                 connected: true,
@@ -968,6 +1102,152 @@ pub async fn locus_connect() -> CmdResult<ConnectionResult> {
         }
 
         tokio::time::sleep(CONNECT_READY_INTERVAL).await;
+    }
+}
+
+/// How the wait for the config-update guard ended.
+///
+/// Its own type because `Ok(())` cannot distinguish "the config is applied" from
+/// "the student cancelled while we were waiting" — and the caller must, because
+/// the next thing it does is start the engine.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ApplyWait {
+    /// The config is written and the guard is free.
+    Done,
+    /// The student asked to abandon the connect while the guard was held.
+    Cancelled,
+}
+
+/// Applies the tier config, waiting out a guard that somebody else holds.
+///
+/// # Why this is a loop at all
+///
+/// Applying and *starting the engine* are the same call in this codebase
+/// (`start_core` takes the config-update guard), so a second caller that arrives
+/// while the first is applying cannot make progress by refusing — it can only
+/// arrive late. `ApplyOutcome::Deferred` is exactly that state, and the honest
+/// response is to wait and ask again rather than to report a refusal.
+///
+/// # Why it is bounded
+///
+/// A guard that is never released is a genuine fault, and a connect command that
+/// waits on it forever is the retired client's forever-spinner. When the budget
+/// runs out the caller is told the tunnel is still starting — the same sentence
+/// the readiness timeout uses — because that is what is actually true.
+///
+/// # Why it starts the engine here
+///
+/// The engine start used to live in the readiness loop, once per poll, which is
+/// what produced the concurrency storm this function exists to remove. It is
+/// here because this is the only place that legitimately knows the config is in
+/// place and it is time to run it. Later polls of the loop only observe.
+async fn apply_tier_waiting_for_the_guard(
+    config: &contract::TierConfig,
+    udp_relay: bool,
+    started: tokio::time::Instant,
+) -> CmdResult<ApplyWait> {
+    let mut waiting_logged = false;
+
+    loop {
+        match apply::apply_tier(config, udp_relay).await {
+            Ok(apply::ApplyOutcome::Rejected { reason }) => {
+                return Err(super::coded_error(
+                    "LOCUS_CONFIG_REJECTED",
+                    format!("The tunnel configuration was refused: {reason}"),
+                ));
+            }
+            Ok(apply::ApplyOutcome::Applied)
+            | Ok(apply::ApplyOutcome::StagedOnly) => break,
+            Ok(apply::ApplyOutcome::Deferred { reason }) => {
+                // Somebody else holds the config-update guard. Wait and ask
+                // again — refusing here is the defect this whole function exists
+                // to remove.
+                //
+                // This branch used to be folded into `Ok(_) => break`, so the
+                // loop could never iterate: the retry was documented and did not
+                // exist. `clippy::never_loop` caught it (`-D correctness`), which
+                // is exactly the "a comment is not a mechanism" lesson — the prose
+                // described waiting, the code did not wait.
+                if started.elapsed() >= CONNECT_READY_BUDGET {
+                    logging!(
+                        warn,
+                        Type::Cmd,
+                        "[locus] the config-update guard stayed held for {:?}; giving up: {reason}",
+                        started.elapsed()
+                    );
+                    return Err(super::coded_error(
+                        "LOCUS_CONFIG_BUSY",
+                        "Another configuration update is still running, so this connect could not \
+                         apply yours. Try again in a moment.",
+                    ));
+                }
+                if !waiting_logged {
+                    logging!(
+                        info,
+                        Type::Cmd,
+                        "[locus] another config update holds the guard; waiting for it ({reason})"
+                    );
+                    waiting_logged = true;
+                }
+                // A cancel during the wait must not be swallowed: the readiness
+                // loop below checks the same flag, and consuming it here would
+                // make the Cancel button work only when it happened to be read
+                // first. Report it as its own outcome so the caller does not go
+                // on to start an engine the student just abandoned.
+                if CANCEL_CONNECT.load(Ordering::Acquire) {
+                    return Ok(ApplyWait::Cancelled);
+                }
+                tokio::time::sleep(CONNECT_READY_INTERVAL).await;
+            }
+            Err(error) => {
+                return Err(super::coded_error(
+                    "LOCUS_CONFIG_FAILED",
+                    format!("Could not write the tunnel configuration: {error:#}"),
+                ));
+            }
+        }
+    }
+
+    // The config is written and the guard has been released. Now — and only
+    // now — start the engine, once.
+    //
+    // The port-fallback variant, not the bare `start_core`: the mixed-port retry
+    // used to live in the launch-time `CoreManager::init`, which this app no
+    // longer calls because a launch-time start is an auto-connect. A student whose
+    // mixed port is taken would otherwise get a hard `LOCUS_CONNECT_FAILED` where
+    // they used to get a silent fallback.
+    loop {
+        match CoreManager::global().start_core_with_port_fallback().await {
+            Ok(_) => return Ok(ApplyWait::Done),
+            Err(error) => {
+                // A start that fails because *another* start is in flight lands
+                // here too, and it carries the same "already running" text. It is
+                // not a verdict on this device, so it is waited out rather than
+                // surfaced — but only for as long as the readiness budget, so a
+                // guard that never clears still ends in a sentence and a Cancel
+                // button rather than a hang.
+                let message = format!("{error:#}");
+                let held = message.contains("already running");
+
+                if held && started.elapsed() < CONNECT_READY_BUDGET {
+                    if !waiting_logged {
+                        logging!(
+                            info,
+                            Type::Cmd,
+                            "[locus] another start holds the guard; waiting for it rather than reporting a refusal"
+                        );
+                        waiting_logged = true;
+                    }
+                    tokio::time::sleep(CONNECT_READY_INTERVAL).await;
+                    // Re-enter the apply path: the other start may have applied a
+                    // different config, and this device's tier must win.
+                    continue;
+                }
+
+                logging!(warn, Type::Cmd, "[locus] the engine could not be started: {message}");
+                return Err(super::coded_error("LOCUS_CONNECT_FAILED", message));
+            }
+        }
     }
 }
 
@@ -1091,7 +1371,10 @@ pub async fn locus_dismiss_update() -> CmdResult<()> {
 /// return may never happen. Callers must not treat a missing response as failure.
 #[tauri::command]
 pub async fn locus_install_update(app: tauri::AppHandle) -> CmdResult<()> {
-    let hub = contract::HUB_URL;
+    // Resolved, not the constant: the updater must reach the same hub the rest of
+    // the app does. This matters most on a filtered network, where the compiled
+    // default is unreachable AND the update that would fix it is served from it.
+    let hub = contract::hub_url().await;
     let current = env!("CARGO_PKG_VERSION");
 
     // START-OF-INSTALL. This line is the one whose absence made the reported
@@ -1100,7 +1383,7 @@ pub async fn locus_install_update(app: tauri::AppHandle) -> CmdResult<()> {
     // all. Every branch below now says so before it can block.
     logging!(info, Type::System, "[locus] update install requested (running {current})");
 
-    let pending = crate::locus::update::install::PendingInstall::check(&app, hub, current)
+    let pending = crate::locus::update::install::PendingInstall::check(&app, &hub, current)
         .await
         .map_err(|error| {
             // The plugin has to be registered for `updater_builder()` to resolve.
@@ -1264,7 +1547,10 @@ pub async fn locus_update_staging_dir() -> CmdResult<String> {
 /// activation fails on a school network.
 #[tauri::command]
 pub async fn locus_hub_url() -> String {
-    contract::HUB_URL.to_owned()
+    // The URL actually in use, override included. The UI shows this for support,
+    // so reporting the compiled default while dialling an override would send a
+    // student to check an address the app is not using.
+    contract::hub_url().await
 }
 
 /// Asks the client to confirm its subscription with the hub right now.
@@ -1306,6 +1592,92 @@ mod tests {
     use activation::ActivationOutcome as O;
     use crate::core::manager::RunningMode;
     use crate::core::runstate::ServiceHealth;
+
+    /// The four shapes a tier's UDP configuration can arrive in, kept distinct.
+    ///
+    /// This is the free-plan report reduced to a rule. A student said the free
+    /// plan "does not connect at all, and occasionally crashes"; the client had no
+    /// way to say which of these four states it was in, because the whole payload
+    /// was reduced to one boolean on the way in. The distinction is the fix: three
+    /// of these are operator-fixable and one is fine.
+    #[test]
+    fn the_four_udp_shapes_are_not_collapsed_into_one() {
+        let tcp_only = contract::TierConfig {
+            server: "hub.example.org".into(),
+            server_port: 8443,
+            password: "x".into(),
+            method: "2022-blake3-aes-256-gcm".into(),
+            uot_port: 0,
+        };
+        // The free plan as the hub is supposed to seed it: its own listener.
+        let free = contract::TierConfig {
+            uot_port: 8447,
+            ..tcp_only.clone()
+        };
+        // Enabled, no endpoint — the hub row says UDP is on and names nowhere.
+        let enabled_without_endpoint = contract::TierConfig {
+            uot_port: 0,
+            ..tcp_only.clone()
+        };
+
+        assert_eq!(classify_udp(Some(&tcp_only), false), UdpStatus::None);
+        assert_eq!(
+            classify_udp(Some(&free), true),
+            UdpStatus::Configured { port: 8447 }
+        );
+
+        // A half-configured tier is `Unusable` **with a reason naming which half**,
+        // because the two halves have different operator fixes.
+        match classify_udp(Some(&enabled_without_endpoint), true) {
+            UdpStatus::Unusable { reason } => {
+                assert!(reason.contains("uot_port"), "must name the missing half: {reason}")
+            }
+            other => panic!("enabled with no endpoint must be unusable, got {other:?}"),
+        }
+        match classify_udp(Some(&free), false) {
+            UdpStatus::Unusable { reason } => {
+                assert!(reason.contains("udp_relay"), "must name the missing half: {reason}")
+            }
+            other => panic!("an advertised but disabled endpoint must be unusable, got {other:?}"),
+        }
+
+        // No stored payload at all: activation has not completed, which is a
+        // different statement again and must not read as "this tier has no UDP".
+        match classify_udp(None, false) {
+            UdpStatus::Unusable { reason } => {
+                assert!(reason.contains("activation"), "must point at the cause: {reason}")
+            }
+            other => panic!("a missing payload is not `None`, got {other:?}"),
+        }
+    }
+
+    /// The classifier must agree with the profile builder, or the status field
+    /// describes a document the core is not running.
+    ///
+    /// `TierConfig::uot_enabled` is the one decision `tier::build_profile` uses to
+    /// emit `Locus-UoT` and the UDP rule. `Configured` therefore has to mean
+    /// exactly "the builder emitted UoT", for both tier shapes.
+    #[test]
+    fn the_reported_udp_state_matches_the_document_that_is_built() {
+        for (port, relay) in [(0u16, false), (8447, true), (0, true), (8447, false)] {
+            let config = contract::TierConfig {
+                server: "hub.example.org".into(),
+                server_port: 8443,
+                password: "x".into(),
+                method: "2022-blake3-aes-256-gcm".into(),
+                uot_port: port,
+            };
+            let built = crate::locus::tier::build_profile(&config, relay);
+            let has_uot = built.yaml.contains(crate::locus::tier::UOT_PROXY_NAME);
+            let reported = matches!(classify_udp(Some(&config), relay), UdpStatus::Configured { .. });
+
+            assert_eq!(
+                has_uot, reported,
+                "udp_port={port} relay={relay}: the profile says {has_uot} but status reports {reported}"
+            );
+            assert_eq!(has_uot, config.uot_enabled(relay));
+        }
+    }
 
     /// Every refusal must produce a sentence a student can act on.
     ///
@@ -1803,6 +2175,41 @@ mod tests {
     /// then rendered "{{count}} days" with an empty count (or nothing), and the
     /// expiry was reported as simply not working — with the Rust tests all green,
     /// because none of them looked at the bytes.
+    /// The UDP status reaches the frontend with the same shape as its siblings.
+    ///
+    /// `rename_all = "camelCase"` renames VARIANTS, not their fields — so without
+    /// `rename_all_fields` the `Configured { port }` arm would emit `kind` +
+    /// `port` while every sibling emits camelCase inner keys. That is not
+    /// cosmetic: the TypeScript interface is written against the siblings'
+    /// convention, and a field that silently does not appear there is a value the
+    /// UI reads as `undefined` — the same class as the `uot_port` mismatch that
+    /// killed UoT fleet-wide.
+    #[test]
+    fn the_udp_wire_shape_matches_its_siblings() {
+        let configured = serde_json::to_value(UdpStatus::Configured { port: 8447 })
+            .expect("UdpStatus must serialize");
+        assert_eq!(
+            configured.get("kind").and_then(serde_json::Value::as_str),
+            Some("configured")
+        );
+        assert_eq!(
+            configured.get("port").and_then(serde_json::Value::as_u64),
+            Some(8447)
+        );
+
+        let none = serde_json::to_value(UdpStatus::None).expect("UdpStatus must serialize");
+        assert_eq!(none.get("kind").and_then(serde_json::Value::as_str), Some("none"));
+
+        let unusable = serde_json::to_value(UdpStatus::Unusable {
+            reason: "no endpoint".to_owned(),
+        })
+        .expect("UdpStatus must serialize");
+        assert!(
+            unusable.get("reason").is_some(),
+            "the frontend reads `reason`; got {unusable}"
+        );
+    }
+
     #[test]
     fn the_active_wire_shape_is_camel_case() {
         let value = serde_json::to_value(SubscriptionStatus::Active {

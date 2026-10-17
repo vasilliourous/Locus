@@ -15,6 +15,18 @@ interface TierRow {
   // the tier's config JSON and surfaced so the udp_relay checkbox has a visible
   // partner — it is the other half of the switch.
   uot_port: number
+  // A hub base URL to offer this fleet instead of the one compiled into the
+  // client, or '' for none.
+  //
+  // WHY THIS IS ON THE TIER RATHER THAN A SEPARATE PAGE
+  //
+  // It reaches clients on the heartbeat, which is per-code — so it is per-tier
+  // data, and putting it anywhere else would mean inventing a second delivery
+  // path for a value the client already has an inbox for. The heartbeat is the
+  // ONLY channel that can move an already-installed device without a release,
+  // which is exactly what is needed when a network has blocked the compiled
+  // hostname and the update path is blocked with it.
+  hub_alias: string
 }
 
 const tiers = ref<TierRow[]>([])
@@ -40,6 +52,7 @@ async function save(row: TierRow) {
       active: row.active,
       udp_relay: row.udp_relay,
       uot_port: row.uot_port,
+      hub_alias: row.hub_alias,
     })
     if (res.ok) {
       toast.ok(`${row.tier} updated — clients pick this up on their next heartbeat`)
@@ -97,6 +110,14 @@ onMounted(load)
         <span>UoT port (0 = none)</span>
         <input v-model.number="row.uot_port" type="number" min="0" max="65535" />
       </label>
+      <label class="field">
+        <span>Hub address to offer (blank = none)</span>
+        <input
+          v-model="row.hub_alias"
+          placeholder="https://hub.example.org"
+          spellcheck="false"
+        />
+      </label>
       <div class="shrink">
         <button class="primary" :disabled="saving" @click="save(row)">Save {{ row.tier }}</button>
       </div>
@@ -129,12 +150,26 @@ onMounted(load)
       it at the ordinary shadowsocks-rust ports (8443/8445): those do not
       implement sing-box's UDP-over-TCP and will refuse the connections.
       <br /><br />
+      <strong>Hub address to offer</strong> lets you move this fleet off a
+      hostname a network has blocked — for example a school filter that
+      classifies the default hub address as uncategorised. It reaches clients on
+      their next heartbeat and takes effect on their next launch; the built-in
+      address keeps working for everyone else, so nothing breaks if this is
+      blank. It must be an absolute <code>https://</code> URL with no path
+      (<code>https://hub.example.org</code>), or the client ignores it. The
+      server must actually answer on that name: add a Caddy alias block with
+      <code>HUB_ALIAS_DOMAIN</code> on the box first.
+      <br /><br />
+      Clearing the field withdraws the offer; leaving it unchanged does not,
+      because a heartbeat that omits the key never overrides a stored value.
+      <br /><br />
       Confirm the listener is actually up before setting the port:
-      <code>systemctl status sing-box-uot</code> and
-      <code>ss -lntup | grep 8446</code> (it must listen on <em>UDP</em> as well as
-      TCP). A port advertised with nothing listening breaks UDP — game and voice
-      traffic — while TCP and DNS keep working, so the failure looks like "some
-      things work, some don't" rather than an obvious outage.
+      <code>systemctl status sing-box-uot-strike</code> /
+      <code>sing-box-uot-eco</code> and <code>ss -lntup | grep -E '8446|8447'</code>
+      (each must listen on <em>UDP</em> as well as TCP). A port advertised with
+      nothing listening breaks UDP — game and voice traffic — while TCP and DNS
+      keep working, so the failure looks like "some things work, some don't"
+      rather than an obvious outage.
     </p>
   </div>
 </template>

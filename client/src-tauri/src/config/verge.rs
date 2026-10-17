@@ -274,6 +274,44 @@ pub struct IVerge {
     /// Whether this tier should carry UDP over TCP.
     pub locus_udp_relay: Option<bool>,
 
+    /// An override for the hub's base URL, when the built-in one cannot be
+    /// reached from this network.
+    ///
+    /// # Why this exists
+    ///
+    /// The hub address is compiled in (`locus::contract::HUB_URL`), which is
+    /// correct — a client that cannot find its hub cannot activate, heartbeat or
+    /// update, so the address must not be a per-machine guess. But it is also the
+    /// one value that can become *entirely* unreachable for reasons that have
+    /// nothing to do with us: a school network that classifies the hostname as
+    /// uncategorised refuses the DNS/TLS the whole product depends on. N4L does
+    /// exactly that to `*.duckdns.org`, and it did so to this project.
+    ///
+    /// When that happens the compiled address is unreachable *and so is the
+    /// update path*, because the update path is served from the same host — the
+    /// failure prevents escaping the failure. This field is the escape hatch: a
+    /// hub move becomes a stored value the next launch honours, with no release
+    /// required, so a stranded fleet can be repointed by one operator action
+    /// rather than by shipping a build it cannot download.
+    ///
+    /// # Rules for the value
+    ///
+    ///   * **Absolute and https**, or it is ignored. A relative value, a bare
+    ///     hostname or an `http://` URL is refused by
+    ///     `contract::resolve_hub_url` — an override that cannot be trusted to be
+    ///     a hub URL is worse than the compiled default.
+    ///   * **A trailing slash is stripped**, so `format!("{hub}/api/...")` cannot
+    ///     produce a double slash.
+    ///   * **Empty means "use the built-in"**, which is the state of every device
+    ///     that has never needed this.
+    ///
+    /// Deliberately *not* settable from the activation screen: a student typing a
+    /// hub address is a phishing surface and a support nightmare. It is set by an
+    /// operator (config file, or a future console-driven push on an authenticated
+    /// path), which is also why the value alone can never degrade the compiled
+    /// default into something insecure.
+    pub locus_hub_override: Option<String>,
+
     /// When this code lapses, exactly as the hub last told us.
     ///
     /// Stored raw rather than as a timestamp so the value the UI displays is the

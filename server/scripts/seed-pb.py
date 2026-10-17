@@ -209,6 +209,18 @@ collections = [
     ("codes", [
         {"name":"code","type":"text","required":True,"unique":True},
         {"name":"tier","type":"text","required":True},
+        # `used` is VESTIGIAL. Nothing reads it.
+        #
+        # The single-use rule is `activated_at` (set on first redemption, cleared
+        # by an admin release) — see `alreadyRedeemed()` in activation.pb.js and
+        # the `wasRedeemed` check in admin_unbind.pb.js. `used` is still written
+        # as `false` at generation, and was written as `true` by the pre-V5 flow,
+        # but no reader anywhere consults it.
+        #
+        # Kept in the schema only because the column exists on the live hub and
+        # removing it would mean deleting data on a production box for a cosmetic
+        # gain. NOT kept to be used: an operator who sets it expecting an effect
+        # gets none, and would reasonably conclude the console is broken.
         {"name":"used","type":"bool"},
         {"name":"suspended","type":"bool"},
         # NOTE: `bound_fingerprint` was removed. Codes are single-use and not

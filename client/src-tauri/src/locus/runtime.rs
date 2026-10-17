@@ -424,6 +424,29 @@ async fn handle_success(response: &crate::locus::heartbeat::HeartbeatResponse) {
         apply_refreshed_config(config, response.udp_relay).await;
     }
 
+    // Adopt a hub address the operator offered.
+    //
+    // This is the escape hatch for a network that refuses the compiled hostname:
+    // the heartbeat is the only channel that reaches an already-installed device
+    // without a release, so the offer arrives here and is stored for the NEXT
+    // launch to dial.
+    //
+    // Written only when the hub actually sent one, and through the same validator
+    // the connect path uses — so a malformed or plaintext value is ignored rather
+    // than adopted, and a hub that stops sending it does NOT clear a working
+    // override (the operator's remedy must not evaporate because one beat omitted
+    // the key). Reaching the new address mid-session is deliberately not attempted:
+    // swapping the hub under a running tunnel would re-dial the connection the
+    // student is using, and the value takes effect on the next launch.
+    if let Some(alias) = &response.hub_alias
+        && let Err(error) = store::record_hub_override(alias).await
+    {
+        logging!(
+            warn,
+            Type::Config,
+            "[locus] could not store the hub alias the hub offered: {error:#}"
+        );
+    }
     // Persist the expiry on EVERY successful beat, deliberately outside the
     // `server_config` branch above.
     //
@@ -701,6 +724,7 @@ mod tests {
             tier: None,
             server_config: None,
             udp_relay: false,
+            hub_alias: None,
             expires_at: None,
             free_allowance_mb: None,
             free_throttle_mbps: None,

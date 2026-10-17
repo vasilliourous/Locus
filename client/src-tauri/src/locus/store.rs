@@ -226,6 +226,50 @@ pub async fn record_expiry(expires_at: Option<String>) -> Result<()> {
     verge.data_arc().save_file().await
 }
 
+/// Records, or clears, a hub address the operator offered over the heartbeat.
+///
+/// # What it refuses, and why that matters more than what it accepts
+///
+/// The value arrives from the network, so it is validated here by the same rule
+/// the connect path uses — `contract::resolve_hub_url` — and stored **only if it
+/// is a usable override**. A malformed value is dropped with a warning rather
+/// than stored, because a bad value that persisted would leave the device unable
+/// to reach its hub on the next launch, with no way back except editing the
+/// config file by hand. Failing to adopt a *good* value costs a retry on the next
+/// beat; adopting a bad one costs the device.
+///
+/// # Why an empty offer clears
+///
+/// `Some("")` is how an operator withdraws an alias: the validator maps it to the
+/// compiled default, so the stored value is cleared and the device returns to the
+/// built-in address. That is a different signal from *omitting* the key, which the
+/// caller does not route here at all — omitting it must not undo a working
+/// override just because one beat was produced by a hub that does not know about
+/// them.
+pub async fn record_hub_override(offered: &str) -> Result<()> {
+    use crate::locus::contract::{resolve_hub_url, HUB_URL};
+
+    let resolved = resolve_hub_url(Some(offered));
+    let accept = resolved != HUB_URL;
+
+    if !accept && !offered.trim().is_empty() {
+        // Something was offered and it did not survive validation. Say so, and
+        // keep whatever is already stored.
+        logging::warn_hub_alias_rejected(offered);
+        return Ok(());
+    }
+
+    let verge = Config::verge().await;
+    verge.edit_draft(|draft| {
+        draft.locus_hub_override = if accept {
+            Some(resolved.as_str().into())
+        } else {
+            None
+        };
+    });
+    verge.data_arc().save_file().await
+}
+
 /// Clears the entitlement after the hub has **definitively** refused it.
 ///
 /// This is the suspension/expiry/refund path — a statement about the code
@@ -524,8 +568,22 @@ mod logging {
         );
     }
 
-    /// The stored usage window could not be parsed, so it was reset.
+    /// A hub-offered address was not usable, so it was not adopted.
     ///
+    /// Worth a line rather than silence: the operator's intent was to move this
+    /// fleet off a blocked hostname, and a value that failed validation means the
+    /// move did not happen. Silence here would look identical to a hub that never
+    /// offered one.
+    pub fn warn_hub_alias_rejected(offered: &str) {
+        clash_verge_logging::logging!(
+            warn,
+            clash_verge_logging::Type::Config,
+            "[locus] ignoring the hub address the hub offered ({offered:?}): it is not an \
+             absolute https URL with no path"
+        );
+    }
+
+    /// The stored usage window could not be parsed, so it was reset.    ///
     /// Worth a line: the visible symptom is "my free data keeps resetting", and
     /// without this the cause is unknowable from the student's side.
     pub fn warn_corrupt_usage(detail: &str) {
@@ -647,6 +705,45 @@ mod tests {
         assert_eq!(activation.tier, "strike");
         assert!(is_usable(&activation));
     }
+
+    /// A hub-offered address is adopted only when it is usable; otherwise the
+    /// stored value is left exactly as it was.
+    ///
+    /// The asymmetry is the point. Failing to adopt a GOOD offer costs one more
+    /// beat; adopting a BAD one strands the device, because the thing it would
+    /// need to recover is the value that broke it. This is the store-side half of
+    /// `contract::resolve_hub_url`, and it is tested with the same table so the
+    /// two cannot disagree about what "usable" means.
+    #[test]
+    fn an_offered_hub_address_is_adopted_only_when_it_survives_validation() {
+        use crate::locus::contract::{resolve_hub_url, HUB_URL};
+
+        // Adoption is decided by the resolver, not by a second rule here.
+        let adopted = |offered: &str| {
+            let resolved = resolve_hub_url(Some(offered));
+            resolved != HUB_URL
+        };
+
+        assert!(adopted("https://hub.example.org"));
+        assert!(adopted("https://hub.example.org/"));
+
+        for bad in [
+            "",
+            "   ",
+            "http://hub.example.org",
+            "hub.example.org",
+            "https://hub.example.org/api",
+            "https://hub.example.org/?x=1",
+            "javascript:alert(1)",
+        ] {
+            assert!(!adopted(bad), "{bad:?} must not be adopted as a hub address");
+        }
+
+        // An empty offer is the operator WITHDRAWING an alias: it validates to the
+        // default, which `record_hub_override` writes as `None` (cleared) rather
+        // than as a rejection. The two paths are distinguishable by this predicate
+        // plus the emptiness test in the function itself.
+        assert!(resolve_hub_url(Some("")).trim() == HUB_URL);    }
 
     /// A partial record must read as absent, not as a half-populated struct.
     ///

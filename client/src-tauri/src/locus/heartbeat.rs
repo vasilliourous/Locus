@@ -15,7 +15,7 @@
 //! 3. **The update signal.** Updates are advertised through the heartbeat, not
 //!    a separate poll, gated server-side by a per-device rollout percentage.
 
-use crate::locus::contract::{HeartbeatRequest, HUB_URL, TierConfig};
+use crate::locus::contract::{HeartbeatRequest, TierConfig};
 use serde::Deserialize;
 use std::sync::Arc;
 use std::time::Duration;
@@ -94,6 +94,31 @@ pub struct HeartbeatResponse {
     pub server_config: Option<TierConfig>,
     #[serde(default)]
     pub udp_relay: bool,
+
+    /// A hub base URL the operator suggests using instead of the built-in one.
+    ///
+    /// # Why the hub offers this at all
+    ///
+    /// A school network can refuse the compiled hostname outright (N4L classified
+    /// it as uncategorised), which blocks activation, heartbeat **and** the update
+    /// path at once — the failure prevents escaping the failure. The remedy is a
+    /// second hostname plus a client that will use it, and the heartbeat is the
+    /// only channel that reaches an already-installed device without a release.
+    /// This is the same reasoning as [`crate::locus::contract::ReleaseManifest`]:
+    /// the update path must not require the thing that is broken.
+    ///
+    /// # Why it is a suggestion and not an instruction
+    ///
+    /// It is validated by [`crate::locus::contract::resolve_hub_url`] before it is
+    /// stored, and anything that is not an absolute `https` URL with no path falls
+    /// back to the compiled default. A hub that sent a malformed or plaintext value
+    /// therefore cannot strand the device it was trying to rescue — the worst case
+    /// is that the offer is ignored.
+    ///
+    /// Absent for every deployment that has not configured an alias, which is the
+    /// normal case and must stay silent.
+    #[serde(default)]
+    pub hub_alias: Option<String>,
 
     /// When this code lapses, exactly as the hub stores it.
     ///
@@ -408,7 +433,13 @@ pub async fn beat(credential: &Credential, fingerprint: &str) -> BeatOutcome {
         }
     };
 
-    let response = match client.post(format!("{HUB_URL}/api/heartbeat")).json(&body).send().await {
+    // The hub base URL is resolved, not read from the constant: a device on a
+    // network that refuses the default hostname honours a stored override. See
+    // `contract::resolve_hub_url` — and note this is the ONE place a heartbeat
+    // finds its hub, so the override cannot be honoured inconsistently.
+    let hub = crate::locus::contract::hub_url().await;
+
+    let response = match client.post(format!("{hub}/api/heartbeat")).json(&body).send().await {
         Ok(response) => response,
         Err(error) => {
             return BeatOutcome::Unreachable {
@@ -847,6 +878,7 @@ mod tests {
             tier: None,
             server_config: None,
             udp_relay: false,
+            hub_alias: None,
             expires_at: None,
             free_allowance_mb: None,
             free_throttle_mbps: None,
@@ -884,6 +916,7 @@ mod tests {
             tier: None,
             server_config: None,
             udp_relay: false,
+            hub_alias: None,
             expires_at: None,
             free_allowance_mb: None,
             free_throttle_mbps: None,
@@ -916,6 +949,7 @@ mod tests {
             tier: None,
             server_config: None,
             udp_relay: false,
+            hub_alias: None,
             expires_at: None,
             free_allowance_mb: None,
             free_throttle_mbps: None,

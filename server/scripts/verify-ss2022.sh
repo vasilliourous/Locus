@@ -80,39 +80,95 @@ for tier in eco strike; do
     fi
 done
 
-# ── 2. The UoT inbound matches the tiers ──
-# This is the highest-risk surface: sing-box rejects an unknown key outright,
-# taking the whole Strike gaming path down.
-log "Step 2/5: Checking the sing-box UoT inbound..."
-uot_cfg="/etc/sing-box/config.json"
-if [ -f "$uot_cfg" ]; then
-    uot_method=$(python3 -c "
-import json,sys
-c=json.load(open(sys.argv[1]))
-print(c['inbounds'][0].get('method',''))" "$uot_cfg" 2>/dev/null || echo "")
-    if [ "$uot_method" = "$SS_METHOD" ]; then
-        pass "UoT inbound: method is ${SS_METHOD}"
-    else
-        fail "UoT inbound: method is '${uot_method}', expected '${SS_METHOD}'"
+# ── 2. The UoT inbounds match the tiers ──
+#
+# ONE LISTENER PER PLAN (2026-10). This section used to read a single
+# `/etc/sing-box/config.json` and a single `sing-box-uot` service, and compare
+# that one key against Strike's. After the per-plan split that check was both
+# stale and insufficient:
+#
+#   * it reported WARN "not present (UoT disabled?)" on a healthy box, because the
+#     per-plan configs are `strike.json` and `eco.json`, and
+#   * it could not see the FREE plan's listener at all — so a free key that did
+#     not match its own listener (TCP works, UDP silently dead) passed the whole
+#     script.
+#
+# That second gap is the expensive one: a free student's game traffic fails while
+# every check says the deployment is healthy. The pairing is now asserted per
+# plan, which is the agreement that actually has to hold.
+log "Step 2/5: Checking the sing-box UoT inbounds (one per plan)..."
+
+# plan -> config file, service unit, and the tc class that must bound it
+uot_check() {
+    local plan="$1" cfg="$2" unit="$3" tc_class="$4"
+
+    if [ ! -f "$cfg" ]; then
+        warn "${cfg} not present — ${plan} has no UoT listener (ENABLE_UOT=0?)"
+        return 0
     fi
 
-    # The UoT inbound must agree with the Strike tier, or TCP works and gaming
-    # does not — a partial failure that reads as "the VPN is broken".
-    uot_key=$(python3 -c "
-import json,sys
-c=json.load(open(sys.argv[1]))
-print(c['inbounds'][0].get('password',''))" "$uot_cfg" 2>/dev/null || echo "")
-    strike_key=$(python3 -c "import json; print(json.load(open('/etc/shadowsocks/strike.json')).get('password',''))" 2>/dev/null || echo "")
-    if [ -n "$uot_key" ] && [ "$uot_key" = "$strike_key" ]; then
-        pass "UoT key matches the Strike tier key"
+    local method key tier_key
+    method=$(python3 -c "import json,sys; print(json.load(open(sys.argv[1]))['inbounds'][0].get('method',''))" "$cfg" 2>/dev/null || echo "")
+    if [ "$method" = "$SS_METHOD" ]; then
+        pass "${plan} UoT: method is ${SS_METHOD}"
     else
-        fail "UoT key does NOT match the Strike tier key — UDP would fail while TCP works"
+        fail "${plan} UoT: method is '${method}', expected '${SS_METHOD}'"
     fi
-else
-    warn "${uot_cfg} not present (UoT disabled with ENABLE_UOT=0?)"
+
+    # The inbound's key must equal the plan's own shadowsocks key. A mismatch in
+    # either direction produces the same partial failure: TCP works, UDP does not.
+    key=$(python3 -c "import json,sys; print(json.load(open(sys.argv[1]))['inbounds'][0].get('password',''))" "$cfg" 2>/dev/null || echo "")
+    tier_key=$(python3 -c "import json; print(json.load(open('/etc/shadowsocks/${plan}.json')).get('password',''))" 2>/dev/null || echo "")
+    if [ -n "$key" ] && [ "$key" = "$tier_key" ]; then
+        pass "${plan} UoT key matches the ${plan} tier key"
+    else
+        fail "${plan} UoT key does NOT match the ${plan} tier key — UDP would fail while TCP works"
+    fi
+
+    # The port must be the one the tier row advertises, and it must be shaped.
+    # An unshaped free listener is the free plan's whole rate limit missing.
+    local uot_port
+    uot_port=$(python3 -c "import json,sys; print(json.load(open(sys.argv[1]))['inbounds'][0].get('listen_port',''))" "$cfg" 2>/dev/null || echo "")
+    if [ -n "$uot_port" ] && systemctl is-active --quiet "$unit" 2>/dev/null; then
+        pass "${plan} UoT: ${unit} is running on :${uot_port}"
+    elif [ -n "$uot_port" ]; then
+        fail "${plan} UoT: ${unit} is NOT running (listener :${uot_port} is dead)"
+        journalctl -u "$unit" -n 5 --no-pager 2>/dev/null | tail -3 | sed 's/^/         /'
+    fi
+
+    if [ -n "$tc_class" ]; then
+        local iface
+        iface=$(ip -4 route show default 2>/dev/null | awk '{print $5}' | head -1)
+        if [ -n "$iface" ] && tc -s class show dev "$iface" 2>/dev/null | grep -q "1:${tc_class} "; then
+            pass "${plan} UoT: :${uot_port} is shaped by class 1:${tc_class}"
+        else
+            fail "${plan} UoT: no tc class 1:${tc_class} — this plan has no server-side cap"
+        fi
+    fi
+}
+
+# Ports and classes mirror modules/02-shadowsocks.sh and modules/04-tc.sh.
+uot_check "strike" "/etc/sing-box/strike.json" "sing-box-uot-strike" ""
+uot_check "eco"    "/etc/sing-box/eco.json"    "sing-box-uot-eco"    "20"
+
+# The retired single-listener unit must be gone. If it survived an upgrade it
+# binds :8446, racing the per-plan listener for the paid UDP port — and whichever
+# loses silently stops carrying UDP.
+#
+# A NEGATIVE assertion: an `is-active` that FAILS when true. check-consistency.sh
+# §31 distinguishes this from a positive requirement by looking for the success
+# `pass` on the same branch, so the shape here matters — keep the failure arm
+# first and give success its own unconditional `pass` below.
+if systemctl is-active --quiet sing-box-uot 2>/dev/null; then
+    fail "the retired sing-box-uot.service is still running and races :8446 — disable it: systemctl disable --now sing-box-uot"
 fi
+pass "the retired sing-box-uot.service is not running (a running one races :8446)"
 
 # ── 3. The listeners are actually up ──
+#
+# The UoT listeners are checked in section 2, per plan. This section used to
+# repeat a single `sing-box-uot` check here against a unit that no longer exists,
+# which reported a false FAIL on every healthy box.
 log "Step 3/5: Checking listeners..."
 for svc in shadowsocks-eco shadowsocks-strike; do
     if systemctl is-active --quiet "$svc"; then
@@ -122,20 +178,12 @@ for svc in shadowsocks-eco shadowsocks-strike; do
         journalctl -u "$svc" -n 5 --no-pager 2>/dev/null | tail -3 | sed 's/^/         /'
     fi
 done
-if [ -f "$uot_cfg" ]; then
-    if systemctl is-active --quiet sing-box-uot; then
-        pass "sing-box-uot is running"
-    else
-        fail "sing-box-uot is NOT running"
-        journalctl -u sing-box-uot -n 5 --no-pager 2>/dev/null | tail -3 | sed 's/^/         /'
-    fi
-fi
 
 # A listener that started and then refused every handshake is the failure this
 # whole script exists to catch, so the journal is read for key/decrypt errors
 # rather than trusting `is-active` alone.
 log "Step 4/5: Scanning recent journals for handshake/key errors..."
-for svc in shadowsocks-eco shadowsocks-strike sing-box-uot; do
+for svc in shadowsocks-eco shadowsocks-strike sing-box-uot-strike sing-box-uot-eco; do
     systemctl is-active --quiet "$svc" 2>/dev/null || continue
     hits=$(journalctl -u "$svc" --since "1 hour ago" --no-pager 2>/dev/null \
         | grep -ciE 'invalid key|cipher|password|decrypt.*fail|unsupported method' || true)

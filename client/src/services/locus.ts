@@ -92,7 +92,35 @@ export interface LocusStatus {
    * drift between the two languages.
    */
   allowance: AllowanceStatus
+
+  /**
+   * How this tier's UDP-over-TCP endpoint is configured, or why there is not one.
+   *
+   * Backend-owned for the same reason `allowance` is: three distinct states
+   * collapsed into one boolean is what made the free-plan report unusable. When a
+   * student says "the free plan does not connect", this distinguishes a coherent
+   * UoT tier from a half-configured row (enabled with no port, or a port with the
+   * relay off) — states that previously all presented as "it is broken".
+   *
+   * `configured` is **not** "working": it says the generated profile is coherent.
+   * Whether packets actually move is `ready` and `trafficFlowing`.
+   */
+  udp: UdpStatus
 }
+
+/**
+ * The tier's UDP-over-TCP state, mirroring `UdpStatus` in
+ * `src-tauri/src/cmd/locus.rs`.
+ *
+ * `kind` is the tag, matching the sibling unions' convention.
+ */
+export type UdpStatus =
+  /** No UoT for this tier; UDP rides inside the TCP proxy. Correct, not a fault. */
+  | { kind: 'none' }
+  /** A coherent UoT endpoint was generated. Not proof it carries packets. */
+  | { kind: 'configured'; port: number }
+  /** Advertised but unusable, with the reason. The state that used to be invisible. */
+  | { kind: 'unusable'; reason: string }
 
 /**
  * The free tier's allowance, as the backend classified it.

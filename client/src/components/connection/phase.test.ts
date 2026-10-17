@@ -44,6 +44,12 @@ const status = (
   // variant that renders no bar, so a helper that forgets it cannot accidentally
   // assert metered behaviour.
   allowance: { state: 'unlimited' },
+  // Not read by `phaseFromStatus`; required by the type. `none` is the honest
+  // default — it is the "this tier has no UoT endpoint" state, which is correct
+  // for a helper that is not describing a particular tier, and it is the variant
+  // that cannot be mistaken for "configured", so a helper that forgets to set it
+  // cannot accidentally assert UDP behaviour.
+  udp: { kind: 'none' },
 })
 
 describe('connection phase from backend status', () => {

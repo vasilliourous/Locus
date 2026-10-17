@@ -4,7 +4,7 @@
 audience:    builder
 status:      live
 authoritative-for: the readiness chain from probe to rendered phase, and how to localise a stall
-verified-against: client/src-tauri/src/core/manager/probe.rs, client/src/components/connection/phase.ts
+verified-against: client/src-tauri/src/core/manager/probe.rs, client/src/components/connection/phase.ts, client/src-tauri/src/cmd/locus.rs
 ```
 
 **What this is.** A field manual for one symptom: *the tunnel is carrying traffic
@@ -92,6 +92,58 @@ for twice.
 
 Run these in order. Stop at the first that disagrees with expectation; that is the
 broken hop.
+
+### Hop 0 — did the connect even get as far as applying a config?
+
+**Added 2026-10.** Before the readiness chain runs at all, `locus_connect` has to
+get the tier's configuration applied. That path has its own failure modes and they
+are *not* readiness failures, so they are diagnosed here rather than mistaken for
+the stall below.
+
+`locus_connect` (`cmd/locus.rs`) does, in order:
+
+```text
+1. store::read            -> no usable record        -> LOCUS_NOT_ACTIVATED
+2. stored expiry          -> known past date         -> LOCUS_SUBSCRIPTION_LAPSED
+3. RUN_STATE.tun_capable  -> false                   -> LOCUS_TUN_NOT_AVAILABLE
+4. enable_tun_mode = true, saved                     (only after 3 passed)
+5. store::tier_config     -> none stored             -> LOCUS_NO_TIER_CONFIG
+6. apply_tier_waiting_for_the_guard
+     |  Applies ONCE (re-applying per poll was the defect — see below)
+     |  Waits out a config-update guard somebody else holds; bounded by
+     |  CONNECT_READY_BUDGET -> LOCUS_CONFIG_BUSY
+     |  A real refusal                          -> LOCUS_CONFIG_REJECTED
+     |  A write failure                         -> LOCUS_CONFIG_FAILED
+     |  Cancel while waiting                    -> ConnectionResult{connected:false,"Cancelled"}
+7. start_core_with_port_fallback  (ONCE, not per poll)
+       -> a start failing for a real reason    -> LOCUS_CONNECT_FAILED
+8. readiness poll (250 ms, CONNECT_READY_BUDGET) -> the chain below
+```
+
+**Why step 6 is one call and the poll is separate.** It used to be a single loop
+that re-entered `start_core()` every 250 ms. Starting the core takes the
+config-update guard, so every poll after the first came back `Busy` — and `Busy`
+was formatted as *"The tunnel configuration was refused: Configuration validation
+is already running"*. A connect that was proceeding normally was reported as a
+refused configuration, and the command resolved, abandoning the wait it was in the
+middle of. The macOS Intel report is that sentence.
+
+**Reading the codes:** `LOCUS_CONFIG_REJECTED` is the only one that is a verdict on
+the configuration. `BUSY` / `FAILED` / `CONNECT_FAILED` are statements about the
+machine's state or about timing, and a log line saying "rejected" for any of them
+is a bug — `ValidationOutcome::is_refusal()` is the predicate that decides, and it
+is true only for `Invalid`.
+
+**The system proxy is a separate writer.** On macOS the whole proxy configuration
+is one machine-wide lock taken with a *zero-second* wait
+(`sysproxy`'s `SCPreferencesLock(prefs, 0)`), and this client has several writers —
+the connect path, the heartbeat's refresh and the guard's timer. Two overlaps used
+to surface as `lock preferences` followed by a failed compensation, because the
+compensating write met the same lock. The write now waits and retries
+(`plan_preferences_lock_retry`, 3 attempts 250 ms apart) and only for that error;
+`commit`/`apply proxy configuration` failures still fail once. A log showing
+`lock preferences` on **every** attempt is not contention — look for a second copy
+of the app or a stuck process holding the preferences lock.
 
 ### Hop 1 — what does the backend actually report?
 

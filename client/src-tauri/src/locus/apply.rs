@@ -59,6 +59,21 @@ pub enum ApplyOutcome {
     /// Written and accepted, but the core is not running yet — normal after
     /// activation, because the student has not pressed Connect.
     StagedOnly,
+    /// Written, but **no verdict was reached** because another config update holds
+    /// the manager's guard.
+    ///
+    /// This is not a refusal and must never be reported as one. It is the shape of
+    /// the macOS Intel report: `locus_connect` polls the readiness loop every
+    /// 250 ms, each iteration re-enters the apply path, and every iteration after
+    /// the first met the guard and came back `Busy` — which used to be formatted
+    /// into "The tunnel configuration was refused: Configuration validation is
+    /// already running".
+    ///
+    /// Kept as its own variant rather than folded into `Applied` because the caller
+    /// genuinely needs to distinguish "the core has this config" from "nobody has
+    /// looked at it yet": the first can proceed to the readiness wait, the second
+    /// must not claim the transition has begun.
+    Deferred { reason: String },
 }
 
 /// Writes the tier as the current profile and applies it.
@@ -85,9 +100,25 @@ pub async fn apply_tier(config: &TierConfig, udp_relay: bool) -> Result<ApplyOut
             Ok(ApplyOutcome::Applied)
         }
         Ok(outcome) => {
-            // The core refused it. Report the reason rather than a bare failure:
-            // "the tunnel will not start" is not actionable, "the proxy port is
-            // already in use" is.
+            // Three different things arrive here and only one of them is a refusal.
+            //
+            // `is_refusal()` is the rule, not `!is_valid()`: `Busy` and `Skipped`
+            // describe the *scheduler*, not the configuration. Turning either into
+            // "rejected" tells a student their tunnel config is broken when in fact
+            // somebody else is looking at it.
+            if !outcome.is_refusal() {
+                let reason = outcome.to_string();
+                logging!(
+                    info,
+                    Type::Config,
+                    "[locus] tier config written but not judged yet: {reason}"
+                );
+                return Ok(ApplyOutcome::Deferred { reason });
+            }
+
+            // The core really refused it. Report the reason rather than a bare
+            // failure: "the tunnel will not start" is not actionable, "the proxy
+            // port is already in use" is.
             let reason = outcome.to_string();
             logging!(warn, Type::Config, "[locus] tier config rejected: {reason}");
             Ok(ApplyOutcome::Rejected { reason })
@@ -281,6 +312,61 @@ mod tests {
         match outcome {
             ApplyOutcome::Rejected { reason } => assert!(!reason.is_empty()),
             other => panic!("expected a rejection, got {other:?}"),
+        }
+    }
+
+    /// **The macOS Intel report, pinned as a rule.**
+    ///
+    /// A validation outcome that is not a verdict — `Busy` (the manager's guard
+    /// was held) or `Skipped` (this validator's own guard was held, or the app is
+    /// exiting) — must never be classified as a refusal, because the two carry
+    /// different sentences to a student:
+    ///
+    /// * refusal  -> "The tunnel configuration was refused: …"
+    /// * no verdict -> "written but not judged yet", and the caller waits
+    ///
+    /// The connect loop used to re-enter the apply path every 250 ms, so every
+    /// iteration after the first met the guard, came back `Busy`, and was shown to
+    /// the student as a refusal — on a device whose configuration was perfectly
+    /// fine.
+    ///
+    /// This asserts the CLASSIFICATION, not one string, so it holds for any future
+    /// outcome that means "not judged yet". It fails against the old code, where
+    /// `!outcome.is_valid()` was the test and `Busy` reached the refusal branch.
+    #[test]
+    fn only_a_real_refusal_is_a_refusal() {
+        use crate::core::validate::{ValidationOutcome, ValidationSkipReason};
+
+        let refusals = [ValidationOutcome::invalid(
+            crate::core::validate::ValidationErrorKind::CoreRejected,
+            "proxy port already in use",
+        )];
+        let not_verdicts = [
+            ValidationOutcome::Busy,
+            ValidationOutcome::Skipped {
+                reason: ValidationSkipReason::Validating,
+            },
+            ValidationOutcome::Skipped {
+                reason: ValidationSkipReason::Debounced,
+            },
+            ValidationOutcome::Skipped {
+                reason: ValidationSkipReason::Exiting,
+            },
+        ];
+
+        for outcome in refusals {
+            assert!(
+                outcome.is_refusal(),
+                "{outcome} is a verdict on the config and must be reported as one"
+            );
+        }
+        for outcome in not_verdicts {
+            assert!(
+                !outcome.is_refusal(),
+                "{outcome} is not a verdict on the config, so reporting it as a \
+                 refusal tells a student their config is broken when nobody has \
+                 finished looking at it"
+            );
         }
     }
 }

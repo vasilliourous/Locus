@@ -44,6 +44,43 @@ CADDY_DATA_DIR="/var/www/html"
 # entirely (see the guard around the block below).
 LANDING_DOMAIN="${LANDING_DOMAIN:-locusvpn.jadedns.uk}"
 
+# ── Optional ADDITIONAL hub hostname ──
+#
+# A second name that serves the SAME API surface as ${DOMAIN}, for the one case
+# the primary name cannot cover: a school network whose filter classifies the
+# primary hostname as uncategorised and blocks it.
+#
+# WHY THIS IS A HUB ALIAS AND NOT A LANDING PAGE
+#
+# These are opposite requirements and must not be conflated. The landing block
+# below is deliberately starved (static files only, strict CSP, nothing else),
+# because it is the one hostname meant to be indexed. This block is the reverse:
+# it needs /api/*, /updates/* and /admin/, because a device that cannot reach
+# ${DOMAIN} cannot activate, heartbeat or — crucially — update itself. The
+# landing block's whole design reason is that serving the API at an indexable
+# name is a mistake; that reason applies to a *public page*, not to a second API
+# name that is never linked or advertised.
+#
+# WHY IT REDIRECTS RATHER THAN REPEATING THE HANDLERS
+#
+# The hub block is ~140 lines of handles, rate-limit zones and headers, and a
+# second copy would drift — this repository has already paid for duplicated
+# wire names three times. Instead the alias 308s every request to the same path
+# on ${DOMAIN}: same paths, no path rewriting, so the client's `{hub}/api/...`
+# concatenation is unchanged and there is exactly one implementation of the API.
+#
+# The trade-off is deliberate and worth stating: a redirect costs one extra round
+# trip per request and requires the client to follow redirects (it does — every
+# call site uses a reqwest client with defaults, which follow). What it buys is
+# that the rate-limit zones, the admin token check and the update path cannot
+# disagree between the two names. If a future change ever needs the alias to
+# serve directly, that is the moment to extract the handles into a shared snippet
+# (Caddy `(snippet)`), not to paste them.
+#
+# Empty by default: a deployment that has not been given a second name serves
+# exactly what it served before.
+HUB_ALIAS_DOMAIN="${HUB_ALIAS_DOMAIN:-}"
+
 # ── Install or rebuild Caddy with rate_limit support ──
 install_caddy() {
     # Check if Caddy already has rate_limit
@@ -428,6 +465,44 @@ CADDY
         log "✓ Landing page block added for ${LANDING_DOMAIN}"
     else
         log "LANDING_DOMAIN empty — no landing page block written"
+    fi
+
+    # ── Optional hub alias (see the header) ──
+    #
+    # Appended after everything else, and QUOTED so no prose in it is executed.
+    # The target is substituted the same way the landing domain is, because the
+    # heredoc must not interpolate `${DOMAIN}` — a `${...}` inside an unquoted
+    # heredoc is shell expansion, and this file has already paid for that once.
+    if [ -n "${HUB_ALIAS_DOMAIN}" ]; then
+        cat >> "$CADDYFILE" << 'CADDY'
+
+# ── Hub alias ──
+# A second name for the SAME API surface, for networks that filter the primary
+# hostname. Every request is redirected to the same path on the primary name, so
+# there is one implementation of the API, one set of rate-limit zones and one
+# admin check. See modules/05-caddy.sh for why this redirects instead of
+# repeating the handles.
+__HUB_ALIAS_DOMAIN__ {
+    tls {
+        protocols tls1.2 tls1.3
+        curves x25519 secp384r1
+    }
+    redir https://__HUB_CANONICAL_DOMAIN__{uri} 308
+}
+CADDY
+
+        sed -i "s|__HUB_ALIAS_DOMAIN__|${HUB_ALIAS_DOMAIN}|g" "$CADDYFILE"
+        sed -i "s|__HUB_CANONICAL_DOMAIN__|${DOMAIN}|g" "$CADDYFILE"
+
+        if grep -q '__HUB_' "$CADDYFILE"; then
+            warn "Caddyfile still contains a __HUB_ placeholder — the alias block is malformed"
+        else
+            log "✓ Hub alias block added: ${HUB_ALIAS_DOMAIN} → ${DOMAIN} (same paths)"
+            log "  A client must be pointed at it with locus_hub_override; the"
+            log "  built-in hub address is unchanged and keeps working."
+        fi
+    else
+        log "HUB_ALIAS_DOMAIN empty — no hub alias block written"
     fi
 
     log "✓ Caddyfile deployed to ${CADDYFILE}"

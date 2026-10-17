@@ -2,13 +2,55 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+    <!--
+        Locus is NOT sandboxed.
+
+        The app installs routes and manages a privileged helper, neither of which
+        an App Sandbox container permits, so `app-sandbox` is false and the bundle
+        must not claim otherwise.
+
+        WHAT WAS REMOVED, AND WHY (2026-10)
+
+        This file used to carry two further keys, inherited from the upstream
+        Clash Verge Rev fork and never re-examined:
+
+            com.apple.security.application-groups
+                -> io.github.clash-verge-rev.clash-verge-rev
+            com.apple.security.inherit = true
+
+        Both are wrong for this bundle, and both are the kind of wrong that is
+        only evaluated on a machine that has to validate the signature:
+
+        * `com.apple.security.inherit` is meaningful ONLY on a child process of a
+          sandboxed parent. On a top-level, unsandboxed app it is a
+          contradiction: it asserts "my entitlements come from my parent" on a
+          process that has no sandboxed parent. It is also the one entitlement
+          whose validity is judged per signature slice rather than per bundle,
+          which is why the same .app can behave differently on two architectures.
+
+        * The app group names ANOTHER PRODUCT's identifier. Locus' identifier is
+          `com.locus.client` (tauri.macos.conf.json). Nothing in this tree creates
+          or reads a group container, and a non-Developer-ID signature cannot
+          carry a group it does not own.
+
+        A student on Intel reported the tunnel configuration being refused and the
+        system proxy failing to write ("lock preferences"). The system-proxy code
+        itself is architecture-independent — it is opaque SystemConfiguration FFI
+        with no `#[cfg(target_arch)]` anywhere in `sysproxy-rs` — so the
+        architecture-dependent variable was never the proxy logic. A signature
+        that fails to validate is one, and this entitlement pair is the part of
+        the signature that is structurally suspicious.
+
+        The rule this leaves behind: an entitlement is a claim about what the
+        process may do. Never inherit one from upstream without asking what it
+        asserts about THIS bundle.
+
+        Note that the .dmg and the updater payload are signed ad-hoc (codesign
+        with the literal "-" identity): no Developer ID, no notarisation. These
+        keys are therefore claims the OS can only partly honour, which is another
+        reason to carry none we do not need. See client/docs/SIGNING.md.
+    -->
     <key>com.apple.security.app-sandbox</key>
     <false/>
-    <key>com.apple.security.application-groups</key>
-    <array>
-        <string>io.github.clash-verge-rev.clash-verge-rev</string>
-    </array>
-    <key>com.apple.security.inherit</key>
-    <true/>
 </dict>
 </plist>
