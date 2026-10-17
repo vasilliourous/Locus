@@ -150,6 +150,51 @@ Full detail, including which operations do and do not preserve secrets, is in
 > missing Actions secret, and a fleet still on the old key — in the order that
 > avoids the second failure.
 
+### Check the account can run CI at all, before tagging
+
+**Added 2026-10-17, after a tag that produced nothing.** A release needs Actions
+minutes, and a **private repository on a Free plan has none**. The failure looks
+like storage, not billing:
+
+```
+##[error]Failed to CreateArtifact: Artifact storage quota has been hit.
+```
+
+Deleting artifacts does not help (the repository read 0 bytes and still failed).
+Full diagnosis and the cascade that follows — `verify` uploads `frontend-dist`,
+the builds download it, `release` downloads it too, so there is no release — is in
+[`CI-CD.md`](CI-CD.md). One line to check first:
+
+```sh
+gh api repos/:owner/:repo -q .private   # true on a Free plan means CI cannot run
+```
+
+### 3.3.1 — a worked example of the whole path (2026-10-17)
+
+Recorded because it exercised every gate at once, and because the ordering is the
+lesson.
+
+1. `pnpm release-version 3.3.1` wrote all five sites; `check-consistency.sh` green.
+2. The **committed** tree failed §8 — two documents (`RELEASE-RECOVERY.md`,
+   `DOC-AUDIT.md`) existed only in the working tree while nine documents linked to
+   them. A local run passed and CI failed, because the difference between the two
+   was exactly the uncommitted files. **A local green run is evidence about your
+   working tree, not about what you are about to tag.**
+3. The tag was replaced (`git tag -d` + re-tag + `--force` push) after that fix.
+   Safe only because no release had been created from it — check with
+   `gh release view v<version>` first.
+4. The first tag run produced **no release** and a `verify` failure that had
+   nothing to do with the code: account billing (above).
+5. After the account was unblocked, `verify` → four builds → `release` all passed.
+   21 assets published, `manifest.json` reading `3.3.1` with all four platforms
+   signed.
+6. Artifacts cleared afterwards (~800 MB) — the release had already copied what it
+   needed, and deleting Actions artifacts does not touch a published release.
+
+**Two things this release proved green that had never been run:**
+`verify` succeeded with the new guards §30–§34 in place, and **macOS Intel built
+and signed** — the platform behind the original defect report.
+
 ---
 
 ## Publishing a build to the hub

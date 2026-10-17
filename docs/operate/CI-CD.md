@@ -33,14 +33,74 @@ earlier plan to put one there would never have triggered.
 `on.push` is **path-filtered**:
 
 ```
-client/**   server/**   scripts/**   .github/workflows/client.yml
+client/**   server/**   scripts/**   docs/**   AGENTS.md   README.md
+.github/workflows/client.yml
 ```
 
-A push that touches only `docs/**` or the repo root **starts no workflow at all**.
-That is indistinguishable from success by looking at the tree, and it is how a
-person comes to believe "push to main publishes a preview" while their change was
-in a path that cannot start a run. `scripts/**` was added on 2026-09-29 for exactly
-this reason.
+A push outside those paths **starts no workflow at all**. That is indistinguishable
+from success by looking at the tree, and it is how a person comes to believe "push
+to main publishes a preview" while their change was in a path that cannot start a
+run. `scripts/**` was added on 2026-09-29 and `docs/**` + `AGENTS.md` + `README.md`
+on 2026-10-17, each time after a commit silently produced no run.
+
+**Docs are in the list because the pipeline checks documents**: §8 (dead
+cross-references), §25 (front-matter) and §28 (index reachability) all fail the
+build. A docs-only commit that skips CI is one whose most likely defect is never
+tested — and that is not theoretical: the 3.3.1 doc commit was rejected by §8 for
+two files that existed only in a working tree.
+
+**`pull_request` carries the identical list.** The two were the same before
+2026-10-17 and would otherwise drift one edit at a time.
+
+**A `v*` tag push ignores `paths` entirely.** GitHub applies path filters to branch
+pushes only, so a release is never blocked by this filter — only the preview is.
+That asymmetry is why a tag build can succeed on a commit whose `main` run never
+started.
+
+### Billing stops CI before any job code runs
+
+**Added 2026-10-17, from a real outage.** The repository was **private on a Free
+plan**, where GitHub Actions has **no included minutes**. Every billing SKU read
+`$0.00 / 100% Usage blocked` and `verify` died in seconds with:
+
+```
+##[error]Failed to CreateArtifact: Artifact storage quota has been hit.
+           Unable to upload any new artifacts.
+```
+
+**That message is misleading and cost an hour.** It names artifact storage, so the
+obvious remedy is deleting artifacts — and deleting all 1.9 GB of them changed
+nothing, because the repository then held **0 bytes** and runs still failed. The
+real cause was the account-level block, not the size.
+
+What made it fatal rather than cosmetic: `verify` uploads `frontend-dist`, every
+build job *downloads* it, and `release` downloads artifacts too. So the failure
+cascaded — no `frontend-dist`, four failed builds, no release.
+
+**Diagnose it like this:**
+
+```sh
+gh api repos/:owner/:repo -q .private          # true + Free plan = no minutes
+gh api repos/:owner/:repo/actions/artifacts -q '[.artifacts[].size_in_bytes]|add//0'
+```
+
+If the second number is small (or zero) and uploads still fail, it is billing, not
+storage. **Remedy:** restore billing, or make the repository public — public repos
+get Actions minutes on the Free plan, which is what unblocked 3.3.1.
+
+**Artifact retention cleaning is still worth doing, for a different reason.** Each
+release run leaves ~800 MB (seven artifacts across four platforms). They are not
+needed afterwards — the GitHub Release carries its own copy of every asset, and
+deleting Actions artifacts does **not** touch a published release. Clear them once
+a release is confirmed:
+
+```sh
+gh api repos/:owner/:repo/actions/artifacts -q '.artifacts[] | "\(.id)"' \
+  | while read -r id; do gh api -X DELETE repos/:owner/:repo/actions/artifacts/$id; done
+```
+
+**Do not do this before the release job has run** — it downloads those artifacts to
+assemble the release.
 
 **Do not infer that a preview was published — ask.** Every run writes a `report`
 job summary stating what it actually published, read back from the GitHub API. Read

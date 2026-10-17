@@ -31,6 +31,65 @@ corrections are marked. For what is *still* broken, read `STILL-OPEN.md`.
 
 ---
 
+## 3.3.1 SHIPPED, AND THE THREE THINGS THAT STOPPED IT (2026-10-17, release)
+
+| | |
+|---|---|
+| Severity | 🟢 No defect in the shipped build; three defects in the road to it |
+| **Files:** | `docs/operate/{CI-CD,RELEASING}.md`, `.github/workflows/client.yml`, the committed doc set |
+| **Shipped in:** | 3.3.1 — CI run 39076038836, 21 assets, every platform signed |
+
+The code fixes in 3.3.1 are their own entries above. This one records the release
+path, because **each of the three was a new instance of a class this repository
+already documents**, and none of them was in the client.
+
+### 1. A docs-only commit started no workflow
+
+`docs/**`, `AGENTS.md` and `README.md` were not in `on.push.paths`. A commit whose
+entire content was the documentation restructure produced **no run** — which reads
+as "CI did not start", not "CI was never asked to start". The filter's own comment
+already described this trap for `scripts/**`.
+
+They are in the list now because the pipeline checks documents (§8, §25, §28), so
+a docs commit that skips CI is one whose most likely defect is never tested.
+`pull_request` got the same list so the two cannot drift. **A `v*` tag ignores
+`paths`**, which is why the release itself was never blocked — only the preview.
+
+### 2. The committed tree failed §8, and a local run passed
+
+`RELEASE-RECOVERY.md` and `DOC-AUDIT.md` existed only in the working tree while
+nine documents linked to them. §8 resolves every cross-reference, so CI failed on
+a tree where `bash server/scripts/check-consistency.sh` had just printed green.
+
+**The rule that generalises:** a local green run is evidence about the working
+tree, not about what you are about to tag. Verify the committed tree — a
+`git worktree add --detach` of the tag is enough, and it is what found this.
+
+### 3. The account could not run CI, and the error named storage
+
+The repository was private on a Free plan, where Actions has **no included
+minutes**. Every billing SKU read `$0.00 / 100% Usage blocked`, and `verify` died
+with *"Artifact storage quota has been hit"* — a message that sent the
+investigation to artifact size. Deleting all 1.9 GB changed nothing: the repository
+then held **0 bytes** and still failed.
+
+Fatal rather than cosmetic, because `verify` uploads `frontend-dist`, every build
+downloads it, and `release` downloads artifacts to assemble the release — so the
+failure cascades and **no release** is created. Making the repository public
+unblocked it.
+
+**Documented in [`../operate/CI-CD.md`](../operate/CI-CD.md)** with the two
+commands that tell billing apart from storage.
+
+### What this release does not prove
+
+`Build (macos-intel)` green means the bundle compiles, is ad-hoc signed and
+packages. It does **not** mean the reported Intel symptom is fixed — nobody has
+installed 3.3.1 on that machine. Same for the free-plan and N4L work. Each is
+tracked separately in `STILL-OPEN.md` with the command that would close it.
+
+---
+
 ## A REPO-WIDE SCAN: A RETRY THAT NEVER RETRIED, AND THREE CROSS-LANGUAGE GAPS (2026-10)
 
 | | |

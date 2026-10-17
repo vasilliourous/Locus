@@ -143,11 +143,14 @@ shadowsocks units by hand.
 
 ### Three field reports from the 2026-10 investigation: what is fixed, and what is not
 
-**Added 2026-10.** Three reports arrived together and only one of them turned out
-to be a defect this repository could see. Recorded here so the next person does not
-re-derive the split.
+**Added 2026-10. Released in 3.3.1 on 2026-10-17** — building is not the same as
+working, and the entries below are the difference. Three reports arrived together
+and only one of them turned out to be a defect this repository could see. Recorded
+here so the next person does not re-derive the split.
 
-**Fixed in the tree (not yet released):**
+**Fixed and shipped in 3.3.1** (CI run 39076038836: `verify`, all four platform
+builds and `release` green; 21 assets, `manifest.json` reads `3.3.1` with every
+platform signed):
 
 - *"Configuration validation is already running"* reported as a refusal. The
   connect loop re-entered the config-apply path per poll; every poll after the
@@ -171,6 +174,13 @@ re-derive the split.
   block, so a fleet behind a filtered hostname can be repointed without a release
   (§32).
 
+> **What 3.3.1 does NOT prove.** `Build (macos-intel)` succeeded, which means the
+  bundle compiles, gets ad-hoc signed and packages — **not** that the reported
+  Intel symptom is gone. Nobody has installed 3.3.1 on the Intel Mac that reported
+  it. The same is true of the free-plan and N4L fixes: all three need a device or a
+  box, and each is a separate claim. See the per-item entries below for the exact
+  command that would close each one.
+
 **NOT verified — each needs a machine or a box, and each is a different claim:**
 
 - **That the Intel Mac's bundle fails to validate.** This is the hypothesis the
@@ -180,6 +190,10 @@ re-derive the split.
   on the silicon machine, the entitlement change is a *correctness* fix (it is
   still correct) and is **not** the cause of the Intel difference — look to
   `sysopt` timing next.
+  **3.3.1 status: unrun.** The Intel build compiles and signs; nobody has installed
+  it there. The most useful single artifact now is
+  `installer-Locus_3.3.1_amd64.zip` from the v3.3.1 release, installed on that
+  machine, plus the two commands above.
 - **That the free plan's UoT listener is running on the hub, with credentials
   matching the seeded row.** `sing-box-uot-eco.service` must be `active` (not
   merely `enabled`), `/etc/sing-box/eco.json`'s password must equal `ECO_PASS`, and
