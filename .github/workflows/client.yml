@@ -55,16 +55,39 @@ on:
     # cannot start a run. If a path is added to the repo and it should refresh
     # the preview, add it here; if it should NOT, that is a deliberate decision
     # worth a comment rather than an omission.
+    #
+    # 2026-10-17: `docs/**`, `AGENTS.md` and `README.md` were the NEXT instance of
+    # exactly that trap, found while cutting 3.3.1. A commit whose only content was
+    # the documentation restructure produced NO run at all, so the failure looked
+    # like "CI did not start" rather than "CI was never asked to start".
+    #
+    # Docs belong here because the pipeline CHECKS them: §8, §25 and §28 of
+    # `check-consistency.sh` fail the build on a dead cross-reference, a missing
+    # front-matter block, or a document the index cannot reach. A docs-only commit
+    # that skips CI is a commit whose most likely defect is never tested.
+    #
+    # NOTE: this filter applies to BRANCH pushes only. A `v*` tag push ignores
+    # `paths` entirely, which is why a release is never blocked by it — only the
+    # preview is.
     paths:
       - 'client/**'
       - 'server/**'
       - 'scripts/**'
+      - 'docs/**'
+      - 'AGENTS.md'
+      - 'README.md'
       - '.github/workflows/client.yml'
   pull_request:
+    # Same list as `push`, for the same reason — a docs-only pull request must be
+    # checked too. Kept in step deliberately: the two filters were identical before
+    # 2026-10-17 and would otherwise drift apart one edit at a time.
     paths:
       - 'client/**'
       - 'server/**'
       - 'scripts/**'
+      - 'docs/**'
+      - 'AGENTS.md'
+      - 'README.md'
       - '.github/workflows/client.yml'
   workflow_dispatch:
 
