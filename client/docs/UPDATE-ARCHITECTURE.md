@@ -266,7 +266,7 @@ Three options, in preference order:
 | `pending_update.bin` cache | Not needed if we do not pre-download. If we do, reuse the pattern but put it under the app dir, never CWD. |
 | Crash-on-update sentinel | Replaced by the installer's own atomicity, **but** keep the "did we come back?" check for the *hosted* case: if the new version fails to start, the user needs a way out. |
 | `createUpdaterArtifacts` | Stays `false` unless option 1 is chosen. |
-| Version authority | **Guarded.** The fork's three sites (`package.json`, `Cargo.toml`, `tauri.conf.json`) must agree, asserted by `tests/version_consistency.rs`; current value in `../../docs/STATE.md`. Version drift is a **correctness dependency of the updater**, not hygiene (FIXES #20/#45, #12). See `docs/reference/STILL-OPEN.md` ("Fork versioning — RESOLVED"). |
+| Version authority | **Guarded.** The runtime version sites (`package.json`, `Cargo.toml`, `tauri.conf.json`) must agree, asserted by `tests/version_consistency.rs`; current value in `../../docs/state.toml` `[client.version]`. The **full bump set** (which also includes `Cargo.lock` and `state.toml`) is `[client.version_sites]` there — do not restate the count in prose. Version drift is a **correctness dependency of the updater**, not hygiene (FIXES #20/#45, #12). See `docs/reference/STILL-OPEN.md` ("Fork versioning — RESOLVED"). |
 | nsproxy/language | `nsis_language_id` logic is small and worth keeping for silent installs; it is Windows-only and currently maps 3 languages. |
 
 ---

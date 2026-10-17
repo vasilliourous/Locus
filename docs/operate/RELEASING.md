@@ -127,6 +127,8 @@ step 2 fails (and so does every branch build — signing is not tag-gated).
 clone**, so a migrated repository starts without it:
 
 ```sh
+# If .locus-keys/ is empty, recover the key from the bundle first:
+# see RELEASE-RECOVERY.md §2.
 gh secret set LOCUS_UPDATE_KEY --repo vasilliourous/Locus < .locus-keys/locus_update.key
 gh secret list --repo vasilliourous/Locus   # confirms it exists; never prints the value
 ```
@@ -136,15 +138,17 @@ installed client, so a replacement key produces updates those clients all refuse
 Full detail, including which operations do and do not preserve secrets, is in
 `client/docs/SIGNING.md` §4a.
 
-> ⚠️ **This is the current state, not a warning about the future.** As of
-> 2026-10-16 **no copy of `.locus-keys/locus_update.key` exists on any machine**:
-> not in this repository, not in the passphrase-encrypted secrets bundle
-> (`server/secrets.env.age`), and **not retrievable from GitHub** — Actions
-> secrets are write-only. The release command below therefore **cannot run**, and
-> the fleet cannot be offered an update, until an offline copy is found. Read
-> `client/docs/SIGNING.md` §4a and the operator's recovery manifest at
-> `~/.locus-secrets/RECOVERY-MANIFEST.md` (kept outside this repository) before
-> assuming custody of this key.
+> **The key is in three places since the 2026-10-16 rotation** — the Actions
+> secret, an offline copy, and `LOCUS_UPDATE_KEY_B64` inside
+> `server/secrets.env.age`. Before that it existed only in the Actions store,
+> which is write-only, so when it was needed it could not be retrieved and no
+> release could be signed. 3.3.0 replaced it rather than recovering it.
+>
+> **If any of the three is missing**, do not generate a replacement key as a
+> reflex: a new key is a breaking change for every installed client. Follow
+> [`RELEASE-RECOVERY.md`](RELEASE-RECOVERY.md), which covers a missing key file, a
+> missing Actions secret, and a fleet still on the old key — in the order that
+> avoids the second failure.
 
 ---
 

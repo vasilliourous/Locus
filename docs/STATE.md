@@ -8,21 +8,15 @@ data:        docs/state.toml    (derived facts — the machine-readable half)
 claims:      operate/CLAIMS.md  (world claims — the dated, checkable half)
 ```
 
-> **This file is about *where a fact goes*, not what the fact is.** If you are
-> looking for the map of the documents themselves, that is
-> [`README.md`](README.md).
+> **This file is about *where a fact goes*, not what the fact is.** The map of the
+> documents themselves is [`README.md`](README.md).
 >
-> It used to be both — a fact table *and* a competing index — and that is the
-> mistake this rewrite removes. It held a version, an IP address, host specs and a
-> HEAD commit, and it called itself "the single source of truth for facts that
-> change". It was wrong in a specific way worth understanding, because the same
-> mistake is easy to make again — see [`operate/CLAIMS.md`](operate/CLAIMS.md) §1.
->
-> The IP in that table went stale three times and finished by naming an address
-> that **did not exist**, in the document other documents were told to trust.
-> Nothing failed. Nothing noticed. That is not a proofreading problem, and it does
-> not get fixed by writing more carefully — it gets fixed by moving the fact to a
-> place something **recomputes**.
+> It used to be both — a fact table *and* a competing index — and the fact table
+> held a version, an IP address and a HEAD commit under the title "the single
+> source of truth for facts that change". The IP went stale three times and
+> finished by naming an address that **did not exist**, in the document other
+> documents were told to trust. Nothing failed and nothing noticed, because a
+> sentence cannot notice. See [`operate/CLAIMS.md`](operate/CLAIMS.md) §1.
 
 ---
 
@@ -39,26 +33,11 @@ There are two kinds of fact, and they have two homes. Neither of them is here.
 day passes, it is dated and checkable — never a present-tense sentence. If a
 command can recompute it, it is data and a guard — never a sentence either.
 
-The decision procedure, and the two failure modes to watch for, are in
-[`operate/CLAIMS.md`](operate/CLAIMS.md) §3. Read it before adding a fact to any
-document.
-
----
-
-## The two facts that most often get written down anyway
-
-Both of these were in this file as present-tense facts. Neither belongs in prose.
-Writing either one into a document is now a build failure (`check-consistency.sh`
-§10).
-
-- **An IP address.** The only stable identifier for the deployed system is the
-  **domain**, and it is in `state.toml`. The address behind it is a measurement of
-  a moment. If you need it, resolve the domain.
-- **A count of live codes or customers.** It decays before it is read, and it is
-  customer-identifying in a product whose core design decision is to store no
-  identity. The **rule** is what survives: *never bulk-delete `codes` or
-  `code_events`; revoke with Suspend, move with Unbind.* See
-  [`operate/CLAIMS.md`](operate/CLAIMS.md) §4.
+The decision procedure is [`operate/CLAIMS.md`](operate/CLAIMS.md) §3; the two
+claims that most often get written down anyway — an **IP address** and a **count
+of live codes or customers** — are §1 and §4 there, and writing either one is now
+a build failure (§10). The rule that survives: *never bulk-delete `codes` or
+`code_events`; revoke with Suspend, move with Unbind.*
 
 ---
 
@@ -75,7 +54,7 @@ find its owner here first.
 | World claims — hub up, data live, CI ran, preview current | [`operate/CLAIMS.md`](operate/CLAIMS.md) §5 |
 | How to write any fact at all | [`operate/CLAIMS.md`](operate/CLAIMS.md) |
 | The map of the documents themselves | [`README.md`](README.md) |
-| What the product is; human orientation | [`CONTEXT.md`](CONTEXT.md) |
+| What the product is; glossary, layout, naming and live-data rules | [`CONTEXT.md`](CONTEXT.md) |
 | Tiers, ports, caps, the live UoT facts | [`business/04-tiers.md`](business/04-tiers.md) |
 | Pricing and unit economics | [`business/05-pricing.md`](business/05-pricing.md), [`business/06-unit-economics.md`](business/06-unit-economics.md) |
 | HTTP API contracts (hub) | [`reference/API.md`](reference/API.md) |
@@ -84,6 +63,7 @@ find its owner here first.
 | Secrets | [`operate/SECRETS-MANAGEMENT.md`](operate/SECRETS-MANAGEMENT.md) |
 | Update path, end to end | [`operate/UPDATE-SYSTEM.md`](operate/UPDATE-SYSTEM.md) |
 | Publishing a release | [`operate/RELEASING.md`](operate/RELEASING.md) |
+| Recovering the signing key / CI secret / a stranded fleet | [`operate/RELEASE-RECOVERY.md`](operate/RELEASE-RECOVERY.md) |
 | Client CI pipeline | [`operate/CI-CD.md`](operate/CI-CD.md) |
 | How to diagnose a defect | [`reference/DEBUGGING-METHOD.md`](reference/DEBUGGING-METHOD.md) |
 | The readiness chain ("stuck on connecting") | [`reference/EGRESS-READINESS.md`](reference/EGRESS-READINESS.md) |
@@ -92,6 +72,7 @@ find its owner here first.
 | Client release signing | [`client/docs/SIGNING.md`](../client/docs/SIGNING.md) |
 | Defect log (dated, append-only) | [`reference/FIXES.md`](reference/FIXES.md) |
 | What is unfinished | [`reference/STILL-OPEN.md`](reference/STILL-OPEN.md) |
+| The state of the doc set itself (dated audit) | [`reference/DOC-AUDIT.md`](reference/DOC-AUDIT.md) |
 | Business plan | [`business/`](business/README.md) (start at `README.md`) |
 | Retired client / pre-V5 research | [`archive/`](archive/), [`history/`](history/) |
 
@@ -101,30 +82,20 @@ find its owner here first.
 
 1. **The code wins.** Where a document and the code disagree, the code is right
    and the document is a bug — fix it in the same change.
-2. **No brittle numbers in prose.** A version, an address, a count and a HEAD
-   belong in `state.toml` or in `CLAIMS.md` §5, not inlined in a sentence. Link
-   instead; §10 of the consistency check fails the build if you do not.
-3. **Status is structure, not a banner.** A live document's status is a
-   front-matter field (`status: live | reference | design-record`); if it is
-   retired, it lives in `archive/` or `history/`, where **the folder carries the
-   status**. This is **enforced**: §25 fails the build when a live document has no
-   front-matter block or an invented `status:` value.
-4. **One home per topic.** The map above is the index of owners. A second copy of
-   a fact is a second thing that can disagree, and neither is the truth.
-5. **Every live document is reachable from the index.** §28 fails the build when a
-   live document is orphaned from [`README.md`](README.md).
+2. **No brittle numbers in prose.** A version, an address, a count or a HEAD goes
+   in `state.toml` or `CLAIMS.md` §5, never inline in a sentence; §10 fails the
+   build if you try.
+3. **Status is structure, not a banner** — front-matter for live material, the
+   folder for retired material (§25).
+4. **One home per topic** — the table above is the index of owners.
+5. **Every live document is reachable from the index** (§28).
 6. **A world claim carries a date and a method.** Present tense is for things that
-   cannot change. Everything else is *"as last verified on `<date>`"*, and if it
-   has not been verified, it says **unverified** in those words.
+   cannot change; everything else is *"as last verified on `<date>`"*, or says
+   **unverified** in those words.
 
----
+*Rewritten 2026-09-29: the volatile fact table was removed — derived facts to
+`state.toml`, world claims to `CLAIMS.md`, guarded by §9 and §10.*
 
-*Rewritten 2026-09-29 by the documentation-overhaul work that removed the volatile
-table: the facts moved to `state.toml` (derived) and `CLAIMS.md` (world), and the
-guards that keep them there are `check-consistency.sh` §9 and §10.*
-
-*Rewritten again 2026-10-05: the competing index and ownership table were folded
-back into it deliberately — this file is now the **single** home for "where does
-this fact go", and [`README.md`](README.md) is the **single** home for "which
-document is this". Two files answering the same question is the fragmentation this
-pass removed; they had already drifted.*
+*Rewritten 2026-10-05: it is now the **single** home for "where does this fact
+go", and [`README.md`](README.md) the **single** home for "which document is
+this" — the two had been answering the same question and had drifted.*

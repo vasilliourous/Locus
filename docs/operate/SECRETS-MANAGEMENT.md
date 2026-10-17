@@ -28,11 +28,12 @@ The Locus server needs several credentials to run:
 | `STEALTH_PASS` | **Retired tier's password (port 8444).** Still validated and written to `/root/.tier_passwords` for compatibility, but no service consumes it on a fresh box. Keep it in the secrets file so an upgraded host does not fork, and so removing the old service is not blocked by a missing key. |
 | `PB_ADMIN_EMAIL`, `PB_ADMIN_PASS` | PocketBase admin credentials |
 
-**That list is 11 variables.** It is stated as a list rather than a number on
-purpose: a count in a sentence cannot be recomputed and drifts (this document's
-predecessor said "12" while listing 11 — see the operator's recovery manifest at
-`~/.locus-secrets/RECOVERY-MANIFEST.md`, kept outside this repository).
-If you need the live count, decrypt the file and count it.
+The bundle also carries one **non-credential** on the same terms: a base64 copy of
+the update signing key (`LOCUS_UPDATE_KEY_B64`, added 2026-10-16 — see the FAQ).
+
+**That list is stated as a list, not a number, on purpose:** a count in a sentence
+cannot be recomputed and drifts (this document's predecessor said "12" while
+listing 11). To get the live count, decrypt the file and count it.
 
 These must be available at deploy time, but **must not be committed in
 plain-text**. At the same time, one-command deploy is important — nobody wants to
@@ -381,15 +382,41 @@ manager.
 
 ### Should the signing key go in here too?
 
-No — and it cannot, for a reason worth recording. `LOCUS_UPDATE_KEY` is the
-minisign private key that signs every client update (`client/docs/SIGNING.md`).
-It is **not present on any machine we control**: it lives only in the GitHub
-Actions secret store, which is write-only by design, so it cannot be read back to
-be encrypted. A passphrase-protected copy could only be committed if a copy were
-found offline first. As of 2026-10-16 no offline copy exists, so the key cannot
-be included here at all. The record of the extraction attempts is kept outside
-this repository, in the operator's recovery manifest at
-`~/.locus-secrets/RECOVERY-MANIFEST.md`.
+**It does — since the 2026-10-16 rotation.** Read why it did not before, because
+the reason is the whole lesson.
+
+The update signing key (`LOCUS_UPDATE_KEY`, `client/docs/SIGNING.md`) used to
+live *only* in the GitHub Actions secret store. Actions secrets are write-only —
+no API, `gh` command or UI action returns the value — and no offline copy was
+ever made, so there was nothing on any machine to encrypt. When the key was
+needed **it could not be retrieved**: no release could be signed, and the fleet
+could not be offered an update. The rotation to `4DA9B48F39251CEF` (3.3.0)
+replaced the key; it did not recover it.
+
+That was a custody failure, not a tooling one, and the fix is an order of
+operations:
+
+1. **Generate the key locally first**, into the repo root's `.locus-keys/`.
+2. **Back that copy up immediately** — offline, and as `LOCUS_UPDATE_KEY_B64` in
+   this bundle.
+3. **Then** set the Actions secret.
+
+Anything set into an Actions secret before it exists somewhere readable is a
+secret you can lose without noticing. The three recovery procedures — key file
+missing, Actions secret missing, fleet still on the old key — are
+[`RELEASE-RECOVERY.md`](RELEASE-RECOVERY.md).
+
+### How is the key stored in the bundle?
+
+`LOCUS_UPDATE_KEY_B64` is **base64 of the whole key file**, not a literal key
+line. That encoding is not decoration: this bundle is `source`d by bash, and the
+key's raw form is a comment line followed by the payload, so `source` would try
+to execute the comment as a command and abort the deploy. Base64 makes it one
+`KEY=value` line that `set -a` exports harmlessly.
+
+Decode it back, check the trailing newline, and **verify the recovered key with a
+sign/verify round trip before setting any secret** —
+[`RELEASE-RECOVERY.md`](RELEASE-RECOVERY.md) §2 has the commands.
 
 ### Why not SOPS / Vault / git-crypt?
 

@@ -17,23 +17,14 @@ verified-against: docs/state.toml
 
 ## 1. The failure this prevents
 
-`docs/CONTEXT.md` told the reader, in the same file that warns agents to trust it:
-
-> **DNS is managed by the hosting provider** — the VPS hostname
-> `networkingguides.duckdns.org` resolves to the VPS IP automatically. No DuckDNS
-> updates needed.
-
-The *domain* is stable. The IP is not: the hub has moved at least three times
-(`114.23.136.59` → `134.199.155.166` → `170.64.196.179`), each time recorded in
-`docs/STATE.md` as **"Live hub host"** — a fact, in the present tense, crowned
-"authoritative". By 2026-09-29 the last of those addresses **did not exist at
-all**, and it was still there in the canonical home, in a code test, and in a
-diagnostic script.
+The domain is stable; the address behind it is not. An earlier `docs/STATE.md`
+carried a present-tense "Live hub host" IP as the authoritative fact, and by
+2026-09-29 the address it named **did not exist** — still asserted there, in a
+code test and in a diagnostic script.
 
 Nothing in that story is a logic error. Every document was correct when written.
-The world moved. **There is no mechanism in this repository that notices.**
-
-That is the defect class this file governs.
+The world moved, and **nothing in this repository notices.** That is the defect
+class this file governs; the dated record is `../reference/FIXES.md`.
 
 ---
 
@@ -65,7 +56,8 @@ active use; a release is published; CI has actually run; the rolling
 4. **An unverified claim is written as unverified.** If the last check failed or
    has never run, the document says so, in those words. "Probably fine" is not a
    status.
-5. **Never identify a customer.** See §4.
+5. **Never identify a customer, and never write a count of them.** The rule is
+   §4; the one-line version is *never bulk-delete `codes` or `code_events`*.
 
 ### Class B — derived claims
 
@@ -153,6 +145,39 @@ last time it was actually checked, and `verify-live.sh` is the only thing permit
 to advance it. **If the check cannot reach the network, the date does not move and
 the claim is not verified.**
 
+> ### ⚠️ Every A-claim below is currently **falsified**, not merely unverified.
+>
+> **Recorded 2026-10-18.** The hub was taken down and is being redeployed from
+> scratch with B2-backed backups. That does not make the entries below *stale* —
+> stale means "true when written, may have moved". It makes them **false about the
+> world**: A1 named a reachable endpoint and there is no endpoint; A10–A13 named
+> observations on a specific box that no longer exists.
+>
+> **The dates and values below are kept deliberately, and must not be deleted or
+> "refreshed".** A claim's history is the evidence that it was once true and how;
+> erasing it is how a register becomes a wish list. What changes is the reading:
+> **treat every row as unverified until `verify-live.sh` re-establishes it on the
+> new box.** Do not advance a date during the redeploy — the redeploy is the event
+> that *invalidates* these, not the event that re-verifies them.
+>
+> **Two claims are invalidated by 3.3.0 regardless of the redeploy**, and must be
+> re-argued rather than re-run:
+>
+> - **A5** (a published release is installable end to end) — 3.3.0 rotated the
+>   update signing key. Any client still carrying the previous key series cannot
+>   verify a 3.3.0 payload, so those devices need a manual reinstall; whether a
+>   *reinstalled* client then updates is a new question with a new answer, not a
+>   re-check of the old one. [`RELEASE-RECOVERY.md`](RELEASE-RECOVERY.md) §4.
+> - **A3** (the rolling `build-preview` release is current) — that release and its
+>   136 assets were **deleted on 2026-10-18** to cut storage. The claim's subject
+>   no longer exists. Either the release is recreated as part of the redeploy and
+>   the claim is rewritten against the new one, or the claim is retired. It must
+>   not sit here as "unverified" implying a check would settle it.
+>
+> **A4, A6, A7, A8 are unaffected by the redeploy** — they are observations about
+> CI and about artifacts on real hardware, not about the hub. Their dates stand at
+> what they measured (`5ebfc89`, `v3.2.12`, `a8b0acf`); they are stale, not false.
+
 | # | Claim | Last verified | How to re-verify |
 |---|---|---|---|
 | A1 | The hub endpoint `https://networkingguides.duckdns.org` resolves and answers `/api/health` | **verified 2026-10-05** | `server/scripts/verify-live.sh` — ran 2026-10-04T22:45Z (= 2026-10-05 NZ, the register's dateline), `A1 PASS`, `/api/health` returned 200 (`{"message":"API is healthy.","code":200}`) |
@@ -168,184 +193,92 @@ the claim is not verified.**
 | A11 | The **live hub took the Free/Full merge** — port 8445 is capped at 100 Mbit, port 8444 is no longer shaped, and the retired service is stopped | **verified 2026-10-05** | read-only: `tc class show dev "$(ip -4 route show default \| awk '{print $5}' \| head -1)"` must show a `1:30` class at 100Mbit and **no** `1:20` class; `systemctl is-active shadowsocks-eco shadowsocks-strike` must be `active` and `systemctl is-enabled shadowsocks-stealth` must not report `enabled`. The tree is green either way — this is the box, not the repo. |
 | A13 | **Free clients carry UDP** — the free plan's UoT listener answers on 8447 and the free tier rows advertise `uot_port` | **verified 2026-10-05** | after a `setup.sh` re-run: `ssh <hub> "systemctl is-active sing-box-uot-eco sing-box-uot-strike"` must both be `active`, `ufw status \| grep 8447` must show tcp+udp allowed, and `tc class show dev <iface>` must show a `1:20` class at 1mbit. Then activate a throwaway `free` code and confirm its heartbeat returns `server_config.uot_port: 8447` with `udp_relay: true`. The mechanism is a second instance of the paid path (which works), but "the second instance works" is not implied by "the first does". |
 | A12 | A **paid code connects on the merged tier** — activation resolves `strike` and the heartbeat returns a `server_config` on 8445 with `udp_relay` true | **verified 2026-10-05** | activate a throwaway `strike` code (never a live student's) and inspect the `/api/activate` and `/api/heartbeat` responses; `server_config.server_port` must be 8445 and `udp_relay` must be `true`. This is the merge's central claim and it is the one thing that cannot be proven from the checkout. |
+| A14 | The **3.3.0 release is published and signed with the current key** — CI built every platform, each asset carries a `.sig`, and the release is complete enough for the hub to fetch | **verified 2026-10-16** | `gh release view v3.3.0 --json assets` lists four platforms each with a `.sig` and a `manifest.json`; `gh run view 38830217320 --json jobs` shows `Verify`, all four `Build` jobs, `Report` and `Release` succeeded. Re-check with `gh release view v<current> --json assets`. This is the release the rotation made possible, not a property that persists. |
+| A15 | A **124 MB `locus-linux-amd64` from the published release verifies against the new public key and is rejected by the retired one** — the rotation is live, not merely configured | **verified 2026-10-16** | download `locus-linux-amd64` (124,232,456 bytes) and its `.sig` for the current version, then `minisign -V -p <pubkey> -m …` must verify, and the same command against the retired key must fail. Command in `../../client/docs/SIGNING.md` §6. **Not** covered: that a client *installs* it — that is A5/A7. |
 
-> **A10–A13 were verified on 2026-10-05 by the deploy that shipped them**, with
-> the caveat each row records:
+> **A10–A13 were verified on 2026-10-05 by the deploy that shipped them, and the
+> redeploy of 2026-10-18 makes them false again** — the box they measured is gone.
+> Kept as history, per the note above. What each one measured, in one line each:
 >
-> - **A10** — `SELECT tier, COUNT(*) FROM codes GROUP BY tier` returned a single
->   row: `strike`, 8 codes (3 activated). **No `stealth` code has ever been
->   minted**, so the retired tier stranded nobody and its service was removed.
-> - **A11** — the live tc state is `1:10 @ 1Mbit`, `1:20 @ 1Mbit`, `1:30 @ 100Mbit`
->   with three matching filters and **no 8444 filter**; `shadowsocks-stealth
->   .service` and `/etc/shadowsocks/stealth.json` were deleted and 8444 stopped
->   listening.
-> - **A13** — `sing-box-uot-strike` (8446) and `sing-box-uot-eco` (8447) are both
->   `active` and `enabled`, both listening on TCP+UDP, both reachable from
->   outside this network, and both tier rows advertise their own `uot_port`.
-> - **A12** — verified by activating **one throwaway code per plan** through the
->   *public* `POST /api/activate`, exactly as a student's client does, and reading
->   the response back:
+> - **A10** — `codes` held a single tier value, `strike`. **No `stealth` code was
+>   ever minted**, so the retired tier stranded nobody.
+> - **A11** — tc showed `1:10 @ 1Mbit`, `1:20 @ 1Mbit`, `1:30 @ 100Mbit`, three
+>   matching filters, **no 8444 filter**; the stealth unit and config were deleted.
+> - **A13** — both UoT listeners (`8446` strike, `8447` eco) were `active`,
+>   `enabled`, listening on TCP+UDP, and each tier row advertised its own
+>   `uot_port`.
+> - **A12** — one throwaway code per plan activated through the *public*
+>   `POST /api/activate`, response read back:
 >
->   | Plan | status | tier | TCP | `udp_relay` | `uot_port` |
->   |---|---|---|---|---|---|
->   | Free | Activation successful | `free` | 8443 | `True` | **8447** |
->   | Full | Activation successful | `strike` | 8445 | `True` | **8446** |
+>   | Plan | tier | TCP | `udp_relay` | `uot_port` |
+>   |---|---|---|---|---|
+>   | Free | `free` | 8443 | `true` | **8447** |
+>   | Full | `strike` | 8445 | `true` | **8446** |
 >
->   Both codes were minted for the test and deleted afterwards (never a live
->   code, and never a bulk delete — `CLAIMS.md` §4). This exercises the whole
->   chain: code → checksum → lookup → activate → tier-config resolution →
->   per-plan `uot_port`.
+>   Both codes were minted for the test and deleted afterwards (never a live code,
+>   never a bulk delete — §4). This exercised code → checksum → lookup → activate
+>   → tier-config resolution → per-plan `uot_port`. **It still does not prove** that
+>   a client tunnels real game traffic at the shaped rate: the response is the hub's
+>   promise, and no machine has played through it.
 >
->   **What it still does not prove:** that a client *tunnels real game traffic* at
->   the shaped rate. The response is the hub's promise; no machine has yet played
->   through it. That observation needs real hardware
->   ([`../reference/STILL-OPEN.md`](../reference/STILL-OPEN.md)).
->
-> **Two defects were found and fixed by this deploy, both invisible in the tree:**
+> **Two defects that deploy found, both invisible in the tree** — worth keeping
+> because each is a guard that read as passing:
 >
 > 1. **The UoT units were created but never started.** `systemctl enable` acts at
->    the next boot, and rewriting a unit file does not restart it — so a module
->    run on a live box left *both* plans with no UDP at all, while every check
->    said "created". Both listeners were started by hand, and
->    `02-shadowsocks.sh` now starts and asserts them.
-> 2. **`04-tc.sh`'s own verification was a false negative.** It grepped
->    `tc filter show` for `sport <port>`, but a u32 filter is printed as a hex
->    match (`match 20fb0000/ffff0000`), so it warned "filter not found" for all
->    three ports on a correctly shaped interface. Now decoded and asserted
->    against the intended class, with the retired 8444 port checked as a
->    negative.
+>    the next boot, and rewriting a unit does not restart it, so both plans had no
+>    UDP while every check said "created". `02-shadowsocks.sh` now starts and
+>    asserts them.
+> 2. **`04-tc.sh`'s verification was a false negative.** It grepped `tc filter
+>    show` for `sport <port>`, but a u32 filter prints as a hex match
+>    (`match 20fb0000/ffff0000`) — so it warned "filter not found" for all three
+>    ports on a correctly shaped interface. It now decodes and asserts the class,
+>    with the retired 8444 checked as a negative.
 
-> **A7 is no longer merely unverified — it was observed FAILING on 2026-09-30, and
-> the failure was a different one from the two already fixed.**
+> **The per-claim detail that used to sit below the table, compressed.** Each one
+> records *why* a claim was carried as unverified, because the reason is the
+> testable part:
 >
-> A Windows client on `3.2.13` was offered `3.2.14`: the download reached 100%
-> and then the client refused it with *"the update to 3.2.14 is not an installer
-> (51741696 bytes); refusing to execute it."* That byte count is exactly
-> `locus-windows-amd64.exe` — the raw PE, not the NSIS installer.
->
-> The client's guard was **correct** and did its job: it stopped an unvetted PE
-> from being ShellExecuted, which is precisely the 3.2.12 fix. The defect was
-> upstream of it. CI had correctly advertised
-> `installer-Locus_3.2.14_x64-setup.exe` in `manifest.json`, but the hub's
-> `fetch-release.py` still resolved the raw binary for the `windows` slot and
-> served it with the *raw binary's* signature. So the client was offered the
-> wrong artifact at every version, and **no Windows client could update at all**.
->
-> Three separate checks passed throughout: CI's manifest guard (§15, which greps
-> the workflow, not the hub), the fetch service's all-or-nothing check (all four
-> *wrong* files were present), and the manifest hash cross-check — which hashed
-> whichever file the *manifest* named, so it agreed with itself by construction.
-> The lesson is the one `docs/README.md` rule 3 states for prose, applied to
-> guards: **a check that cannot distinguish a right answer from a wrong one reads
-> exactly like a check that passed.**
->
-> Fixed on the hub side (`fetch-release.py`, `publish-release.sh` now resolve the
-> installer and verify the filename against `manifest.json`; the fetch service
-> also refuses a Windows PE that carries no NSIS header), with a new guard in
-> `check-consistency.sh` §1a pinning the name on both sides, plus a
-> `smoke-publish.sh` case shown to fail against the pre-fix code. **A7 itself
-> remains unverified**: a real Windows machine has still never taken an update
-> and relaunched from the Start Menu. That is the test, and it cannot be run from
-> a Linux CI box.
-
-> **A7 was previously written to claim the opposite thing** — that a stale
-> `start_page` in `verge.yaml` produced a blank window. That was a misdiagnosis,
-> withdrawn on 2026-09-30: the reporting user's config carried `start_page: /`,
-> so the described code path could not fire. The claim is retained at this number
-> because the *unverified property* it names is real and load-bearing; only the
-> proposed cause was wrong. `docs/README.md` rule 3 — the code wins, and the doc
-> was the bug.
-
-> **A8 is the third attempt at one symptom, and the report that exposed it.**
-> The same `ERR_FILE_NOT_FOUND` was attributed first to a stale `start_page`
-> (withdrawn) and then to the updater re-executing the client's own binary (real,
-> fixed in `v3.2.12`, but not this report). This report differs on two facts that
-> rule both out: the installer was **pulled from the release page and run fresh**
-> (no update involved), and `verge.yaml` carried `start_page: /` (so no config
-> path could fire). What remains is the log line `url=file:///D:/` — the Windows
-> CI workspace `D:\a\Locus\Locus`, compiled into the binary by an absolute
-> `frontendDist` override added by the "better workflow" speed change. Normalizing
-> that path's separators (`17ef21a`) made CI green without removing the defect.
-
-> **A8 is now VERIFIED, and the way it was verified is the point.** The earlier
-> entry here read "do not read A8 as verified because the guard passes — the guard
-> is on the tree, and the artifact is the thing that shipped broken." That warning
-> was correct, and the distinction it drew is exactly what the verification had to
-> cross: a **green run proves nothing** (four consecutive green runs preceded this
-> bug). So verification was done on the **built artifact**, not the run colour —
-> the raw `locus-windows-amd64.exe` was downloaded from run `36686775049` and the
-> Tauri context string inside it was read directly:
->
-> ```text
-> broken  (5ebfc89, v3.2.12):  ...localhost:3000/ d:/a/Locus/Locus/client/dist icons/128x128.png...
-> fixed   (a8b0acf, run #17):  ...localhost:3000/ ../dist                        icons/32x32.png...
-> ```
->
-> The defect string is **present** in the broken binary and **absent** (`grep -c`
-> returns `0`) in the fixed one, which carries the committed relative `../dist`
-> instead. This is the class-level check the project kept saying it lacked: the
-> build's own output was inspected, so a defect that only exists *after* "the
-> bundle compiled" is now visible. See `FIXES.md` for the full entry.
-
-> **Green still proves nothing on its own.** A8 was verified by reading the
-> *artifact*; A4's green run and A6/A7 below it were not advanced by it. Do not
-> generalise one artifact check into "the pipeline is trustworthy" — the next
-> platform-specific leak (a macOS path, a Linux path) would need its own read-back.
-
-> **A6 is now VERIFIED — the installer is confirmed to install.** The
-> `installer-Locus_3.2.12_x64-setup.exe` was run interactively on real Windows and
-> completed, installing Locus. This is the first Windows install this project has
-> ever confirmed; A6 had been carried as unverified since 2026-09-30 because
-> nothing in CI executes an installer. Note what it does **not** settle: the
-> install completing is the installer's job, and A7 (the installed app surviving an
-> update) and A8's interactive end — the window rendering after a real install —
-> are separate properties. The artifact read-back covers A8's side; A7 remains
-> unverified.
-
-> **A6 was NOT advanced by A4 going green, and that distinction still stands.**
-> The `v3.2.12` run is green and its published `manifest.json` names
-> `installer-Locus_3.2.12_x64-setup.exe` rather than the raw executable — but
-> neither proves an installer *installs*. It took an actual interactive run on
-> Windows to move A6, which is exactly why the row sat unverified while three
-> preceding green runs shipped unusable releases. Do not read the ✓ beside A4 as
-> progress on any row below it.
-
-### The honest limit of this file
-
-**This file does not make any Class A claim true.** It makes them dated,
-single-homed, and checkable, and it stops them being laundered into derived
-sentences that read as facts about the code. A5 and A7 above are **not verified**;
-A4, A6 and A8 each carry a single dated verification of one artifact, and A1 a
-single dated reachability check. Nothing more.
-
-**Reachability is itself a dated observation, and it is recorded as one.** When
-this documentation overhaul was performed (2026-09-29) the environment had no
-route to the hub: the previous address no longer existed and no credentials were
-available, and every world claim was written `unverified` accordingly. On
-2026-10-05 the environment *could* reach the hub (`verify-live.sh` → `A1 PASS`),
-so A1's date moved and nothing else did — A3/A4 stayed `SKIP` because `gh` is not
-installed, and a `SKIP` is never a pass. Both states are the rule working: the
-honest current state is written down, not assumed in either direction.
-
-**A verification is a dated observation of one run, never a property.** A4 says
-"verified for `5ebfc89`", not "the workflow is green"; A6 says "verified for the
-`v3.2.12` installer", not "the installer works"; A8 says "verified for `a8b0acf`",
-not "the client resolves its assets". The next release invalidates each, and a
-reader who needs the current state must re-run the check in the right-hand column.
-This is the distinction the file exists to preserve; a "verified" cell without an
-artifact or commit attached is the drift this table is here to prevent.
+> - **A7 (Windows client cannot update).** Falsified in the field 2026-09-30: a
+>   `3.2.13` client accepted `3.2.14`'s download and refused it — *"not an
+>   installer (51741696 bytes)"*, exactly `locus-windows-amd64.exe`. The client's
+>   guard was **correct**; the hub's `fetch-release.py` was resolving the raw PE
+>   while CI correctly advertised the NSIS name. **No Windows client could update
+>   at all.** Three checks passed throughout: CI's manifest guard (it greps the
+>   workflow, not the hub), the fetch service's all-or-nothing check (all four
+>   *wrong* files were present), and the hash cross-check — which hashed whichever
+>   file the manifest named, so it agreed with itself by construction. Fixed on
+>   the hub with a `check-consistency.sh` §1a guard and a `smoke-publish.sh` case
+>   shown failing against the pre-fix code. **A7 itself remains unverified:** no
+>   Windows machine has taken an update and relaunched from the Start Menu.
+>   *An earlier revision blamed a stale `start_page` in `verge.yaml`; withdrawn
+>   2026-09-30 — that user's config carried `start_page: /`, so the path could not
+>   fire. The property is real; only the cause was wrong.*
+> - **A8 (the installed app resolves its own assets).** Verified on the
+>   **artifact**, not the run colour, because four consecutive green runs preceded
+>   the bug: the binary from run `36686775049` was downloaded and its Tauri
+>   context string read directly — broken builds carry
+>   `d:/a/Locus/Locus/client/dist`, fixed ones carry `../dist`
+>   (`grep -c 'a/Locus/Locus'` returns `0`). *An earlier revision also attributed
+>   this symptom to the `start_page` misdiagnosis and to the updater re-executing
+>   the client; both are ruled out by the report itself — the installer was run
+>   fresh from the release page.*
+> - **A6 (the NSIS installer completes).** Verified 2026-09-30 by running
+>   `installer-Locus_3.2.12_x64-setup.exe` interactively on real Windows. It does
+>   **not** settle A7 or A8's interactive end — completing an install and
+>   surviving an update are different properties.
+> - **Green still proves nothing on its own.** A8 was advanced by reading an
+>   artifact; A4's green run was not. Do not generalise one artifact check into
+>   "the pipeline is trustworthy" — the next platform-specific leak would need its
+>   own read-back.
 
 ---
 
 ## 6. Where the stable identifiers live
 
-The **only** stable identifiers for the deployed system are:
-
-| Thing | Stable identifier | Why it is stable |
-|---|---|---|
-| The hub | `networkingguides.duckdns.org` | A DNS name the operator controls; survives the box moving |
-| The console | `https://networkingguides.duckdns.org/admin/` | Path within the above |
-| The API | `https://networkingguides.duckdns.org` | Root of the above |
+The **only** stable identifier for the deployed system is the **domain** — a DNS
+name the operator controls, which survives the box moving. The console is a path
+under it (`/admin/`); the API is its root. The domain's value is a derived fact
+and lives in [`../state.toml`](../state.toml), not in this sentence.
 
 **An IP address is never one of them.** It is a Class A claim about a moment, and
 it belongs in this file's register or nowhere. Writing one into a document, a test

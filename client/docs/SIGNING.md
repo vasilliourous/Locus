@@ -80,10 +80,12 @@ negative cases are recorded here.
 
 | | |
 |---|---|
-> **ROTATED 2026-10-16.** The previous keypair (key ID `64D65025E2E479FD`) was
-> unrecoverable — it existed only in the write-only GitHub Actions secret store
-> and no offline copy existed anywhere. The table below describes the key in use
-> **now**. Clients built against the old key cannot auto-update; see §5.
+> **ROTATED 2026-10-16 (3.3.0).** The previous keypair (key ID `64D65025E2E479FD`)
+> was unrecoverable — it existed only in the write-only GitHub Actions secret
+> store and no offline copy was ever made. It was replaced rather than recovered.
+> The table below describes the key in use **now**; clients built against the old
+> key cannot auto-update (§5), and the recovery procedure for that fleet is
+> [`../../docs/operate/RELEASE-RECOVERY.md`](../../docs/operate/RELEASE-RECOVERY.md).
 
 | | |
 |---|---|
@@ -167,7 +169,7 @@ curl -sSL -o minisign.tar.gz \
 tar xzf minisign.tar.gz
 
 # -G generate, -W no passphrase (required for non-interactive CI signing)
-# The output paths place the key inside the gitignored .locus-keys/.
+# THE PATHS ARE THE TRAP — see the note below. Run this from the REPO ROOT.
 ./minisign-linux/x86_64/minisign -G -W \
   -p .locus-keys/locus_update.pub -s .locus-keys/locus_update.key \
   -c "Locus client update signing key"
@@ -177,6 +179,16 @@ tar xzf minisign.tar.gz
 # one-`git add -A` incident.
 git check-ignore -v .locus-keys/locus_update.key
 ```
+
+> **Generate at the repo root, never in `client/`.** The contract test resolves
+> `.locus-keys/` as `CARGO_MANIFEST_DIR/..` — that is, the repo root — and its
+> mismatch assertion only runs **when the file it looks for exists**. A key
+> generated at `client/.locus-keys/` is therefore not found, the assertion is
+> skipped, and the test **passes regardless of whether the configured pubkey
+> matches the key**. It reads as a green guard over the one relationship it exists
+> to check. This was hit during the 2026-10-16 rotation and caught only by a
+> deliberate wrong-key probe (`update_signature_contract.rs`,
+> `the_configured_pubkey_is_base64_of_the_public_key_file`).
 
 Then, **before shipping anything**:
 
@@ -191,11 +203,10 @@ Then, **before shipping anything**:
    rotation.** An Actions secret is not a backup — it is write-only, so it can
    never be read back to become one.
 4. Add a passphrase-encrypted backup of the private key to
-   `server/secrets.env.age` (`server/scripts/secrets-encrypt.sh`), so the
-   committed, clone-recoverable bundle carries the key too. Until 2026-10-16
-   this bundle deliberately excluded it, on the reasoning that no copy existed to
-   encrypt; now that a key is generated locally first, that reasoning no longer
-   holds and the exclusion is what makes a lost Actions secret unrecoverable.
+   `server/secrets.env.age` (`server/scripts/secrets-encrypt.sh`), so a clone
+   plus the passphrase can reproduce it. This bundle deliberately excluded the key
+   until 2026-10-16; that exclusion is what made a lost Actions secret
+   unrecoverable, and generating the key locally first is what removed it.
 5. Re-run the sign/verify round trip in §6, **including the negative cases**.
 6. Retarget the two key literals that pin the *shape* of the values: the bare key
    in `client/src-tauri/tests/update_signature_contract.rs`
@@ -219,7 +230,9 @@ That failure is deliberate (an unsigned release is installable by nobody), but
 the message does not say *how* to fix it, which is a real cost when it fires.
 
 ```sh
-# From a checkout, with gh authenticated against the right account:
+# From a checkout, with gh authenticated against the right account.
+# If .locus-keys/ is empty, recover the key from the bundle first — the recovery
+# procedure is docs/operate/RELEASE-RECOVERY.md §2:
 gh secret set LOCUS_UPDATE_KEY --repo vasilliourous/Locus < .locus-keys/locus_update.key
 
 # Verify it exists (prints only names and dates, never values):
@@ -240,12 +253,17 @@ are stored against the **repository**, and **none** of the following carry them:
 
 So after a copy or a fresh repo, `LOCUS_UPDATE_KEY` must be re-set by hand
 **before the first `v*` tag**, or the tag fails at signing. The key file itself is
-gitignored (`.locus-keys/`), so the copy does not carry it either — it lives only
-in your offline custody and in the Actions secret.
+gitignored (`.locus-keys/`), so a copy of the tree does not carry it either — it
+lives in the offline copy at `~/.locus-secrets/locus_update.key`, the Actions
+secret, and the passphrase bundle below.
 
 The **same key must be used**, not a freshly generated one: the matching public
 half is compiled into every already-installed client, and a new key produces
-updates those clients will all refuse (§5).
+updates those clients will all refuse (§5). The one exception is a deliberate
+rotation, which also requires a new `pubkey` in `tauri.conf.json` and a major
+version bump — 3.3.0 is that exception, and
+[`../../docs/operate/RELEASE-RECOVERY.md`](../../docs/operate/RELEASE-RECOVERY.md)
+is its runbook.
 
 ### The key IS in the passphrase-encrypted secrets bundle (since 2026-10-16)
 
@@ -265,7 +283,9 @@ recovery manifest at `~/.locus-secrets/RECOVERY-MANIFEST.md`.
 rotation changed the order of operations: generate locally *first*, encrypt a
 backup into the bundle, then set the Actions secret. That ordering is what makes
 the loss of an Actions secret survivable, and skipping step 4 recreates the
-2026-10-16 failure exactly.
+2026-10-16 failure exactly. The bundle entry is `LOCUS_UPDATE_KEY_B64`, base64 of
+the whole key file; recovering it is
+[`../../docs/operate/RELEASE-RECOVERY.md`](../../docs/operate/RELEASE-RECOVERY.md) §2.
 
 The result is an asymmetry worth stating plainly: a clone plus the passphrase is
 now enough to **sign a release**, which was not true before this rotation.

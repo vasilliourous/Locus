@@ -13,30 +13,30 @@ and it is not here, the index is wrong — fix it in the same change
 (`check-consistency.sh` §28 fails the build when a live document is orphaned
 from this page).
 
-**How to read anything here:**
+**How to read anything here.** Five rules, and each one is enforced by a guard:
 
-1. **Every live document opens with a front-matter block** naming its `audience`,
-   `status` (`live`, `reference`, or `design-record`) and `verified-against`.
-   Retired documents live in `archive/` / `history/`, where **the folder carries
-   the status** and no front-matter block is needed.
-2. **Nothing current lives in `archive/` or `history/`.** Those are reference
-   material — read them for *why*, never for *what is*.
-3. **The code wins.** Where a document and the code disagree, the code is right
+1. **Status is structure.** A live document opens with a front-matter block
+   (`audience`, `status`, `verified-against`); a retired one lives in `archive/` or
+   `history/`, where **the folder carries the status**. Nothing current lives in
+   those folders — read them for *why*, never for *what is*. (§25, §28)
+2. **The code wins.** Where a document and the code disagree, the code is right
    and the document is a bug — fix it in the same change.
-4. **Know which kind of fact you are writing.** Read
-   [`operate/CLAIMS.md`](operate/CLAIMS.md) before adding a fact to any document.
-   In one line: a fact that can be recomputed from this checkout is **data** and
-   belongs in [`state.toml`](state.toml) with a guard behind it; a fact about the
-   deployed system is a **world claim** and belongs in
-   [`operate/CLAIMS.md`](operate/CLAIMS.md) §5 with a date and a re-verify command.
-   **Neither belongs in a sentence.**
-5. **Never write an IP address.** The hub's only stable identifier is its
-   **domain** (`state.toml`). Addresses have gone stale three times here, and the
-   last recorded one outlived its server. `server/scripts/check-consistency.sh`
-   §10 fails the build if one appears in a live document.
-6. **Never write a count of live codes or customers.** It decays before it is read,
-   and it identifies a customer — see [`operate/CLAIMS.md`](operate/CLAIMS.md) §4.
-   The rule that survives (*never bulk-delete; Suspend/Unbind*) is what you keep.
+3. **Know which kind of fact you are writing** — [`operate/CLAIMS.md`](operate/CLAIMS.md)
+   before adding one to any document. A fact recomputable from this checkout is
+   **data** and belongs in [`state.toml`](state.toml) with a guard behind it; a
+   fact about the deployed system is a **world claim** and belongs in
+   [`operate/CLAIMS.md`](operate/CLAIMS.md) §5 with a date and a re-verify
+   command. **Neither belongs in a sentence.** (§9, §10)
+4. **One home per topic.** [`STATE.md`](STATE.md) is the ownership map; a second
+   copy of a fact is a second thing that can disagree. Link to the owner.
+5. **Every live document is reachable from this page**, and none may announce its
+   own retirement. (§28)
+
+The two facts this doc set has actually rotted on are an **IP address** and a
+**count of live codes or customers**. Both are build failures now (§10) and both
+are explained in [`operate/CLAIMS.md`](operate/CLAIMS.md) §4 — the rule that
+survives is *never bulk-delete `codes` or `code_events`; revoke with Suspend,
+move with Unbind.*
 
 ---
 
@@ -48,7 +48,7 @@ from this page).
 | [`STATE.md`](STATE.md) | live | **Where a fact goes.** The two claim classes and the ownership map — one canonical home per topic. Not a fact table. |
 | [`state.toml`](state.toml) | data | The derived facts (version, domain, console path, platform list) as **data**, each with a `source` and `provenance`. Guard-enforced by §9. |
 | [`operate/CLAIMS.md`](operate/CLAIMS.md) | live | **Read before writing any fact.** The two claim classes, the decision procedure, and the dated register of world claims (§5). |
-| [`CONTEXT.md`](CONTEXT.md) | live | The project in full: what it is, its history, the repository layout, the naming rules, the live-data warning. |
+| [`CONTEXT.md`](CONTEXT.md) | live | **Orientation in one page:** the product, the glossary, the repo layout, the `myvpn` naming rule, the pitfalls index. |
 | [`reference/STILL-OPEN.md`](reference/STILL-OPEN.md) | live | What is unfinished or unvalidated, and what was deliberately left alone. |
 
 ## Operate the hub — `docs/operate/`
@@ -61,6 +61,7 @@ from this page).
 | [`operate/SECRETS-MANAGEMENT.md`](operate/SECRETS-MANAGEMENT.md) | live | age-encrypted secrets: what is plaintext, what must never be committed. |
 | [`operate/UPDATE-SYSTEM.md`](operate/UPDATE-SYSTEM.md) | live | How an update reaches a client, end to end, and what is verified vs not. |
 | [`operate/RELEASING.md`](operate/RELEASING.md) | live | **Cutting a client release** (bump → commit → tag → CI) and publishing it to the hub. |
+| [`operate/RELEASE-RECOVERY.md`](operate/RELEASE-RECOVERY.md) | live | **When the signing key, the CI secret or the fleet is broken** — the three recoveries, and which one you have. Read before generating a replacement key. |
 | [`operate/RECOVER-WINDOWS-UPDATE.md`](operate/RECOVER-WINDOWS-UPDATE.md) | live | **When Windows clients cannot update** — the hub serving the raw PE instead of the installer, and the ordered recovery (sign → deploy → publish). |
 | [`operate/RECOVER-MACOS-UPDATE.md`](operate/RECOVER-MACOS-UPDATE.md) | live | **When macOS clients cannot update** — the hub serving a bare Mach-O instead of the `.app.tar.gz`, and the ordered recovery. |
 | [`operate/CI-CD.md`](operate/CI-CD.md) | live | The client CI pipeline (`.github/workflows/client.yml`). |
@@ -77,6 +78,7 @@ from this page).
 | [`reference/THEMES.md`](reference/THEMES.md) | live | **The theme registry** — what a theme may and may not change, and the checklist for adding one. Read before touching `_themes.ts`. |
 | [`reference/FIXES.md`](reference/FIXES.md) | live | Append-only dated log of every real defect and its fix. **Historical** — later entries sometimes correct earlier ones. |
 | [`reference/STILL-OPEN.md`](reference/STILL-OPEN.md) | live | What is unfinished or unvalidated. |
+| [`reference/DOC-AUDIT.md`](reference/DOC-AUDIT.md) | live | **The state of this doc set**, file by file, as of 2026-10-18 — what is true, what is rotting, and what a guard cannot see. A dated observation, not a rule. |
 
 ## Business — `docs/business/`
 
@@ -156,7 +158,7 @@ that the client keeps in a machine store —
 | Directory | What it is |
 |---|---|
 | [`archive/`](archive/) | Retired material: the Wails client's architecture and build guide, a completed deployment packet, and the Gaming-UDP implementation plan. **Read for why, never for what is.** Links into it are one-way — nothing in `archive/` is current. |
-| [`history/`](history/) | Curated pre-V5 research: business plan, N4L attacker/defender analysis, blocklist research, and dated session records. Includes [`history/LAYOUT.md`](history/LAYOUT.md), the before/after record of every documentation reorganisation. |
+| [`history/`](history/) | Curated pre-V5 research: the first business plan, the N4L attacker/defender analysis, and the blocklist research. Start at [`history/README.md`](history/README.md). |
 
 ---
 
@@ -173,25 +175,19 @@ that the client keeps in a machine store —
 | `client/docs/` | The builder | Client internals, kept beside the client. |
 | `docs/archive/`, `docs/history/` | Nobody, yet | Retired material. **The folder carries the status.** |
 
-Three rules keep it from fragmenting again, and each is enforced:
-
-1. **One home per topic.** [`STATE.md`](STATE.md) holds the ownership map. When two
-   documents disagree, the owner wins and the other is a bug.
-2. **Every live document is reachable from this index.** §28 fails the build on an
-   orphan — the index is a guard, not a habit.
-3. **Status is structure.** Front-matter (§25) for live material; the folder itself
-   for anything retired.
-
 ---
 
 ## Layout history
 
-`docs/` was reorganised twice before this: the 2026-09 overhaul split live
-material into `operate/` and `reference/`, replaced status banners with
-front-matter, and moved volatile facts into `state.toml` + `CLAIMS.md`; the
-2026-09-23 restructure separated `client/`, `server/` and `legacy/`.
+`docs/` has been reorganised twice: the 2026-09 overhaul split live material into
+`operate/` and `reference/`, replaced status banners with front-matter, and moved
+volatile facts into `state.toml` + `CLAIMS.md`; 2026-09-23 separated `client/`,
+`server/` and `legacy/`.
 
-The 2026-10-05 pass rebuilt **this page** as the single index (it previously
-covered only part of the set, and `STATE.md` carried a competing map), moved the
-retired material into `archive/`, and named the misleading titles. The
-before/after map is in [`history/LAYOUT.md`](history/LAYOUT.md).
+The 2026-10-05 pass rebuilt **this page** as the single index (`STATE.md` had
+carried a competing map), moved retired material into `archive/`, named the
+misleading titles, and then made the set smaller — `CONTEXT.md` rewritten, the
+pre-3.0 tail of `FIXES.md` consolidated, the session records dropped from
+`history/`. The before/after map is [`history/LAYOUT.md`](history/LAYOUT.md); the
+file-by-file evaluation that prompted it is
+[`reference/DOC-AUDIT.md`](reference/DOC-AUDIT.md).

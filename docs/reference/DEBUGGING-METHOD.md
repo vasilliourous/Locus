@@ -38,14 +38,12 @@ hub, the reproduction is a `curl`:
 curl -s "https://<domain>/api/update?version=<installed>&platform=windows" | python3 -m json.tool
 ```
 
-The 2026-10-01 Windows defect was located **before reading a single line of Rust**,
-because the response contained `locus-windows-amd64.exe` where the installer
-belonged. The byte count in the student's error (`51741696`) matched that asset
-exactly, which turned a vague "updater is broken" into a specific, located fact.
+The 2026-10-01 Windows defect was located **before reading a single line of
+Rust**: the response named `locus-windows-amd64.exe` where the installer belonged,
+and the byte count in the student's error matched that asset exactly.
 
-**Read the reported numbers as evidence.** Sizes, versions, hashes and offsets in
-an error message are usually the identifier of the artifact involved. Matching
-`51741696` against the release asset list is what proved which file was served.
+**Read the reported numbers as evidence.** Sizes, hashes and offsets in an error
+message usually identify the artifact involved.
 
 ### 1.2 Prefer the artefact over the configuration
 
@@ -81,23 +79,18 @@ value — a filename, a wire key, a version, an encoding — that value is a
 **contract**, and the failure mode is not "side A is wrong" but **"A and B
 disagree, and nothing compares them."**
 
-Locus has several, all frozen and all easy to break by "tidying":
-
-| Contract | Sides |
-|---|---|
-| Artifact filenames | CI's `manifest.json` ↔ `fetch-release.py` ↔ `publish-release.sh` ↔ the client's `artifact_for()` |
-| Wire field names | hub hooks ↔ `contract.rs` (`uot_port`, `download_*`→`update_*`, the `macos_*`/`darwin-*` asymmetry) |
-| Signature encoding | `fetch-release.py` ↔ `releases.publish` ↔ the plugin's `base64_to_string` |
-| Version | five files ↔ the git tag ↔ `state.toml` |
+Locus has several of these — artifact filenames, wire field names, the signature
+encoding, the version. **Which ones they are, and which sides must agree, is
+[`../../AGENTS.md`](../../AGENTS.md)'s "Traps" list and `check-consistency.sh`'s
+own guards; it is not restated here**, because a contract listed in two places is
+the second thing that can drift.
 
 **How to check a contract:** find every site, then compare them **to each other**.
 A test that each site is self-consistent proves nothing — that is precisely the
 trap described in §3.
 
-**How to guard a contract:** assert the *agreement*, not the parties. The useful
-guard for the Windows defect was never "does `fetch-release.py` mention windows"
-(it always did) but "does the filename it would serve equal the one CI
-advertised". See `check-consistency.sh` §1a and `smoke-publish.sh` case 5b.
+**How to guard a contract:** assert the *agreement*, not the parties — §3 shows
+what happens when you do not.
 
 ---
 
@@ -106,16 +99,12 @@ advertised". See `check-consistency.sh` §1a and `smoke-publish.sh` case 5b.
 The costly lesson, stated plainly: **a check that cannot distinguish a right
 answer from a wrong one reads exactly like a check that passed.**
 
-Three guards reported healthy through the release that no Windows client could
-install:
-
-- **A presence check.** `grep "\"windows\"" fetch-release.py` — the string was
-  present before, during and after the bug.
-- **A self-referential check.** The manifest cross-check hashed *whichever file
-  the manifest named*. Manifest says `installer…`, check hashes `installer…`,
-  hashes match, `ok`. It never compared the name the hub would **serve**.
-- **A scoped check.** `check-consistency.sh` §15 grepped the workflow, which was
-  correct, and never looked at the hub.
+The three guards that reported healthy through the release no Windows client
+could install had one shape between them: **a presence check** (the string was
+there before, during and after the bug), **a self-referential check** (the hash
+cross-check compared the manifest against whichever file the manifest named, so
+it agreed with itself), and **a scoped check** (§15 grepped the workflow and never
+looked at the hub). None could distinguish a right answer from a wrong one.
 
 ### The rule
 
@@ -141,6 +130,14 @@ Also worth rehearsing: **`SKIP != PASS`.** A guard that silently skips reports
 green while covering nothing. If a check skips on a condition, the skip must be
 loud.
 
+The live example is `update_signature_contract.rs`. Its mismatch assertion runs
+**only when `.locus-keys/locus_update.pub` exists**, and it resolves that path from
+`CARGO_MANIFEST_DIR/..` — the repo root. A key generated at `client/.locus-keys/`
+is therefore invisible to it: no file, no assertion, green test, over the one
+relationship the test exists to check. It was found by deliberately probing with
+the wrong key, not by reading the test — which is the general lesson: **a skip
+that a reader cannot see is a pass they will believe.**
+
 ---
 
 ## 4. Where the truth lives (hub edition)
@@ -163,25 +160,15 @@ the hub served the raw binary.
 
 ### Verify the deployment, do not assume it
 
+`hooks-sync.sh --fetch-service --check` is the sanctioned way to ask; it hashes
+the host's copy against the repo, byte-compiles it, probes `/health`, and prints
+the platform names the *running* copy resolves. Do any of those by hand and you
+will eventually skip one:
+
 ```sh
-# The host's copy, by hash — not "the service is active".
 ssh root@<host> 'sha256sum /root/server/scripts/fetch-release.py'
 sha256sum server/scripts/fetch-release.py        # must match
-
-# Does the host's copy can even load? An `active` service with a syntax error
-# serves every request as a failure.
-ssh root@<host> 'python3 -m py_compile /root/server/scripts/fetch-release.py'
-
-# Is the right name resolved IN the copy that runs?
-ssh root@<host> 'cd /root/server/scripts && python3 -c "
-import importlib.util
-s=importlib.util.spec_from_file_location(\"fr\",\"fetch-release.py\")
-m=importlib.util.module_from_spec(s); s.loader.exec_module(m)
-print(m.resolve_platform_names(\"<version>\"))"'
 ```
-
-`hooks-sync.sh --fetch-service --check` does all of the above, plus a `/health`
-probe, and is the sanctioned way to ask the question.
 
 > **`active` is not `correct`.** `systemctl is-active` says the process started.
 > It says nothing about which file it is running or whether that file works.

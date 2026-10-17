@@ -287,9 +287,15 @@ class as `download_* → update_*`.)
 
 | Tier | Transport | Notes |
 |---|---|---|
-| eco / free | Shadowsocks TCP | fallback when UDP is blocked. `free` and `eco` are the SAME endpoint (port 8443); `eco` is the legacy row kept so field codes resolve — see `docs/business/04-tiers.md` §4.5 |
-| stealth | TCP, no TUN | `clash-verge-stealth-notun.yaml` sits in the repo root as a **local, gitignored** reference profile — it is **not tracked**, not a source of truth, and embeds a live tier PSK. Do not commit or cite it; the contract is the tier payload, not this file. |
-| strike | + UDP over TCP (UoT) | gated on `udp_relay` **and** `uot_port > 0` |
+| free | Shadowsocks TCP | the free plan (port 8443). The `eco` seed row was **removed 2026-10-06**: the live hub held no code carrying it, and a duplicate row on one port renders in the console as a second plan. The on-box names (`shadowsocks-eco`, `tc-eco-cap`, `ECO_PASS`) are infrastructure, not a tier. See `docs/business/04-tiers.md` §4.1 and §4.5 |
+| strike | + UDP over TCP (UoT) | the paid plan (port 8445), customer-facing name **Full**. Gated on `udp_relay` **and** `uot_port > 0` |
+
+> **`stealth` was retired on 2026-10-05** when the paid ladder was merged into a
+> single plan. It is deliberately **absent** from the table rather than listed as
+> retired: the previous row documented a local `clash-verge-stealth-notun.yaml`
+> profile that embedded a live tier PSK, and leaving the instructions for it in
+> place after the tier died is how such a key gets re-committed. Nothing in the
+> client or the hub resolves `stealth` any more.
 
 The GC rule for `udp_relay`: it is only meaningful when `uot_port > 0`; an operator
 toggling one without the other is editing a half-configured tier (noted in

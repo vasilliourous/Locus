@@ -764,9 +764,13 @@ the served bytes, and exits non-zero if anything disagrees.
   uninstallable by every client while looking perfectly healthy on the hub.
   `fetch-release.py` and `publish-release.sh` both refuse to publish unsigned
   artifacts, as does `releases.set` when activating. See `client/docs/SIGNING.md`.
-- **Losing the update signing key is unrecoverable for installed clients.** A
-  client only trusts the key it was built with, and nothing server-side can
-  change that. Keep the private key in CI secrets *and* offline.
+- **Losing the update signing key is recoverable only by rotating it, and
+  rotation strands the installed fleet.** A client trusts only the key it was
+  built with and nothing server-side can change that, so a new key means a manual
+  reinstall per device. Keep the private key in CI secrets *and* offline *and* in
+  the passphrase bundle — the 2026-10-16 loss had only the first of the three,
+  which is why it could not be recovered. Runbook:
+  [`RELEASE-RECOVERY.md`](RELEASE-RECOVERY.md).
 - `/update.json` is still a static placeholder written by `05-caddy.sh`. The
   updater reads `update_config`, **not** this file — it is informational only.
 - `update_sha256` (the legacy single field) is populated with the **Linux**

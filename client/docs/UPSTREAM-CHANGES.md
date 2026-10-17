@@ -245,7 +245,7 @@ still sent, but only as a rate-limit and support key. Full design:
 | App id | `io.github.clash-verge-rev.clash-verge-rev` | `com.locus.client` |
 | Data dir | upstream's | migrated on first launch (see below) |
 | Product name | Clash Verge | Locus |
-| Version | 2.5.5 (inherited) | its own 3.x line, not Verge's — current version in `../../docs/STATE.md` |
+| Version | 2.5.5 (inherited) | its own 3.x line, not Verge's — current value in `../../docs/state.toml` `[client.version]` |
 
 **The data-dir migration is real user state**, not a rename: `APP_ID` is the app data
 root, and on Windows it is also how the privileged service authenticates (the root's

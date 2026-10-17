@@ -16,8 +16,10 @@ verified-against: client/ (layout), docs/reference/FIXES.md
 > `smoke-bump.sh`, `scripts/release-cut.sh`, the committed `.syso` resources, and
 > `.github/workflows/build.yml` are gone. They versioned and released the retired
 > Wails client, never the fork. Sections marked REMOVED below reflect that; the
-> fork's release path now exists — three version sites guarded by a test, and CI
-> at `.github/workflows/client.yml` (see `docs/operate/RELEASING.md`).
+> fork's release path now exists — its version sites guarded by a test (the list
+> is `[client.version_sites]` in `../../docs/state.toml`, not a count in a
+> sentence), and CI at `.github/workflows/client.yml` (see
+> `docs/operate/RELEASING.md`).
 
 ---
 
@@ -88,11 +90,11 @@ was **not** carried out: root `VERSION`, `bump.sh`, `server/scripts/bump-version
 **deleted**, because they versioned and released the retired Wails client and
 never the shipping fork.
 
-The fork's three version sites must now agree, and CI-fails when they do not:
+The fork's runtime version sites must now agree, and CI fails when they do not. **The count is not stated here** — it is `[client.version_sites]` in `../../docs/state.toml` (five, recomputed from `client/scripts/release-version.mjs` by `check-consistency.sh` §17); the three listed below are the subset that must agree at run time.
 
 | Site | Value |
 |---|---|
-| `client/package.json` | the three version sites must agree; current value in `../../docs/STATE.md` |
+| `client/package.json` | 1 of the runtime version sites, which must agree; current value in `../../docs/state.toml` `[client.version]` |
 | `client/src-tauri/tauri.conf.json` | (same) |
 | `client/src-tauri/Cargo.toml` | (same) |
 | `legacy/wails-client` `main.go` + `wails.json` + `frontend/package.json` | frozen (stale, reference only) |
