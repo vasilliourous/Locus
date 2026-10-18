@@ -65,6 +65,7 @@ find its owner here first.
 | Publishing a release | [`operate/RELEASING.md`](operate/RELEASING.md) |
 | Recovering the signing key / CI secret / a stranded fleet | [`operate/RELEASE-RECOVERY.md`](operate/RELEASE-RECOVERY.md) |
 | Client CI pipeline | [`operate/CI-CD.md`](operate/CI-CD.md) |
+| The hub's two hostnames, and why the old one is still served | [`CONTEXT.md`](CONTEXT.md) §3 (naming rule); values in [`state.toml`](state.toml) `[hub.domain]` / `[hub.domain_legacy]` |
 | How to diagnose a defect | [`reference/DEBUGGING-METHOD.md`](reference/DEBUGGING-METHOD.md) |
 | The readiness chain ("stuck on connecting") | [`reference/EGRESS-READINESS.md`](reference/EGRESS-READINESS.md) |
 | How a student keeps their entitlement | [`reference/DEVICE-IDENTITY.md`](reference/DEVICE-IDENTITY.md) |

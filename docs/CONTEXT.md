@@ -103,6 +103,26 @@ sight.
 
 No live file carries the old name any more.
 
+### The hub's old hostname is a third class, and for the same reason
+
+`networkingguides.duckdns.org` is `[hub.domain_legacy]` — **not** a leftover to
+tidy. Since 3.3.2 the canonical hub is `networkingguides.jadedns.uk` (a name under
+a domain the operator owns; N4L filtered `*.duckdns.org`, which took activation,
+heartbeat and the update path down together, so a device could not fetch the build
+that would have fixed it).
+
+The old name is **served from the same Caddy site block, not redirected**. Every
+build before 3.3.2 has it compiled in, and the heartbeat — the only channel that
+carries a hub move — needs a working hub to reach. A redirect cannot help: a 308
+requires the old name to present its own valid certificate first, which is exactly
+what failed.
+
+**Do not delete it while any earlier build is in the field.** The failure is
+permanent and silent — the device sits at the activation gate, unable even to
+update out of it. Set `LEGACY_DOMAIN=""` only once none remain.
+`check-consistency.sh` §32 enforces that the deployment keeps serving it, and
+`contract::LEGACY_HUB_URL` records it beside every other wire name.
+
 ---
 
 ## 4. The two facts that must not be written down here
