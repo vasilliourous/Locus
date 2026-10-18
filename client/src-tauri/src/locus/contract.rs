@@ -39,7 +39,44 @@ use serde::{Deserialize, Serialize};
 /// device cannot even fetch the build that would fix it. [`resolve_hub_url`] is
 /// the escape hatch: an operator-set override, validated, with this constant as
 /// the fallback.
-pub const HUB_URL: &str = "https://networkingguides.duckdns.org";
+///
+/// # Why this moved off `*.duckdns.org` (3.3.2)
+///
+/// The duckdns name was blocked by N4L's filter, and that block could not be
+/// escaped from the client side: `/api/activate` is the first call a device
+/// makes, it happens *before* any heartbeat, and the heartbeat is the only
+/// channel that could deliver [`LEGACY_HUB_URL`]'s replacement. The failure
+/// prevented escaping the failure, exactly as `/api/release` and the
+/// unauthenticated `/api/update` exist to prevent elsewhere.
+///
+/// The replacement is a name under a domain the operator owns, which is the one
+/// property a dynamic-DNS subdomain cannot have: a registered name with a
+/// reputation can be recategorised on request, and its certificate can be
+/// renewed against a name that is not itself the thing being blocked.
+///
+/// **This is not a migration mechanism.** Deployed 3.3.1-and-earlier builds
+/// keep dialling [`LEGACY_HUB_URL`] and cannot be told otherwise — which is why
+/// the hub must keep answering on it. See [`LEGACY_HUB_URL`].
+pub const HUB_URL: &str = "https://networkingguides.jadedns.uk";
+
+/// The hub's **previous** name, kept alive on the server for the deployed fleet.
+///
+/// Every build before 3.3.2 has this string compiled in and no way to learn a
+/// new one, because the only channel that carries a hub move is the heartbeat —
+/// which requires a working hub to reach. So the hub serves the full API surface
+/// on this name as well (`05-caddy.sh` puts both names on one site block), and
+/// it is not a redirect: a 308 would need this name to present a valid
+/// certificate for itself first, which is the thing that failed.
+///
+/// **Do not delete the server-side block while any earlier build is in the
+/// field.** A device stranded on it is stuck at the activation gate with no
+/// path to an update that would fix it — the same dead end as the retired
+/// `already_used` lookup status.
+///
+/// It is referenced by tests and by the consistency checker, never by the
+/// client's own call sites; keeping it named here makes the two-sided server
+/// contract visible in the one module that owns wire names.
+pub const LEGACY_HUB_URL: &str = "https://networkingguides.duckdns.org";
 
 /// The hub base URL this run should use, given a stored override.
 ///
@@ -602,5 +639,44 @@ mod tests {
         ] {
             assert!(artifact_for(key).is_some(), "no artifact for platform {key}");
         }
+    }
+
+    /// **The canonical name and the legacy name must stay distinguishable.**
+    ///
+    /// `LEGACY_HUB_URL` is never dialled by this client — it is here so the
+    /// server-side commitment is recorded where wire names live, and so
+    /// `check-consistency.sh` §32 can assert the hub still serves it. Two ways
+    /// that arrangement silently stops working, and neither is visible at
+    /// runtime:
+    ///
+    ///   * someone "tidies" the two constants together — then the record of what
+    ///     the deployed fleet dials is gone, and a future cleanup removes the
+    ///     server block that a thousand devices need;
+    ///   * the legacy value is edited to the canonical one — the checker then
+    ///     compares a name against itself and passes forever.
+    ///
+    /// Both are asserted here rather than left to review, because the failure
+    /// they cause is a stranded fleet, and it surfaces months later.
+    #[test]
+    fn the_legacy_hub_name_is_distinct_and_still_a_hub_url() {
+        assert_ne!(
+            HUB_URL, LEGACY_HUB_URL,
+            "the canonical and legacy hub names must differ — collapsing them \
+             erases the record of what pre-3.3.2 builds dial"
+        );
+        assert!(
+            LEGACY_HUB_URL.starts_with("https://"),
+            "the legacy hub must be the https origin it was, not a rewritten form"
+        );
+        // The legacy name is a host only: no path, no trailing slash. The server
+        // block is generated from it, and a stray path there would produce an
+        // address Caddy treats as a non-host site.
+        let host = LEGACY_HUB_URL
+            .trim_start_matches("https://")
+            .trim_end_matches('/');
+        assert!(
+            !host.contains('/'),
+            "the legacy hub must be a bare host, got {host}"
+        );
     }
 }

@@ -25,8 +25,8 @@
 #   server/scripts/verify-release.sh 2.2.1 --local /path/to/artifacts
 #
 # Environment:
-#   VPS      ssh target (default root@networkingguides.duckdns.org)
-#   PB_API   hub base URL (default https://networkingguides.duckdns.org)
+#   VPS      ssh target (default root@networkingguides.jadedns.uk)
+#   PB_API   hub base URL (default https://networkingguides.jadedns.uk)
 #   SSH      ssh command to use (default `ssh`)
 #
 # Exit codes: 0 everything checked out, 1 usage, 2 a check FAILED.
@@ -66,12 +66,12 @@ _site_pick_ssh_target() {
     if ssh -o BatchMode=yes -o ConnectTimeout=5 locus-hub true 2>/dev/null; then
         printf 'locus-hub'
     else
-        printf 'root@networkingguides.duckdns.org'
+        printf 'root@networkingguides.jadedns.uk'
     fi
 }
 _VPS_CHOSEN="$(_site_pick_ssh_target)"
 VPS="${_VPS_CHOSEN}"
-PB_API="${PB_API:-https://networkingguides.duckdns.org}"
+PB_API="${PB_API:-https://networkingguides.jadedns.uk}"
 SSH="${SSH:-ssh}"
 SSH="${SSH} -o BatchMode=yes -o ConnectTimeout=15"
 LOCAL_DIR=""

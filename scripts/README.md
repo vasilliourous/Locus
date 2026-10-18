@@ -31,18 +31,18 @@ publish path) and `fetch-release.py` (the GitHub-fetch path).
 ```bash
 # Generate 50 free-plan codes and import to PocketBase
 PB_TOKEN=$(grep PB_TOKEN /root/.pb_admin_creds | cut -d= -f2)
-./scripts/generate_codes.sh https://networkingguides.duckdns.org $PB_TOKEN free 50
+./scripts/generate_codes.sh https://networkingguides.jadedns.uk $PB_TOKEN free 50
 
 # Paid plan — the row is `strike`, the card prints "Full"
-./scripts/generate_codes.sh https://networkingguides.duckdns.org $PB_TOKEN strike 20
+./scripts/generate_codes.sh https://networkingguides.jadedns.uk $PB_TOKEN strike 20
 
 # Dry run (no import)
 DRY_RUN=1 PB_TOKEN=$(grep PB_TOKEN /root/.pb_admin_creds | cut -d= -f2)
-./scripts/generate_codes.sh https://networkingguides.duckdns.org $PB_TOKEN free 50
+./scripts/generate_codes.sh https://networkingguides.jadedns.uk $PB_TOKEN free 50
 
 # Custom expiry (30 days)
 EXPIRY_DAYS=30 PB_TOKEN=$(grep PB_TOKEN /root/.pb_admin_creds | cut -d= -f2)
-./scripts/generate_codes.sh https://networkingguides.duckdns.org $PB_TOKEN free 10
+./scripts/generate_codes.sh https://networkingguides.jadedns.uk $PB_TOKEN free 10
 ```
 
 ### Print Code Cards

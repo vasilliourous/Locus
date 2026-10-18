@@ -39,7 +39,7 @@
 #   server/scripts/deploy.sh --no-console    # skip the console build (slow)
 #
 # Environment:
-#   VPS      ssh target (default: the `locus-hub` alias, then the duckdns host)
+#   VPS      ssh target (default: the `locus-hub` alias, then the canonical hub name)
 #   PB_API   hub base URL for verification
 #
 # Exit codes: 0 success, 1 usage, 2 transfer failure, 3 restart failure,
@@ -58,10 +58,10 @@ if [ -z "${VPS:-}" ]; then
     if ssh -o BatchMode=yes -o ConnectTimeout=5 locus-hub true 2>/dev/null; then
         VPS="locus-hub"
     else
-        VPS="root@networkingguides.duckdns.org"
+        VPS="root@networkingguides.jadedns.uk"
     fi
 fi
-PB_API="${PB_API:-https://networkingguides.duckdns.org}"
+PB_API="${PB_API:-https://networkingguides.jadedns.uk}"
 
 REMOTE_HOOKS="/opt/pocketbase/pb_hooks"
 REMOTE_CONSOLE="/var/www/admin"

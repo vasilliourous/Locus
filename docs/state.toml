@@ -32,7 +32,7 @@
 # Added 2026-09-29.
 
 [client.version]
-value      = "3.3.1"
+value      = "3.3.2"
 source     = "client/package.json, client/src-tauri/Cargo.toml, client/src-tauri/tauri.conf.json"
 provenance = "derived"
 
@@ -98,12 +98,25 @@ provenance = "derived"
 # belongs in CLAIMS.md §5 where it can be dated and re-verified. It was recorded
 # in STATE.md for months, went stale three times, and finished by naming an
 # address that no longer existed — while being labelled "authoritative".
+value      = "networkingguides.jadedns.uk"
+source     = "client/src-tauri/src/locus/contract.rs (HUB_URL); server/setup.sh (DOMAIN, required env)"
+provenance = "derived"
+
+[hub.domain_legacy]
+# The hub's PREVIOUS name. Still resolves, and the hub still answers the full
+# API surface on it, because every build before 3.3.2 has this string compiled in
+# and the only channel that could tell it otherwise (the heartbeat) needs a
+# working hub to reach. See `LEGACY_HUB_URL` in contract.rs and §32.
+#
+# NOT a redirect target and NOT deprecated-with-a-date: deleting the server-side
+# block while an earlier build is in the field strands that device at the
+# activation gate with no path to the update that would fix it.
 value      = "networkingguides.duckdns.org"
-source     = "server/setup.sh (DOMAIN, required env)"
+source     = "client/src-tauri/src/locus/contract.rs (LEGACY_HUB_URL); server/modules/05-caddy.sh (both names on one site block)"
 provenance = "derived"
 
 [hub.api_base]
-value      = "https://networkingguides.duckdns.org"
+value      = "https://networkingguides.jadedns.uk"
 source     = "server/scripts/publish-release.sh (PB_API default)"
 provenance = "derived"
 
@@ -148,7 +161,7 @@ provenance = "derived"
 # `%s` is the version, from the release manifest. The page is NOT linked to
 # "latest": the version is rendered at deploy time from manifest.json, because a
 # button pointing at a version the hub does not serve 404s silently.
-value      = "https://networkingguides.duckdns.org/updates/<version>/<file>"
+value      = "https://networkingguides.jadedns.uk/updates/<version>/<file>"
 source     = "server/scripts/deploy-site.sh; server/scripts/publish-release.sh (PLATFORMS)"
 provenance = "derived"
 

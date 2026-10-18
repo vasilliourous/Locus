@@ -80,7 +80,7 @@ fi
 if [ -z "$DOMAIN" ]; then
     # Fall back to the documented default so the script still explains itself,
     # but say so loudly — this is a degraded mode, not normal operation.
-    DOMAIN="networkingguides.duckdns.org"
+    DOMAIN="networkingguides.jadedns.uk"
     echo -e "${YELLOW}WARN${NC} could not read hub.domain from docs/state.toml; using the documented default."
 fi
 
@@ -156,8 +156,68 @@ else
     fi
 fi
 
-# ── A3 — the rolling preview release is present ──
-# Verifies EXISTENCE and when it was published, not that it is current for any
+# ── A16 / A17 — the hub's TWO names, and the certificate each presents ──
+#
+# Checked as a PAIR, because they fail independently and the failure of either is
+# a different outage:
+#
+#   * the canonical name is what every 3.3.2+ build dials;
+#   * the legacy name is what every EARLIER build dials, and those builds have it
+#     compiled in — they cannot be repointed, so if it stops answering or its
+#     certificate lapses they are stranded at the activation gate with no path to
+#     the update that would fix them.
+#
+# A certificate being valid is a claim about a MOMENT: it expires, so this check
+# is worth running before every release and after every box move.
+LEGACY_DOMAIN_CHECK="${LEGACY_DOMAIN-networkingguides.duckdns.org}"
+if ! have curl; then
+    record "A16"$'\t'"SKIP"$'\t'"curl is not installed, cannot check either name's certificate"
+elif ! have openssl; then
+    record "A16"$'\t'"SKIP"$'\t'"openssl is not installed, cannot read the certificate expiry"
+else
+    a16_bad=""
+    for pair in "canonical:$DOMAIN" "legacy:$LEGACY_DOMAIN_CHECK"; do
+        role="${pair%%:*}"
+        name="${pair#*:}"
+        [ -n "$name" ] || continue
+        # Certificate end date. `-servername` matters: without SNI a multi-name
+        # origin may present the wrong certificate and report a misleading expiry.
+        end="$(echo | timeout 15 openssl s_client -connect "$name:443" -servername "$name" \
+                 2>/dev/null | openssl x509 -noout -enddate 2>/dev/null | cut -d= -f2)"
+        code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 "https://$name/api/health" 2>/dev/null)"
+        code="${code:-000}"
+        if [ -z "$end" ]; then
+            a16_bad="$a16_bad $role"
+            echo -e "  ${RED}A16${NC} $role name ($name): no certificate presented"
+        elif [ "$code" != "200" ]; then
+            a16_bad="$a16_bad $role"
+            echo -e "  ${RED}A16${NC} $role name ($name): cert ends $end, but /api/health -> $code"
+        else
+            echo -e "  ${GREEN}A16${NC} $role name ($name): cert ends $end, /api/health -> 200"
+        fi
+    done
+    if [ -n "$a16_bad" ]; then
+        record "A16"$'\t'"FAIL"$'\t'"a hub name is not serving a usable certificate + /api/health:$a16_bad"
+    else
+        record "A16"$'\t'"PASS"$'\t'"both hub names present a certificate and answer /api/health"
+    fi
+
+    # A17 — the legacy name must be SERVED, not redirected. A 3xx means the alias
+    # block swallowed it, which strands the fleet at the next renewal.
+    if [ -n "$LEGACY_DOMAIN_CHECK" ]; then
+        lcode="$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 \
+                  -X POST "https://$LEGACY_DOMAIN_CHECK/api/activate" \
+                  -H 'Content-Type: application/json' -d '{}' 2>/dev/null)"
+        lcode="${lcode:-000}"
+        case "$lcode" in
+            3*) record "A17"$'\t'"FAIL"$'\t'"the legacy name redirects ($lcode) instead of serving — pre-3.3.2 builds are stranded" ;;
+            000) record "A17"$'\t'"SKIP"$'\t'"the legacy name did not answer from this environment; claim UNKNOWN" ;;
+            *)  record "A17"$'\t'"PASS"$'\t'"the legacy name answers a handler directly ($lcode)" ;;
+        esac
+    fi
+fi
+
+# ── A3 — the rolling preview release is present ──# Verifies EXISTENCE and when it was published, not that it is current for any
 # particular commit. "Current for commit X" is a claim about a specific push and
 # belongs to the person making that push; this can only answer "does a preview
 # exist, and how old is it".

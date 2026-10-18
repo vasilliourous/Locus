@@ -26,7 +26,10 @@ import subprocess
 import sys
 
 API = "http://127.0.0.1:8090"
-DOMAIN = os.environ.get("DOMAIN", "networkingguides.duckdns.org")
+# The canonical hub name, written into each tier's `server` field — the hostname
+# every client dials for its tunnel. Moved off duckdns in 3.3.2 (N4L blocked it);
+# the old name still answers because pre-3.3.2 builds have it compiled in.
+DOMAIN = os.environ.get("DOMAIN", "networkingguides.jadedns.uk")
 # Cipher fallback, matching the single definition in server/modules/00-env.sh.
 # This script READS the cipher out of the live ssserver configs; the default
 # only applies when a config omits the field.

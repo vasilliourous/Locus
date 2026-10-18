@@ -57,7 +57,7 @@ MANIFEST_URL="${MANIFEST_URL:-https://github.com/vasilliourous/Locus/releases/la
 # [hub.api_base], and it is deliberately NOT configurable to the landing host:
 # the landing block has no /updates/ handle (see modules/05-caddy.sh), so a URL
 # under the landing hostname would 404.
-HUB_BASE="${HUB_BASE:-https://networkingguides.duckdns.org}"
+HUB_BASE="${HUB_BASE:-https://networkingguides.jadedns.uk}"
 
 # The hostname the page is served from. Used for the canonical link and the
 # sitemap, and must agree with LANDING_DOMAIN in modules/05-caddy.sh —

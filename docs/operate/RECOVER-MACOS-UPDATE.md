@@ -77,7 +77,7 @@ Cheap, and worth doing before touching anything:
 
 ```sh
 # What would a macOS client on the previous version be offered?
-curl -s "https://networkingguides.duckdns.org/api/update?version=<prev>&platform=macos_arm" \
+curl -s "https://networkingguides.jadedns.uk/api/update?version=<prev>&platform=macos_arm" \
   | python3 -m json.tool
 ```
 
@@ -195,8 +195,8 @@ Update PLATFORMS … or re-deploy with `hooks-sync.sh --fetch-service`".
 ## Step 4 — Verify the hub is serving it
 
 ```sh
-curl -s "https://networkingguides.duckdns.org/api/update?version=<prev>&platform=macos_arm" | python3 -m json.tool
-curl -s "https://networkingguides.duckdns.org/api/update?version=<prev>&platform=macos_intel" | python3 -m json.tool
+curl -s "https://networkingguides.jadedns.uk/api/update?version=<prev>&platform=macos_arm" | python3 -m json.tool
+curl -s "https://networkingguides.jadedns.uk/api/update?version=<prev>&platform=macos_intel" | python3 -m json.tool
 ```
 
 Each must return `"url": "…/locus-darwin-<arch>.app.tar.gz"`.
@@ -204,7 +204,7 @@ Each must return `"url": "…/locus-darwin-<arch>.app.tar.gz"`.
 Then confirm the served bytes are a gzip, not a Mach-O:
 
 ```sh
-curl -s "https://networkingguides.duckdns.org/updates/X.Y.Z/locus-darwin-arm64.app.tar.gz" \
+curl -s "https://networkingguides.jadedns.uk/updates/X.Y.Z/locus-darwin-arm64.app.tar.gz" \
   | head -c 2 | od -An -tx1      # expect: 1f 8b
 ```
 

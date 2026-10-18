@@ -238,7 +238,7 @@ saved to `/root/.tier_passwords` on the VPS.
 ### Retrieve Passwords
 
 ```bash
-ssh root@networkingguides.duckdns.org "cat /root/.tier_passwords"
+ssh root@networkingguides.jadedns.uk "cat /root/.tier_passwords"
 ```
 
 This will output:
@@ -263,7 +263,7 @@ active: ✅ (checked)
 udp_relay: ❌ (unchecked)
 config:
 {
-  "server": "networkingguides.duckdns.org",
+  "server": "networkingguides.jadedns.uk",
   "server_port": 8443,
   "password": "<ECO_PASS from above>",
   "method": "2022-blake3-aes-256-gcm"
@@ -277,7 +277,7 @@ active: ✅ (checked)
 udp_relay: ✅ (checked)
 config:
 {
-  "server": "networkingguides.duckdns.org",
+  "server": "networkingguides.jadedns.uk",
   "server_port": 8445,
   "password": "<STRIKE_PASS from above>",
   "method": "2022-blake3-aes-256-gcm",
@@ -345,7 +345,7 @@ PocketBase 0.22 rejects the app-level token with 401 (see
 ### On the VPS
 
 ```bash
-ssh root@networkingguides.duckdns.org
+ssh root@networkingguides.jadedns.uk
 
 # Add the token to environment
 echo 'ADMIN_API_TOKEN=YOUR_ADMIN_TOKEN' >> /etc/environment
@@ -395,12 +395,12 @@ hashes and signatures are missing or name a different version.
 ```bash
 # From your local machine
 ./scripts/generate_codes.sh \
-  https://networkingguides.duckdns.org \
+  https://networkingguides.jadedns.uk \
   YOUR_ADMIN_TOKEN \
   free 50
 
 ./scripts/generate_codes.sh \
-  https://networkingguides.duckdns.org \
+  https://networkingguides.jadedns.uk \
   YOUR_ADMIN_TOKEN \
   strike 20   # the paid plan; prints as "Full" on the cards
 ```
@@ -411,7 +411,7 @@ hashes and signatures are missing or name a different version.
 
 ### Health Check
 ```bash
-curl -sf https://networkingguides.duckdns.org/api/health
+curl -sf https://networkingguides.jadedns.uk/api/health
 # Expected: {"message":"API is healthy.","code":200}
 ```
 
@@ -420,7 +420,7 @@ curl -sf https://networkingguides.duckdns.org/api/health
 # Get a code from the eco-codes.txt generated above
 CODE=$(head -1 eco-codes.txt)
 
-curl -s -X POST https://networkingguides.duckdns.org/api/activate \
+curl -s -X POST https://networkingguides.jadedns.uk/api/activate \
   -H "Content-Type: application/json" \
   -d "{\"code\": \"$CODE\", \"fingerprint\": \"test-fingerprint-123\"}"
 # Expected: {"code":200, "tier":"eco", ...}
@@ -432,8 +432,8 @@ curl -s -X POST https://networkingguides.duckdns.org/api/activate \
 
 | Item | Value / Location |
 |------|-----------------|
-| Admin UI | `https://networkingguides.duckdns.org/_/` |
-| API base | `https://networkingguides.duckdns.org` |
+| Admin UI | `https://networkingguides.jadedns.uk/_/` |
+| API base | `https://networkingguides.jadedns.uk` |
 | All credentials | Encrypted in `server/secrets.env.age` — see [`SECRETS-MANAGEMENT.md`](SECRETS-MANAGEMENT.md) |
 | Tier passwords | `/root/.tier_passwords` on VPS (auto-deployed from secrets) |
 | Admin API token | `/root/.admin_api_token` on VPS (auto-deployed from secrets) |

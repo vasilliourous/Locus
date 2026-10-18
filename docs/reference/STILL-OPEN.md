@@ -228,8 +228,57 @@ has a reputation, and can be recategorised on request — that is an operator
 purchase, and it is **unverified** until a device on the school network has
 actually resolved and reached it.
 
+**Fixable here:** which hostname the client dials. `locus::contract::resolve_hub_url`
+now honours a validated stored override (absolute https, no path), so a hub move is
+one operator-set value plus a Caddy site block — no release.
+
+**Not fixable here:** the categorisation itself. A dynamic-DNS subdomain
+(`*.duckdns.org`) is structurally likely to be classified as uncategorised or
+dynamic-DNS. A durable fix needs a hostname under a domain that is registered,
+has a reputation, and can be recategorised on request — that is an operator
+purchase, and it is **unverified** until a device on the school network has
+actually resolved and reached it.
+
 **Re-verify with:** a `curl` to `/api/release` from the school network. Success is
 the only evidence that counts; a successful `curl` from anywhere else says nothing.
+
+### The domain moved on 2026-10-18 — and N4L's classification is still unverified
+
+**Added 2026-10-18.** The operator provisioned `networkingguides.jadedns.uk` and
+it is now the canonical hub: `contract::HUB_URL`, every server-script default, the
+tier rows' `server` field, `state.toml` and the docs all name it. The old duckdns
+name is **still served** from the same Caddy site block (`LEGACY_DOMAIN`), because
+every pre-3.3.2 build has it compiled in and cannot be repointed — see
+`../operate/CLAIMS.md` A16/A17 and `contract::LEGACY_HUB_URL`.
+
+**Verified here (the tree and the box, by running things):**
+
+- Both names serve `/api/health` 200 and present certificates valid to
+  **2027-01-15/16**; the new name's certificate was issued during the change.
+  Recorded as A16, dated.
+- A throwaway `free` code activated through the **public** `/api/activate` on the
+  new name and returned `server_config.server` = the new name on 8443 with
+  `udp_relay: true`; the heartbeat returned the same plus a self-consistent
+  `update_*` block. The code was deleted afterwards (one code, never a bulk
+  delete, never a live student's).
+- All four tunnel ports (8443/8445/8446/8447) accept connections on the new name.
+
+**NOT verified, and this is the part that matters:**
+
+- **That N4L now permits it.** The whole point of the move is a classification
+  this repository cannot observe. Nothing here has been tested from a school
+  network, and a `curl` from anywhere else is not evidence. The choice of a name
+  under a registered domain is a *structural argument*, not a measurement.
+- **That a pre-3.3.2 client survives.** It should, because the old name still
+  answers — but no device on an older build has been driven through activation
+  since the change, and the failure mode if the legacy block is ever dropped is
+  permanent (the device cannot reach the update that would fix it).
+- **Which name the 3.3.1 fleet is actually failing on.** The reported error said
+  "invalid peer certificate: Expired" for `networkingguides.duckdns.org`, whose
+  origin certificate was valid throughout (issued Oct 17). The mismatch was never
+  explained — the only hop not observable from either end is the network between
+  the student and the box. Moving the canonical name may route around it without
+  anyone having established the cause.
 
 ### macOS auto-update is now the right SHAPE, but has never run on a Mac
 

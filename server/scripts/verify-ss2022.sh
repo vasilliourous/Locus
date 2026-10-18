@@ -9,7 +9,7 @@
 # Read-only. It does not change any configuration.
 #
 # Usage:
-#     ssh root@host "DOMAIN=networkingguides.duckdns.org /root/server/scripts/verify-ss2022.sh"
+#     ssh root@host "DOMAIN=networkingguides.jadedns.uk /root/server/scripts/verify-ss2022.sh"
 #
 # Exit code is 0 when no check FAILED (warnings do not fail the run).
 

@@ -24,6 +24,37 @@ CADDY_DATA_DIR="/var/www/html"
 
 : "${DOMAIN:?DOMAIN is required}"
 
+# ── The hub's PREVIOUS name — SERVED, not redirected ──
+#
+# WHY THIS EXISTS AND WHY IT IS NOT `HUB_ALIAS_DOMAIN` BELOW
+#
+# Every client build before 3.3.2 has `https://networkingguides.duckdns.org`
+# compiled in, and nothing can tell it otherwise: the only channel that carries a
+# hub move is the heartbeat, and reaching the heartbeat requires a working hub.
+# So when the canonical name moves, the OLD name must keep serving the full API
+# surface — activation, heartbeat, /updates/ — or every earlier build is stranded
+# at the activation gate with no path to the release that would fix it.
+#
+# A redirect cannot do this job. A 308 needs the old name to present a valid
+# certificate for itself *first*, and "the old name's certificate is the thing
+# that broke" is precisely the failure being recovered from. Serving it from the
+# same site block needs no second implementation: Caddy puts both names on one
+# block, so there is one set of handles, one rate-limit zone and one admin check.
+#
+# It defaults to the literal old name rather than to empty, because a box that
+# has always served it must not quietly stop doing so when DOMAIN is updated —
+# that is the change that strands the fleet. Set LEGACY_DOMAIN="" deliberately,
+# and only once no earlier build remains in the field.
+LEGACY_DOMAIN="${LEGACY_DOMAIN-networkingguides.duckdns.org}"
+
+# The address line for the hub site block: both names share ONE block.
+if [ -n "${LEGACY_DOMAIN}" ] && [ "${LEGACY_DOMAIN}" != "${DOMAIN}" ]; then
+    HUB_BLOCK_NAMES="${DOMAIN}, ${LEGACY_DOMAIN}"
+else
+    HUB_BLOCK_NAMES="${DOMAIN}"
+fi
+
+
 # ── The public landing page hostname ──
 #
 # A SECOND hostname on the SAME box, deliberately not the hub's. The hub is
@@ -180,7 +211,9 @@ deploy_caddyfile() {
 }
 
 # ── Main site block ──
-${DOMAIN} {
+# Serves BOTH names (see LEGACY_DOMAIN above): the canonical hub and the previous
+# one that deployed builds still dial. One block, one set of handles.
+${HUB_BLOCK_NAMES} {
     root * ${CADDY_DATA_DIR}
     file_server
 

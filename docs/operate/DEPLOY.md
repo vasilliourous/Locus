@@ -46,7 +46,7 @@ verified-against: server/setup.sh, server/modules/
 Create an A record for your VPS IP:
 
 ```
-networkingguides.duckdns.org  A  YOUR_VPS_IP
+networkingguides.jadedns.uk  A  YOUR_VPS_IP
 ```
 
 TTL of 60s recommended during initial setup. Increase to 300s+ after stable.
@@ -57,6 +57,23 @@ TTL of 60s recommended during initial setup. Increase to 300s+ after stable.
 does, it takes down activation, heartbeat **and** the update path together — they
 are all served from that one name — so the device cannot fetch the build that
 would relieve it.
+
+> **There are now TWO second-name mechanisms, and confusing them is an outage.**
+> `LEGACY_DOMAIN` (below) is **served** and **on by default**; `HUB_ALIAS_DOMAIN`
+> (this section) is a **redirect** and **opt-in**. A redirect is useless for a name
+> whose certificate is the thing that broke, so the two cannot be swapped.
+>
+> ### `LEGACY_DOMAIN` — the previous hub name, served on the same block
+>
+> Set automatically to `networkingguides.duckdns.org` when `DOMAIN` moves. Caddy
+> puts both names on one site block, so there is one set of handles, one rate-limit
+> zone and one admin check. It is **not optional while any pre-3.3.2 build is in
+> the field**: those clients have the old name compiled in and the heartbeat — the
+> only channel that could tell them otherwise — needs a working hub to reach. Set
+> `LEGACY_DOMAIN=""` only once no earlier build remains.
+>
+> `check-consistency.sh` **§32** asserts the block is addressed by
+> `${HUB_BLOCK_NAMES}` and that the alias block did not swallow the legacy name.
 
 There are two halves, and either alone does nothing:
 
@@ -70,6 +87,9 @@ There are two halves, and either alone does nothing:
    rate-limit zones and the admin token check cannot drift between the two names.
    Point the name's DNS at the same box first — Caddy obtains the certificate on
    first request, and a name that does not resolve fails loudly at that point.
+   **A redirect requires the alias to present its own valid certificate first**,
+   so this mechanism helps only when the alias name's TLS is sound; it cannot
+   rescue a fleet whose *alias* certificate has expired.
 
 2. **The client must be told to use it.**
    ```sh
@@ -313,7 +333,7 @@ LOCUS_SECRETS_PASSPHRASE='...' ssh root@your-vps 'bash -s' < server/setup.sh
 If you haven't set up the age-encrypted secrets file yet:
 
 ```bash
-DOMAIN=networkingguides.duckdns.org \
+DOMAIN=networkingguides.jadedns.uk \
 ADMIN_API_TOKEN=your-token \
 B2_APPLICATION_KEY_ID=xxx \
 B2_APPLICATION_KEY=xxx \
@@ -389,11 +409,17 @@ After deployment, verify:
 - [ ] `systemctl is-active pocketbase-backup.timer` → active (hourly B2 backups; setup auto-runs the first backup)
 - [ ] `tail -5 /var/log/myvpn-backup.log` → last line "Backup completed (exit 0)"
 - [ ] `systemctl is-active locus-fetch` → active (only if publishing releases)
-- [ ] `curl -sf https://networkingguides.duckdns.org/api/health` → 200
-- [ ] `curl -s -o /dev/null -w '%{http_code}' https://networkingguides.duckdns.org/admin/` → 200 (and `/admin` → 301)
+- [ ] `curl -sf https://networkingguides.jadedns.uk/api/health` → 200
+- [ ] `curl -s -o /dev/null -w '%{http_code}' https://networkingguides.jadedns.uk/admin/` → 200 (and `/admin` → 301)
 - [ ] `ufw status` → active with all rules
 - [ ] `systemctl is-active fail2ban` → active
-- [ ] `openssl s_client -connect networkingguides.duckdns.org:443 -servername networkingguides.duckdns.org </dev/null 2>/dev/null | openssl x509 -noout -dates` → valid cert
+- [ ] `openssl s_client -connect networkingguides.jadedns.uk:443 -servername networkingguides.jadedns.uk </dev/null 2>/dev/null | openssl x509 -noout -dates` → valid cert
+- [ ] **The legacy hub name answers too** — every pre-3.3.2 build dials it:
+      `curl -sf https://networkingguides.duckdns.org/api/health` → 200, **and**
+      `openssl s_client -connect networkingguides.duckdns.org:443 -servername networkingguides.duckdns.org </dev/null 2>/dev/null | openssl x509 -noout -enddate`
+      → a date in the future. A valid cert here is not optional while earlier
+      builds are in the field; an expired one strands them at the activation gate
+      with no path to an update. Set `LEGACY_DOMAIN=""` only once none remain.
 
 > **`/update.json` is not a health check.** It is a stale placeholder written by
 > `05-caddy.sh`. The client updater reads the **`update_config`** record, not
@@ -443,7 +469,7 @@ After deployment, verify:
 
 ### Create PocketBase Admin (First Run Only)
 
-1. Visit `https://networkingguides.duckdns.org/_/` in a browser
+1. Visit `https://networkingguides.jadedns.uk/_/` in a browser
 2. Create your admin account (first-run wizard)
 
 > If `PB_ADMIN_EMAIL` and `PB_ADMIN_PASS` were set in `secrets.env.age`, the
@@ -476,8 +502,8 @@ token. Note `05-caddy.sh` extracts `console-dist.tar.gz` if present, so a full
 # /root/.pb_admin_creds — NOT /root/.admin_api_token, which PocketBase 0.22
 # rejects with 401)
 PB_TOKEN=$(ssh root@your-vps "grep PB_TOKEN /root/.pb_admin_creds | cut -d= -f2")
-./scripts/generate_codes.sh https://networkingguides.duckdns.org "$PB_TOKEN" free 50
-./scripts/generate_codes.sh https://networkingguides.duckdns.org "$PB_TOKEN" strike 20
+./scripts/generate_codes.sh https://networkingguides.jadedns.uk "$PB_TOKEN" free 50
+./scripts/generate_codes.sh https://networkingguides.jadedns.uk "$PB_TOKEN" strike 20
 ```
 
 ### Print Code Cards
@@ -524,7 +550,7 @@ ssh root@new-vps "LOCUS_SECRETS_PASSPHRASE='...' /root/server/restore.sh"
 B2_APPLICATION_KEY_ID=xxx \
 B2_APPLICATION_KEY=xxx \
 B2_BUCKET=my-vpn-backup-bucket \
-DOMAIN=networkingguides.duckdns.org \
+DOMAIN=networkingguides.jadedns.uk \
 ssh root@new-vps 'bash -s' < server/restore.sh
 ```
 

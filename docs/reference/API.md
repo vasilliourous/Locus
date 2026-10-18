@@ -14,7 +14,16 @@ verified-against: server/pb_hooks/*.pb.js
 
 ## Base URL
 
-`https://networkingguides.duckdns.org`
+`https://networkingguides.jadedns.uk` — the canonical hub, and the default
+compiled into the client (`locus::contract::HUB_URL`).
+
+**Two names serve this API.** The hub's previous name,
+`https://networkingguides.duckdns.org` (alias `contract::LEGACY_HUB_URL`), is on
+the **same Caddy site block** and answers every endpoint identically — not by
+redirect. Every build before 3.3.2 has it compiled in, and the only channel that
+could tell a device otherwise (the heartbeat) needs a working hub to reach, so
+removing it strands those devices permanently at the activation gate. Both names
+are in `05-caddy.sh`; `check-consistency.sh` §32 asserts it.
 
 All endpoints are served through Caddy reverse proxy to PocketBase on `127.0.0.1:8090`.
 
@@ -49,7 +58,7 @@ Activates a device with an activation code and binds it to the hardware fingerpr
   "tier": "eco",
   "device_fingerprint": "a1b2c3d4e5f6...abcdef",
   "server_config": {
-    "server": "networkingguides.duckdns.org",
+    "server": "networkingguides.jadedns.uk",
     "server_port": 8443,
     "password": "...",
     "method": "2022-blake3-aes-256-gcm"
@@ -185,7 +194,7 @@ update signal and a refreshed tier config.
   "server_time": "2026-09-19T10:09:42.945Z",
   "tier": "strike",
   "server_config": {
-    "server": "networkingguides.duckdns.org",
+    "server": "networkingguides.jadedns.uk",
     "server_port": 8445,
     "password": "...",
     "method": "2022-blake3-aes-256-gcm",
@@ -209,7 +218,7 @@ update signal and a refreshed tier config.
   "server_time": "2026-09-19T10:09:42.945Z",
   "tier": "eco",
   "update_available": "2.1.0",
-  "update_url": "https://networkingguides.duckdns.org/updates/2.1.0/locus-linux-amd64",
+  "update_url": "https://networkingguides.jadedns.uk/updates/2.1.0/locus-linux-amd64",
   "update_sha256": "abc123...",
   "update_linux": "https://.../updates/2.1.0/locus-linux-amd64",
   "update_windows": "https://.../updates/2.1.0/installer-Locus_2.1.0_x64-setup.exe",
@@ -502,7 +511,7 @@ Static file served by Caddy. A placeholder — the updater does NOT read it; it 
 
 ### `GET /_/`
 
-PocketBase admin interface at `https://networkingguides.duckdns.org/_/`.
+PocketBase admin interface at `https://networkingguides.jadedns.uk/_/`.
 
 ---
 

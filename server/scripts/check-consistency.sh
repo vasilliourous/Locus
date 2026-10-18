@@ -1074,8 +1074,22 @@ def setup_domain():
     m = re.search(r'DOMAIN="?([a-z0-9.-]+\.[a-z]{2,})"?', read("server/setup.sh"))
     if m:
         return m.group(1)
-    # Fall back to any duckdns hostname in the file (the required-env error text).
-    m = re.search(r'([a-z0-9-]+\.duckdns\.org)', read("server/setup.sh"))
+    # Fall back to the example in the required-env error text. This is the
+    # canonical name now — the hub moved off duckdns in 3.3.2 because N4L blocked
+    # it, and every other default in the tree points at the new name.
+    m = re.search(r'([a-z0-9-]+\.jadedns\.uk)', read("server/setup.sh"))
+    return m.group(1) if m else None
+
+def legacy_hub_domain():
+    """The hub's previous name, from the client's own constant.
+
+    It is NOT dead: every build before 3.3.2 has it compiled in and cannot learn
+    a new address, so the hub must keep answering on it. The Rust constant is the
+    source because it is the thing that makes it load-bearing; §32 then asserts
+    the server actually still serves it.
+    """
+    m = re.search(r'pub const LEGACY_HUB_URL: &str = "https://([^"]+)"',
+                  read("client/src-tauri/src/locus/contract.rs"))
     return m.group(1) if m else None
 
 def publish_api_base():
@@ -1264,6 +1278,7 @@ CHECKERS = {
     "client.version":       manifest_version,
     "client.version_sites": version_sites,
     "hub.domain":           setup_domain,
+    "hub.domain_legacy":    legacy_hub_domain,
     "hub.api_base":         publish_api_base,
     "hub.console_path":     lambda: setup_log_path("Admin console"),
     "hub.pocketbase_ui":    lambda: setup_log_path("PocketBase UI"),
@@ -4167,6 +4182,60 @@ else
     bad "contract::resolve_hub_url is gone — a filtered fleet cannot be repointed"
 fi
 
+# ── The LEGACY hub name must keep being SERVED, not redirected ──
+#
+# THE FAILURE THIS PREVENTS, and it is not hypothetical: the canonical name moved
+# off duckdns because N4L blocked it. Every build before 3.3.2 has the OLD name
+# compiled in and no way to learn a new one — the heartbeat is the only channel
+# that carries a hub move, and reaching the heartbeat needs a working hub. So a
+# deploy that emits only the new name strands every earlier device at the
+# activation gate, permanently, with no path to the release that would fix it.
+#
+# Anchored on the SITE-BLOCK ADDRESS LINE, which is the thing that decides what is
+# served. Two weaker checks would both pass while the fleet was stranded: grepping
+# for the legacy string anywhere (a comment mentioning it proves nothing) and
+# checking Caddy still has *a* site block (the canonical one alone is not enough).
+LEGACY_CONST=$(grep -oE 'pub const LEGACY_HUB_URL: &str = "https://[^"]+"' "$RUST/contract.rs" | grep -oE '[a-z0-9.-]+\.[a-z]{2,}' | head -1)
+# Anchored on the ASSIGNMENT at the start of a line, not on the bare name.
+# `grep LEGACY_DOMAIN` matched a COMMENT the first time this guard was written,
+# so the check passed while the default had been deleted — the "grep the string
+# anywhere" failure this whole block warns about, committed by the block itself.
+# Observed failing against the deleted-default case before it was kept.
+LEGACY_ASSIGN=$(grep -cE '^LEGACY_DOMAIN=' "$CADDY_MODULE")
+if [ -z "$LEGACY_CONST" ]; then
+    bad "contract.rs declares no LEGACY_HUB_URL — the previous hub name is not recorded where the client owns wire names"
+elif [ "$LEGACY_ASSIGN" -eq 0 ]; then
+    bad "modules/05-caddy.sh no longer assigns LEGACY_DOMAIN — a DOMAIN move would stop serving the old name"
+    bad "  Deployed pre-3.3.2 builds have it compiled in and cannot be repointed."
+elif ! grep -q '\${HUB_BLOCK_NAMES} {' "$CADDY_MODULE"; then
+    bad "the hub site block is not addressed by \${HUB_BLOCK_NAMES}"
+    bad "  That variable is what puts BOTH names on one block; using \${DOMAIN} alone"
+    bad "  serves only the canonical name and strands every earlier build."
+else
+    ok "the hub site block is addressed by \${HUB_BLOCK_NAMES} (canonical + legacy)"
+    ok "the legacy hub name is recorded in contract.rs ($LEGACY_CONST)"
+fi
+
+# And the legacy name must NOT be a redirect: a 308 needs the old name to hold a
+# valid certificate for itself, which is the very thing that failed.
+#
+# Written POSITIVELY — extract the alias block's address line and require it to be
+# exactly the placeholder. The first version of this check ran awk over a range
+# that began with the block header, so when the header changed the range matched
+# NOTHING and the guard passed on an empty string: a check that only looks for an
+# absence cannot fail when the thing it looks at is gone. Observed passing against
+# `__HUB_ALIAS_DOMAIN__, ${LEGACY_DOMAIN} {` before it was rewritten.
+ALIAS_ADDR=$(grep -oE '^__HUB_ALIAS_DOMAIN__[^{]*' "$CADDY_MODULE" | sed 's/[[:space:]]*$//')
+if [ -z "$ALIAS_ADDR" ]; then
+    bad "could not find the __HUB_ALIAS_DOMAIN__ site block address — the alias guard cannot check anything"
+elif [ "$ALIAS_ADDR" != "__HUB_ALIAS_DOMAIN__" ]; then
+    bad "the hub ALIAS block is addressed by '$ALIAS_ADDR', not __HUB_ALIAS_DOMAIN__ alone"
+    bad "  If that includes the legacy name, the legacy fleet is being REDIRECTED —"
+    bad "  and a redirect needs the old name's certificate, which is what broke."
+else
+    ok "the alias serves only __HUB_ALIAS_DOMAIN__; the legacy name is served, not redirected"
+fi
+
 # ── The two-sided contract for the alias VALUE ──
 #
 # The hub validates the address before storing it and the client validates it
@@ -4382,6 +4451,63 @@ else
     done <<EOF
 $command_report
 EOF
+fi
+
+echo
+echo "════════════════════════════════════════════════════════════"
+echo "35. The legacy single-platform update fields have two writers, and they agree"
+
+# ── WHY THIS GUARD EXISTS ──
+#
+# `update_config` carries FOUR per-platform artifacts plus a LEGACY pair —
+# `update_url` / `update_sha256` — describing the Linux binary only, kept so a
+# client that cannot find its own platform key still has a fallback.
+#
+# Two code paths write that record:
+#
+#   * `server/scripts/publish-release.sh`  — the CLI
+#   * `admin_console.pb.js` → releases.publish — the console button
+#
+# Only the FIRST knew the legacy pair existed. The console path wrote version,
+# active, download_*, sha256_* and signature_* and left update_url/update_sha256
+# pointing at the PREVIOUS release — so the record claimed 3.3.1 while its legacy
+# URL said 3.2.30, and `update_sha256` hashed a file that was not the one the URL
+# named. Observed live on 2026-10-18. A client falling back to those fields would
+# download the old binary and fail the hash (fail-closed), so an otherwise perfect
+# release would simply never install.
+#
+# Asserting the AGREEMENT is the point. Checking each writer separately would pass
+# with one of them still blind — which is exactly how this shipped.
+# ─────────────────────────────────────────────────────────────
+PUBLISH_SH="$SCRIPTS/publish-release.sh"
+
+# Count ACTUAL WRITES, not mentions.
+#
+# `grep -q update_url` passes on a comment that merely names the field — the
+# first version of this guard did exactly that, and passed against a hook with
+# every write deleted. Observed failing before it was rewritten. The patterns
+# below match an assignment (`"update_url":` in the Python heredoc,
+# `recP.set("update_url"` in the hook), which prose does not produce.
+pub_writes=$(grep -cE '"update_url" *:|update_url *=' "$PUBLISH_SH" 2>/dev/null || true)
+hook_url_writes=$(grep -cE 'recP\.set\("update_url"' "$ADMIN_HOOK" 2>/dev/null || true)
+hook_sha_writes=$(grep -cE 'recP\.set\("update_sha256"' "$ADMIN_HOOK" 2>/dev/null || true)
+pub_writes="${pub_writes:-0}"
+hook_url_writes="${hook_url_writes:-0}"; hook_sha_writes="${hook_sha_writes:-0}"
+
+if [ "$pub_writes" -lt 1 ]; then
+    bad "publish-release.sh no longer writes update_url — the legacy fallback would go stale"
+elif [ "$hook_url_writes" -lt 1 ] || [ "$hook_sha_writes" -lt 1 ]; then
+    bad "admin_console.pb.js releases.publish writes update_url ${hook_url_writes}x and update_sha256 ${hook_sha_writes}x; each needs at least one write"
+    bad "  Both update_url AND update_sha256 must be written on every publish."
+    bad "  A stale update_url advertises the PREVIOUS release's Linux binary while"
+    bad "  update_sha256 hashes a different file — the updater then fails closed on"
+    bad "  a release that is otherwise perfectly published (observed 2026-10-18)."
+elif ! grep -q 'linuxArt' "$ADMIN_HOOK" 2>/dev/null; then
+    bad "admin_console.pb.js sets update_url from something other than the linux artifact"
+    bad "  The legacy pair describes the LINUX binary; sourcing it elsewhere would"
+    bad "  pair one platform's URL with another's hash."
+else
+    ok "both update_config writers set the legacy update_url/update_sha256 pair"
 fi
 
 echo

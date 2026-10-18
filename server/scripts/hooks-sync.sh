@@ -52,8 +52,8 @@
 # with no reconciliation. This mode is that reconciliation for the fetcher.
 #
 # Environment:
-#   VPS      ssh target (default root@networkingguides.duckdns.org)
-#   PB_API   hub base URL for the liveness probe (default the duckdns host)
+#   VPS      ssh target (default root@networkingguides.jadedns.uk)
+#   PB_API   hub base URL for the liveness probe (default the canonical hub name)
 #   SSH      ssh command to use. Defaults to plain `ssh`; set it to
 #            "sshpass -e ssh" (or similar) on a host with no key-based access.
 #            The script does not invent credentials.
@@ -65,8 +65,8 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 HOOKS_SRC="${REPO_ROOT}/server/pb_hooks"
 
-VPS="${VPS:-root@networkingguides.duckdns.org}"
-PB_API="${PB_API:-https://networkingguides.duckdns.org}"
+VPS="${VPS:-root@networkingguides.jadedns.uk}"
+PB_API="${PB_API:-https://networkingguides.jadedns.uk}"
 SSH="${SSH:-ssh}"
 REMOTE_HOOKS="/opt/pocketbase/pb_hooks"
 # The release fetcher's home on the host. `05-caddy.sh` refuses to install the

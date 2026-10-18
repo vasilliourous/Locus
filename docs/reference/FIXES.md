@@ -31,6 +31,120 @@ corrections are marked. For what is *still* broken, read `STILL-OPEN.md`.
 
 ---
 
+## 3.3.2 — THE HUB MOVED, AND THREE DEFECTS THE MOVE UNCOVERED (2026-10-18, release)
+
+| | |
+|---|---|
+| Severity | 🔴 Activation was failing for students on the school network |
+| **Files:** | `client/src-tauri/src/locus/contract.rs`, `server/modules/05-caddy.sh`, `server/pb_hooks/admin_console.pb.js`, `server/scripts/{seed-live,fix-tier-configs}.py`, script defaults, the doc set |
+| **Shipped in:** | 3.3.2 |
+
+### 0. What was reported, and what was actually true
+
+A 3.3.1 client failed at activation with:
+
+```
+client error (Connect): invalid peer certificate: Expired
+```
+
+against `https://networkingguides.duckdns.org/api/activate`. The first theory was
+that the certificate had lapsed. **It had not** — Let's Encrypt had renewed it on
+2026-10-17, valid to 2027-01-15, and it was answering `/api/health` 200 from every
+network this repository can reach. The "Expired" certificate was therefore **not**
+the origin's, and the mechanism was never established: the one hop nobody can
+observe from either end is the network between the student and the box.
+
+What the investigation *did* establish was that the response to the original N4L
+block had never actually been finished:
+
+- the rewrite introduced `hub_alias`, but it is **opt-in and empty by default**,
+  so no device was using it;
+- the client's compiled default was still the blocked name;
+- and the name the operator then provisioned for the purpose —
+  `networkingguides.jadedns.uk` — **had no Caddy site block at all**, so it failed
+  its TLS handshake outright (`alert internal error`, no certificate).
+
+**Symptom reported, cause not established, fix delivered anyway.** That is stated
+plainly because moving the canonical name may route around the failure without
+anyone having found it; `STILL-OPEN.md` carries that as unverified rather than
+folding it into "fixed".
+
+### 1. The legacy hub name was going to be dropped by the next deploy
+
+The canonical name moved to `networkingguides.jadedns.uk`. Every build before
+3.3.2 has the old name **compiled in** and the heartbeat — the only channel that
+could carry a new address — needs a working hub to reach. So the old name must
+keep serving, or the entire deployed fleet is stranded at the activation gate
+with no path to the release that would fix it.
+
+`05-caddy.sh` emitted exactly one name (`${DOMAIN} {`). A fresh deploy would have
+served the new name and quietly stopped serving the old one — **a change that
+looks like a successful migration from the operator's side and is an outage for
+every installed device.**
+
+Fixed by addressing the site block with `${HUB_BLOCK_NAMES}` (both names, one
+block, so there is still one set of handles and one rate-limit zone) and adding
+`LEGACY_DOMAIN`, which defaults to the old name rather than to empty.
+`check-consistency.sh` **§32** now asserts it.
+
+**Deliberately not a redirect.** The obvious alternative — 308 the old name to the
+new one — requires the old name to present a valid certificate *first*, which is
+the very thing that was failing. Serving costs one block and nothing else.
+
+### 2. The console's publish never wrote the legacy update fields
+
+`update_config` carries four per-platform artifacts plus a legacy pair
+(`update_url` / `update_sha256`) describing the Linux binary, kept so a client
+missing its own platform key has a fallback.
+
+Two writers exist — `publish-release.sh` (CLI) and `releases.publish` (the console
+button, i.e. the normal path). **Only the CLI knew the pair existed.** Observed
+live: `version` read `3.3.1` while `update_url` still pointed at **3.2.30**, and
+`update_sha256` hashed a file the URL did not name. A client falling back to those
+fields would download the old binary and fail the hash — fail-closed, on a release
+that was otherwise perfectly published.
+
+This is the two-sided-contract class `DEBUGGING-METHOD.md` §3 names: two writers of
+one record, one blind to a field. Asserting either writer alone would pass. **§35
+(new)** counts *actual writes* in both, because the first version of that guard
+grepped for the field name and passed on a comment that merely mentioned it.
+
+### 3. `X-Admin-Token` had never worked
+
+The body token was accepted; the header form returned `403` for a token that the
+body path accepted on the next line.
+
+**The cause was the header NAME, not the lookup.** `$apis.requestInfo(e).headers`
+presents every header with its `-` replaced by `_`, lower-cased — so the client's
+`X-Admin-Token` arrives as **`x_admin_token`**. The code looked up the hyphenated
+form, found nothing, left `supplied` empty and failed the compare. The comment
+beside it described the fallback as "supported" and it had never once run; it only
+appeared to work because the console also sends the token in the body.
+
+A first attempt at this fix walked the map's keys comparing
+`toLowerCase()` against `"x-admin-token"` — still hyphenated, so still never
+matched, and it was **observed still returning 403** after deploy. What settled it
+was probing the live hub with a throwaway endpoint that returned the real header
+keys (`content_type`, `x_admin_token`, `x_forwarded_for`, …) instead of reasoning
+from the documentation: the docs describe the Go type, and this is the goja
+bridge's presentation of it. Both spellings are now tried, with a normalising walk
+as a backstop.
+
+**Verified live** on both hostnames: header token `200`, body token `200`, wrong
+token `403`, no token `403`.
+
+Same trap class as the file-scope-helper problem at the top of the hook files:
+goja's surface is close to V8's but not identical, and the difference is invisible
+until something calls it.
+
+### What the guards could not catch, and were not asked to
+
+§32 checks that the *deployment* serves both names. Nothing in this repository can
+check that a third party's filter permits either of them — that is a world claim,
+and it stays unverified until a device on that network reaches the hub.
+
+---
+
 ## 3.3.1 SHIPPED, AND THE THREE THINGS THAT STOPPED IT (2026-10-17, release)
 
 | | |

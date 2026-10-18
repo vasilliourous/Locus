@@ -232,9 +232,50 @@ routerAdd("POST", "/api/admin/console", function(e) {
             // passing only the header is a supported shape — and one the
             // fetch-release service (fetch-release.py) honours properly, so the
             // two admin surfaces must agree.
+            //
+            // READ IT DEFENSIVELY — observed 2026-10-18 returning 403 against a
+            // correct token that the BODY path accepted on the next line.
+            //
+            // THE HEADER NAME IS NOT WHAT THE CLIENT SENDS. `requestInfo(e).headers`
+            // exposes each header with its `-` replaced by `_` and lower-cased, so
+            // `X-Admin-Token` arrives as `x_admin_token` — never `x-admin-token`.
+            // The old code looked up the hyphenated form, which is why this path
+            // had never once authenticated; it only appeared to work because the
+            // console also sends the token in the body.
+            //
+            // Established by probing the live hub rather than by reading the docs,
+            // because the docs describe the Go type and this is the goja bridge's
+            // presentation of it: a probe endpoint returned the real key list
+            // (`content_type`, `x_admin_token`, `x_forwarded_for`, …). Both spellings
+            // are tried so the code survives a future PocketBase presenting either.
             try {
                 var headers = $apis.requestInfo(e).headers || {};
-                supplied = String(headers["x-admin-token"] || headers["X-Admin-Token"] || "").trim();
+                var hdr = "";
+                var headerNames = ["x_admin_token", "X-Admin-Token", "x-admin-token", "X_Admin_Token"];
+                for (var hn = 0; hn < headerNames.length && !hdr; hn++) {
+                    try {
+                        var cand = headers[headerNames[hn]];
+                        if (cand !== null && cand !== undefined && cand !== "") hdr = String(cand);
+                    } catch (idxErr) { /* fall through to the next spelling */ }
+                }
+                if (!hdr) {
+                    // Last resort: walk the map's own keys and normalise BOTH sides
+                    // (`-` and `_` collapse to `_`), so any casing or separator
+                    // works.
+                    var keys = [];
+                    try { keys = Object.keys(headers); } catch (kErr) { keys = []; }
+                    for (var hi = 0; hi < keys.length; hi++) {
+                        var norm = String(keys[hi]).toLowerCase().replace(/-/g, "_");
+                        if (norm === "x_admin_token") {
+                            var hv = headers[keys[hi]];
+                            // A header may arrive as an array of values.
+                            if (hv && typeof hv.length === "number" && typeof hv !== "string") hv = hv[0];
+                            hdr = String(hv || "");
+                            break;
+                        }
+                    }
+                }
+                supplied = hdr.trim();
             } catch (hErr) {
                 supplied = "";
             }
@@ -1206,6 +1247,50 @@ routerAdd("POST", "/api/admin/console", function(e) {
             }
             recP.set("version", pubVersion);
             recP.set("active", true);
+
+            // ── The LEGACY single-platform fields ──────────────────────
+            //
+            // `update_url` / `update_sha256` predate the per-platform columns and
+            // describe the LINUX binary only. They exist so a client that cannot
+            // find its own platform's key still has something to fall back to.
+            //
+            // THEY WERE NEVER WRITTEN HERE. `publish-release.sh` sets both, but
+            // this action — the one the console's "Fetch & publish" button
+            // actually calls — did not. So every console publish since the
+            // per-platform columns were added left these two at whatever the
+            // PREVIOUS release had put there.
+            //
+            // Observed live on 2026-10-18: version was 3.3.1 while `update_url`
+            // still named 3.2.30's Linux binary, with a `update_sha256` hashing a
+            // *different file from the one advertised*. A client with no platform
+            // key would download the old binary under the new version's name and
+            // fail the hash — and the hash is what the updater trusts, so it fails
+            // closed on a release that is otherwise perfectly published.
+            //
+            // This is the two-sided contract DEBUGGING-METHOD.md §3 describes:
+            // two writers of one record, only one of which knew the field existed.
+            // NOTE: the linux artifact is read into a local BEFORE use. Written
+            // inline as a bracketed index on the artifacts map, the substring
+            // was scanned by check-consistency.sh §1 as a truncated platform-key
+            // LIST — that section scans every `.pb.js` for such literals, and a
+            // dangling one looks exactly like a hook whose platform list has lost
+            // three entries. Binding it to a variable keeps §1 strict (a real
+            // list anywhere in a hook still fails the build) without teaching it
+            // an exception it would later apply to a genuine list. Keep bracket
+            // literals out of this file and its comments.
+            var linuxArt;
+            try { linuxArt = arts.linux; } catch (laErr) { linuxArt = null; }
+            if (linuxArt) {
+                recP.set("update_url", baseUrl + "/updates/" + pubVersion + "/" + linuxArt.filename);
+                recP.set("update_sha256", String(linuxArt.sha256 || ""));
+            } else {
+                // No Linux artifact: clear rather than leave a stale pointer to a
+                // previous version's binary. An empty hash refuses the update
+                // (fail-closed) instead of applying the wrong bytes.
+                recP.set("update_url", "");
+                recP.set("update_sha256", "");
+            }
+
             // Publishing IS offering. There is no rollout percentage any more:
             // a published release is served to every client on its next check.
             // `active` remains as the single off switch — see releases.set.

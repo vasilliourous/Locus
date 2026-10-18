@@ -43,7 +43,16 @@ sys.exit(
 )
 
 API = "http://127.0.0.1:8090"
-DOMAIN = os.environ.get("DOMAIN", "networkingguides.duckdns.org")
+# The canonical hub name. This is what lands in each tier's `server` field, and
+# therefore what every client dials for its tunnel — so it is the one value here
+# that a wrong default silently misdirects, rather than failing loudly.
+#
+# Moved off `networkingguides.duckdns.org` in 3.3.2: N4L's filter blocked that
+# name, which took activation, heartbeat and the update path down together. The
+# old name still resolves and the hub still answers on it (05-caddy.sh puts both
+# names on one site block), because deployed pre-3.3.2 builds have it compiled in
+# and cannot be told otherwise. See client/src-tauri/src/locus/contract.rs.
+DOMAIN = os.environ.get("DOMAIN", "networkingguides.jadedns.uk")
 ADMIN_EMAIL = f"admin@{DOMAIN}"
 CREDS = "/root/.pb_admin_creds"
 CODES_FILE = "/tmp/codes.json"

@@ -67,7 +67,7 @@ function signOut() {
     <nav class="sidebar">
       <div class="brand">
         Locus Console
-        <small>networkingguides.duckdns.org</small>
+        <small>networkingguides.jadedns.uk</small>
       </div>
       <button
         v-for="p in pages"

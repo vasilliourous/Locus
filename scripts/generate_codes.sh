@@ -12,8 +12,8 @@
 #   ./scripts/generate_codes.sh <hub_url> <admin_token> <tier> <count>
 #
 # Examples:
-#   ./scripts/generate_codes.sh https://networkingguides.duckdns.org my-token free 50
-#   ./scripts/generate_codes.sh https://networkingguides.duckdns.org my-token strike 20
+#   ./scripts/generate_codes.sh https://networkingguides.jadedns.uk my-token free 50
+#   ./scripts/generate_codes.sh https://networkingguides.jadedns.uk my-token strike 20
 #
 # `free` is the customer-facing Free plan's row; `strike` is the paid plan
 # (called "Full" on the card — the row name is frozen, see
@@ -134,7 +134,7 @@ if [ -z "$HUB_URL" ] || [ -z "$ADMIN_TOKEN" ] || [ -z "$TIER" ] || [ -z "$COUNT"
     echo "Usage: $0 <hub_url> <admin_token> <tier> <count>"
     echo ""
     echo "Arguments:"
-    echo "  hub_url      Admin hub URL (e.g. https://networkingguides.duckdns.org)"
+    echo "  hub_url      Admin hub URL (e.g. https://networkingguides.jadedns.uk)"
     echo "  admin_token  PocketBase ADMIN token (JWT) — on the VPS:"
     echo "               grep PB_TOKEN /root/.pb_admin_creds | cut -d= -f2"
     echo "               (NOT /root/.admin_api_token — that is the app-level"

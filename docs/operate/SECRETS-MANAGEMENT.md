@@ -134,7 +134,7 @@ tracked — but neither of those is a substitute for not writing it down nearby.
 ```bash
 cat > .secrets.env << 'EOF'
 # Locus Production Secrets
-DOMAIN=networkingguides.duckdns.org
+DOMAIN=networkingguides.jadedns.uk
 ADMIN_API_TOKEN=<generate with: openssl rand -base64 32>
 B2_APPLICATION_KEY_ID=your-backblaze-key-id
 B2_APPLICATION_KEY=your-backblaze-application-key
@@ -142,7 +142,7 @@ B2_BUCKET=vpsvpnbackup
 ECO_PASS=your-base64-of-32-bytes-eco-key
 STEALTH_PASS=your-base64-of-32-bytes-stealth-key   # retired tier; see the table above
 STRIKE_PASS=your-base64-of-32-bytes-strike-key
-PB_ADMIN_EMAIL=admin@networkingguides.duckdns.org
+PB_ADMIN_EMAIL=admin@networkingguides.jadedns.uk
 PB_ADMIN_PASS=your-secure-pb-admin-password
 RELEASE_FETCH_SECRET=<generate with: openssl rand -hex 32>
 EOF

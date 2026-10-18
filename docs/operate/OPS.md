@@ -14,8 +14,8 @@ verified-against: server/scripts/, server/setup.sh
 ## Quick Reference
 
 ```bash
-export VPS="root@networkingguides.duckdns.org"
-export PB_API="https://networkingguides.duckdns.org"
+export VPS="root@networkingguides.jadedns.uk"
+export PB_API="https://networkingguides.jadedns.uk"
 export PB_TOKEN="your-pocketbase-admin-token"
 export ADMIN_TOKEN="your-admin-api-token"
 ```
@@ -27,6 +27,14 @@ export ADMIN_TOKEN="your-admin-api-token"
 > address to be written down outlived the server. Resolve the domain instead
 > ([`CLAIMS.md`](CLAIMS.md) §1 and §6). On a small box, watch memory: `free -m`
 > and `systemctl status <svc> | grep Memory`.
+>
+> **Two names serve this hub.** `networkingguides.jadedns.uk` is canonical (since
+> 2026-10-18, `[hub.domain]`); `networkingguides.duckdns.org` is the legacy name
+> ([`hub.domain_legacy`](../state.toml)) and is **served, not redirected**, because
+> every pre-3.3.2 client has it compiled in. `05-caddy.sh` puts both on one site
+> block. **Do not remove the legacy block while an older build is in the field** —
+> that device would be stranded at the activation gate with no path to an update.
+> Both must hold a valid certificate; check them in pairs (A16/A17).
 
 ---
 
@@ -262,13 +270,13 @@ scp -r server root@new-vps:/root/
 #    certificate; SKIP_DNS_CHECK=1 only skips the pre-flight, it does NOT
 #    make TLS work. Setup is idempotent — safe to re-run.
 ssh root@new-vps "apt-get install -y age"   # required for secret decryption
-ssh root@new-vps "DOMAIN=networkingguides.duckdns.org /root/server/setup.sh"
+ssh root@new-vps "DOMAIN=networkingguides.jadedns.uk /root/server/setup.sh"
 
 # 3. Only needed if step 2 ran before DNS resolved: re-issue the certificate.
 ssh root@new-vps "systemctl restart caddy && journalctl -u caddy -n 30 --no-pager | grep -i 'certificate obtained'"
 
 # 4. Verify (expect: 23 passed / 0 failed / 0 warnings)
-ssh root@new-vps "DOMAIN=networkingguides.duckdns.org bash /root/server/scripts/smoke-test.sh"
+ssh root@new-vps "DOMAIN=networkingguides.jadedns.uk bash /root/server/scripts/smoke-test.sh"
 
 # 5. Seed activation codes — a fresh DB has an EMPTY codes collection, so
 #    every activation fails until this is done. codes.json holds the RQ- set.
@@ -303,7 +311,7 @@ ssh root@new-vps "DOMAIN=networkingguides.duckdns.org bash /root/server/scripts/
   scripted deployment — and do not hand-inject limiter chains into
   `/etc/ufw/before.rules` (this locks SSH out entirely and needs console
   recovery). See FIXES.md 2026-09-19.
-- **DNS/TLS**: confirm `dig +short networkingguides.duckdns.org` returns this
+- **DNS/TLS**: confirm `dig +short networkingguides.jadedns.uk` returns this
   host's IP before expecting HTTPS.
 
 ### Verify SSH Protection (fail2ban)
@@ -324,7 +332,7 @@ ssh $VPS "fail2ban-client set sshd unbanip 203.0.113.10"
 B2_APPLICATION_KEY_ID=xxx \
 B2_APPLICATION_KEY=xxx \
 B2_BUCKET=my-vpn-backup-bucket \
-DOMAIN=networkingguides.duckdns.org \
+DOMAIN=networkingguides.jadedns.uk \
 ssh root@new-vps 'bash -s' < server/restore.sh
 ```
 
@@ -453,7 +461,7 @@ done
 
 ## Admin Console (web UI)
 
-**`https://networkingguides.duckdns.org/admin/`** — the everyday way to run the
+**`https://networkingguides.jadedns.uk/admin/`** — the everyday way to run the
 hub. Everything below that used to need SSH + Python + sqlite is a form now.
 
 Sign in with the admin token (`ADMIN_API_TOKEN` from `/etc/environment`; on the
@@ -550,7 +558,7 @@ deliberate, documented operation.
 
 ```bash
 # Is the bundle present and being served?
-ssh $VPS "ls /var/www/admin/index.html && curl -s -o /dev/null -w '%{http_code}\n' https://networkingguides.duckdns.org/admin/"
+ssh $VPS "ls /var/www/admin/index.html && curl -s -o /dev/null -w '%{http_code}\n' https://networkingguides.jadedns.uk/admin/"
 
 # Redeploy it (builds locally, uploads, verifies)
 server/scripts/deploy-console.sh
@@ -657,7 +665,7 @@ git tag v1.1.0 && git push origin v1.1.0
 DRY_RUN=1 server/scripts/publish-release.sh 1.1.0 --from-github
 
 # 3. Publish. This also activates it — there is no rollout step.
-PB_ADMIN_EMAIL=admin@networkingguides.duckdns.org PB_ADMIN_PASS=... \
+PB_ADMIN_EMAIL=admin@networkingguides.jadedns.uk PB_ADMIN_PASS=... \
   server/scripts/publish-release.sh 1.1.0 --from-github
 ```
 
@@ -910,7 +918,7 @@ head -c 16 /tmp/restore.db | xxd  # Should show "SQLite format 3\000"
 
 # Restore
 ssh $VPS "systemctl stop pocketbase"
-scp /tmp/restore.db root@networkingguides.duckdns.org:/opt/pocketbase/pb_data/data.db
+scp /tmp/restore.db root@networkingguides.jadedns.uk:/opt/pocketbase/pb_data/data.db
 ssh $VPS "
   rm -f /opt/pocketbase/pb_data/data.db-wal /opt/pocketbase/pb_data/data.db-shm  # stale WAL must go
   chown pocketbase:pocketbase /opt/pocketbase/pb_data/data.db
@@ -923,7 +931,7 @@ ssh $VPS "
 
 # If the restored admin password doesn't match the secrets file (old DB era),
 # align it so documented credentials work:
-ssh $VPS "cd /opt/pocketbase && ./pocketbase admin update admin@networkingguides.duckdns.org '<PB_ADMIN_PASS>'"
+ssh $VPS "cd /opt/pocketbase && ./pocketbase admin update admin@networkingguides.jadedns.uk '<PB_ADMIN_PASS>'"
 
 # Verify
 curl -s "$PB_API/api/health"
@@ -948,8 +956,8 @@ table for rate limiting (10 lookups / 10 min per fingerprint), so it cannot be
 used as an unlimited code-enumeration oracle.
 
 ```bash
-VPS=root@networkingguides.duckdns.org
-PB_API=https://networkingguides.duckdns.org   # adjust to the hub base URL
+VPS=root@networkingguides.jadedns.uk
+PB_API=https://networkingguides.jadedns.uk   # adjust to the hub base URL
 
 # 1. Back up the hooks directory (reversible).
 ssh $VPS "cp -a /opt/pocketbase/pb_hooks /root/pb_hooks.bak.$(date +%s)"

@@ -111,7 +111,7 @@ KEYERR
 fi
 
 # ── Required variables (may be set by decrypted secrets or environment) ──
-: "${DOMAIN:?DOMAIN is required (e.g. networkingguides.duckdns.org)}"
+: "${DOMAIN:?DOMAIN is required (e.g. networkingguides.jadedns.uk)}"
 : "${FORCE:=}"  # Set to 1 to continue on module failure
 
 # ── Deployment toggles (resolved once, exported to every module) ──

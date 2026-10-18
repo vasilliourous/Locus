@@ -213,7 +213,7 @@ large travels from a browser.
 DRY_RUN=1 server/scripts/publish-release.sh 3.1.0 --from-github
 
 # Publish. There is no rollout to set; publishing is offering.
-PB_ADMIN_EMAIL=admin@networkingguides.duckdns.org PB_ADMIN_PASS=... \
+PB_ADMIN_EMAIL=admin@networkingguides.jadedns.uk PB_ADMIN_PASS=... \
   server/scripts/publish-release.sh 3.1.0 --from-github
 ```
 
@@ -233,8 +233,8 @@ than as "updates silently never arrive". See `client/docs/SIGNING.md`.
 ### Confirm the hub is serving it
 
 ```bash
-curl -s https://networkingguides.duckdns.org/api/release
-curl -s "https://networkingguides.duckdns.org/api/update?version=2.2.0&platform=linux"
+curl -s https://networkingguides.jadedns.uk/api/release
+curl -s "https://networkingguides.jadedns.uk/api/update?version=2.2.0&platform=linux"
 server/scripts/verify-release.sh 3.1.0      # read-only; hashes the SERVED bytes
 ```
 

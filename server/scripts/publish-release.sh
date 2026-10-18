@@ -29,8 +29,8 @@
 #   See FIXES.md entry 41.
 #
 # Environment:
-#   VPS              ssh target (default root@networkingguides.duckdns.org)
-#   PB_API           hub base URL (default https://networkingguides.duckdns.org)
+#   VPS              ssh target (default root@networkingguides.jadedns.uk)
+#   PB_API           hub base URL (default https://networkingguides.jadedns.uk)
 #   PB_ADMIN_EMAIL   PocketBase admin email   ─┐ required for update_config
 #   PB_ADMIN_PASS    PocketBase admin password ─┘ (or PB_TOKEN to skip login)
 #   RELEASE_DIR      where to find the artifacts (default ./release-artifacts)
@@ -89,12 +89,12 @@ _site_pick_ssh_target() {
     if ssh -o BatchMode=yes -o ConnectTimeout=5 locus-hub true 2>/dev/null; then
         printf 'locus-hub'
     else
-        printf 'root@networkingguides.duckdns.org'
+        printf 'root@networkingguides.jadedns.uk'
     fi
 }
 _VPS_CHOSEN="$(_site_pick_ssh_target)"
 VPS="${_VPS_CHOSEN}"
-PB_API="${PB_API:-https://networkingguides.duckdns.org}"
+PB_API="${PB_API:-https://networkingguides.jadedns.uk}"
 # Kept only so an older invocation that sets ROLLOUT_PERCENT still runs; the
 # value is written for schema compatibility and is IGNORED by every reader.
 #
