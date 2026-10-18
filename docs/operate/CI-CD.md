@@ -82,11 +82,43 @@ cascaded — no `frontend-dist`, four failed builds, no release.
 ```sh
 gh api repos/:owner/:repo -q .private          # true + Free plan = no minutes
 gh api repos/:owner/:repo/actions/artifacts -q '[.artifacts[].size_in_bytes]|add//0'
+gh api repos/:owner/:repo/actions/caches -q '.actions_caches|length'
+gh api repos/:owner/:repo/actions/caches -q '[.actions_caches[].size_in_bytes]|add//0'
 ```
 
-If the second number is small (or zero) and uploads still fail, it is billing, not
-storage. **Remedy:** restore billing, or make the repository public — public repos
-get Actions minutes on the Free plan, which is what unblocked 3.3.1.
+If the artifact number is small (or zero) and uploads still fail, look at the
+**caches before concluding it is billing** — added 2026-10-18 from a recurrence.
+
+**Caches and artifacts share one storage allowance.** On this repo the artifacts
+were 0 bytes and the caches were **22 entries / ~7.4 GB**, almost all of it four
+`rust-*-build` caches at 0.9–2.2 GB each. That alone exceeds the Free plan's 500 MB,
+so every upload failed on a repository that stored no artifacts at all. Delete them
+by id — the collection endpoint requires a `key` parameter, so "delete all caches"
+is a loop:
+
+```sh
+gh api repos/:owner/:repo/actions/caches -q '.actions_caches[].id' |
+while read -r id; do gh api -X DELETE "repos/:owner/:repo/actions/caches/$id"; done
+```
+
+> **Deleting them does not unblock immediately.** Usage is recalculated every
+> **6–12 hours**, so the next run still fails with the same message and it is easy
+> to conclude the deletion did not work. It did; the meter has not moved.
+> Confirm with `gh api /users/<user>/settings/billing/usage` and look for
+> `Actions storage` on this repository.
+
+**The durable fix is the `purge-caches` job** (added 2026-10-18, at the bottom of
+`client.yml`). `Swatinem/rust-cache` has no size limit of its own — it waits for
+GitHub's 10 GB eviction, which a 500 MB allowance never reaches — so the workflow
+now deletes caches older than seven days every Monday.
+
+It runs on `schedule` and `workflow_dispatch` **only**, never on a push: on a push
+it would race the builds writing those caches. That is also why the purge is not
+tied to a release — by the time a release fails on a full quota, the upload that
+needed the space has already gone.
+
+**Remedy:** restore billing, or make the repository public — public repos get
+Actions minutes and storage on the Free plan, which is what unblocked 3.3.1.
 
 **Artifact retention cleaning is still worth doing, for a different reason.** Each
 release run leaves ~800 MB (seven artifacts across four platforms). They are not
