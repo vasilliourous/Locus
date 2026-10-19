@@ -911,8 +911,11 @@ for p in docs:
 #   * `check-consistency.sh` itself — its comments QUOTE stale paths as examples
 #     of what it catches, and a guard that flags its own documentation is a guard
 #     the next reader disables.
-#   * `docs/history/` and `docs/reference/FIXES.md` — historical logs cite old
-#     paths on purpose; they record what happened.
+#   * `docs/history/`, `docs/archive/` and `docs/reference/FIXES.md` — historical
+#     logs cite old paths on purpose; they record what happened. (FIXES.md is now
+#     a summary index rather than a transcript, so this exemption is smaller than
+#     it was; it is kept because the summary still names the old paths the rules
+#     were learned on.)
 #
 # The extensions are the languages that can carry a path in a comment or string.
 # Deliberately NOT included: `.json`/lockfiles (generated, and full of unrelated
@@ -4508,6 +4511,78 @@ elif ! grep -q 'linuxArt' "$ADMIN_HOOK" 2>/dev/null; then
     bad "  pair one platform's URL with another's hash."
 else
     ok "both update_config writers set the legacy update_url/update_sha256 pair"
+fi
+
+echo
+echo "════════════════════════════════════════════════════════════"
+echo "36. Every hub call can verify the hub on a machine with an old root store"
+
+# ── WHY THIS GUARD EXISTS ──
+#
+# On 2026-10-18 a student on Windows could not activate, on either plan, every
+# time: "client error (Connect): invalid peer certificate: Expired" for a hub
+# certificate issued that morning and valid for three months.
+#
+# The cause was not the hub. `locus/activation.rs` built its own
+# `reqwest::Client`, and a bare builder uses `rustls-platform-verifier`, which on
+# Windows reads ONLY the Windows certificate store. The hub's chain is anchored at
+# `ISRG Root X2`, an ECDSA root that reaches Windows machines solely through
+# root-certificate update servicing. A machine that has not taken those updates
+# has no anchor; rustls does not chase the certificate's AIA extension; and
+# webpki's "no path to an anchor" surfaces as `InvalidCertificate(Expired)`.
+#
+# The lesson is the one this repository keeps paying for: a policy copied into
+# several places drifts. Activation, heartbeat and the update download each had
+# their own client, and only the shared one in `utils::network` had a fallback.
+#
+# The rule this asserts: a hub call is made through `locus::hub::client`, which
+# tries the platform store and falls back to the compiled-in roots. A hand-built
+# `reqwest::Client::builder()` in the hub-facing modules is the defect.
+#
+# VERIFIED TO FAIL: adding `.build()` on a `reqwest::Client::builder()` to
+# `locus/heartbeat.rs` produces the BAD line below. Removing the bundled-roots
+# fallback from `locus/hub.rs` produces the second.
+# ─────────────────────────────────────────────────────────────
+LOCUS_DIR="$REPO/client/src-tauri/src/locus"
+
+if [ ! -d "$LOCUS_DIR" ]; then
+    warn "no client/src-tauri/src/locus — this guard cannot run"
+else
+    # Only the hub-facing modules: these are the ones that talk to the hub over
+    # TLS. `hub.rs` is where the client belongs and is allowed to build one.
+    rogue_clients=$(grep -rlE 'reqwest::Client::builder\(\)' "$LOCUS_DIR" 2>/dev/null \
+        | grep -v '/hub\.rs$' || true)
+    if [ -n "$rogue_clients" ]; then
+        for f in $rogue_clients; do
+            bad "hub-facing module builds its own reqwest client: ${f#"$REPO"/}"
+            bad "  A bare client trusts only the OS certificate store. On a Windows"
+            bad "  machine without the ISRG Root X2 update that cannot verify the hub,"
+            bad "  and the student sees \"invalid peer certificate: Expired\" for a"
+            bad "  valid certificate. Use locus::hub::client instead."
+        done
+    else
+        ok "no hub-facing module builds its own reqwest client"
+    fi
+
+    HUB_RS="$LOCUS_DIR/hub.rs"
+    if [ ! -f "$HUB_RS" ]; then
+        bad "locus/hub.rs is gone — nothing provides the root-store fallback"
+    else
+        if ! grep -q 'webpki_roots::TLS_SERVER_ROOTS' "$HUB_RS"; then
+            bad "locus/hub.rs no longer uses the bundled roots — the Windows fallback is inert"
+        else
+            ok "the hub client has a bundled-roots fallback (webpki_roots)"
+        fi
+        # The panic that proves a fallback was never run: `ClientConfig::builder()`
+        # refuses to guess a crypto provider, and this crate enables only `ring`.
+        if grep -qE 'rustls::ClientConfig::builder\(\)' "$HUB_RS"; then
+            bad "locus/hub.rs calls rustls::ClientConfig::builder(), which panics without a"
+            bad "  process-level crypto provider — the fallback would crash the activation"
+            bad "  screen instead of fixing it. Use builder_with_provider."
+        else
+            ok "the bundled-roots TLS config names its crypto provider"
+        fi
+    fi
 fi
 
 echo

@@ -19,6 +19,7 @@ pub mod credential;
 pub mod device;
 pub mod expiry;
 pub mod heartbeat;
+pub mod hub;
 pub mod runtime;
 pub mod store;
 pub mod tier;

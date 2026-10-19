@@ -15,14 +15,12 @@ across `server/`, `scripts/`, and `client/src-tauri/src/locus/` return
 nothing; `"protocol"`, `v2ray`, `trojan` in the hooks and Locus modules
 return nothing.
 
-> **Updated `9a91da1`, corrected 2026-10.** The term model, renewal and
-> search-by-name are **built** and documented in
-> [`10-lifecycle.md`](10-lifecycle.md) and [`09-console.md`](09-console.md).
-> **Device binding and one-code-per-device were removed, not finished** — the
-> live model is a single-use, unbound code; see
-> [`../reference/DEVICE-IDENTITY.md`](../reference/DEVICE-IDENTITY.md). This
-> file is the anti-drift guard, so it is updated *with* the change rather than
-> after it: anything below is still genuinely absent.
+> **This file is updated *with* a change, never after it.** The term model,
+> renewal and search-by-name are built ([`10-lifecycle.md`](10-lifecycle.md),
+> [`09-console.md`](09-console.md)); **device binding was removed, not
+> finished** — the live model is a single-use, unbound code
+> ([`../reference/DEVICE-IDENTITY.md`](../reference/DEVICE-IDENTITY.md)).
+> Anything still listed below is genuinely absent.
 
 ## 17.0 Still not built
 

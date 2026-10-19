@@ -69,8 +69,8 @@ Locus/
 └── legacy/        retired clients. REFERENCE ONLY — read it, never build it.
 ```
 
-The per-directory detail (every leaf, and what moved where in the 2026-09-23
-restructure) is in [`docs/CONTEXT.md`](docs/CONTEXT.md) and
+Per-directory detail is in [`docs/CONTEXT.md`](docs/CONTEXT.md); what moved in
+the 2026-09 separation, and which old paths are dead, is
 [`client/docs/RESTRUCTURE.md`](client/docs/RESTRUCTURE.md).
 
 > **Build output is not committed.** `client/target/`, `node_modules/`, `dist/`,

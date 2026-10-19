@@ -35,9 +35,6 @@ Instructions for AI coding agents working in `client/`, the Locus desktop client
 | measuring the traffic graph's performance | [`scripts/perf/GUIDE.md`](scripts/perf/GUIDE.md) — the macOS harness (`pnpm perf:build` / `perf:run` / `perf:compare`) |
 | anything else in the project | `../docs/README.md` — the single documentation index |
 
-> **Added 2026-10-05.** Four of these were reachable from nowhere: they were
-> written, correct, and findable only by browsing the filesystem.
-
 ## Traps this client has already paid for
 
 Each of these cost a real report. They are listed here because the *shape* of the

@@ -7,21 +7,12 @@ authoritative-for: the module map and the behaviour each Locus module owns
 verified-against: client/src-tauri/src/locus/
 ```
 
-> **Title note (2026-10-05).** This file was called *"the exact modules to write"*,
-> which was true when it was the specification and is false now: the modules were
-> written. The title now says what the document is — a map — and the banner below
-> already carries the part that matters, which is that where this file and the code
-> disagree, the code wins.
-
 > **Design record — only partly a to-do.** `client/src-tauri/src/locus/` exists and
 > carries this behaviour: `contract`, `activation`, `device`, `heartbeat`, `tier`,
 > `store`, `apply`, `runtime`, and `update/`. Where this document and the code
 > disagree, **the code is right** and this file is a bug — fix it in the same
-> change. The module-by-module descriptions below still describe the intended
-> contracts and are useful for that. Companion to `ARCHITECTURE.md` (what to cut)
-> and `UPDATE-ARCHITECTURE.md` (updater).
-> This file is the specification for what must be **written**, module by module, with
-> the old client cited as the reference for each contract.
+> change. Companion to `ARCHITECTURE.md` (what to cut) and
+> `UPDATE-ARCHITECTURE.md` (updater).
 >
 > Convention: `locus/…` is new Rust we own. `cmd/`, `core/`, `config/`, `feat/` are
 > inherited from Verge and are touched only as noted.
@@ -40,6 +31,7 @@ src-tauri/src/
 ├─ locus/
 │  ├─ mod.rs
 │  ├─ contract.rs        # every wire name (HUB_URL, tier payload, platform keys, artifact names)
+│  ├─ hub.rs             # the one HTTP client: platform roots, bundled-roots fallback
 │  ├─ activation.rs      # code validation + /api/activate + /api/code-lookup
 │  ├─ device.rs          # device fingerprint (per-OS) — a rate-limit/support key
 │  ├─ credential.rs      # the activation code mirrored to a machine-scoped store
@@ -176,6 +168,34 @@ retries separately from heartbeat. Port both; a school network drops requests.
 
 ---
 
+## 1b. `locus/hub.rs` — the one hub HTTP client
+
+Every call to the hub — activation, heartbeat, the update download — goes through
+`hub::client`, which returns a client **and**, when the platform store was
+rejected, a diagnosis naming what failed and what was used instead.
+
+**Why it is one module.** The three call sites each built their own
+`reqwest::Client`. They shared a policy on timeout, User-Agent and connection
+pooling, and that policy is harmless when it drifts — except for one setting:
+which certificate roots are trusted. A bare builder trusts only the OS store,
+which on Windows means a machine that has not taken its root-certificate updates
+cannot verify the hub's chain (anchored at `ISRG Root X2`) and reports it as
+`Expired`. See `docs/reference/FIXES.md`, 2026-10-18.
+
+| Behaviour | Why |
+|---|---|
+| Platform store first | Honours operator-installed roots and corporate proxies a compiled-in list cannot know about |
+| Bundled `webpki-roots` fallback | Ships with the binary, so it needs no OS update; only a **certificate** failure swaps to it |
+| Transport failures are not remembered | A school network dropping one packet must not pin the process to one store for the session |
+| `no_proxy()` | The hub is reached directly — routing it through the tunnel would make activation depend on the Core the entitlement is meant to start |
+| Per-call `Timeout` | Activation 30 s, heartbeat 15 s, download 600 s; the difference is deliberate and named |
+
+Guarded by `check-consistency.sh` §36, which fails if a hub-facing module builds
+its own client, if the bundled fallback disappears, or if the TLS config stops
+naming its crypto provider.
+
+---
+
 ## 2. `locus/heartbeat.rs`
 
 **Reference:** `legacy/wails-client/internal/heartbeat/heartbeat.go`.
@@ -290,12 +310,9 @@ class as `download_* → update_*`.)
 | free | Shadowsocks TCP | the free plan (port 8443). The `eco` seed row was **removed 2026-10-06**: the live hub held no code carrying it, and a duplicate row on one port renders in the console as a second plan. The on-box names (`shadowsocks-eco`, `tc-eco-cap`, `ECO_PASS`) are infrastructure, not a tier. See `docs/business/04-tiers.md` §4.1 and §4.5 |
 | strike | + UDP over TCP (UoT) | the paid plan (port 8445), customer-facing name **Full**. Gated on `udp_relay` **and** `uot_port > 0` |
 
-> **`stealth` was retired on 2026-10-05** when the paid ladder was merged into a
-> single plan. It is deliberately **absent** from the table rather than listed as
-> retired: the previous row documented a local `clash-verge-stealth-notun.yaml`
-> profile that embedded a live tier PSK, and leaving the instructions for it in
-> place after the tier died is how such a key gets re-committed. Nothing in the
-> client or the hub resolves `stealth` any more.
+> **`stealth` is deliberately absent from this table, not listed as retired.**
+> Instructions for a dead tier are how its PSK gets re-committed; nothing in the
+> client or the hub resolves `stealth`.
 
 The GC rule for `udp_relay`: it is only meaningful when `uot_port > 0`; an operator
 toggling one without the other is editing a half-configured tier (noted in

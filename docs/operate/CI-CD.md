@@ -7,15 +7,10 @@ authoritative-for: the client CI pipeline (.github/workflows/client.yml)
 verified-against: .github/workflows/client.yml
 ```
 
-> **Note:** the archived client's pipeline was removed and replaced. `build.yml`
-> built and released `legacy/wails-client/` — the **retired** Go + Wails + sing-box
-> client — and never built the shipping fork. It is deleted, along with the
-> version-cutting scripts it depended on (`bump.sh`, `server/scripts/bump-version.sh`,
-> `stamp-syso.py`, `smoke-bump.sh`, `scripts/release-cut.sh`, root `VERSION`, and the
-> committed `rsrc_windows_*.syso` resources).
->
-> **The replacement is `.github/workflows/client.yml`**, which builds, **signs**
-> and releases the shipping fork (`client/`, the Tauri fork of Clash Verge Rev).
+> **This pipeline replaced one that never built the shipping client.** Do not
+> re-add a root `VERSION`, a root `bump.sh`, or committed `.syso` resources: they
+> versioned the retired client, and the shipping client's version sites are
+> `[client.version_sites]` in [`../state.toml`](../state.toml).
 
 ---
 

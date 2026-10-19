@@ -105,22 +105,15 @@ No live file carries the old name any more.
 
 ### The hub's old hostname is a third class, and for the same reason
 
-`networkingguides.duckdns.org` is `[hub.domain_legacy]` — **not** a leftover to
-tidy. Since 3.3.2 the canonical hub is `networkingguides.jadedns.uk` (a name under
-a domain the operator owns; N4L filtered `*.duckdns.org`, which took activation,
-heartbeat and the update path down together, so a device could not fetch the build
-that would have fixed it).
+`[hub.domain_legacy]` in [`state.toml`](state.toml) is **not** a leftover to tidy.
+Every build before 3.3.2 has it compiled in, and the heartbeat — the only channel
+that carries a hub move — needs a working hub to reach. It is therefore **served
+from the same Caddy site block, not redirected**: a 308 requires the old name to
+present its own certificate first, which is exactly what failed.
 
-The old name is **served from the same Caddy site block, not redirected**. Every
-build before 3.3.2 has it compiled in, and the heartbeat — the only channel that
-carries a hub move — needs a working hub to reach. A redirect cannot help: a 308
-requires the old name to present its own valid certificate first, which is exactly
-what failed.
-
-**Do not delete it while any earlier build is in the field.** The failure is
-permanent and silent — the device sits at the activation gate, unable even to
-update out of it. Set `LEGACY_DOMAIN=""` only once none remain.
-`check-consistency.sh` §32 enforces that the deployment keeps serving it, and
+**Do not delete it while any earlier build is in the field** — the failure is
+permanent and silent, leaving the device at the activation gate unable to update
+out of it. `check-consistency.sh` §32 enforces that it keeps being served, and
 `contract::LEGACY_HUB_URL` records it beside every other wire name.
 
 ---
@@ -177,8 +170,7 @@ hook traps are owned by
 
 ---
 
-*Rewritten 2026-10-05 as part of the documentation overhaul: the era-trust banners,
-the retired Wails client's structure and stack, the duplicate tier and version
-tables, and the per-round VPS bug lists were cut — they are in `archive/`,
-`FIXES.md` and `business/04-tiers.md`, which own them. What remains is what a
-reader needs before touching the code.*
+*Everything cut from this page — duplicate tier and version tables, the retired
+client's structure, the per-round VPS bug lists — lives where it is owned:
+`archive/`, [`reference/FIXES.md`](reference/FIXES.md) and
+[`business/04-tiers.md`](business/04-tiers.md).*

@@ -19,10 +19,8 @@ verified-against: client/src-tauri/src/locus/, client/docs/
 > a bug — fix it in the same change.
 >
 > **Fork base:** Clash Verge Rev `v2.5.5` (`22e3f1ac`), copied into `client/`, history removed.
-> **Reference implementation:** the retired Wails client at `legacy/wails-client/` (formerly
-> `v5/client/`). It is *reference only* — it does not ship — but three years of
-> field bugs are recorded in its `FIXES.md` and half of this document exists to make
-> sure the fork does not re-earn them.
+> **Reference implementation:** `legacy/wails-client/` — reference only, never built.
+> Its numbered field bugs are the reason §8 exists.
 
 ---
 
@@ -40,11 +38,10 @@ need written architecture:
 2. **Verge has no concept of a user.** There is no account, no code, no device, no
    entitlement. Everything Locus needs — activation, tiers, heartbeat, grace — is
    additive, and must not fight Verge's "profiles are the source of truth" model.
-3. **The old client is a specification.** Its `updatecfg` package documents a
-   three-layer contract between publish scripts, the hub hook, and the client, where
-   a *rename* between layers is load-bearing for already-deployed clients. A rewrite
-   that "simplifies" that rename breaks every client in the field. That is exactly the
-   kind of thing a fresh implementation gets wrong, so it is written down here.
+3. **The wire names are a contract.** Three layers — publish scripts, the hub hook,
+   the client — carry names that *rename* between layers, and that rename is
+   load-bearing for already-deployed clients. A rewrite that "simplifies" it breaks
+   every client in the field, so it is written down here.
 
 ---
 
@@ -108,12 +105,11 @@ upstream terms, as the root `LICENSE` carve-out states), bundle id
   clash-verge-i18n, clash-verge-limiter}`.
 - **A bundled binary, not a library:** `externalBin: ["sidecar/verge-mihomo",
   "sidecar/verge-mihomo-alpha"]` — mihomo ships as a bundled executable.
-  This is why the engine question is settled by construction: the fork *is* a mihomo
-  client, and `legacy/wails-client`'s `ENGINE-SWAP-ANALYSIS.md` Track B is moot.
+  The fork *is* a mihomo client, by construction.
   **Note the two senses of "sidecar" in this codebase.** This one is the *Tauri
-  `externalBin` directory name* — where the core binary lives, still accurate. The
-  other sense, a *run mode* in which the app hosted the core as its own child, is
-  **removed** (decision 5c below); do not read this bullet as that mode surviving.
+  `externalBin` directory name* — where the core binary lives. The other sense, a
+  *run mode* in which the app hosted the core as its own child, is **removed**
+  (decision 5c below); do not read this bullet as that mode surviving.
 - **Git dependencies (five, all reachable only over the network):**
 
   | Crate | Pin | Note |
@@ -337,8 +333,8 @@ profile *pipeline* survives even though the profile *UI* does not (§6.2 item 2)
 
 ## 8. Reference: bugs the old client paid for
 
-From `legacy/wails-client` and its `FIXES.md` (60 numbered entries). These are the ones
-the fork can plausibly re-earn:
+Paid for by `legacy/wails-client`'s numbered field bugs. These are the ones the fork
+can plausibly re-earn:
 
 | # | Bug | Fork risk |
 |---|---|---|

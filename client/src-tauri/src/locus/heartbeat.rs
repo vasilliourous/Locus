@@ -35,8 +35,9 @@ pub const MAX_INTERVAL: Duration = Duration::from_secs(2 * 60 * 60);
 /// on every heartbeat.
 pub const GRACE_PERIOD: Duration = Duration::from_secs(7 * 24 * 60 * 60);
 
-/// Per-attempt timeout. School networks are slow, not absent.
-const REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
+// The per-attempt timeout lives in `locus::hub::Timeout::Heartbeat` now, beside
+// the other two hub timeouts, because a client built here would trust only the
+// operating system's certificate store — see that module.
 
 /// Proportions of jitter applied to each interval.
 ///
@@ -419,27 +420,27 @@ pub async fn beat(credential: &Credential, fingerprint: &str) -> BeatOutcome {
         token: "",
     };
 
-    let client = match reqwest::Client::builder()
-        .timeout(REQUEST_TIMEOUT)
-        .pool_idle_timeout(Duration::from_secs(30))
-        .user_agent(concat!("Locus-Client/", env!("CARGO_PKG_VERSION")))
-        .build()
-    {
-        Ok(client) => client,
-        Err(error) => {
-            return BeatOutcome::Unreachable {
-                reason: format!("could not build the hub client: {error}"),
-            };
-        }
-    };
-
     // The hub base URL is resolved, not read from the constant: a device on a
     // network that refuses the default hostname honours a stored override. See
     // `contract::resolve_hub_url` — and note this is the ONE place a heartbeat
     // finds its hub, so the override cannot be honoured inconsistently.
     let hub = crate::locus::contract::hub_url().await;
 
-    let response = match client.post(format!("{hub}/api/heartbeat")).json(&body).send().await {
+    // The shared client, so a machine whose OS certificate store cannot verify
+    // the hub still heartbeats. See `locus::hub` for why a hand-built client
+    // fails on Windows.
+    let hub_client = crate::locus::hub::client(&hub, crate::locus::hub::Timeout::Heartbeat).await;
+    if hub_client.diagnosis().is_some() {
+        tracing::warn!(target: "locus::hub", "{}", hub_client.describe());
+    }
+
+    let response = match hub_client
+        .client()
+        .post(format!("{hub}/api/heartbeat"))
+        .json(&body)
+        .send()
+        .await
+    {
         Ok(response) => response,
         Err(error) => {
             return BeatOutcome::Unreachable {

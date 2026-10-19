@@ -166,7 +166,7 @@ activated".
 | Field | Meaning |
 |---|---|
 | `activated` | This device has a complete, usable entitlement record. |
-| `tier` | The tier name (`free`/`strike` — the customer-facing names are **Free**/**Full**), when known. `stealth` was retired 2026-10-05 and is never returned. |
+| `tier` | The tier name (`free`/`strike` — customer-facing **Free**/**Full**), when known. `stealth` is never returned. |
 | `deviceId` | The fingerprint, **truncated** — enough for support, not a shareable id. |
 | `connected` | The core works. The UI derives its phase from this **and** `ready`. |
 | `ready` | The core can carry a packet (observed, not latched). |

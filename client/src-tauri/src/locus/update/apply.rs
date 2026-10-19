@@ -157,15 +157,15 @@ pub async fn download(
         .unwrap_or("locus-update.bin");
     let destination = staging_dir.join(format!("{}.download", sanitize(file_name)));
 
-    let client = reqwest::Client::builder()
-        // Downloads happen on school wifi and can be slow; this is an overall
-        // ceiling, not a per-read timeout.
-        .timeout(std::time::Duration::from_secs(600))
-        .user_agent(concat!("Locus-Client/", env!("CARGO_PKG_VERSION")))
-        .build()
-        .context("could not build the download client")?;
+    // The shared hub client, not a hand-built one. The update download is the
+    // path that matters MOST when a machine's OS certificate store is the
+    // problem: the update is how such a machine gets fixed, so a client that
+    // cannot verify the hub here traps it. See `locus::hub`.
+    let hub = crate::locus::contract::hub_url().await;
+    let hub_client = crate::locus::hub::client(&hub, crate::locus::hub::Timeout::Download).await;
 
-    let response = client
+    let response = hub_client
+        .client()
         .get(&offer.url)
         .send()
         .await

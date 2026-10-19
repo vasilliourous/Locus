@@ -7,11 +7,8 @@ authoritative-for: cutting a release (tag → CI → hub publish)
 verified-against: client/scripts/release-version.mjs, server/scripts/publish-release.sh
 ```
 
-> **Note:** the old release-cutting machinery is gone. `scripts/release-cut.sh`,
-> root `bump.sh`, `bump-version.sh`, `stamp-syso.py`, `smoke-bump.sh`, root
-> `VERSION`, the committed `rsrc_windows_*.syso`, and `.github/workflows/build.yml`
-> are **deleted** — they versioned the retired Wails client and never the fork.
-> What replaced them:
+> **Note:** the old release-cutting machinery is **deleted**, not repointed — it
+> versioned the retired client and never the fork. What replaced it:
 > - CI at `.github/workflows/client.yml` (**repo root** — GitHub ignores a workflow
 >   under `client/.github/`). A `v*` tag builds, **signs** and releases all four
 >   platforms plus `manifest.json`.
@@ -20,21 +17,18 @@ verified-against: client/scripts/release-version.mjs, server/scripts/publish-rel
 >   `client/src-tauri/tests/version_consistency.rs`). There is no root `VERSION`.
 >
 > **A bump is one command.** `pnpm release-version X` (from `client/`) writes
-> **all five** version sites: `package.json`, `src-tauri/Cargo.toml`,
-> `src-tauri/tauri.conf.json`, `client/Cargo.lock`, **and `docs/state.toml`'s
-> `[client.version]`**. The data file is the one that is easy to miss — it is not
-> a manifest, it records the client version as a **derived** fact with
-> `provenance = "derived"`, and `check-consistency.sh` §7 checks it against
-> `client/package.json`, failing the `verify` job with `BAD client.version`.
-> The script handles it so a release cannot forget it; if a sixth site ever
+> every site listed in `[client.version_sites]` — including `docs/state.toml`,
+> the one that is easy to miss because it is a data file, not a manifest.
+> `check-consistency.sh` §7 checks it against `client/package.json` and fails the
+> `verify` job with `BAD client.version`. The script handles it so a release
+> cannot forget it; if a further site ever
 > appears, add it to `client/scripts/release-version.mjs`. `cargo fetch --locked`
 > separately catches a stale `Cargo.lock` in each build job.
 >
 > **The list is data, not prose.** `docs/state.toml` `[client.version_sites]`
-> holds exactly these five paths with `provenance = "derived"`, and
-> `check-consistency.sh` §9 recomputes it from `release-version.mjs` and fails on
-> disagreement — so "all five" cannot drift, and a sixth site fails the build
-> instead of silently invalidating this sentence.
+> holds those paths with `provenance = "derived"`, and `check-consistency.sh` §9
+> recomputes it from `release-version.mjs` and fails on disagreement — a new site
+> fails the build instead of silently invalidating this paragraph.
 >
 > **Read `UPDATE-SYSTEM.md` for the full pipeline**, and `client/docs/SIGNING.md`
 > for key custody. The short version:
@@ -174,7 +168,8 @@ gh api repos/:owner/:repo -q .private   # true on a Free plan means CI cannot ru
 Recorded because it exercised every gate at once, and because the ordering is the
 lesson.
 
-1. `pnpm release-version 3.3.1` wrote all five sites; `check-consistency.sh` green.
+1. `pnpm release-version 3.3.1` wrote every site in `[client.version_sites]`;
+   `check-consistency.sh` green.
 2. The **committed** tree failed §8 — two documents (`RELEASE-RECOVERY.md`,
    `DOC-AUDIT.md`) existed only in the working tree while nine documents linked to
    them. A local run passed and CI failed, because the difference between the two
@@ -290,33 +285,16 @@ not before widening a rollout, because there is no rollout to widen.
 
 ## History — the removed release-cutting path (for context only)
 
-The following is kept because it explains why certain files disappeared and
-which failure modes the descendants of this project already hit. **None of the
-commands below work any more** — the scripts they name are deleted.
+**Do not reintroduce any of it.** A root `VERSION`, `bump.sh`, the syso stamping
+and `scripts/release-cut.sh` drove **only** the retired Wails client; the shipping
+fork was never wired into them, which is why they were removed rather than
+repaired. Three failure modes are worth remembering:
 
-The old flow was, in order:
+- **A committed binary resource can be stale while every text check passes.** The
+  generated directive and the committed artifact disagreed at 2.1.0 and again at
+  2.2.7. Never ship a generated artifact that nothing regenerates.
+- **`--no-verify` skipped the artifact update, not just the tests.**
+- **A skipped CI job renders as a green check.** Seven green checks, no release.
 
-1. `./bump.sh <arg> --no-verify` — rewrote six version-bearing files in
-   `legacy/wails-client/` and stamped `rsrc_windows_{amd64,arm64}.syso` via
-   `stamp-syso.py`. It deliberately did not touch git.
-2. A stale-artifact gate read the version back out of the committed `.syso`
-   bytes and refused to tag if they did not match root `VERSION`.
-3. `git add -A && commit && tag -a v<version>`, then push `main` **and** the tag
-   (via `scripts/release-cut.sh`).
-4. CI built four platforms on the tag and created the GitHub Release.
-
-Failures worth remembering if a successor reintroduces any of this:
-
-- **A committed Windows resource can be stale while every text check passes.**
-  The `go:generate` *directive* said `2.2.8`; the committed `.syso` *artifact*
-  said `2.2.6`. Happened at 2.1.0 (stamped `2.0.0`, product `MyVPN`) and again at
-  2.2.7. This is why the gate eventually read the version out of the binary.
-- **`--no-verify` skipped the artifact update, not just the tests.** Fixed by
-  making stamping run before the flag was consulted. (`FIXES.md` 57.)
-- **A skipped CI job renders as a green check.** The `Create Release` job was
-  gated on `refs/tags/v*`; a branch-only push skipped it and showed seven green
-  checks with no release. Re-running the workflow replayed the same skip —
-  the fix was to push the tag.
-- Root `VERSION` and this tooling drove **only** the archived Wails client. The
-  shipping fork was never wired into it. That mismatch is the reason the
-  machinery was removed rather than repaired.
+The full old pipeline is in git history at the commit that deleted
+`.github/workflows/build.yml`.

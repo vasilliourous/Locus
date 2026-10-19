@@ -92,24 +92,17 @@ Delete: @request.auth.admin = true
 
 ### Why `tier` is `text` and not a `select`
 
-This document described it as a `select` with `["eco", "stealth", "strike"]` for
-a long time, and that is **wrong on both axes**:
-
-* **The type.** `server/scripts/seed-pb.py` creates it as `text`. A `select`
-  would have been an allow-list enforced by PocketBase on every write, which
-  sounds safer than it is: the hub resolves a code's tier by looking the
-  **code's own string** up in `tier_configs`, so a value the allow-list rejects
-  is a code that cannot be minted at all, while a value it *accepts* but no row
-  matches is a code that activates and then carries no `server_config` — a
-  "connected" app that cannot reach the internet, which is the failure class
-  `FIXES.md` records. `text` plus the guards in `check-consistency.sh` §23/§27 is
-  the shape that actually holds the agreement.
-* **The options.** There are two tiers now. `stealth` was retired when the paid
-  ladder merged; `free` and `eco` are the same free endpoint and both resolve.
+`server/scripts/seed-pb.py` creates it as `text`, and that is deliberate. A
+`select` would be an allow-list enforced on every write, which sounds safer than
+it is: the hub resolves a code's tier by looking the **code's own string** up in
+`tier_configs`, so a value the allow-list rejects is a code that cannot be minted,
+while a value it accepts but no row matches is a code that activates and carries
+no `server_config` — a "connected" app that cannot reach the internet. `text`
+plus `check-consistency.sh` §23/§27 is the shape that holds the agreement. There
+are two tiers; `free` and `eco` are the same free endpoint and both resolve.
 
 If you are creating these collections by hand rather than by running the seed,
-match the seed's types — a hub whose `tier` column is a three-value `select`
-will refuse to mint a `free` code.
+match the seed's types.
 
 ### Collection: `tier_configs`
 

@@ -9,14 +9,9 @@ claims:      operate/CLAIMS.md  (world claims — the dated, checkable half)
 ```
 
 > **This file is about *where a fact goes*, not what the fact is.** The map of the
-> documents themselves is [`README.md`](README.md).
->
-> It used to be both — a fact table *and* a competing index — and the fact table
-> held a version, an IP address and a HEAD commit under the title "the single
-> source of truth for facts that change". The IP went stale three times and
-> finished by naming an address that **did not exist**, in the document other
-> documents were told to trust. Nothing failed and nothing noticed, because a
-> sentence cannot notice. See [`operate/CLAIMS.md`](operate/CLAIMS.md) §1.
+> documents themselves is [`README.md`](README.md). The rule exists because facts
+> written down in prose go stale silently — nothing fails when a sentence is
+> wrong. [`operate/CLAIMS.md`](operate/CLAIMS.md) §1 is the incident record.
 
 ---
 
@@ -94,9 +89,5 @@ find its owner here first.
    cannot change; everything else is *"as last verified on `<date>`"*, or says
    **unverified** in those words.
 
-*Rewritten 2026-09-29: the volatile fact table was removed — derived facts to
-`state.toml`, world claims to `CLAIMS.md`, guarded by §9 and §10.*
-
-*Rewritten 2026-10-05: it is now the **single** home for "where does this fact
-go", and [`README.md`](README.md) the **single** home for "which document is
-this" — the two had been answering the same question and had drifted.*
+*History: until 2026-09-29 this file was a fact table; it now answers only "where
+does a fact go". [`README.md`](README.md) is the single index.*

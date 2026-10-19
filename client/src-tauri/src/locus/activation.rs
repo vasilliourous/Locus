@@ -340,23 +340,14 @@ fn classify_lookup(response: &LookupResponse) -> CodeCheck {
     }
 }
 
-/// Calls the hub.
-///
-/// One client for both endpoints so timeouts, the User-Agent and the
-/// "identify ourselves honestly" rule live in one place.
-fn http_client() -> Result<reqwest::Client> {
-    reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(30))
-        // The hub is reached over the school network, which drops idle
-        // connections aggressively; a short pool lifetime avoids reusing a
-        // socket the network has already forgotten.
-        .pool_idle_timeout(std::time::Duration::from_secs(30))
-        .user_agent(concat!("Locus-Client/", env!("CARGO_PKG_VERSION")))
-        .build()
-        .context("could not build the hub HTTP client")
-}
-
 /// Posts a JSON body to a hub endpoint and returns the parsed response.
+///
+/// The client comes from [`crate::locus::hub`], not from a builder here: a
+/// hand-built client trusts only the operating system's certificate store, and
+/// on a Windows machine that has not taken its root-certificate updates that
+/// store cannot verify the hub's chain. The student sees "invalid peer
+/// certificate: Expired" for a certificate that is valid for months — see that
+/// module for the full mechanism.
 ///
 /// Deliberately does **not** decode into a typed error: a hub that returns a
 /// 403 with a JSON body still carries the classification, so the body is parsed
@@ -366,14 +357,30 @@ where
     T: serde::de::DeserializeOwned,
     B: Serialize + Sync,
 {
-    let url = format!("{}{path}", crate::locus::contract::hub_url().await);
+    let hub = crate::locus::contract::hub_url().await;
+    let url = format!("{hub}{path}");
 
-    let response = http_client()?
+    let hub_client = crate::locus::hub::client(&hub, crate::locus::hub::Timeout::Activation).await;
+    if hub_client.diagnosis().is_some() {
+        // Once per process is enough; the diagnosis is a property of the
+        // machine, not of this request. The warn names the store, so a support
+        // log no longer reads as though the hub's certificate expired.
+        tracing::warn!(target: "locus::hub", "{}", hub_client.describe());
+    }
+
+    let response = hub_client
+        .client()
         .post(&url)
         .json(&body)
         .send()
         .await
-        .with_context(|| format!("could not reach the Locus hub at {url}"))?;
+        .map_err(|error| {
+            // Put the *real* cause in the chain. The raw reqwest text says
+            // "Expired" whatever store failed, which accuses the hub.
+            let failure = crate::locus::hub::Failure::classify(&error);
+            let remedy = failure.remedy().map(|remedy| format!(" {remedy}")).unwrap_or_default();
+            anyhow::anyhow!("could not reach the Locus hub at {url}: {error}.{remedy}")
+        })?;
 
     let status = response.status();
     let text = response
