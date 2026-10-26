@@ -395,6 +395,35 @@ function clashMeta() {
   }
 }
 
+/// The download URL for a geo database, pinned by release-asset ID.
+///
+/// WHY NOT `releases/download/latest/...`. `meta-rules-dat` publishes a single
+/// rolling `latest` release and keeps no dated tag, so that URL points at
+/// whatever was rebuilt last. Observed 2026-10-26: `country.mmdb` changed
+/// between two runs minutes apart, silently. A build is not reproducible if a
+/// file it embeds can change under it.
+///
+/// A GitHub release ASSET ID is permanent: the ID names one upload and its
+/// contents never change. `GET /releases/assets/<id>` with
+/// `Accept: application/octet-stream` returns those exact bytes forever, so a
+/// pinned date is addressed by ID and the hash check confirms it.
+///
+/// Falls back to the legacy `latest` URL only when the lock has no ID, so an
+/// unpinned checkout still works (and says so).
+function geoDownloadUrl(file, legacyUrl) {
+  const id = SIDECAR_LOCK?.resources?.[file]?.asset_id
+  if (!id) return legacyUrl
+  return `https://api.github.com/repos/MetaCubeX/meta-rules-dat/releases/assets/${id}`
+}
+
+/// Headers required to read a release asset by ID. Without the Accept header
+/// the API answers with JSON metadata instead of the bytes.
+function geoDownloadHeaders(url) {
+  return url.includes('/releases/assets/')
+    ? { Accept: 'application/octet-stream' }
+    : { 'Content-Type': 'application/octet-stream' }
+}
+
 async function downloadFile(url, outPath) {
   const options = {}
   const httpProxy =
@@ -407,7 +436,11 @@ async function downloadFile(url, outPath) {
   const response = await fetch(url, {
     ...options,
     method: 'GET',
-    headers: { 'Content-Type': 'application/octet-stream' },
+    // An asset-ID URL needs `Accept: application/octet-stream` or the API
+    // returns JSON metadata rather than the file.
+    headers: url.includes('/releases/assets/')
+      ? { Accept: 'application/octet-stream' }
+      : { 'Content-Type': 'application/octet-stream' },
   })
   if (!response.ok) {
     const body = await response.text().catch(() => '')
@@ -867,22 +900,34 @@ async function resolveServiceBundle() {
 const resolveMmdb = () =>
   resolveResource({
     file: 'Country.mmdb',
-    downloadURL: `https://github.com/MetaCubeX/meta-rules-dat/releases/download/latest/country.mmdb`,
+    downloadURL: geoDownloadUrl(
+      'Country.mmdb',
+      `https://github.com/MetaCubeX/meta-rules-dat/releases/download/latest/country.mmdb`,
+    ),
   })
 const resolveASNMmdb = () =>
   resolveResource({
     file: 'ASN.mmdb',
-    downloadURL: `https://github.com/MetaCubeX/meta-rules-dat/releases/download/latest/GeoLite2-ASN.mmdb`,
+    downloadURL: geoDownloadUrl(
+      'ASN.mmdb',
+      `https://github.com/MetaCubeX/meta-rules-dat/releases/download/latest/GeoLite2-ASN.mmdb`,
+    ),
   })
 const resolveGeosite = () =>
   resolveResource({
     file: 'geosite.dat',
-    downloadURL: `https://github.com/MetaCubeX/meta-rules-dat/releases/download/latest/geosite.dat`,
+    downloadURL: geoDownloadUrl(
+      'geosite.dat',
+      `https://github.com/MetaCubeX/meta-rules-dat/releases/download/latest/geosite.dat`,
+    ),
   })
 const resolveGeoIP = () =>
   resolveResource({
     file: 'geoip.dat',
-    downloadURL: `https://github.com/MetaCubeX/meta-rules-dat/releases/download/latest/geoip.dat`,
+    downloadURL: geoDownloadUrl(
+      'geoip.dat',
+      `https://github.com/MetaCubeX/meta-rules-dat/releases/download/latest/geoip.dat`,
+    ),
   })
 const resolveEnableLoopback = () =>
   resolveResource({

@@ -144,7 +144,7 @@ def runtime_version(path):
 # Forgetting one is not hypothetical: the first --write after vendoring the alpha
 # dropped `vendored: true`, and prebuild would have gone back to downloading an
 # artifact whose URL no longer exists.
-PRESERVED_TOP_LEVEL = ("vendored", "unavailable")
+PRESERVED_TOP_LEVEL = ("vendored", "unavailable", "resources_provenance", "resources_release")
 
 
 def preserved(existing):
@@ -223,10 +223,18 @@ def collect():
         for name in RESOURCES:
             path = RESOURCES_DIR / name
             if path.is_file():
-                lock["resources"][name] = {
+                entry = {
                     "sha256": sha256(path),
                     "bytes": path.stat().st_size,
                 }
+                # `asset_id` cannot be derived from the bytes: it records WHICH
+                # immutable upstream upload these bytes came from. Dropping it
+                # on --write would silently unpin the resource back to the
+                # moving `latest` URL.
+                prev = (previous or {}).get("resources", {}).get(name, {})
+                if prev.get("asset_id"):
+                    entry["asset_id"] = prev["asset_id"]
+                lock["resources"][name] = entry
 
     lock.update(keep)
     return lock

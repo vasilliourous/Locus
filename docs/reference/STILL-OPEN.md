@@ -895,7 +895,7 @@ captured from the live host or a replay fixture, deserialised into the client's
 structs in a Rust integration test. That is a real piece of work, it needs the
 live host or a captured transcript, and it is deliberately not started here.
 
-## The alpha engine: VENDORED (2026-10-26), and the geo databases still drift
+## The alpha engine: vendored, and the geo databases now pinned by asset ID
 
 **Resolved on 2026-10-26 by vendoring.** The record below is kept because the
 *failure mode* is the point, and it recurs for anything else published as a
@@ -926,97 +926,29 @@ verifies it against the pin and **does not fetch it**, including under `--force`
   sidecar that exists but cannot execute reports as "not found" all the way
   downstream. The mode is now set once, after extraction, for every shape.
 
-**Still open — the geo databases cannot be pinned to a URL.** `Country.mmdb`,
-`ASN.mmdb`, `geosite.dat` and `geoip.dat` come from
-`meta-rules-dat/releases/download/latest`, and that repository publishes **only**
-a moving `latest` tag — there is no dated tag to reference. Observed live on
+**Resolved — the geo databases are now pinned by release-asset ID.**
+
+They came from `meta-rules-dat/releases/download/latest`, and that repository
+publishes **only** a moving `latest` release with no dated tag. Observed live on
 2026-10-26: `Country.mmdb` changed between two runs minutes apart (7,646,989 →
-7,649,827 bytes), and the pin caught it. So `sidecar.lock.json` can tell you the
-databases **changed**, but cannot fetch a chosen older set back. Reproducing an
-exact past build therefore still depends on having the files.
+7,649,827 bytes) and the pin caught it — but the lock could only report the
+change, not fetch a chosen older set back.
 
-**What would close it:** vendor the four databases too (~37 MiB) as the alpha now
-is, or mirror `latest` at a known date into this project's own release assets.
-Not done; it is the same size trade as the entry below.
+The fix is a different immutable handle. A GitHub **release asset ID** names one
+upload whose bytes never change, and is readable at
+`GET /releases/assets/<id>` with `Accept: application/octet-stream`. All four
+databases are now recorded by asset ID plus sha256 in `sidecar.lock.json`,
+`prebuild.mjs` requests the ID rather than `latest`, and every download is
+verified against the pin. Re-downloading restores identical bytes.
 
-## The build still needs the network, and the engine is not vendored
+Cost: none in repository size. The assets stay where they are; only the
+*address* changed from a moving pointer to a permanent one.
 
-**Added 2026-10-26.** `server/data/sidecar.lock.json` pins the sha256 of every
-downloaded build input, and `prebuild.mjs` verifies each one against it. That
-closes the *silent wrong binary* path: a substituted or corrupted engine now
-aborts the build instead of shipping.
-
-It does **not** close the network dependency. The archives are still fetched from
-GitHub on every build that does not already have them; pinning only decides
-*which* bytes are acceptable, not whether they can be obtained offline.
-
-Two things follow, and neither is fixed:
-
-- **A build on a machine with no network, or on a day GitHub is unreachable,
-  cannot proceed.** For CI this is normal and acceptable.
-- **A pinned artifact can be deleted upstream**, which no lock can prevent — this
-  is exactly what happened to the alpha engine (previous entry). For the stable
-  engine the risk is lower (release assets are kept), but it is not zero.
-
-**What would close it:** vendor the archives into the repository (or a release
-attachment owned by this project) and have `prebuild.mjs` read them locally,
-falling back to the network only when the vendored copy is absent. The cost is
-repository size — the stable engine alone is ~59 MiB per platform, so a four-
-platform vendoring is roughly 240 MiB. That is a deliberate trade nobody has
-made, and it is **not** done here.
-
-**Closing both contract gaps** needs the same artifact: a directory of recorded hub responses
-captured from the live host or a replay fixture, deserialised into the client's
-structs in a Rust integration test. That is a real piece of work, it needs the
-live host or a captured transcript, and it is deliberately not started here.
-
-## The alpha engine cannot be rebuilt, and ships in every installer
-
-**Found 2026-10-26** while pinning the build inputs. Two facts, both verifiable
-now, and neither is hypothetical.
-
-**1. The pinned alpha artifact no longer exists upstream.**
-
-```
-alpha-94b13ae   (what was on disk, sha256 3eeff401…)
-alpha-6780eee   (what upstream serves today)
-```
-
-`https://github.com/MetaCubeX/mihomo/releases/download/Prerelease-Alpha/mihomo-linux-amd64-v2-alpha-94b13ae.gz`
-returns **404**. MetaCubeX publishes the mihomo alpha as a single rolling
-prerelease, so every alpha older than the current one is deleted. This is not a
-pin that went stale — it is a *class* of artifact that cannot be pinned to a URL
-at all, because the URL stops existing.
-
-**Consequence:** `--force` on `prebuild.mjs` deletes the sidecars and
-re-downloads them. On a machine whose cache is gone, the alpha cannot be
-recovered, and the build fails. That happened here on 2026-10-26.
-
-**2. The alpha is in every shipped installer anyway.**
-
-`tauri.conf.json` lists `sidecar/verge-mihomo-alpha` in `externalBin`, so it is
-bundled for all platforms — **~59 MiB per installer**. But:
-
-- `config/verge.rs` forces `clash_core` to `verge-mihomo` at startup when it is
-  unset *or invalid*, so the default is always the stable engine.
-- `change_clash_core` is exposed as an IPC command
-  (`services/cmds.ts:184`), but **nothing in the UI calls it**. There is no
-  surface that selects the alpha.
-
-So the alpha is unreachable from the product, unshippable from a fresh clone,
-and still paid for in download size by every student.
-
-**What would close it** — a decision, not a fix. Either:
-
-- **Remove `sidecar/verge-mihomo-alpha` from `externalBin`**, delete the
-  `verge-mihomo-alpha` prebuild task and the `ClashMetaAlpha` chain-support arm,
-  and drop ~59 MiB from every installer. This is the smallest change and the
-  recommendation, because nothing reaches the alpha today; or
-- **Keep it and vendor it** — commit the binary (repo-size cost) so it is
-  reproducible, and give the UI an actual selector.
-
-Left open because it is a product decision about a shipped artifact size, not a
-bug with one correct answer. **Not fixed here.**
+**Residual risk, stated:** an asset ID is only as durable as the repository
+that hosts it. If MetaCubeX deletes the release, the ID 404s and the bytes are
+gone — the same class as the alpha engine, minus the repo of last resort. That
+is the argument for eventually mirroring the four files into this project's own
+release assets, and it remains **not done**.
 
 ## If you are the next agent here
 
