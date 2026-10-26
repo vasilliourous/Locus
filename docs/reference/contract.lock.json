@@ -1,0 +1,240 @@
+{
+  "boundary": {
+    "client_rust": "client/src-tauri/src/locus/contract.rs",
+    "hub_routes": "server/pb_hooks/*.js \u2014 routerAdd() calls",
+    "ipc": "client/src-tauri/src/cmd/locus.rs + lib.rs + client/src/**/*.ts*"
+  },
+  "endpoints": {
+    "client_calls": [
+      "/api/activate",
+      "/api/code-lookup",
+      "POST /api/heartbeat"
+    ],
+    "hub_serves": [
+      "GET /api/release",
+      "GET /api/update",
+      "POST /api/activate",
+      "POST /api/admin/console",
+      "POST /api/admin/unbind-code",
+      "POST /api/code-lookup",
+      "POST /api/device-recognise",
+      "POST /api/heartbeat"
+    ]
+  },
+  "enums": {
+    "LookupStatus": {
+      "wire_values": [
+        "already_used",
+        "expired",
+        "not_found",
+        "ok",
+        "suspended",
+        "unbound"
+      ]
+    }
+  },
+  "hub_urls": {
+    "HUB_URL": "https://networkingguides.jadedns.uk",
+    "LEGACY_HUB_URL": "https://networkingguides.duckdns.org"
+  },
+  "ipc_commands": {
+    "called": [
+      "locus_activate",
+      "locus_cancel_connect",
+      "locus_check_code",
+      "locus_check_subscription",
+      "locus_connect",
+      "locus_disconnect",
+      "locus_dismiss_update",
+      "locus_hub_url",
+      "locus_install_update",
+      "locus_js_log",
+      "locus_status",
+      "locus_update_staging_dir",
+      "locus_update_status",
+      "locus_validate_code"
+    ],
+    "defined": [
+      "locus_activate",
+      "locus_cancel_connect",
+      "locus_check_code",
+      "locus_check_subscription",
+      "locus_connect",
+      "locus_disconnect",
+      "locus_dismiss_update",
+      "locus_hub_url",
+      "locus_install_update",
+      "locus_js_log",
+      "locus_status",
+      "locus_update_staging_dir",
+      "locus_update_status",
+      "locus_validate_code"
+    ],
+    "registered": [
+      "locus_activate",
+      "locus_cancel_connect",
+      "locus_check_code",
+      "locus_check_subscription",
+      "locus_connect",
+      "locus_disconnect",
+      "locus_dismiss_update",
+      "locus_hub_url",
+      "locus_install_update",
+      "locus_js_log",
+      "locus_status",
+      "locus_update_staging_dir",
+      "locus_update_status",
+      "locus_validate_code"
+    ]
+  },
+  "platforms": {
+    "linux": {
+      "artifact": "locus-linux-amd64",
+      "key": "linux"
+    },
+    "macos_arm": {
+      "artifact": "locus-darwin-arm64",
+      "key": "macos_arm"
+    },
+    "macos_intel": {
+      "artifact": "locus-darwin-amd64",
+      "key": "macos_intel"
+    },
+    "windows": {
+      "artifact": "locus-windows-amd64.exe",
+      "key": "windows"
+    }
+  },
+  "proxy_names": {
+    "GROUP_NAME": "Locus Auto",
+    "PROXY_NAME": "Locus",
+    "UOT_PROXY_NAME": "Locus-UoT"
+  },
+  "structs": {
+    "ActivateResponse": {
+      "code": {
+        "default": true,
+        "wire_name": "code"
+      },
+      "device_fingerprint": {
+        "default": true,
+        "wire_name": "device_fingerprint"
+      },
+      "expires_at": {
+        "default": true,
+        "wire_name": "expires_at"
+      },
+      "message": {
+        "default": true,
+        "wire_name": "message"
+      },
+      "server_config": {
+        "default": true,
+        "wire_name": "server_config"
+      },
+      "tier": {
+        "default": true,
+        "wire_name": "tier"
+      },
+      "udp_relay": {
+        "default": true,
+        "wire_name": "udp_relay"
+      }
+    },
+    "CodeRequest": {
+      "code": {
+        "wire_name": "code"
+      },
+      "device_id": {
+        "optional": true,
+        "wire_name": "device_id"
+      },
+      "fingerprint": {
+        "wire_name": "fingerprint"
+      },
+      "store": {
+        "optional": true,
+        "wire_name": "store"
+      },
+      "verifier": {
+        "optional": true,
+        "wire_name": "verifier"
+      }
+    },
+    "HeartbeatRequest": {
+      "code": {
+        "wire_name": "code"
+      },
+      "fingerprint": {
+        "wire_name": "fingerprint"
+      },
+      "token": {
+        "wire_name": "token"
+      }
+    },
+    "LookupResponse": {
+      "expires_at": {
+        "default": true,
+        "wire_name": "expires_at"
+      },
+      "message": {
+        "default": true,
+        "wire_name": "message"
+      },
+      "status": {
+        "wire_name": "status"
+      },
+      "tier": {
+        "default": true,
+        "wire_name": "tier"
+      }
+    },
+    "ReleaseAsset": {
+      "sha256": {
+        "default": true,
+        "wire_name": "sha256"
+      },
+      "url": {
+        "wire_name": "url"
+      }
+    },
+    "ReleaseManifest": {
+      "ok": {
+        "wire_name": "ok"
+      },
+      "platforms": {
+        "default": true,
+        "wire_name": "platforms"
+      },
+      "published": {
+        "default": true,
+        "wire_name": "published"
+      },
+      "version": {
+        "default": true,
+        "wire_name": "version"
+      }
+    },
+    "TierConfig": {
+      "method": {
+        "wire_name": "method"
+      },
+      "password": {
+        "wire_name": "password"
+      },
+      "server": {
+        "wire_name": "server"
+      },
+      "server_port": {
+        "wire_name": "server_port"
+      },
+      "uot_port": {
+        "alias": "server_port_uot",
+        "default": true,
+        "wire_name": "uot_port"
+      }
+    }
+  },
+  "version": 1,
+  "what": "The Locus wire contract. See server/scripts/contract-snapshot.py."
+}

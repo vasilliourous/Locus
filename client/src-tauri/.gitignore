@@ -4,4 +4,16 @@
 gen/
 WixTools
 resources
-sidecar
+
+# The sidecar directory holds downloaded engines, which are reproducible — EXCEPT
+# the alpha, which is vendored on purpose. MetaCubeX publishes the mihomo alpha as
+# a single rolling prerelease and deletes the previous one, so its URL stops
+# existing; on 2026-10-26 that made the client uncompilable because
+# `tauri.conf.json` lists it in `externalBin`. See the root .gitignore and
+# docs/reference/STILL-OPEN.md.
+#
+# Git cannot re-include a file inside an excluded DIRECTORY, so the directory is
+# excluded by its contents (`sidecar/*`) rather than wholesale, and the one
+# vendored file is negated. Every other sidecar stays ignored.
+sidecar/*
+!sidecar/verge-mihomo-alpha-x86_64-unknown-linux-gnu

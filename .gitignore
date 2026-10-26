@@ -22,7 +22,30 @@ node_modules/
 # Rust/Tauri client build output. `client/` has its own .gitignore covering
 # these; repeated here so a root-level `git add -A` cannot pick them up.
 client/target/
-client/src-tauri/sidecar/
+# NOTE: the sidecar directory is excluded by CONTENTS (`sidecar/*`), not
+# wholesale. Git cannot re-include a file inside an excluded directory, so a
+# directory-level pattern here would silently defeat the vendored-alpha
+# exception documented below. That is not a hypothetical: the first version of
+# this change used `client/src-tauri/sidecar/` and the alpha stayed ignored.
+client/src-tauri/sidecar/*
+#
+# EXCEPTION: the alpha engine is VENDORED, deliberately.
+#
+# Every other sidecar is a reproducible download from a stable release URL, so
+# ignoring it costs nothing. The mihomo ALPHA is published as a single rolling
+# prerelease — MetaCubeX deletes the previous alpha the moment a new one lands —
+# so its download URL stops existing. On 2026-10-26 that deleted the only copy
+# of `alpha-94b13ae` anywhere, and the client could not compile: `tauri.conf.json`
+# lists the alpha in `externalBin`, so the build requires a file that nothing
+# could reproduce.
+#
+# A file the build requires and the network cannot supply has to live in the
+# repository. The cost is ~62 MiB; the alternative is that no fresh clone can
+# build the client. `prebuild.mjs` prefers this vendored copy and does not fetch
+# it; `server/scripts/sidecar-lock.py` pins its hash like any other input.
+#
+# This un-ignores exactly this one path. It does NOT un-ignore the directory.
+!client/src-tauri/sidecar/verge-mihomo-alpha-x86_64-unknown-linux-gnu
 
 # Signed release binaries and their manifest, staged here by publish-release.sh
 # before upload. ~330 MB per release, reproducible from the tag, and never

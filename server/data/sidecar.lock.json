@@ -1,0 +1,74 @@
+{
+  "engine_versions": {
+    "mihomo": "v1.19.32",
+    "mihomo_alpha": "alpha-6780eee"
+  },
+  "engine_versions_provenance": "read from the local binaries with `-v`; the gitignored prebuild cache is consulted only as a cross-check and is not required",
+  "resources": {
+    "ASN.mmdb": {
+      "bytes": 8969559,
+      "sha256": "d82d2f39ea82a175a3d63484c8b4723040d134ba1edf4b27d6819c2f96c14a9b"
+    },
+    "Country.mmdb": {
+      "bytes": 7649827,
+      "sha256": "ccec4d6fa69de3a79960a460c377ac9a23c1a90e5f9052dae3488921e56201df"
+    },
+    "geoip.dat": {
+      "bytes": 16586957,
+      "sha256": "1adaeec24369b866b3398e8d46992f25293fdd7a7bf78135558bd767ac264d8b"
+    },
+    "geosite.dat": {
+      "bytes": 4276543,
+      "sha256": "9ae9d588b1c051c764f2500e188393934aa84fc45e0da96530ddf069cf232b27"
+    }
+  },
+  "sidecars": {
+    "clash-verge-service": {
+      "x86_64-unknown-linux-gnu": {
+        "bytes": 3566736,
+        "file": "clash-verge-service-x86_64-unknown-linux-gnu",
+        "sha256": "1e682e17f0a5bf7ffa4b68cb605aea4fa891436210b171b643c622c8abb9e9f5"
+      }
+    },
+    "clash-verge-service-install": {
+      "x86_64-unknown-linux-gnu": {
+        "bytes": 1668712,
+        "file": "clash-verge-service-install-x86_64-unknown-linux-gnu",
+        "sha256": "d855ec9de9c654812c997c40fd7b25dbee28407a3ee1b9bd7b09bf4e83853ab8"
+      }
+    },
+    "clash-verge-service-uninstall": {
+      "x86_64-unknown-linux-gnu": {
+        "bytes": 788984,
+        "file": "clash-verge-service-uninstall-x86_64-unknown-linux-gnu",
+        "sha256": "596911fd1d58ebf1e558b8e8dd557d9271a180e5ecc1b8b8dd45e332621577e7"
+      }
+    },
+    "verge-mihomo": {
+      "x86_64-unknown-linux-gnu": {
+        "bytes": 62021758,
+        "file": "verge-mihomo-x86_64-unknown-linux-gnu",
+        "sha256": "90529d00b84df1441a6c6bff7d9fba59ba3c9d86312adf2deeaa20eb0f356ab6"
+      }
+    },
+    "verge-mihomo-alpha": {
+      "x86_64-unknown-linux-gnu": {
+        "bytes": 62066814,
+        "file": "verge-mihomo-alpha-x86_64-unknown-linux-gnu",
+        "sha256": "8ef31967dfda95ed75e522be18cb8795cf8c98d230dce245bb4b41127015908c",
+        "vendored": true
+      }
+    }
+  },
+  "source": "client/scripts/prebuild.mjs",
+  "vendored": {
+    "verge-mihomo-alpha": {
+      "see": "docs/reference/STILL-OPEN.md",
+      "since": "2026-10-26",
+      "where": "client/src-tauri/sidecar/verge-mihomo-alpha-x86_64-unknown-linux-gnu",
+      "why": "MetaCubeX publishes the mihomo alpha as a single rolling prerelease and deletes older builds, so its download URL stops existing. tauri.conf.json lists it in externalBin, so the build requires a file the network cannot reliably supply."
+    }
+  },
+  "version": 1,
+  "what": "The build inputs prebuild.mjs downloads, pinned by sha256 of the bytes actually used. See server/scripts/sidecar-lock.py."
+}
