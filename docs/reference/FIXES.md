@@ -24,6 +24,32 @@ commercial gaps, [`../business/17-not-built.md`](../business/17-not-built.md).
 
 ---
 
+## 3.3.3 — THE WINDOWS TLS FIX SHIPS, AND THE BUILD BECOMES REPRODUCIBLE (2026-10-26, release)
+
+- **What went out.** The `locus::hub` TLS fix from 2026-10-18, which sat in the
+  tree labelled *unreleased* for eight days and three commits. The student it was
+  written for was still affected; the fix was correct and never shipped. That gap
+  is the one this entry exists to name: work is not done when it is in `main`.
+- **Proven before tagging, not after.** Both live-hub tests pass on 2026-10-26 —
+  the bundled-roots fallback verifies `networkingguides.jadedns.uk/api/health`,
+  and the platform-store path does too, so the probe is not proving a tautology.
+  A **Windows** machine was still not available: that this fixes *the reporter's*
+  specific machine remains structural reasoning, not an observation.
+- **Build inputs are now data.** The mihomo engine, the service bundle and the
+  four geo databases are pinned by sha256 in `server/data/sidecar.lock.json`;
+  `prebuild.mjs` takes the version *from the lock* rather than from
+  `releases/latest`. The four databases are pinned by immutable release-asset ID,
+  because `meta-rules-dat` publishes only a moving `latest` tag — observed live
+  when `Country.mmdb` changed between two runs minutes apart.
+- **The alpha engine is vendored.** `tauri.conf.json` requires
+  `sidecar/verge-mihomo-alpha` in `externalBin`, and upstream deletes old alphas,
+  so its URL is not stable. It is committed and hash-verified. Before this the
+  client would not compile at all with a cold cache.
+- **Rule kept.** A build that cannot be reproduced from a cold cache is a build
+  that has never been reproduced. Two of the three inputs here were only
+  discoverable by clearing the cache and trying, which is why the failure was
+  invisible for as long as it was.
+
 ## 3.3.2 — THE HUB MOVED, AND THREE DEFECTS THE MOVE UNCOVERED (2026-10-18, release)
 
 - **What broke.** A 3.3.1 client failed activation with `invalid peer certificate:
@@ -36,7 +62,7 @@ commercial gaps, [`../business/17-not-built.md`](../business/17-not-built.md).
 - **Rule kept.** A defect whose mechanism cannot be observed from either end is
   recorded as *not established*, not as a theory that was convenient.
 
-## ACTIVATION FAILED ON WINDOWS WITH "INVALID PEER CERTIFICATE: EXPIRED", ON EVERY ATTEMPT (2026-10-18, unreleased)
+## ACTIVATION FAILED ON WINDOWS WITH "INVALID PEER CERTIFICATE: EXPIRED", ON EVERY ATTEMPT (2026-10-18, release 3.3.3)
 
 - **What broke.** A Windows student could not activate, on either plan, on every
   attempt: `client error (Connect): invalid peer certificate: Expired` against a
