@@ -117,7 +117,6 @@ impl CoreManager {
         self.core_stopped();
         Ok(())
     }
-
 }
 
 /// Drops a `cache.db` the current user cannot write before handing the directory to the core.

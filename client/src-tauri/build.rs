@@ -35,9 +35,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     #[cfg(not(feature = "clippy"))]
-    tauri_build::try_build(tauri_build::Attributes::new().windows_attributes(
-        tauri_build::WindowsAttributes::new().app_manifest(WINDOWS_APP_MANIFEST),
-    ))?;
+    tauri_build::try_build(
+        tauri_build::Attributes::new()
+            .windows_attributes(tauri_build::WindowsAttributes::new().app_manifest(WINDOWS_APP_MANIFEST)),
+    )?;
 
     Ok(())
 }

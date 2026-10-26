@@ -575,8 +575,7 @@ mod tests {
             let live = format!(
                 r#"{{"expires_at": "2027-09-19 00:00:00.000Z", "message": "This code has already been activated", "status": "{status}", "tier": "strike"}}"#
             );
-            let parsed: LookupResponse =
-                serde_json::from_str(&live).expect("the redeemed response shape must parse");
+            let parsed: LookupResponse = serde_json::from_str(&live).expect("the redeemed response shape must parse");
 
             assert_eq!(
                 parsed.status,
@@ -671,12 +670,7 @@ mod tests {
         // The legacy name is a host only: no path, no trailing slash. The server
         // block is generated from it, and a stray path there would produce an
         // address Caddy treats as a non-host site.
-        let host = LEGACY_HUB_URL
-            .trim_start_matches("https://")
-            .trim_end_matches('/');
-        assert!(
-            !host.contains('/'),
-            "the legacy hub must be a bare host, got {host}"
-        );
+        let host = LEGACY_HUB_URL.trim_start_matches("https://").trim_end_matches('/');
+        assert!(!host.contains('/'), "the legacy hub must be a bare host, got {host}");
     }
 }

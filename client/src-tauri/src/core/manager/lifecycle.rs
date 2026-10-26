@@ -210,14 +210,7 @@ where
     Restore: FnOnce() -> RestoreFuture,
     RestoreFuture: std::future::Future<Output = Result<()>>,
 {
-    run_controlled_stop_transition(
-        is_macos,
-        RunningMode::Service,
-        stop_guard,
-        clear_proxy,
-        stop_core,
-    )
-    .await?;
+    run_controlled_stop_transition(is_macos, RunningMode::Service, stop_guard, clear_proxy, stop_core).await?;
     run_ready_core_start_transition(start_core, core_is_ready, restore_proxy).await
 }
 

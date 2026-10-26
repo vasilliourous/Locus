@@ -247,7 +247,8 @@ impl CoreManager {
     /// is combined with an actual probe instead of standing in for one.
     #[must_use]
     fn core_readiness_latched(&self) -> bool {
-        !matches!(*self.get_running_mode(), RunningMode::NotRunning) && self.current_core_readiness_generation().is_some()
+        !matches!(*self.get_running_mode(), RunningMode::NotRunning)
+            && self.current_core_readiness_generation().is_some()
     }
 
     /// Whether the Core is actually answering, as observed rather than assumed.
@@ -291,9 +292,7 @@ impl CoreManager {
         // The local probe above is now only a gate on whether asking is worth it:
         // a Core that is not answering cannot run a delay test, and asking would
         // be a request guaranteed to fail.
-        let egress = self
-            .observe_egress(outcome == probe::ProbeOutcome::Serving)
-            .await;
+        let egress = self.observe_egress(outcome == probe::ProbeOutcome::Serving).await;
 
         // The second proof, and the one that cannot fail for a reason that is not
         // the tunnel's fault: what the Core reports it actually moved, rather than
@@ -383,11 +382,26 @@ impl CoreManager {
     }
 
     pub(crate) fn invalidate_core_readiness(&self) {
-        let _ = self
-            .core_readiness_state
-            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |current| {
-                active_core_readiness_generation(current).map(inactive_core_readiness_state)
-            });
+        // A CAS loop rather than `AtomicU64::fetch_update`, which is deprecated
+        // in favour of `try_update` and therefore fails the `-D warnings` lint.
+        // `try_update` would be the tidier call, but it is newer than this
+        // crate's `rust-version = "1.95"` floor, and the loop is the one form
+        // that compiles on both.
+        let mut current = self.core_readiness_state.load(Ordering::Acquire);
+        loop {
+            let Some(generation) = active_core_readiness_generation(current) else {
+                return;
+            };
+            match self.core_readiness_state.compare_exchange(
+                current,
+                inactive_core_readiness_state(generation),
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            ) {
+                Ok(_) => return,
+                Err(changed) => current = changed,
+            }
+        }
     }
 
     pub fn set_last_update(&self, time: Instant) {
@@ -437,7 +451,11 @@ impl CoreManager {
         // a launch-time start is an auto-connect, and this product does not
         // auto-connect. Report "no core is running" so callers that consulted the
         // return value keep working unchanged.
-        logging!(info, Type::Core, "Core is not started at launch; waiting for an explicit connect");
+        logging!(
+            info,
+            Type::Core,
+            "Core is not started at launch; waiting for an explicit connect"
+        );
         Ok(false)
     }
 

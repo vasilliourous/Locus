@@ -1,6 +1,5 @@
 #![allow(non_snake_case)]
 #![recursion_limit = "512"]
-
 // ── Test-code lint scoping ──
 //
 // The workspace lints (Cargo.toml `[workspace.lints.clippy]`) deny `panic` and

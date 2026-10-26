@@ -471,7 +471,8 @@ mod mtu_tests {
     #[test]
     fn the_mtu_is_the_documented_value() {
         assert_eq!(
-            tun_const::DEFAULT_MTU, 1280,
+            tun_const::DEFAULT_MTU,
+            1280,
             "changing the MTU alters behaviour on every tier and platform; \
              update this test and the rationale in constants.rs together"
         );

@@ -869,6 +869,24 @@ jobs:
         if: matrix.label == 'linux'
         run: cargo clippy --all-targets --features clippy -- -D warnings
 
+      # ── rustfmt, at last ──
+      #
+      # WHY THIS EXISTS: nothing ever checked formatting. `client/rustfmt.toml`
+      # has been the project's style since the fork, and no workflow invoked it,
+      # so hand-written code diverged from it until 82 files were unformatted at
+      # once. That is the expensive way to discover it — a formatter run then
+      # touches most of the tree in one commit, which is indistinguishable in
+      # review from a large semantic change.
+      #
+      # Deliberately linux-only, like clippy: it is one cheap toolchain and
+      # running it on all four runners reports the same answer four times.
+      #
+      # `--check` never writes. A failure here means running `cargo fmt` in
+      # `client/` and committing the result.
+      - name: Rust formatting
+        if: matrix.label == 'linux'
+        run: cargo fmt --check
+
       # ── Stage the raw executable under the name the hub expects ──
       #
       # tauri build produces the *installed* form (NSIS / .app). The updater is

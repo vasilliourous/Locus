@@ -477,6 +477,26 @@ async function resolveSidecar(binInfo) {
   const sidecarPath = path.join(SIDECAR_DIR, targetFile)
   await fsp.mkdir(SIDECAR_DIR, { recursive: true })
 
+  // A sidecar that is present and correct still has to be EXECUTABLE, and every
+  // "already good" path below returns before the download path's chmod.
+  //
+  // Observed 2026-10-26: `verge-mihomo` had the pinned sha256 to the byte and
+  // mode 0644, so `prebuild` reported "matches its pin, skipping download" and
+  // every integration test that starts the engine died with
+  // `PermissionDenied` on a file whose bytes were provably right. The same
+  // shape as the case recorded further down — a binary that cannot be executed
+  // is worse than a missing one, because nothing reports it as missing.
+  //
+  // Mode is not content, so it is not covered by the hash pin and must be
+  // asserted separately on every path that can leave a file in place.
+  const ensureExecutable = async (filePath) => {
+    if (platform === 'win32' || !fs.existsSync(filePath)) return
+    const stat = await fsp.stat(filePath)
+    if ((stat.mode & 0o111) === 0o111) return
+    await fsp.chmod(filePath, 0o755)
+    log_success(`restored the executable bit on "${path.basename(filePath)}"`)
+  }
+
   // "Already exists" is not the same as "is what the lock pins". A cached
   // binary left over from a previous engine version would otherwise be reused
   // silently — the exact drift the lock exists to stop — so an existing file is
@@ -489,7 +509,7 @@ async function resolveSidecar(binInfo) {
   if (lockedSidecarVendored(targetFile)) {
     await assertPinned(sidecarPath, pinnedHash, `"${name}" (vendored)`)
     log_success(`"${name}" is vendored in the repository and matches its pin`)
-    if (platform !== 'win32') await fsp.chmod(sidecarPath, 0o755)
+    await ensureExecutable(sidecarPath)
     return
   }
 
@@ -504,6 +524,7 @@ async function resolveSidecar(binInfo) {
       log_success(
         `"${name}" matches its pin${FORCE ? ' — kept (nothing to re-download)' : ', skipping download'}`,
       )
+      await ensureExecutable(sidecarPath)
       return
     }
     log_warn(
@@ -511,6 +532,7 @@ async function resolveSidecar(binInfo) {
     )
   } else if (!FORCE && fs.existsSync(sidecarPath)) {
     log_success(`"${name}" already exists, skipping download (UNPINNED)`)
+    await ensureExecutable(sidecarPath)
     return
   }
 

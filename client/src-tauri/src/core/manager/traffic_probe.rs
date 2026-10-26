@@ -48,8 +48,8 @@
 //! recent call. Two conditions, because they are two facts: bytes moved, and the
 //! Core is still telling us about it.
 
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::OnceLock;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::Duration;
 
 use parking_lot::Mutex;
@@ -387,7 +387,6 @@ impl TrafficStreamTask {
 
         *guard = Some(handle);
     }
-
 }
 
 #[cfg(test)]

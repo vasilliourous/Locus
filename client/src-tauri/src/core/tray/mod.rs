@@ -145,8 +145,6 @@ impl Default for Tray {
 singleton!(Tray, TRAY);
 
 impl Tray {
-
-
     fn new() -> Self {
         Self::default()
     }

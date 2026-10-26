@@ -83,17 +83,25 @@ macro_rules! logging {
     };
 }
 
+/// Logs the `Err` arm of a `Result`, or a formatted message.
+///
+/// The first form expands to a block rather than a bare `if` statement so that
+/// the macro is usable in expression position — `match r { Err(e) =>
+/// logging_error!(…), Ok(_) => {} }`. Without the block the trailing `;` inside
+/// the expansion makes rustc reject the call site with
+/// `semicolon_in_expressions_from_non_local_macros`, a lint that is already
+/// denied under `-D warnings` and is becoming a hard error.
 #[macro_export]
 macro_rules! logging_error {
-    ($type:expr, $expr:expr) => {
+    ($type:expr, $expr:expr) => {{
         if let Err(err) = $expr {
             log::error!(target: "app", "[{}] {}", $type, err);
         }
-    };
+    }};
 
-    ($type:expr, $fmt:literal $(, $arg:expr)*) => {
+    ($type:expr, $fmt:literal $(, $arg:expr)*) => {{
         log::error!(target: "app", "[{}] {}", $type, format_args!($fmt $(, $arg)*));
-    };
+    }};
 }
 
 const LOGS_QUEUE_LEN: usize = 100;

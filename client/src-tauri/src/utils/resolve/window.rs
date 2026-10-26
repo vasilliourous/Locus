@@ -173,12 +173,7 @@ pub async fn build_new_window() -> Result<WebviewWindow, String> {
             PageLoadEvent::Started => "started",
             PageLoadEvent::Finished => "finished",
         };
-        logging!(
-            info,
-            Type::Window,
-            "[Window] page load {event}: url={}",
-            payload.url()
-        );
+        logging!(info, Type::Window, "[Window] page load {event}: url={}", payload.url());
 
         if payload.event() != PageLoadEvent::Finished {
             return;
@@ -304,7 +299,13 @@ mod tests {
     /// flash of the wrong colour that nothing else would catch.
     #[test]
     fn the_color_tuple_matches_its_hex_literal() {
-        for hex in [DARK_BACKGROUND_HEX, LIGHT_BACKGROUND_HEX, "#000000", "#FFFFFF", "#2EA86A"] {
+        for hex in [
+            DARK_BACKGROUND_HEX,
+            LIGHT_BACKGROUND_HEX,
+            "#000000",
+            "#FFFFFF",
+            "#2EA86A",
+        ] {
             let parsed = parse_hex(hex);
             let expected = Color(
                 u8::from_str_radix(&hex[1..3], 16).unwrap(),

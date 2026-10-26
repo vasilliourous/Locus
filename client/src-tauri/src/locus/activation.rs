@@ -601,10 +601,7 @@ mod tests {
             udp_relay: false,
             expires_at: None,
         };
-        assert!(matches!(
-            classify(already),
-            ActivationOutcome::DeviceAlreadyActivated
-        ));
+        assert!(matches!(classify(already), ActivationOutcome::DeviceAlreadyActivated));
 
         // The wording must not be able to masquerade as a suspension, because
         // the oldest builds in the field classify a 403 by looking for exactly

@@ -215,8 +215,6 @@ fn a_repeat_activation_restores_rather_than_refuses() {
     );
 }
 
-
-
 // ─────────────────────────────────────────────────────────────────────────────
 // The lookup hook's status vocabulary
 // ─────────────────────────────────────────────────────────────────────────────
@@ -233,8 +231,7 @@ fn a_repeat_activation_restores_rather_than_refuses() {
 /// assigns — which is exactly the kind of over-specific guard that teaches
 /// people to ignore a red test.
 fn hook_emits_status(hook: &str, status: &str) -> bool {
-    hook.contains(&format!(r#"status:"{status}""#))
-        || hook.contains(&format!(r#"status = "{status}""#))
+    hook.contains(&format!(r#"status:"{status}""#)) || hook.contains(&format!(r#"status = "{status}""#))
 }
 
 /// The lookup statuses the client deserializes must still be the ones the hub
@@ -249,13 +246,7 @@ fn hook_emits_status(hook: &str, status: &str) -> bool {
 fn the_lookup_status_vocabulary_is_unchanged() {
     let hook = lookup_hook();
 
-    for status in [
-        "ok",
-        "unbound",
-        "suspended",
-        "expired",
-        "not_found",
-    ] {
+    for status in ["ok", "unbound", "suspended", "expired", "not_found"] {
         assert!(
             hook_emits_status(&hook, status),
             "the lookup hook no longer emits status \"{status}\". The client's \
@@ -359,10 +350,9 @@ fn the_lookup_enum_degrades_unknown_statuses_safely() {
 /// should be able to trust it, which means the claim must be checkable.
 #[test]
 fn the_claimed_contract_test_exists() {
-    let this_file = std::fs::read_to_string(
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/activation_contract.rs"),
-    )
-    .expect("this test file must be readable");
+    let this_file =
+        std::fs::read_to_string(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/activation_contract.rs"))
+            .expect("this test file must be readable");
 
     // The name the docs use. If the file is renamed, the docs must move with it;
     // the point is that the *claim* resolves to something real.
@@ -520,4 +510,3 @@ fn only_the_release_paths_clear_the_single_use_stamp() {
          operator cannot release a code from the console."
     );
 }
-

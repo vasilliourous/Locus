@@ -328,9 +328,7 @@ mod tests {
     #[test]
     fn exactly_at_the_allowance_is_throttled() {
         assert!(used(ALLOWANCE).classify(Some(ALLOWANCE), T0).is_throttled());
-        assert!(!used(ALLOWANCE - 1)
-            .classify(Some(ALLOWANCE), T0)
-            .is_throttled());
+        assert!(!used(ALLOWANCE - 1).classify(Some(ALLOWANCE), T0).is_throttled());
     }
 
     #[test]
@@ -427,10 +425,7 @@ mod tests {
             window_start_ms: T0 + 60 * 60 * 1000,
             warned: true,
         };
-        assert!(
-            skewed.window_start_is_skewed(T0),
-            "an hour ahead must read as skew"
-        );
+        assert!(skewed.window_start_is_skewed(T0), "an hour ahead must read as skew");
 
         let repaired = skewed.window(T0);
         assert_eq!(repaired.window_start_ms, T0, "the window restarts at now");
@@ -452,11 +447,7 @@ mod tests {
         };
         assert!(!slightly_ahead.window_start_is_skewed(T0));
         let held = slightly_ahead.window(T0);
-        assert_eq!(
-            held.used_bytes,
-            7 * MB,
-            "a tolerated skew must not discard the count"
-        );
+        assert_eq!(held.used_bytes, 7 * MB, "a tolerated skew must not discard the count");
     }
 
     /// An absurd allowance is clamped to a figure the arithmetic can trust.

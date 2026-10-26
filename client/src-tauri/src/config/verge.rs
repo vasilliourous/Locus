@@ -391,7 +391,6 @@ pub struct IVerge {
     // consistency (a count is meaningless without the window it belongs to), and
     // splitting it across keys is how a half-written window happens — a new
     // start with the old count, which is a free allowance reset.
-
     /// The free-tier usage window, serialised JSON.
     ///
     /// `None` for a paying tier, or a client that has never recorded a byte.
@@ -439,7 +438,6 @@ pub struct IVerge {
     // fail: removing the fields would make an upgrade from a build that wrote
     // them either error or silently discard the rest of the config. They are
     // inert, and a later cleanup can drop them once no shipped build writes them.
-
     /// Retired. The device's non-secret identifier.
     pub locus_device_id: Option<String>,
 
@@ -582,7 +580,6 @@ impl IVerge {
             // theme is selected. Writing a default here would make the field
             // non-`None` on every install and blur the "unset means legacy
             // behaviour" property the upgrade path depends on.
-
             #[cfg(not(target_os = "windows"))]
             env_type: Some("bash".into()),
             #[cfg(target_os = "windows")]

@@ -187,11 +187,11 @@ pub enum TrafficOutcome {
     Silent,
 }
 
-    /// The readiness decision, given the last observations.
-    ///
-    /// # Three states, and why the previous five were two too many
-    ///
-    /// This used to be `Ready | NotReady | NoEgress | Stopped`, and the middle two
+/// The readiness decision, given the last observations.
+///
+/// # Three states, and why the previous five were two too many
+///
+/// This used to be `Ready | NotReady | NoEgress | Stopped`, and the middle two
 /// were the over-engineering: `NoEgress` ("the Core is up but cannot move a
 /// packet") and `NotReady` ("the Core is not answering") are **different
 /// diagnoses of the same user-visible fact**. Nothing in the client branches on
@@ -613,11 +613,7 @@ mod tests {
             ProbeOutcome::Unresponsive,
             ProbeOutcome::NotRunning,
         ] {
-            for egress in [
-                EgressOutcome::Failing,
-                EgressOutcome::NotAttempted,
-                EgressOutcome::Ok,
-            ] {
+            for egress in [EgressOutcome::Failing, EgressOutcome::NotAttempted, EgressOutcome::Ok] {
                 assert!(
                     decide(outcome, egress, TrafficOutcome::Flowing, true).is_ready(),
                     "{outcome:?} + {egress:?} with traffic flowing must be Ready"
@@ -632,9 +628,22 @@ mod tests {
     /// original latch told.
     #[test]
     fn traffic_that_stops_ends_readiness() {
-        assert!(decide(ProbeOutcome::Serving, EgressOutcome::Failing, TrafficOutcome::Flowing, true).is_ready());
+        assert!(
+            decide(
+                ProbeOutcome::Serving,
+                EgressOutcome::Failing,
+                TrafficOutcome::Flowing,
+                true
+            )
+            .is_ready()
+        );
         assert_eq!(
-            decide(ProbeOutcome::Serving, EgressOutcome::Failing, TrafficOutcome::Silent, true),
+            decide(
+                ProbeOutcome::Serving,
+                EgressOutcome::Failing,
+                TrafficOutcome::Silent,
+                true
+            ),
             Readiness::Connecting
         );
     }

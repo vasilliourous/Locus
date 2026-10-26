@@ -33,6 +33,8 @@
     clippy::cognitive_complexity
 )]
 
+#[cfg(unix)]
+use std::fs;
 use std::io::{Read as _, Write as _};
 use std::net::{TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
@@ -55,9 +57,7 @@ use std::time::{Duration, Instant};
 /// wherever a real engine and egress exist — that is the run worth trusting.
 fn skip(reason: &str) {
     if std::env::var_os("LOCUS_REQUIRE_LIVE_ENGINE").is_some() {
-        panic!(
-            "SKIP was requested to be a failure (LOCUS_REQUIRE_LIVE_ENGINE is set): {reason}"
-        );
+        panic!("SKIP was requested to be a failure (LOCUS_REQUIRE_LIVE_ENGINE is set): {reason}");
     }
     eprintln!("SKIP: {reason}");
 }
@@ -96,7 +96,31 @@ fn sidecar() -> Option<PathBuf> {
         return None;
     };
     let path = dir.join(name);
-    path.is_file().then_some(path)
+    sidecar_is_runnable(&path).then_some(path)
+}
+
+/// Whether `path` is a file the kernel will actually let us `spawn`.
+///
+/// A sidecar present with the pinned bytes but mode 0644 satisfies `is_file()`,
+/// reaches `start_engine`, and panics with `PermissionDenied` — a failure whose
+/// message accuses the test rather than the prebuild. Treating it as "not
+/// fetched" keeps the skip honest and points at `prebuild.mjs`, which is what
+/// restores the bit.
+fn sidecar_is_runnable(path: &Path) -> bool {
+    if !path.is_file() {
+        return false;
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        // Any execute bit, matching what the kernel checks for `spawn`. A file
+        // without one is a `PermissionDenied` panic dressed as a test failure.
+        fs::metadata(path).is_ok_and(|meta| meta.permissions().mode() & 0o111 != 0)
+    }
+    #[cfg(not(unix))]
+    {
+        true
+    }
 }
 
 /// Parses mihomo's delay map out of a JSON body.
@@ -139,12 +163,8 @@ fn http_get(addr: &str, path: &str) -> (u16, String) {
     stream
         .set_read_timeout(Some(Duration::from_secs(15)))
         .expect("set read timeout");
-    let request = format!(
-        "GET {path} HTTP/1.1\r\nHost: {addr}\r\nConnection: close\r\nAccept: */*\r\n\r\n"
-    );
-    stream
-        .write_all(request.as_bytes())
-        .expect("write request");
+    let request = format!("GET {path} HTTP/1.1\r\nHost: {addr}\r\nConnection: close\r\nAccept: */*\r\n\r\n");
+    stream.write_all(request.as_bytes()).expect("write request");
     let mut raw = Vec::new();
     let _ = stream.read_to_end(&mut raw);
     let text = String::from_utf8_lossy(&raw).into_owned();
@@ -467,9 +487,7 @@ fn an_unreachable_member_is_not_reported_as_success() {
     // success: whatever numeric values appear, none classifies as a measurement.
     let delays = parse_delay_map(&body);
     assert!(
-        delays
-            .iter()
-            .all(|(_, delay)| !delay_is_a_measurement(*delay, 2)),
+        delays.iter().all(|(_, delay)| !delay_is_a_measurement(*delay, 2)),
         "a failed test must not yield a usable measurement, got {delays:?}"
     );
 }
@@ -626,10 +644,7 @@ fn a_group_whose_members_all_fail_returns_no_delay_map() {
     let dead_url = format!("http://127.0.0.1:{}/generate_204", unused_port());
     let (status, body) = http_get(&controller, &group_delay_path(&dead_url, 2));
 
-    assert_ne!(
-        status, 200,
-        "an all-dead group must not answer 200; body was {body:?}"
-    );
+    assert_ne!(status, 200, "an all-dead group must not answer 200; body was {body:?}");
     assert!(
         parse_delay_map(&body).is_empty(),
         "an all-dead group must return an error message, not a delay map; body was {body:?}"

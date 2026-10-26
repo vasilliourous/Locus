@@ -32,15 +32,26 @@ trap 'rm -rf "$TMP"' EXIT
 
 # Fingerprint every file the tests will touch, BEFORE any of them run, so the
 # restore check at the bottom compares content rather than git status.
-sha256sum \
-    server/pb_hooks/code_lookup.pb.js \
-    client/src-tauri/src/locus/contract.rs \
-    client/src-tauri/src/locus/tier.rs \
-    client/src/services/locus.ts \
-    client/src/services/locus.generated.ts \
-    client/src-tauri/sidecar/verge-mihomo-x86_64-unknown-linux-gnu \
-    client/src-tauri/src/core/manager/lifecycle.rs \
-    > "$TMP/before.sha256" 2>/dev/null
+#
+# Fingerprint them from a directory that cannot go stale between the hash and
+# the patch. The earlier version hashed the live paths — and a cargo/clippy run
+# in the same tree can rewrite a source file in the window between the hash and
+# the patch, which both makes the injected defect a no-op AND makes the restore
+# check compare against bytes that were never there. Copy first, then hash the
+# copy.
+mkdir -p "$TMP/pristine"
+TOUCHED="server/pb_hooks/code_lookup.pb.js
+client/src-tauri/src/locus/contract.rs
+client/src-tauri/src/locus/tier.rs
+client/src/services/locus.ts
+client/src/services/locus.generated.ts
+client/src-tauri/sidecar/verge-mihomo-x86_64-unknown-linux-gnu
+client/src-tauri/src/core/manager/lifecycle.rs"
+for f in $TOUCHED; do
+    [ -f "$f" ] && cp "$f" "$TMP/pristine/$(echo "$f" | tr '/' '_')"
+done
+printf '%s\n' "$TOUCHED" > "$TMP/touched.list"
+(cd "$TMP/pristine" && sha256sum ./*) > "$TMP/before.sha256"
 
 # expect_caught <label> <file> <python-patch-expr>
 # Copies the file, applies a patch, runs the checker, restores, and asserts the
@@ -62,7 +73,8 @@ if out == src:
     raise SystemExit("patch was a no-op — the test proves nothing")
 open(path, "w", encoding="utf-8").write(out)
 PY
-    if [ $? -ne 0 ]; then
+    patch_status=$?
+    if [ "$patch_status" -ne 0 ]; then
         cp "$TMP/orig" "$file"
         miss "$label (the injected defect did not apply — test invalid)"
         return
@@ -146,7 +158,8 @@ if out == src:
     raise SystemExit("patch was a no-op")
 open(path, "w", encoding="utf-8").write(out)
 PY
-    if [ $? -ne 0 ]; then
+    patch_status=$?
+    if [ "$patch_status" -ne 0 ]; then
         cp "$TMP/orig_full" "$file"
         miss "$label (the injected defect did not apply — test invalid)"
         return
@@ -282,22 +295,30 @@ echo "════════════════════════�
 # to how it was found. `git diff` against HEAD cannot say that, and neither can
 # `git status`; a hash of the pre-test state can.
 restore_ok=1
-for f in server/pb_hooks/code_lookup.pb.js \
-         client/src-tauri/src/locus/contract.rs \
-         client/src-tauri/src/locus/tier.rs \
-         client/src/services/locus.ts \
-         client/src/services/locus.generated.ts \
-         client/src-tauri/sidecar/verge-mihomo-x86_64-unknown-linux-gnu \
-         client/src-tauri/src/core/manager/lifecycle.rs; do
-    want=$(sed -n 's/^\([a-f0-9]\{64\}\)  .*/\1/p' "$TMP/before.sha256" 2>/dev/null | head -1)
-    if [ -f "$TMP/before.sha256" ]; then
-        expected=$(grep "  $f\$" "$TMP/before.sha256" | cut -d' ' -f1)
-        actual=$(sha256sum "$f" | cut -d' ' -f1)
-        if [ -n "$expected" ] && [ "$expected" != "$actual" ]; then
-            echo -e "  ${RED}BAD${NC}  the test left $f modified (content differs from before the test)"
-            restore_ok=0
-            FAIL=1
-        fi
+if [ ! -s "$TMP/before.sha256" ]; then
+    # Without the snapshot this block can only ever report OK, which is the
+    # exact shape of failure the whole harness exists to catch. Report it.
+    echo -e "  ${RED}BAD${NC}  no pre-test snapshot was taken — the restore check proved nothing"
+    restore_ok=0
+    FAIL=1
+fi
+for f in $TOUCHED; do
+    # The snapshot lives in $TMP/pristine under a flattened name, so the hash
+    # taken before the tests cannot be disturbed by anything that writes to the
+    # live tree. Compare the LIVE file against that copy.
+    snap="$TMP/pristine/$(echo "$f" | tr '/' '_')"
+    if [ ! -f "$snap" ]; then
+        # A file the tests patch was never snapshotted. Its restore is
+        # unverified, which must not read as a pass.
+        echo -e "  ${RED}BAD${NC}  $f was not snapshotted before the test — its restore is unverified"
+        restore_ok=0
+        FAIL=1
+        continue
+    fi
+    if ! cmp -s "$snap" "$f"; then
+        echo -e "  ${RED}BAD${NC}  the test left $f modified (content differs from before the test)"
+        restore_ok=0
+        FAIL=1
     fi
 done
 if [ "$restore_ok" -eq 1 ]; then

@@ -659,7 +659,31 @@ entry above.
 
 ## Open, and blocked in this environment (continued)
 
-### The publish guard calls `atob`, which goja does not have — the fix is proven but not applied
+### RESOLVED — the publish guard called `atob`, which goja does not have
+
+**Added 2026-09-30. Resolved: the fix is committed; only the live restart is
+left.** Kept in place, not moved to `## Closed`, because the *hub* still needs
+PocketBase restarted for it to take effect and that has not been done (a repo fix
+is inert until the piece that runs it is redeployed — see `AGENTS.md`).
+
+**State in the tree.** `server/pb_hooks/admin_console.pb.js` carries a hand-written
+`base64ToBinary()` and uses it in `isPlausibleMinisignSignature()`; there is no
+`atob`/`btoa` call left anywhere under `server/pb_hooks/` (checked with
+`grep -rn 'atob\|btoa'`). Decoding a real four-line `.sig` file from
+`release-artifacts/` round-trips byte-for-byte to four lines with the expected
+`untrusted comment: ` / `trusted comment: ` headers.
+
+**Guarded by** `server/scripts/smoke-signature-encoding.sh`, which extracts the
+predicate from the shipped hook rather than trusting a pattern — so the regression
+this entry describes (a decoder that returns `false` for every input) fails a check
+instead of quietly refusing every release.
+
+**Still open:** the hub's copy has not been re-deployed and PocketBase has not been
+restarted, so the live console's behaviour after this fix is **unverified**.
+
+<details>
+<summary>The original diagnosis, kept for the reasoning</summary>
+
 
 **Added 2026-09-30.** The admin console refuses to publish or activate **any**
 release, reporting for all four platforms *"signature not base64 of a minisign
@@ -672,14 +696,14 @@ In one line: `isPlausibleMinisignSignature()` in
 call throws, the function's own `catch` returns `false`, and every value is
 judged invalid, correct ones included.
 
-**The fix is proven on the live hub but has not been committed.** A pure-JS base64
-decoder decodes all four real signatures to minisign's 4-line shape. That patch
-was applied, tested and **reverted**, so the live hub is in its original,
-still-broken state.
+**The fix was proven on the live hub, then reverted.** A pure-JS base64 decoder
+decoded all four real signatures to minisign's 4-line shape. The version that was
+reverted was never committed; it has since been re-applied and committed (see the
+resolved note above).
 
-To finish it: replace that one line with a self-contained pure-JS decoder, then
-**restart PocketBase** before testing — it caches `pb_hooks` at startup, and a
-stale-cached hook will make a correct patch look like it did not apply.
+To finish it on a hub: deploy the hook, then **restart PocketBase** before
+testing — it caches `pb_hooks` at startup, and a stale-cached hook will make a
+correct patch look like it did not apply.
 
 Two things a successor should know:
 
@@ -690,6 +714,7 @@ Two things a successor should know:
    total data outage in its output. It was not noticed because nobody published a
    release in the window.
 
+</details>
 ### The term model, renewal and the single-use rule have never met a database
 
 **Added 2026-09-29. Amended 2026-10** — one-code-per-device, `codes.rebind` and

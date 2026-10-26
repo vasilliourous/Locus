@@ -114,11 +114,7 @@ fn is_preferences_lock_contention(error: &anyhow::Error) -> bool {
 /// and there must be budget left. The retry exists because macOS takes one
 /// machine-wide preferences lock with a **zero-second wait**, so two legitimate
 /// writers momentarily overlap and the loser sees a failure it can simply retry.
-fn plan_preferences_lock_retry(
-    is_macos: bool,
-    error: &anyhow::Error,
-    attempt: u32,
-) -> bool {
+fn plan_preferences_lock_retry(is_macos: bool, error: &anyhow::Error, attempt: u32) -> bool {
     is_macos && attempt < PREFERENCES_LOCK_ATTEMPTS && is_preferences_lock_contention(error)
 }
 
@@ -594,12 +590,8 @@ impl Sysopt {
                 loop {
                     attempt += 1;
                     let written = match step {
-                        ProxyApplyStep::Autoproxy => {
-                            skip_without_network_service(auto.enable, auto.set_auto_proxy())
-                        }
-                        ProxyApplyStep::Sysproxy => {
-                            skip_without_network_service(sys.enable, sys.set_system_proxy())
-                        }
+                        ProxyApplyStep::Autoproxy => skip_without_network_service(auto.enable, auto.set_auto_proxy()),
+                        ProxyApplyStep::Sysproxy => skip_without_network_service(sys.enable, sys.set_system_proxy()),
                     };
                     match written {
                         Ok(reached_os) => {
@@ -607,11 +599,7 @@ impl Sysopt {
                             break;
                         }
                         Err(error)
-                            if plan_preferences_lock_retry(
-                                host_is_macos(),
-                                &anyhow::anyhow!("{error:#}"),
-                                attempt,
-                            ) =>
+                            if plan_preferences_lock_retry(host_is_macos(), &anyhow::anyhow!("{error:#}"), attempt) =>
                         {
                             // Another writer holds the machine-wide preferences
                             // lock. Wait for it and take the lock again rather
@@ -698,10 +686,9 @@ mod tests {
     use super::{
         AuthoritativeState, BYPASS_SEPARATOR, DEFAULT_BYPASS, OsProxyState, PREFERENCES_LOCK_ATTEMPTS,
         PREFERENCES_LOCK_RETRY_GAP, ProxyApplyStep, SystemProxyStateUnknown, authoritative_state,
-        authoritative_state_from, classify_os_proxy_state, disable_both,
-        disable_until_the_last_write_is_ours, first_failure, format_bypass,
-        plan_preferences_lock_retry,
-        proxy_apply_steps, recover_from_failed_write, target_is_already_in_place,
+        authoritative_state_from, classify_os_proxy_state, disable_both, disable_until_the_last_write_is_ours,
+        first_failure, format_bypass, plan_preferences_lock_retry, proxy_apply_steps, recover_from_failed_write,
+        target_is_already_in_place,
     };
     use parking_lot::Mutex;
     use std::collections::VecDeque;
@@ -1242,7 +1229,12 @@ mod tests {
     #[test]
     fn the_retry_budget_is_bounded_and_brief() {
         const { assert!(PREFERENCES_LOCK_ATTEMPTS >= 2, "a budget of one is not a retry") };
-        const { assert!(PREFERENCES_LOCK_ATTEMPTS <= 5, "a large budget turns a fault into a hang") };
+        const {
+            assert!(
+                PREFERENCES_LOCK_ATTEMPTS <= 5,
+                "a large budget turns a fault into a hang"
+            )
+        };
         assert!(
             PREFERENCES_LOCK_RETRY_GAP * PREFERENCES_LOCK_ATTEMPTS < std::time::Duration::from_secs(2),
             "the whole retry budget must stay inside a user-visible pause"

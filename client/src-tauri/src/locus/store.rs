@@ -247,7 +247,7 @@ pub async fn record_expiry(expires_at: Option<String>) -> Result<()> {
 /// override just because one beat was produced by a hub that does not know about
 /// them.
 pub async fn record_hub_override(offered: &str) -> Result<()> {
-    use crate::locus::contract::{resolve_hub_url, HUB_URL};
+    use crate::locus::contract::{HUB_URL, resolve_hub_url};
 
     let resolved = resolve_hub_url(Some(offered));
     let accept = resolved != HUB_URL;
@@ -261,11 +261,7 @@ pub async fn record_hub_override(offered: &str) -> Result<()> {
 
     let verge = Config::verge().await;
     verge.edit_draft(|draft| {
-        draft.locus_hub_override = if accept {
-            Some(resolved.as_str().into())
-        } else {
-            None
-        };
+        draft.locus_hub_override = if accept { Some(resolved.as_str().into()) } else { None };
     });
     verge.data_arc().save_file().await
 }
@@ -382,9 +378,7 @@ pub async fn clear_update_offer() -> Result<()> {
 /// Persisted so the Account page can answer "why is this device not updating?"
 /// on demand. It is per-heartbeat state, not an event log: the latest beat wins,
 /// because the question a student asks is about *now*.
-pub async fn record_update_check_reason(
-    reason: Option<&crate::locus::update::NoOfferReason>,
-) -> Result<()> {
+pub async fn record_update_check_reason(reason: Option<&crate::locus::update::NoOfferReason>) -> Result<()> {
     let verge = Config::verge().await;
     let encoded = reason.map(|r| r.describe());
     verge.edit_draft(|draft| {
@@ -486,10 +480,7 @@ pub async fn store_usage(usage: &crate::locus::usage::Usage) -> Result<()> {
 /// rather than implied by the field's presence — see `STILL-OPEN.md`.
 #[must_use]
 pub async fn throttle_mbps() -> Option<u32> {
-    crate::config::Config::verge()
-        .await
-        .latest_arc()
-        .locus_throttle_mbps
+    crate::config::Config::verge().await.latest_arc().locus_throttle_mbps
 }
 
 /// Caches the throttle speed the hub advertised, in Mbps.
@@ -716,7 +707,7 @@ mod tests {
     /// two cannot disagree about what "usable" means.
     #[test]
     fn an_offered_hub_address_is_adopted_only_when_it_survives_validation() {
-        use crate::locus::contract::{resolve_hub_url, HUB_URL};
+        use crate::locus::contract::{HUB_URL, resolve_hub_url};
 
         // Adoption is decided by the resolver, not by a second rule here.
         let adopted = |offered: &str| {
@@ -743,7 +734,8 @@ mod tests {
         // default, which `record_hub_override` writes as `None` (cleared) rather
         // than as a rejection. The two paths are distinguishable by this predicate
         // plus the emptiness test in the function itself.
-        assert!(resolve_hub_url(Some("")).trim() == HUB_URL);    }
+        assert!(resolve_hub_url(Some("")).trim() == HUB_URL);
+    }
 
     /// A partial record must read as absent, not as a half-populated struct.
     ///
@@ -791,13 +783,9 @@ mod tests {
     /// freshly activated value.
     #[test]
     fn the_config_code_beats_the_mirror() {
-        let verge = verge_with(
-            Some("RQ-ABCD-EFGH-JKMN-T"),
-            Some("eco"),
-            Some(&"a".repeat(64)),
-        );
-        let activation = activation_from(&verge, Some("RQ-ZZZZ-ZZZZ-ZZZZ-Z".to_owned()))
-            .expect("the config record must read");
+        let verge = verge_with(Some("RQ-ABCD-EFGH-JKMN-T"), Some("eco"), Some(&"a".repeat(64)));
+        let activation =
+            activation_from(&verge, Some("RQ-ZZZZ-ZZZZ-ZZZZ-Z".to_owned())).expect("the config record must read");
         assert_eq!(activation.code, "RQ-ABCD-EFGH-JKMN-T");
     }
 

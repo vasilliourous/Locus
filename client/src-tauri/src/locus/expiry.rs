@@ -250,16 +250,20 @@ mod tests {
     /// between warning a student and not warning them at all.
     #[test]
     fn the_warning_window_includes_its_own_boundary() {
-        assert!(Expiry::InDays {
-            days: EXPIRY_WARNING_DAYS,
-            expires: Utc::now(),
-        }
-        .is_urgent());
-        assert!(!Expiry::InDays {
-            days: EXPIRY_WARNING_DAYS + 1,
-            expires: Utc::now(),
-        }
-        .is_urgent());
+        assert!(
+            Expiry::InDays {
+                days: EXPIRY_WARNING_DAYS,
+                expires: Utc::now(),
+            }
+            .is_urgent()
+        );
+        assert!(
+            !Expiry::InDays {
+                days: EXPIRY_WARNING_DAYS + 1,
+                expires: Utc::now(),
+            }
+            .is_urgent()
+        );
     }
 
     /// Unknown and lapsed are never "urgent" — they are already resolved states.

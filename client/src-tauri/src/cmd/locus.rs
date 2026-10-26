@@ -444,11 +444,9 @@ pub async fn locus_status() -> LocusStatus {
     // reads. Reported so that "the free plan does not connect" can be answered
     // from a status dump instead of from a rebuild.
     let udp = classify_udp(
-        store::tier_config(
-            activation.as_ref().map_or("", |a| a.tier.as_str()),
-        )
-        .await
-        .as_ref(),
+        store::tier_config(activation.as_ref().map_or("", |a| a.tier.as_str()))
+            .await
+            .as_ref(),
         verge_data.locus_udp_relay.unwrap_or(false),
     );
 
@@ -623,7 +621,11 @@ pub async fn locus_activate(code: String) -> CmdResult<ActivationResult> {
             if expires_at.is_some()
                 && let Err(error) = store::record_expiry(expires_at).await
             {
-                logging!(warn, Type::Cmd, "[locus] could not store the subscription expiry: {error:#}");
+                logging!(
+                    warn,
+                    Type::Cmd,
+                    "[locus] could not store the subscription expiry: {error:#}"
+                );
             }
 
             // The tier's connection details, so Connect has something to dial.
@@ -884,8 +886,7 @@ const fn connect_allowed(state: &crate::core::runstate::RunState) -> bool {
 /// Names the next action (contact the seller) and does not blame the student.
 /// A date is appended by the caller when one is known — this is the part that is
 /// always true.
-const SUBSCRIPTION_LAPSED_MESSAGE: &str =
-    "This Locus code has expired, so the VPN will not connect. Contact the person \
+const SUBSCRIPTION_LAPSED_MESSAGE: &str = "This Locus code has expired, so the VPN will not connect. Contact the person \
      who sold you the code to renew it, then activate again.";
 
 /// Whether a stored expiry permits a new connection.
@@ -934,7 +935,10 @@ pub async fn locus_connect() -> CmdResult<ConnectionResult> {
                 Type::Cmd,
                 "[locus] refusing to connect: the stored subscription expiry has lapsed"
             );
-            return Err(super::coded_error("LOCUS_SUBSCRIPTION_LAPSED", SUBSCRIPTION_LAPSED_MESSAGE));
+            return Err(super::coded_error(
+                "LOCUS_SUBSCRIPTION_LAPSED",
+                SUBSCRIPTION_LAPSED_MESSAGE,
+            ));
         }
     }
 
@@ -1156,8 +1160,7 @@ async fn apply_tier_waiting_for_the_guard(
                     format!("The tunnel configuration was refused: {reason}"),
                 ));
             }
-            Ok(apply::ApplyOutcome::Applied)
-            | Ok(apply::ApplyOutcome::StagedOnly) => break,
+            Ok(apply::ApplyOutcome::Applied) | Ok(apply::ApplyOutcome::StagedOnly) => break,
             Ok(apply::ApplyOutcome::Deferred { reason }) => {
                 // Somebody else holds the config-update guard. Wait and ask
                 // again — refusing here is the defect this whole function exists
@@ -1381,7 +1384,11 @@ pub async fn locus_install_update(app: tauri::AppHandle) -> CmdResult<()> {
     // crash undiagnosable: the install path logged only on failure-to-check and
     // on success, so a process that died mid-download left nothing behind at
     // all. Every branch below now says so before it can block.
-    logging!(info, Type::System, "[locus] update install requested (running {current})");
+    logging!(
+        info,
+        Type::System,
+        "[locus] update install requested (running {current})"
+    );
 
     let pending = crate::locus::update::install::PendingInstall::check(&app, &hub, current)
         .await
@@ -1496,7 +1503,11 @@ pub async fn locus_install_update(app: tauri::AppHandle) -> CmdResult<()> {
     // success log is emitted *before* the call, not after.
     ready.install().map_err(|error| {
         let detail = format!("{error:#}");
-        logging!(error, Type::System, "[locus] the installer refused the update: {detail}");
+        logging!(
+            error,
+            Type::System,
+            "[locus] the installer refused the update: {detail}"
+        );
         super::coded_error("LOCUS_UPDATE_INSTALL_FAILED", detail)
     })?;
 
@@ -1589,9 +1600,9 @@ pub async fn locus_check_subscription() -> bool {
 #[allow(clippy::expect_used, clippy::panic, reason = "tests assert by panicking")]
 mod tests {
     use super::*;
-    use activation::ActivationOutcome as O;
     use crate::core::manager::RunningMode;
     use crate::core::runstate::ServiceHealth;
+    use activation::ActivationOutcome as O;
 
     /// The four shapes a tier's UDP configuration can arrive in, kept distinct.
     ///
@@ -1621,10 +1632,7 @@ mod tests {
         };
 
         assert_eq!(classify_udp(Some(&tcp_only), false), UdpStatus::None);
-        assert_eq!(
-            classify_udp(Some(&free), true),
-            UdpStatus::Configured { port: 8447 }
-        );
+        assert_eq!(classify_udp(Some(&free), true), UdpStatus::Configured { port: 8447 });
 
         // A half-configured tier is `Unusable` **with a reason naming which half**,
         // because the two halves have different operator fixes.
@@ -1825,10 +1833,7 @@ mod tests {
         assert!(core_is_running(&running), "a running service must read as connected");
 
         let stopped = run_state(ServiceHealth::NotInstalled, true, false);
-        assert!(
-            !core_is_running(&stopped),
-            "NotRunning is the only down answer"
-        );
+        assert!(!core_is_running(&stopped), "NotRunning is the only down answer");
     }
 
     /// A cancelled connect is remembered until the loop that reads it consumes it.
@@ -1841,10 +1846,7 @@ mod tests {
     fn a_cancelled_connect_is_consumed_exactly_once() {
         CANCEL_CONNECT.store(true, Ordering::Release);
 
-        assert!(
-            take_cancellation(),
-            "the in-flight connect must see the request"
-        );
+        assert!(take_cancellation(), "the in-flight connect must see the request");
         assert!(
             !take_cancellation(),
             "a cancellation must not leak into the next connect"
@@ -2104,10 +2106,7 @@ mod tests {
         let soon = chrono::Utc::now() + chrono::Duration::days(2);
         let text = soon.format("%Y-%m-%d %H:%M:%S%.fZ").to_string();
         match classify_subscription(true, Some(&text), None) {
-            SubscriptionStatus::Active { urgent, .. } => assert!(
-                urgent,
-                "two days from expiry must be urgent"
-            ),
+            SubscriptionStatus::Active { urgent, .. } => assert!(urgent, "two days from expiry must be urgent"),
             other => panic!("expected Active, got {other:?}"),
         }
     }
@@ -2186,16 +2185,12 @@ mod tests {
     /// killed UoT fleet-wide.
     #[test]
     fn the_udp_wire_shape_matches_its_siblings() {
-        let configured = serde_json::to_value(UdpStatus::Configured { port: 8447 })
-            .expect("UdpStatus must serialize");
+        let configured = serde_json::to_value(UdpStatus::Configured { port: 8447 }).expect("UdpStatus must serialize");
         assert_eq!(
             configured.get("kind").and_then(serde_json::Value::as_str),
             Some("configured")
         );
-        assert_eq!(
-            configured.get("port").and_then(serde_json::Value::as_u64),
-            Some(8447)
-        );
+        assert_eq!(configured.get("port").and_then(serde_json::Value::as_u64), Some(8447));
 
         let none = serde_json::to_value(UdpStatus::None).expect("UdpStatus must serialize");
         assert_eq!(none.get("kind").and_then(serde_json::Value::as_str), Some("none"));
@@ -2219,10 +2214,7 @@ mod tests {
         })
         .expect("SubscriptionStatus must serialize");
 
-        assert_eq!(
-            value.get("state").and_then(serde_json::Value::as_str),
-            Some("active")
-        );
+        assert_eq!(value.get("state").and_then(serde_json::Value::as_str), Some("active"));
         assert!(
             value.get("daysRemaining").is_some(),
             "the frontend reads `daysRemaining`; got {value}"
@@ -2245,10 +2237,7 @@ mod tests {
         })
         .expect("SubscriptionStatus must serialize");
 
-        assert_eq!(
-            value.get("state").and_then(serde_json::Value::as_str),
-            Some("refused")
-        );
+        assert_eq!(value.get("state").and_then(serde_json::Value::as_str), Some("refused"));
         assert!(
             value.get("reason").is_some(),
             "`reason` is a single word and must survive; got {value}"
@@ -2265,8 +2254,7 @@ mod tests {
     #[test]
     fn no_allowance_classifies_as_unlimited_not_metered() {
         let usage = crate::locus::usage::Usage::default();
-        let value = serde_json::to_value(classify_allowance(&usage, None, 0))
-            .expect("AllowanceStatus must serialize");
+        let value = serde_json::to_value(classify_allowance(&usage, None, 0)).expect("AllowanceStatus must serialize");
         assert_eq!(
             value.get("state").and_then(serde_json::Value::as_str),
             Some("unlimited"),
@@ -2286,10 +2274,7 @@ mod tests {
         let value = serde_json::to_value(classify_allowance(&usage, Some(5 * mb), 1_000))
             .expect("AllowanceStatus must serialize");
 
-        assert_eq!(
-            value.get("state").and_then(serde_json::Value::as_str),
-            Some("metered")
-        );
+        assert_eq!(value.get("state").and_then(serde_json::Value::as_str), Some("metered"));
         // The frontend reads these by name; a snake_case slip reads `undefined`.
         for key in ["usedBytes", "allowanceBytes", "percent", "warning", "throttled"] {
             assert!(
@@ -2312,9 +2297,7 @@ mod tests {
                 warned: false,
             };
             match classify_allowance(&usage, Some(allowance), 1_000) {
-                AllowanceStatus::Metered {
-                    warning, throttled, ..
-                } => (warning, throttled),
+                AllowanceStatus::Metered { warning, throttled, .. } => (warning, throttled),
                 AllowanceStatus::Unlimited => panic!("a metered tier must not be unlimited"),
             }
         };

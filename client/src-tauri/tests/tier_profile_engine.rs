@@ -20,6 +20,8 @@
     clippy::cognitive_complexity
 )]
 
+#[cfg(unix)]
+use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -50,6 +52,11 @@ fn client_dir() -> PathBuf {
 /// so a clean checkout has none. A missing engine is reported as a SKIP rather
 /// than a failure: the test must not fail CI on a platform whose sidecar has not
 /// been fetched, but it must be loud about not having run.
+///
+/// "Missing" includes NOT EXECUTABLE — see [`sidecar_is_runnable`]. A file that
+/// is present with the right bytes but mode 0644 satisfies `is_file()` and then
+/// panics the moment the test tries to `spawn` it, which is a failure with a
+/// misleading message rather than the skip this helper is here to produce.
 fn sidecar() -> Option<PathBuf> {
     let dir = client_dir().join("src-tauri").join("sidecar");
     let name = if cfg!(all(target_os = "linux", target_arch = "x86_64")) {
@@ -64,7 +71,24 @@ fn sidecar() -> Option<PathBuf> {
         return None;
     };
     let path = dir.join(name);
-    path.is_file().then_some(path)
+    sidecar_is_runnable(&path).then_some(path)
+}
+
+fn sidecar_is_runnable(path: &Path) -> bool {
+    if !path.is_file() {
+        return false;
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        // Any execute bit, matching what the kernel checks for `spawn`. A file
+        // without one is a `PermissionDenied` panic dressed as a test failure.
+        fs::metadata(path).is_ok_and(|meta| meta.permissions().mode() & 0o111 != 0)
+    }
+    #[cfg(not(unix))]
+    {
+        true
+    }
 }
 
 /// Runs `verge-mihomo -t -f <config>` and returns its combined output.

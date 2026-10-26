@@ -317,12 +317,12 @@ fn is_container(bytes: &[u8]) -> bool {
     /// Magic numbers, longest-first within a format so a prefix cannot match
     /// the wrong entry.
     const CONTAINER_MAGICS: &[&[u8]] = &[
-        b"!<arch>\n", // `ar` archive: .deb
+        b"!<arch>\n",        // `ar` archive: .deb
         b"\xed\xab\xee\xdb", // RPM
-        b"\xfd7zXZ\x00", // xz: AppImage
-        b"koly", // DMG trailer, at the END of the file
-        b"\x1f\x8b", // gzip
-        b"PK\x03\x04", // zip
+        b"\xfd7zXZ\x00",     // xz: AppImage
+        b"koly",             // DMG trailer, at the END of the file
+        b"\x1f\x8b",         // gzip
+        b"PK\x03\x04",       // zip
         b"\xd0\xcf\x11\xe0", // MSI (OLE compound document)
     ];
 
@@ -376,9 +376,7 @@ fn is_bare_executable(bytes: &[u8]) -> bool {
 /// work for nothing.
 fn contains(haystack: &[u8], needle: &[u8]) -> bool {
     let window = &haystack[..haystack.len().min(NSIS_SCAN_LIMIT)];
-    window
-        .windows(needle.len())
-        .any(|candidate| candidate == needle)
+    window.windows(needle.len()).any(|candidate| candidate == needle)
 }
 
 /// How far into an artifact the NSIS header is looked for.
@@ -436,14 +434,10 @@ impl ReadyInstall {
                 bytes.len()
             );
             logging!(error, Type::System, "[locus] {detail}");
-            bail!(
-                "{detail} — this build cannot install a raw executable, and neither can the platform installer"
-            );
+            bail!("{detail} — this build cannot install a raw executable, and neither can the platform installer");
         }
 
-        self.update
-            .install(bytes)
-            .context("the update could not be installed")
+        self.update.install(bytes).context("the update could not be installed")
     }
 }
 
@@ -580,7 +574,10 @@ mod tests {
     fn a_non_string_checksum_yields_none() {
         assert_eq!(sha256_from_manifest(&serde_json::json!({ "sha256": 12345 })), None);
         assert_eq!(sha256_from_manifest(&serde_json::json!({ "sha256": null })), None);
-        assert_eq!(sha256_from_manifest(&serde_json::json!({ "sha256": { "h": "1" } })), None);
+        assert_eq!(
+            sha256_from_manifest(&serde_json::json!({ "sha256": { "h": "1" } })),
+            None
+        );
     }
 
     // ── The payload guard ──
@@ -735,10 +732,7 @@ mod tests {
         // The package formats the Linux and Windows bundles actually produce.
         assert!(is_installer_payload(b"!<arch>\ndebian-binary"), "a .deb");
         assert!(is_installer_payload(b"\xed\xab\xee\xdb\x03\x00"), "an .rpm");
-        assert!(
-            is_installer_payload(b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"),
-            "an .msi"
-        );
+        assert!(is_installer_payload(b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"), "an .msi");
     }
 
     /// The macOS updater payload is a `.app.tar.gz`, and it must be ACCEPTED.

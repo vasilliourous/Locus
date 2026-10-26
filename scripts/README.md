@@ -28,21 +28,26 @@ publish path) and `fetch-release.py` (the GitHub-fetch path).
 
 ### Generate Codes
 
+`$HUB` is the hub's base URL — the canonical hub domain from
+`docs/state.toml` `[hub.domain]`, with `https://`. It is not written here: a
+literal hostname in a doc is a fact that drifts (see `docs/state.toml`).
+
 ```bash
+HUB="https://<hub.domain>"
 # Generate 50 free-plan codes and import to PocketBase
 PB_TOKEN=$(grep PB_TOKEN /root/.pb_admin_creds | cut -d= -f2)
-./scripts/generate_codes.sh https://networkingguides.jadedns.uk $PB_TOKEN free 50
+./scripts/generate_codes.sh $HUB $PB_TOKEN free 50
 
 # Paid plan — the row is `strike`, the card prints "Full"
-./scripts/generate_codes.sh https://networkingguides.jadedns.uk $PB_TOKEN strike 20
+./scripts/generate_codes.sh $HUB $PB_TOKEN strike 20
 
 # Dry run (no import)
 DRY_RUN=1 PB_TOKEN=$(grep PB_TOKEN /root/.pb_admin_creds | cut -d= -f2)
-./scripts/generate_codes.sh https://networkingguides.jadedns.uk $PB_TOKEN free 50
+./scripts/generate_codes.sh $HUB $PB_TOKEN free 50
 
 # Custom expiry (30 days)
 EXPIRY_DAYS=30 PB_TOKEN=$(grep PB_TOKEN /root/.pb_admin_creds | cut -d= -f2)
-./scripts/generate_codes.sh https://networkingguides.jadedns.uk $PB_TOKEN free 10
+./scripts/generate_codes.sh $HUB $PB_TOKEN free 10
 ```
 
 ### Print Code Cards

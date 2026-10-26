@@ -309,7 +309,9 @@ async fn enforce_grace_period() {
 ///
 /// The rejection reason is logged, because "an update was advertised and silently
 /// ignored" is the exact failure this whole path exists to avoid.
-async fn record_update_offer(response: &crate::locus::heartbeat::HeartbeatResponse) -> Option<crate::locus::update::NoOfferReason> {
+async fn record_update_offer(
+    response: &crate::locus::heartbeat::HeartbeatResponse,
+) -> Option<crate::locus::update::NoOfferReason> {
     let Some(platform) = crate::locus::update::Platform::current() else {
         // Not a build target we ship updates for.
         let reason = crate::locus::update::NoOfferReason::UnsupportedPlatform;
@@ -354,7 +356,11 @@ async fn record_update_offer(response: &crate::locus::heartbeat::HeartbeatRespon
 
     logging!(info, Type::System, "[locus] the hub is offering update {version}");
     if let Err(error) = store::record_update_offer(version).await {
-        logging!(warn, Type::System, "[locus] could not record the offered update: {error:#}");
+        logging!(
+            warn,
+            Type::System,
+            "[locus] could not record the offered update: {error:#}"
+        );
     }
     None
 }
@@ -606,7 +612,11 @@ async fn handle_refusal(reason: &str) {
     // evidence is whatever was written here. Order matters: a crash between the
     // two leaves an explained refusal, never an unexplained one.
     if let Err(error) = store::record_refusal(reason).await {
-        logging!(warn, Type::Config, "[locus] could not record the refusal reason: {error:#}");
+        logging!(
+            warn,
+            Type::Config,
+            "[locus] could not record the refusal reason: {error:#}"
+        );
     }
 
     if let Err(error) = store::clear_entitlement().await {
@@ -656,10 +666,7 @@ mod tests {
     #[test]
     fn an_actionable_offer_is_recorded() {
         let response = heartbeat(Some("3.3.0"), Some("https://hub/updates/locus-linux"), "linux");
-        assert_eq!(
-            offered_version_to_record(&response, "linux", "3.2.1"),
-            Some("3.3.0")
-        );
+        assert_eq!(offered_version_to_record(&response, "linux", "3.2.1"), Some("3.3.0"));
     }
 
     /// A version that is not newer must never be prompted about.

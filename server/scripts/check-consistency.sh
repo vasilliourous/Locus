@@ -610,6 +610,38 @@ else
     printf '%s\n' "$used_binding" | sed 's/^/         /'
 fi
 
+# (f) A hook must not call a Web/Node builtin that goja does not define.
+#
+# WHY THIS IS A CHECK AND NOT A COMMENT. `admin_console.pb.js` refused EVERY
+# release for weeks with "signature not base64 of a minisign .sig file", naming
+# the fetch as the culprit. The real cause was `atob(...)`: PocketBase's goja
+# runtime defines no `atob`, `btoa`, `Buffer` or `TextDecoder`, so the call threw
+# `ReferenceError`, the enclosing `try/catch` turned the crash into a `false`
+# verdict, and every value — correct ones included — was judged invalid.
+#
+# Nothing could have caught it before runtime. It parses as JavaScript, `node
+# --check` is happy, and every static check here reads shapes, not semantics.
+# What makes it a guard rather than a warning is that the class of bug is
+# knowable in advance: these four names simply do not exist in this runtime.
+#
+# The comment-only exclusion is not cosmetic — this file explains the trap in
+# prose at the call site, so a naive grep reports the documentation as the defect.
+goja_builtins=""
+for f in "$HOOKS_DIR"/*.js; do
+    [ -f "$f" ] || continue
+    hit=$(sed 's://.*::' "$f" | grep -nE '(^|[^.A-Za-z0-9_$])(atob|btoa|TextDecoder|TextEncoder)[[:space:]]*\(|\bBuffer\.(from|alloc|concat)\(' || true)
+    [ -n "$hit" ] && goja_builtins="${goja_builtins}${f}: ${hit}
+"
+done
+if [ -z "$goja_builtins" ]; then
+    ok "no hook calls a builtin goja does not define (atob/btoa/Buffer/TextDecoder)"
+else
+    bad "a hook calls a builtin this runtime does not define — it throws at runtime,"
+    bad "and a surrounding try/catch turns that crash into a wrong verdict:"
+    printf '%s' "$goja_builtins" | sed 's/^/         /'
+    bad "  use the hand-rolled base64ToBinary() in admin_console.pb.js instead"
+fi
+
 # ─────────────────────────────────────────────────────────────
 # 7. Version agreement, across manifests AND prose.
 #
@@ -716,10 +748,27 @@ else
     # If you add a file here, add the reason. A path with no reason is the next
     # reader's guess, and this list only stays honest if it is specific.
     TRIAGED_BASIS='^(docs/CONTEXT\.md|docs/reference/THEMES\.md|docs/reference/DEBUGGING-METHOD\.md|docs/operate/CLAIMS\.md|docs/archive/DEPLOY-3\.2\.7\.md|docs/operate/UPDATE-SYSTEM\.md|docs/operate/RELEASING\.md|docs/operate/RECOVER-WINDOWS-UPDATE\.md|docs/operate/RECOVER-MACOS-UPDATE\.md|docs/business/1[0-9]-.*\.md|docs/business/redesign/.*\.md|client/docs/UPSTREAM-CHANGES\.md)$'
+
+    # The README's second exit: docs/reference/README.md is the FRONT DOOR of the
+    # doc set and is held to the same standard as the root README — a stale
+    # current-version there is the same false statement in a more prominent place.
+    #
+    # WHY THE GREP RUNS FIRST AND `grep -vF` FILTERS BY SHELL, NOT `grep -vE`.
+    # TRIAGED_BASIS was declared and documented above but NEVER APPLIED: the
+    # filter read `grep -vE "$TRIAGED_BASIS"`, which is an Extended regex, so
+    # every `\.` in the pattern matched any character and the anchors behaved as
+    # alternations of substrings. It did not crash, it silently did not exclude
+    # what the comment above it says it excludes — a guard that reads correct and
+    # does nothing, which is the exact failure this script exists to prevent.
+    # An exact-path file list needs exact matching, so it is `-vF` against a
+    # newline-separated list.
     stale=$(
         cd "$REPO" && grep -rEl --include=*.md '3\.[0-9]+\.[0-9]+' \
             README.md docs client/docs 2>/dev/null \
-            | grep -vE '^(docs/reference/FIXES\.md|docs/reference/STILL-OPEN\.md|docs/history/.*|docs/archive/.*|client/docs/FRONTEND\.md)$' \
+            | grep -vF -e 'docs/reference/FIXES.md' \
+                       -e 'docs/reference/STILL-OPEN.md' \
+                       -e 'client/docs/FRONTEND.md' \
+            | grep -vE '^(docs/history/|docs/archive/)' \
             | grep -vE "$TRIAGED_BASIS" \
             | while read -r f; do
                 # Any 3.x.y in the file that is not the current version.

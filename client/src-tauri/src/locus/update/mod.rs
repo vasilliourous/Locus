@@ -87,16 +87,14 @@ impl NoOfferReason {
     pub fn describe(&self) -> String {
         match self {
             Self::NotAdvertised => "the hub is advertising no update".to_owned(),
-            Self::AutomaticChecksOff { version } => format!(
-                "{version} is available, but automatic update checking is turned off in Settings"
-            ),
-            Self::NotNewer { reason } => reason.clone(),
-            Self::NoArtifactForPlatform { version, platform } => format!(
-                "{version} is advertised but has no build for {platform} — the release is incomplete"
-            ),
-            Self::UnsupportedPlatform => {
-                "this build target does not receive updates".to_owned()
+            Self::AutomaticChecksOff { version } => {
+                format!("{version} is available, but automatic update checking is turned off in Settings")
             }
+            Self::NotNewer { reason } => reason.clone(),
+            Self::NoArtifactForPlatform { version, platform } => {
+                format!("{version} is advertised but has no build for {platform} — the release is incomplete")
+            }
+            Self::UnsupportedPlatform => "this build target does not receive updates".to_owned(),
         }
     }
 }
@@ -154,10 +152,7 @@ mod tests {
         for reason in reasons {
             let text = reason.describe();
             assert!(!text.is_empty(), "{reason:?} produced no description");
-            assert!(
-                text.len() > 15,
-                "{reason:?} produced a useless description: {text:?}"
-            );
+            assert!(text.len() > 15, "{reason:?} produced a useless description: {text:?}");
         }
     }
 

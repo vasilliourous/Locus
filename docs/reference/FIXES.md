@@ -50,7 +50,76 @@ commercial gaps, [`../business/17-not-built.md`](../business/17-not-built.md).
   discoverable by clearing the cache and trying, which is why the failure was
   invisible for as long as it was.
 
-## 3.3.2 — THE HUB MOVED, AND THREE DEFECTS THE MOVE UNCOVERED (2026-10-18, release)
+## THE GUARDS THEMSELVES HAD FOUR DEFECTS, AND ONE OF THEM WAS BLIND (2026-10-26, unreleased)
+
+A run of the full check suite from a cold tree found no defect in the product and
+four in the things that check the product. Recorded together because they share a
+shape: **a check that reads correct and does not do what its comment says.**
+
+- **`cargo clippy -- -D warnings` failed on two lints, so the gate could not
+  pass.** `logging_error!` expanded to a bare `if let` statement with a trailing
+  semicolon, which is rejected in expression position
+  (`semicolon_in_expressions_from_non_local_macros`) — the macro's only use there
+  was a `match` arm. And `AtomicU64::fetch_update` is deprecated in favour of
+  `try_update`. The macro now expands to a block, which is correct in both
+  positions; the atomic uses a CAS loop, because `try_update` is newer than the
+  crate's `rust-version = "1.95"` floor and the loop compiles on both.
+  *Rule:* a macro used as an expression must expand to a block. A `-D warnings`
+  gate is only a gate if it has been run against the toolchain CI actually uses.
+- **`test-contract-guard.sh` judged its own patch step by the wrong status.**
+  Both helpers ran `python3 … <<PY` and then tested `[ $? -ne 0 ]` — but `$?` at
+  that point was the heredoc **assignment**, not the patch, so a patch that
+  silently failed to apply was reported as caught. It now captures the status
+  immediately.
+- **The same script's restore check could pass on files it never checked.** The
+  fingerprint was `grep "  $f\$"`, which treated the path as a regex (dots
+  match anything) and reported OK for an unmatched file; there was also a dead
+  `want=` line whose value was computed and never used. It now snapshots the
+  files to a temp directory *before* touching them and compares with `cmp`, so a
+  file that was not snapshotted fails loudly instead of passing. **Observed
+  failing**: skipping one restore produced three `BAD` lines, where the old code
+  produced one.
+- **`check-consistency.sh` §7 declared `TRIAGED_BASIS` — the documented,
+  per-path list of files whose older version is correct as written — and never
+  applied it.** The filter was `grep -vE "$TRIAGED_BASIS"`, which is an Extended
+  regex, so `\.` matched any character and the anchors behaved as alternations of
+  substrings. It did not crash; it silently did not exclude what the comment above
+  it says it excludes. Replaced with an exact-path list and `grep -vF`, plus the
+  container-directory prefixes as a regex. The report is unchanged on this tree,
+  which is the point: the list is the mechanism, and it was inert.
+- **Nothing checked `cargo fmt`.** `client/rustfmt.toml` has been the style since
+  the fork and no workflow ran it, so 82 files were unformatted. All were
+  formatted here and a `cargo fmt --check` step was added next to clippy.
+  *Rule:* formatting is a function of the toolchain and must be bound to the same
+  toolchain, or it drifts into a commit nobody can review.
+- **`prebuild` did not restore the executable bit on a sidecar that already
+  matched its pin.** The chmod lived at the bottom of the download path only, so
+  every early return — "matches its pin, skipping download", "already exists
+  (UNPINNED)", and the vendored path, which chmods *after* its return — left the
+  file as it was. `verge-mihomo` was found with the pinned sha256 to the byte and
+  mode 0644. The bytes were right, so the lock check passed; the file could not
+  execute, so all five engine integration tests panicked with
+  `PermissionDenied` and the two engine suites read as failures in a tree whose
+  content was correct. Mode is not content, so the hash pin cannot cover it; it
+  is now asserted on every path, by `ensureExecutable()`.
+- **The engine tests' skip check tested `is_file()` and then `spawn`ed.** A
+  present-but-0644 sidecar passed the check and panicked inside `start_engine`,
+  blaming the test. Both suites now treat "not executable" as "not fetched",
+  which prints the `SKIP` naming `prebuild.mjs` — observed skipping after
+  `chmod 644`, and observed passing (5/5, 10.2s) after the bit was restored.
+  *Rule:* a precondition a test relies on must be checked in the form the failure
+  takes. `spawn` needs an executable, not a file.
+- **No guard existed for the goja builtin trap.**
+- **No guard existed for the goja builtin trap.** `admin_console.pb.js` refused
+  every release because it called `atob`, which PocketBase's goja does not
+  define; the crash was caught and turned into `false` for every input. The fix
+  was already committed but nothing prevented it recurring. §6(f) now fails on
+  `atob`/`btoa`/`TextDecoder`/`TextEncoder`/`Buffer.*` in any hook, ignoring
+  comments (the file explains the trap in prose at the call site). Observed
+  failing against a reintroduced `atob(`. `STILL-OPEN.md` was corrected in the
+  same change — it still described the fix as uncommitted.
+
+
 
 - **What broke.** A 3.3.1 client failed activation with `invalid peer certificate:
   Expired`; the certificate had not expired. The response to the N4L block had never

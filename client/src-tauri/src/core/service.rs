@@ -2477,10 +2477,7 @@ mod tests {
         store.observe(ServiceHealth::NotInstalled);
         store.request_action(PendingAction::Install);
 
-        store
-            .perform(PendingAction::Install)
-            .await
-            .expect("the install landed");
+        store.perform(PendingAction::Install).await.expect("the install landed");
         store.observe(ServiceHealth::Ready);
 
         assert_eq!(status_of(&store), ServiceStatus::Ready);

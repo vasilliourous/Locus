@@ -1011,9 +1011,8 @@ mod tests {
     #[test]
     fn a_malformed_allowance_does_not_fail_the_beat() {
         for bad in ["-1", "5.5", "\"5120\"", "null", "{}"] {
-            let json = format!(
-                r#"{{"status":"ok","tier":"free","free_allowance_mb":{bad},"free_throttle_mbps":{bad}}}"#
-            );
+            let json =
+                format!(r#"{{"status":"ok","tier":"free","free_allowance_mb":{bad},"free_throttle_mbps":{bad}}}"#);
             let response: HeartbeatResponse = serde_json::from_str(&json)
                 .unwrap_or_else(|e| panic!("a bad allowance ({bad}) must not fail the beat: {e}"));
             assert!(response.is_ok(), "the beat itself is still good ({bad})");
@@ -1037,8 +1036,7 @@ mod tests {
     #[test]
     fn a_well_formed_allowance_still_parses() {
         let json = r#"{"status":"ok","tier":"free","free_allowance_mb":5120,"free_throttle_mbps":1}"#;
-        let response: HeartbeatResponse =
-            serde_json::from_str(json).expect("a good allowance must parse");
+        let response: HeartbeatResponse = serde_json::from_str(json).expect("a good allowance must parse");
         assert_eq!(response.free_allowance_mb, Some(5120));
         assert_eq!(response.free_throttle_mbps, Some(1));
         assert_eq!(response.allowance_bytes(), Some(5120 * 1024 * 1024));
@@ -1046,8 +1044,7 @@ mod tests {
         // Zero is the operator switching the quota off, and must survive as a
         // real value — not be treated as malformed.
         let off = r#"{"status":"ok","tier":"free","free_allowance_mb":0}"#;
-        let response: HeartbeatResponse =
-            serde_json::from_str(off).expect("zero must parse");
+        let response: HeartbeatResponse = serde_json::from_str(off).expect("zero must parse");
         assert_eq!(response.free_allowance_mb, Some(0));
         assert_eq!(
             response.allowance_bytes(),
@@ -1064,12 +1061,8 @@ mod tests {
     /// Clamping degrades toward "unlimited", the safe direction.
     #[test]
     fn an_absurd_allowance_is_clamped_to_a_usable_byte_count() {
-        let json = format!(
-            r#"{{"status":"ok","tier":"free","free_allowance_mb":{}}}"#,
-            u64::MAX
-        );
-        let response: HeartbeatResponse =
-            serde_json::from_str(&json).expect("an absurd allowance must still parse");
+        let json = format!(r#"{{"status":"ok","tier":"free","free_allowance_mb":{}}}"#, u64::MAX);
+        let response: HeartbeatResponse = serde_json::from_str(&json).expect("an absurd allowance must still parse");
         let bytes = response.allowance_bytes().expect("a quota is still applied");
         assert_eq!(
             bytes,
