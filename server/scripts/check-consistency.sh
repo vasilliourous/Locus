@@ -4309,67 +4309,77 @@ echo "33. The status wire struct and the TypeScript interface agree"
 
 # ── WHY THIS GUARD EXISTS ──
 #
-# `LocusStatus` is serialised by Rust with `rename_all = "camelCase"` and consumed
-# by a hand-written TypeScript interface. Nothing connected them. A field added on
-# one side only is invisible: Rust serialises it and the UI ignores it (a feature
-# that does nothing), or the UI reads a key that is never sent and gets
-# `undefined` (a value rendered as blank or NaN).
+# `LocusStatus` is serialised by Rust with `rename_all = "camelCase"` and was
+# consumed by a hand-written TypeScript interface. Nothing connected them. A
+# field added on one side only is invisible: Rust serialises it and the UI
+# ignores it (a feature that does nothing), or the UI reads a key that is never
+# sent and gets `undefined` (a value rendered as blank or NaN).
 #
 # This is the `uot_port` / `server_port_uot` class one layer out — a name
 # duplicated across languages with nothing enforcing agreement — and it was found
 # for real: the new `udp` field was added to the Rust struct and not to the
-# interface, which is precisely the drift this checks for.
+# interface.
 #
-# ── WHAT THIS CHECKS ──
+# ── WHAT THIS CHECKS NOW, AND WHY IT CHANGED ──
 #
-# Every `pub` field of `LocusStatus`, camelCased, appears in the `LocusStatus`
-# interface, and every interface field corresponds to a struct field. Both
-# directions, because only one of them fails loudly at compile time (neither).
+# The interface is no longer hand-written. `client/src/services/locus.ts`
+# re-exports the types from `locus.generated.ts`, which
+# `gen-ts-contract.py` derives from the Rust. Section 38 asserts that the
+# generated file matches the Rust, for ALL NINE IPC types rather than this one.
+#
+# So this section no longer compares two handwritten copies — that comparison is
+# now vacuous by construction. It asserts the two things generation does NOT
+# guarantee, which is where a hand-edit or a half-finished migration would show
+# up:
+#
+#   1. `services/locus.ts` imports/re-exports the generated types rather than
+#      redeclaring them. A redeclaration is the old failure mode returning, and
+#      it would shadow the generated type while §38 stayed green.
+#   2. `LocusStatus` is actually among them — the type this section has always
+#      been about must still be a generated export, not quietly dropped from the
+#      re-export list.
 # ─────────────────────────────────────────────────────────────
 WIRE_RUST="$REPO/client/src-tauri/src/cmd/locus.rs"
 WIRE_TS="$REPO/client/src/services/locus.ts"
-if [ ! -f "$WIRE_RUST" ] || [ ! -f "$WIRE_TS" ]; then
-    bad "cannot check the status wire shape: $WIRE_RUST or $WIRE_TS is missing"
+WIRE_GEN="$REPO/client/src/services/locus.generated.ts"
+if [ ! -f "$WIRE_RUST" ] || [ ! -f "$WIRE_TS" ] || [ ! -f "$WIRE_GEN" ]; then
+    bad "cannot check the status wire shape: one of $WIRE_RUST, $WIRE_TS, $WIRE_GEN is missing"
 else
-    wire_report=$(python3 - "$WIRE_RUST" "$WIRE_TS" <<'PY'
+    wire_report=$(python3 - "$WIRE_RUST" "$WIRE_TS" "$WIRE_GEN" <<'PY'
 import re, sys
 
-rust = open(sys.argv[1], encoding="utf-8").read()
-ts = open(sys.argv[2], encoding="utf-8").read()
+rust, ts, gen = (open(p, encoding="utf-8").read() for p in sys.argv[1:4])
 
-def camel(name):
-    parts = name.split("_")
-    return parts[0] + "".join(p.capitalize() for p in parts[1:])
-
-m = re.search(r'pub struct LocusStatus \{(.*?)\n\}', rust, re.S)
-if not m:
+if not re.search(r'pub struct LocusStatus \{', rust):
     print("BAD\tcould not find `pub struct LocusStatus` in cmd/locus.rs")
-    raise SystemExit(0)
-rust_fields = [camel(f) for f in re.findall(r'\n    pub (\w+):', m.group(1))]
 
-m = re.search(r'export interface LocusStatus \{(.*?)\n\}', ts, re.S)
-if not m:
-    print("BAD\tcould not find `interface LocusStatus` in services/locus.ts")
-    raise SystemExit(0)
-ts_fields = re.findall(r'\n  (\w+)\??:', m.group(1))
+# (1) A redeclaration in the hand-written file shadows the generated type and
+# reintroduces exactly the drift this section exists to prevent.
+for name in ("LocusStatus", "UdpStatus", "AllowanceStatus", "SubscriptionStatus",
+             "ValidateCodeResult", "ActivationResult", "ConnectionResult",
+             "UpdateStatus", "UpdateProgress"):
+    if re.search(r'^export (?:interface|type) %s\b' % name, ts, re.M):
+        print("BAD\tservices/locus.ts redeclares %s instead of re-exporting the "
+              "generated type — a hand-written mirror shadows the generated one" % name)
 
-for field in rust_fields:
-    if field not in ts_fields:
-        print("BAD\tRust sends %r but the TypeScript interface does not declare it" % field)
-for field in ts_fields:
-    if field not in rust_fields:
-        print("BAD\tthe TypeScript interface declares %r but Rust never sends it" % field)
+# (2) The type this section is about must still be generated and re-exported.
+if not re.search(r'^export interface LocusStatus \{', gen, re.M):
+    print("BAD\tLocusStatus is not in locus.generated.ts — the generator dropped it")
+reexport = re.search(r'export type \{(.*?)\} from', ts, re.S)
+if not reexport:
+    print("BAD\tservices/locus.ts no longer re-exports the generated types")
+elif "LocusStatus" not in reexport.group(1):
+    print("BAD\tservices/locus.ts does not re-export LocusStatus")
 PY
 )
     if [ -z "$wire_report" ]; then
-        ok "LocusStatus has the same fields on both sides of the wire"
+        ok "LocusStatus is generated, not hand-mirrored, and still re-exported"
     else
         while IFS="$(printf '\t')" read -r _kind message; do
             bad "STATUS WIRE: $message"
         done <<EOF
 $wire_report
 EOF
-        bad "  Add the field on BOTH sides in the same change."
     fi
 fi
 
@@ -4653,6 +4663,171 @@ EOF
         fi
     fi
 fi
+
+echo
+echo "════════════════════════════════════════════════════════════"
+echo "37. The wire contract still matches the frozen snapshot"
+
+# ── WHY THIS GUARD EXISTS ──
+#
+# Every defect class in docs/reference/FIXES.md is a name that crossed a
+# boundary with nothing enforcing agreement: `uot_port` / `server_port_uot`,
+# `download_*` / `update_*`, `bound_this_device` / `already_used`, the
+# `macos_*` platform key against the `darwin-*` filename.
+#
+# Sections 33 and 34 catch two of those boundaries — the status struct against
+# its TypeScript interface, and the IPC command set across three sites. Neither
+# looks at the HUB boundary, which is the one an installed client cannot
+# renegotiate: a deployed 3.3.x build sends `device_fingerprint` and
+# `server_config`, reads `server.config`-shaped responses, and calls
+# `/api/heartbeat`. Nothing in this repository recorded that set.
+#
+# docs/reference/contract.lock.json now records it, and this section is what
+# makes the record binding rather than documentation. A field removed from a
+# wire struct, an endpoint a client still calls and the hub no longer serves,
+# a platform artifact renamed, a proxy name made equal to its group name — each
+# fails here, by name, before a release can be built.
+#
+# ── WHAT THIS CHECKS ──
+#
+# Runs contract-snapshot.py --check (see that file's header for the full rule).
+# A name the lock holds that the tree has lost is a BREAK and fails the build.
+# A name the tree has that the lock does not hold is ADDITIVE and is reported:
+# it does not fail, because adding a wire field is sometimes correct, but it
+# must be acknowledged with `--write` so the change appears in a reviewable
+# diff instead of happening silently.
+# ─────────────────────────────────────────────────────────────
+snapshot_report=$(python3 "$SCRIPTS/contract-snapshot.py" --check 2>&1)
+snapshot_status=$?
+if [ "$snapshot_status" -eq 0 ]; then
+    ok "no frozen wire name was removed or respelled"
+    if printf '%s\n' "$snapshot_report" | grep -q '^NEW'; then
+        while IFS= read -r line; do
+            case "$line" in
+                NEW*) warn "undocumented addition: ${line#NEW	}" ;;
+            esac
+        done <<EOF
+$snapshot_report
+EOF
+        warn "acknowledge additive contract changes with: python3 server/scripts/contract-snapshot.py --write"
+    fi
+elif [ "$snapshot_status" -eq 1 ]; then
+    while IFS= read -r line; do
+        case "$line" in
+            BAD*) bad "contract: ${line#BAD	}" ;;
+            NEW*) warn "undocumented addition: ${line#NEW	}" ;;
+            *) [ -n "$line" ] && bad "contract: $line" ;;
+        esac
+    done <<EOF
+$snapshot_report
+EOF
+else
+    bad "the contract snapshot checker could not run (exit $snapshot_status) — see its output above"
+fi
+
+echo
+echo "════════════════════════════════════════════════════════════"
+echo "38. The generated TypeScript IPC types match the Rust types"
+
+# ── WHY THIS GUARD EXISTS ──
+#
+# Section 33 asserts that `LocusStatus`'s fields agree across Rust and
+# TypeScript. It asserted that for ONE type out of nine, by regex, against two
+# hand-maintained files. The other eight — ValidateCodeResult, ActivationResult,
+# ConnectionResult, UpdateStatus, UpdateProgress, and the three tagged unions
+# UdpStatus / AllowanceStatus / SubscriptionStatus — had no check at all.
+#
+# That is not a missing assertion, it is a missing mechanism. Nine hand-written
+# mirrors of nine Rust types will disagree eventually, and `FIXES.md` records the
+# identical failure for `udp`: added to the Rust struct, forgotten in the
+# interface, serialised and ignored.
+#
+# `client/src/services/locus.generated.ts` is now derived from the Rust by
+# `gen-ts-contract.py`. There is one side to write. This section fails when the
+# committed output disagrees with what the Rust currently says — which is what a
+# developer who edits the Rust without regenerating produces.
+#
+# ── WHAT THIS CHECKS ──
+#
+# Regenerates into memory (without touching the file) and compares to the
+# committed copy. Any difference is reported as a diff. It also fails when the
+# extractor finds zero types, because a generator that silently extracts nothing
+# would make every comparison below pass against an empty file.
+# ─────────────────────────────────────────────────────────────
+tsgen_report=$(python3 "$SCRIPTS/gen-ts-contract.py" --check 2>&1)
+tsgen_status=$?
+if [ "$tsgen_status" -eq 0 ]; then
+    ok "the TypeScript IPC types are a faithful mirror of the Rust"
+else
+    while IFS= read -r line; do
+        case "$line" in
+            BAD*) bad "ts-contract: ${line#BAD	}" ;;
+            *) [ -n "$line" ] && bad "ts-contract: $line" ;;
+        esac
+    done <<EOF
+$tsgen_report
+EOF
+fi
+
+echo
+echo "════════════════════════════════════════════════════════════"
+echo "39. The downloaded build inputs match their pinned hashes"
+
+# ── WHY THIS GUARD EXISTS ──
+#
+# `client/scripts/prebuild.mjs` fetches the mihomo engine and the geo databases
+# before the Rust build can start. It resolves the engine version by fetching
+# `version.txt` from GitHub's `releases/latest` AT BUILD TIME, and the only
+# validation on what arrives is a gzip/zip MAGIC-BYTE check.
+#
+# Three consequences, all real:
+#
+#   * Two builds of the same commit can ship different engines, so a defect
+#     cannot be bisected by commit — the engine is not a function of the commit.
+#   * A corrupted or substituted archive that is still a valid archive is
+#     accepted. TLS is the only integrity control.
+#   * The pinned bytes lived in a gitignored cache (`node_modules/.verge/` plus
+#     `src-tauri/sidecar/`). A fresh clone has neither, so "what did we ship" was
+#     answerable only from a machine that still had the cache — the same class of
+#     loss as the gitignored age key.
+#
+# `server/data/sidecar.lock.json` now records the sha256 of every sidecar and
+# geo database that was actually used, plus the engine versions read from the
+# binaries themselves. This section fails when the files on disk stop matching.
+#
+# ── WHAT THIS CHECKS, AND THE HONEST LIMIT ──
+#
+# Files present but differing from the lock → BAD. Files pinned but absent →
+# reported as a warning, not a failure, because a checkout that has not run
+# prebuild is a normal state (CI always runs it; a docs-only clone does not).
+#
+# It cannot verify bytes it has never seen, and it does NOT remove the build-time
+# network fetch — a pinned version is still downloaded. It makes that download
+# checkable, not absent. Vendoring the archives offline is a separate decision,
+# recorded in docs/reference/STILL-OPEN.md.
+# ─────────────────────────────────────────────────────────────
+sidecar_report=$(python3 "$SCRIPTS/sidecar-lock.py" --check 2>&1)
+sidecar_status=$?
+case "$sidecar_status" in
+    0)
+        ok "every downloaded build input matches its pinned sha256"
+        ;;
+    2)
+        # Not an error: nothing has been fetched in this checkout.
+        warn "no downloaded build inputs present — run prebuild to verify them against the lock"
+        ;;
+    *)
+        while IFS= read -r line; do
+            case "$line" in
+                BAD*) bad "build inputs: ${line#BAD	}" ;;
+                MISSING*) warn "build inputs: ${line#MISSING	}" ;;
+                *) [ -n "$line" ] && bad "build inputs: $line" ;;
+            esac
+        done <<EOF
+$sidecar_report
+EOF
+        ;;
+esac
 
 echo
 echo "════════════════════════════════════════════════════════════"

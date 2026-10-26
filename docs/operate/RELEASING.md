@@ -33,11 +33,21 @@ verified-against: client/scripts/release-version.mjs, server/scripts/publish-rel
 > **Read `UPDATE-SYSTEM.md` for the full pipeline**, and `client/docs/SIGNING.md`
 > for key custody. The short version:
 
+> **Step 0 — run the gate.** `server/scripts/release-gate.sh --tag vX.Y.Z` checks
+> the five version sites, the working tree, push state, the tag itself, the
+> contract (§37–§39) and that the signing key matches the pubkey in
+> `tauri.conf.json`. It exits non-zero with the reason. It is the enforcement of
+> the order below; the order itself is prose and prose has been skipped before.
+> What it cannot check is stated in its header — chiefly that the hub will accept
+> the publish, and that the landing page is current (that is `verify-release.sh`,
+> after publishing).
+
 ```
 1. Bump every version site, from client/:
        pnpm release-version X.Y.Z
-2. Commit, then tag, then push both:
+2. Commit, then GATE, then tag and push both:
        git add -A && git commit -m "chore(release): X.Y.Z"
+       server/scripts/release-gate.sh --tag vX.Y.Z    # must pass
        git tag -a vX.Y.Z -m "Locus client vX.Y.Z"
        git push origin main && git push origin vX.Y.Z
      → the TAG triggers CI to build + sign all four platforms and create the

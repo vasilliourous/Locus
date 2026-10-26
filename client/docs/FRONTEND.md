@@ -163,6 +163,15 @@ deliberately small and never fails — a status query that can error forces the 
 to invent a state, and the honest answer when storage cannot be read is "not
 activated".
 
+> **The TypeScript types for this are generated, not written.** `services/locus.ts`
+> re-exports `LocusStatus` and the eight sibling IPC types from
+> `services/locus.generated.ts`, which `server/scripts/gen-ts-contract.py` derives
+> from the Rust types in `cmd/locus.rs`. Change the Rust, run
+> `pnpm gen:contract`, and commit the diff. A hand-written interface here would
+> shadow the generated one; `check-consistency.sh` §33 and §38 both fail if one
+> reappears. The frozen names across the *hub* boundary are
+> [`../../docs/reference/CONTRACT.md`](../../docs/reference/CONTRACT.md).
+
 | Field | Meaning |
 |---|---|
 | `activated` | This device has a complete, usable entitlement record. |

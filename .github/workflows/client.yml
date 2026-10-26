@@ -199,6 +199,20 @@ jobs:
       - name: Cross-language consistency check
         working-directory: .
         run: server/scripts/check-consistency.sh
+
+      # Prove the contract guard (§37) can fail. A guard that cannot fail reads
+      # exactly like one that passed, and this repository has been burned by that
+      # twice — a cited guard that did not exist (FIXES.md, 2026-10-01) and a
+      # section that had silently stopped working. This job injects five real
+      # defects on a copy, asserts each is caught, and asserts it restored them.
+      #
+      # It runs on every CI build, not just when the guard changes, because the
+      # thing most likely to break the guard is a change to the CODE it reads:
+      # a struct moved to another file, a hook renamed, an extractor pattern
+      # that stops matching and quietly returns an empty set — which passes.
+      - name: The contract guard can still fail
+        working-directory: .
+        run: bash server/scripts/test-contract-guard.sh
       #
       # WHY THIS EXISTS: on 2026-09-30 the `v3.2.13` tag was pushed on a commit
       # whose version sites all still said `3.2.12`. Nothing caught it,
@@ -314,6 +328,20 @@ jobs:
       # rebuild. `tauri build` is given an empty `beforeBuildCommand` via
       # `TAURI_CONFIG` — see the build job for why that is an override rather
       # than an edit to `tauri.conf.json`.
+      # The TypeScript IPC types are generated from the Rust types in
+      # `src-tauri/src/cmd/locus.rs`. This fails when the committed generated
+      # file disagrees with the Rust — i.e. when someone changed a wire type and
+      # forgot to regenerate. `web:build` below would NOT catch that: the
+      # committed file still type-checks, it is simply the previous shape.
+      #
+      # Also re-checks the frozen wire contract (docs/reference/contract.lock.json)
+      # from here, so the failure appears next to the frontend it concerns rather
+      # than only inside the consistency script's summary.
+      # check-consistency.sh §33/§38 cover the same ground; this is the fast,
+      # localised report, not a substitute.
+      - name: Generated IPC types match the Rust
+        run: pnpm run check:contract
+
       - name: Type-check and build the frontend
         run: pnpm run web:build
 

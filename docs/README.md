@@ -58,6 +58,7 @@ bulk-delete `codes` or `code_events`; revoke with Suspend, move with Unbind.*
 | [`operate/SECRETS-MANAGEMENT.md`](operate/SECRETS-MANAGEMENT.md) | live | age-encrypted secrets: what is plaintext, what must never be committed. |
 | [`operate/UPDATE-SYSTEM.md`](operate/UPDATE-SYSTEM.md) | live | How an update reaches a client, end to end, and what is verified vs not. |
 | [`operate/RELEASING.md`](operate/RELEASING.md) | live | **Cutting a client release** (bump → commit → tag → CI) and publishing it to the hub. |
+| [`../server/scripts/release-gate.sh`](../server/scripts/release-gate.sh) | live | **The release order, enforced** — refuses to tag on a dirty tree, mismatched version sites, a missing or wrong signing key, or a failing contract. Run before every tag. |
 | [`operate/RELEASE-RECOVERY.md`](operate/RELEASE-RECOVERY.md) | live | **When the signing key, the CI secret or the fleet is broken** — the three recoveries, and which one you have. Read before generating a replacement key. |
 | [`operate/RECOVER-WINDOWS-UPDATE.md`](operate/RECOVER-WINDOWS-UPDATE.md) | live | **When Windows clients cannot update** — the hub serving the raw PE instead of the installer, and the ordered recovery (sign → deploy → publish). |
 | [`operate/RECOVER-MACOS-UPDATE.md`](operate/RECOVER-MACOS-UPDATE.md) | live | **When macOS clients cannot update** — the hub serving a bare Mach-O instead of the `.app.tar.gz`, and the ordered recovery. |
@@ -69,6 +70,9 @@ bulk-delete `codes` or `code_events`; revoke with Suspend, move with Unbind.*
 | Document | `status` | What it is |
 |---|---|---|
 | [`reference/API.md`](reference/API.md) | live | HTTP API reference for the hub (activation, heartbeat, code lookup, releases). |
+| [`reference/CONTRACT.md`](reference/CONTRACT.md) | live | **The frozen wire contract** — every field, endpoint, platform key and proxy name an installed client depends on, held as data in `contract.lock.json`. Read before renaming anything on the wire. |
+| [`reference/contract.lock.json`](reference/contract.lock.json) | live | The machine-readable half of the above. Generated; enforced by `check-consistency.sh` §37. |
+| [`../server/data/sidecar.lock.json`](../server/data/sidecar.lock.json) | live | **The pinned build inputs** — sha256 of the mihomo engine, the service bundle and the four geo databases, plus the engine versions. Enforced by §39 and by `prebuild.mjs` at download time. Read before bumping an engine. |
 | [`reference/DEVICE-IDENTITY.md`](reference/DEVICE-IDENTITY.md) | live | **How a student keeps their entitlement** across an update, an uninstall or a reset, and why device identity was removed. Read before touching the activation gate. |
 | [`reference/DEBUGGING-METHOD.md`](reference/DEBUGGING-METHOD.md) | live | **How to diagnose a defect here** — the reproduce→locate→prove→fix→guard order, two-sided contracts, and checks that cannot fail. Read before fixing anything that "should work". |
 | [`reference/EGRESS-READINESS.md`](reference/EGRESS-READINESS.md) | live | **Why the button says "connecting"** — the readiness chain from probe to rendered phase, and how to localise a stall. Read before touching `probe.rs`. |

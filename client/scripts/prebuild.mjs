@@ -11,11 +11,94 @@ import { HttpsProxyAgent } from 'https-proxy-agent'
 import { extract } from 'tar'
 
 import { resolveServiceRelease } from './service-release.mjs'
-import { log_debug, log_error, log_info, log_success } from './utils.mjs'
+import { log_debug, log_error, log_info, log_success, log_warn } from './utils.mjs'
+
 
 /** Prepares platform resources, caching versions and unchanged files unless `--force` is used. */
 
 const cwd = process.cwd()
+
+// ── The pinned build inputs ────────────────────────────────────────────────
+//
+// `server/data/sidecar.lock.json` records, per sidecar and per geo database, the
+// sha256 of the bytes that were actually used to ship a release, plus the engine
+// version read from the binaries themselves.
+//
+// WHY THE PIN OVERRIDES `releases/latest`. Before this, the engine version was
+// resolved by fetching `version.txt` from GitHub at build time, so two builds of
+// the same commit could carry different engines — which makes a defect
+// impossible to bisect by commit. With the lock present, the version comes from
+// the lock and the network is only a way to *fetch* it, not to *choose* it.
+//
+// WHAT IS ENFORCED AND WHAT IS NOT. After a download the sha256 is checked
+// against the lock and a mismatch aborts the build. That closes the
+// silent-wrong-binary path. It does NOT make the build offline: the archive is
+// still fetched from GitHub. Vendoring the archives is recorded in
+// docs/reference/STILL-OPEN.md as not done.
+//
+// A missing lock is not fatal — a contributor without one should still be able
+// to build — but it is loud, because it means the build is unpinned.
+const LOCK_PATH = path.join(cwd, '..', 'server', 'data', 'sidecar.lock.json')
+let SIDECAR_LOCK = null
+try {
+  SIDECAR_LOCK = JSON.parse(fs.readFileSync(LOCK_PATH, 'utf-8'))
+} catch (err) {
+  log_warn(
+    `no sidecar lock at ${path.relative(cwd, LOCK_PATH)} — build inputs are UNPINNED (${err.code || err.message})`,
+  )
+}
+
+/// The locked version for an engine, or undefined when there is no lock.
+function lockedEngineVersion(key) {
+  return SIDECAR_LOCK?.engine_versions?.[key] || undefined
+}
+
+/// The locked sha256 for a sidecar target file, or undefined.
+function lockedSidecarHash(targetFile) {
+  if (!SIDECAR_LOCK?.sidecars) return undefined
+  for (const byTriple of Object.values(SIDECAR_LOCK.sidecars)) {
+    for (const entry of Object.values(byTriple)) {
+      if (entry.file === targetFile) return entry.sha256
+    }
+  }
+  return undefined
+}
+
+/// Whether this sidecar is vendored in the repository rather than downloaded.
+///
+/// A vendored sidecar is one whose upstream URL cannot be relied on — today that
+/// is only the mihomo alpha, whose rolling prerelease URL stops existing when a
+/// new alpha lands. It is committed to the repository, so the fetch is skipped
+/// entirely and the file is verified against its pin like any other input.
+function lockedSidecarVendored(targetFile) {
+  if (!SIDECAR_LOCK?.sidecars) return false
+  for (const byTriple of Object.values(SIDECAR_LOCK.sidecars)) {
+    for (const entry of Object.values(byTriple)) {
+      if (entry.file === targetFile) return entry.vendored === true
+    }
+  }
+  return false
+}
+
+/// The locked sha256 for a geo database filename, or undefined.
+function lockedResourceHash(file) {
+  return SIDECAR_LOCK?.resources?.[file]?.sha256
+}
+
+/// Hash a file and compare to a pin. Throws on mismatch, naming both hashes.
+async function assertPinned(filePath, expected, label) {
+  if (!expected) return
+  const actual = await calculateFileHash(filePath)
+  if (actual !== expected) {
+    throw new Error(
+      `${label} does not match its pin: got ${String(actual).slice(0, 16)}, ` +
+        `lock pins ${expected.slice(0, 16)}. The build would ship an engine ` +
+        `nobody reviewed. If this change is intended, record it with ` +
+        `\`python3 server/scripts/sidecar-lock.py --write\` and commit the diff.`,
+    )
+  }
+  log_debug(`${label} matches its pin`)
+}
 const TEMP_DIR = path.join(cwd, 'node_modules/.verge')
 const FORCE = process.argv.includes('--force') || process.argv.includes('-f')
 const VERSION_CACHE_FILE = path.join(TEMP_DIR, '.version_cache.json')
@@ -200,6 +283,13 @@ const META_MAP = {
 
 // Release discovery
 async function getLatestAlphaVersion() {
+  // Same rule as getLatestReleaseVersion: a pinned alpha is fetched, not chosen.
+  const pinned = lockedEngineVersion('mihomo_alpha')
+  if (pinned) {
+    META_ALPHA_VERSION = pinned
+    log_info(`mihomo alpha pinned by the lock: ${META_ALPHA_VERSION}`)
+    return
+  }
   if (!FORCE) {
     const cached = await getCachedVersion('META_ALPHA_VERSION')
     if (cached) {
@@ -234,6 +324,13 @@ async function getLatestAlphaVersion() {
 }
 
 async function getLatestReleaseVersion() {
+  // The lock decides WHICH engine; the network only decides where to get it.
+  const pinned = lockedEngineVersion('mihomo')
+  if (pinned) {
+    META_VERSION = pinned
+    log_info(`mihomo version pinned by the lock: ${META_VERSION}`)
+    return
+  }
   if (!FORCE) {
     const cached = await getCachedVersion('META_VERSION')
     if (cached) {
@@ -347,8 +444,40 @@ async function resolveSidecar(binInfo) {
   const sidecarPath = path.join(SIDECAR_DIR, targetFile)
   await fsp.mkdir(SIDECAR_DIR, { recursive: true })
 
-  if (!FORCE && fs.existsSync(sidecarPath)) {
-    log_success(`"${name}" already exists, skipping download`)
+  // "Already exists" is not the same as "is what the lock pins". A cached
+  // binary left over from a previous engine version would otherwise be reused
+  // silently — the exact drift the lock exists to stop — so an existing file is
+  // verified rather than trusted.
+  const pinnedHash = lockedSidecarHash(targetFile)
+
+  // A vendored sidecar is committed, so there is nothing to fetch. Verify it and
+  // stop: downloading one would defeat the reason it exists, and --force must
+  // not delete the only copy — that is exactly how the alpha was lost once.
+  if (lockedSidecarVendored(targetFile)) {
+    await assertPinned(sidecarPath, pinnedHash, `"${name}" (vendored)`)
+    log_success(`"${name}" is vendored in the repository and matches its pin`)
+    if (platform !== 'win32') await fsp.chmod(sidecarPath, 0o755)
+    return
+  }
+
+  // `--force` means "re-download", not "discard what is here first". If the
+  // file already matches its pin there is nothing to gain by fetching it again
+  // — the bytes would be identical — and if the fetch fails we would have
+  // gambled an irreplaceable file for no reason. So a matching file is kept
+  // even under --force, and --force only short-circuits the *skip* decision.
+  if (fs.existsSync(sidecarPath) && pinnedHash) {
+    const actual = await calculateFileHash(sidecarPath)
+    if (actual === pinnedHash) {
+      log_success(
+        `"${name}" matches its pin${FORCE ? ' — kept (nothing to re-download)' : ', skipping download'}`,
+      )
+      return
+    }
+    log_warn(
+      `"${name}" on disk does not match its pin (${String(actual).slice(0, 16)} != ${pinnedHash.slice(0, 16)}) — re-downloading`,
+    )
+  } else if (!FORCE && fs.existsSync(sidecarPath)) {
+    log_success(`"${name}" already exists, skipping download (UNPINNED)`)
     return
   }
 
@@ -422,8 +551,44 @@ async function resolveSidecar(binInfo) {
       })
       log_success(`gz binary processed: "${name}"`)
     }
+
+    // Executable bit, applied once for every archive shape.
+    //
+    // WHY IT IS HERE AND NOT ONLY INSIDE THE STREAMS. The `.gz` path chmods in
+    // the write stream's `finish` handler, which can run after the enclosing
+    // promise has resolved — so the rename and chmod can interleave, and the
+    // file lands non-executable. Observed on 2026-10-26: after a `--force` run
+    // the stable engine was present with the right content but mode 0644, and
+    // the binary refused to run. A sidecar that cannot be executed is worse
+    // than a missing one, because everything downstream reports "not found".
+    if (platform !== 'win32') await fsp.chmod(sidecarPath, 0o755)
+
+    // The pin is checked once, here, for every archive shape.
+    await assertPinned(sidecarPath, pinnedHash, `"${name}"`)
   } catch (err) {
-    await fsp.rm(sidecarPath, { recursive: true, force: true })
+    // DO NOT delete sidecarPath here.
+    //
+    // This line used to `rm` the sidecar on ANY failure. Because a failed
+    // download throws before the new binary is in place, that turned a
+    // transient network error — or an artifact that upstream has deleted —
+    // into permanent loss of a file the repository cannot supply: the sidecars
+    // are gitignored downloads with no copy in git.
+    //
+    // That is not hypothetical. On 2026-10-26 a `--force` run hit a 404 for
+    // `mihomo-linux-amd64-v2-alpha-94b13ae.gz` (MetaCubeX deletes older alpha
+    // builds) and this line deleted the only copy of the alpha that existed
+    // anywhere. It could not be recovered.
+    //
+    // The new binary is written via `rename` onto sidecarPath only after a
+    // successful download and extraction, so a failure leaves the previous
+    // file intact. Keeping it is strictly safer than deleting it.
+    const hadPrevious = fs.existsSync(sidecarPath)
+    log_warn(
+      `"${name}" failed: ${err.message}` +
+        (hadPrevious
+          ? ' — the existing binary was LEFT IN PLACE'
+          : ' — no binary is present for this sidecar'),
+    )
     throw err
   } finally {
     await fsp.rm(tempDir, { recursive: true, force: true })
@@ -441,12 +606,29 @@ async function resolveResource(binInfo) {
   }
 
   if (downloadURL) {
+    // Same rule as the sidecars: an existing file is verified, not trusted.
+    // The geo databases are pinned in the lock too, and a "latest" redirect for
+    // `meta-rules-dat` is exactly as capable of changing under us as mihomo's
+    // `releases/latest`.
+    const pinnedHash = lockedResourceHash(file)
     if (!FORCE && fs.existsSync(targetPath)) {
-      log_success(`"${file}" already exists, skipping download`)
-      return
+      if (pinnedHash) {
+        const actual = await calculateFileHash(targetPath)
+        if (actual === pinnedHash) {
+          log_success(`"${file}" already exists and matches its pin, skipping download`)
+          return
+        }
+        log_warn(
+          `"${file}" on disk does not match its pin — re-downloading`,
+        )
+      } else {
+        log_success(`"${file}" already exists, skipping download (UNPINNED)`)
+        return
+      }
     }
     await fsp.mkdir(baseDir, { recursive: true })
     await downloadFile(downloadURL, targetPath)
+    await assertPinned(targetPath, pinnedHash, `"${file}"`)
     await updateHashCache(targetPath)
   }
 
@@ -721,10 +903,14 @@ const resolveUnSetDnsScript = () =>
 
 const tasks = [
   {
+    // `optional: true` because nothing in the product can select this core, and
+    // upstream deletes old alpha builds so the pinned one may not exist. See
+    // the runTask comment and docs/reference/STILL-OPEN.md.
     name: 'verge-mihomo-alpha',
     func: () =>
       getLatestAlphaVersion().then(() => resolveSidecar(clashMetaAlpha())),
     retry: 5,
+    optional: true,
   },
   {
     name: 'verge-mihomo',
@@ -778,7 +964,30 @@ async function runTask() {
       break
     } catch (err) {
       log_error(`task::${task.name} try ${i} ==`, err.message)
-      if (i === task.retry - 1) throw err
+      if (i === task.retry - 1) {
+        // A task explicitly marked `optional` failing does not fail the build.
+        //
+        // WHY: the alpha engine is listed in `externalBin`, but nothing in the
+        // product can select it — `config/verge.rs` forces `clash_core` to
+        // `verge-mihomo` and no UI calls `change_clash_core`. Meanwhile
+        // MetaCubeX deletes old alpha prereleases, so the pinned alpha can
+        // become undownloadable at any time through no fault of this tree.
+        // Treating that as fatal makes every fresh clone unbuildable for an
+        // artifact the product never runs.
+        //
+        // It is NOT silent: the failure is logged above, and the eventual
+        // Tauri bundling step will refuse to produce an installer that expects
+        // a sidecar it does not have. The decision to drop the alpha from
+        // `externalBin` is recorded in docs/reference/STILL-OPEN.md.
+        if (task.optional) {
+          log_warn(
+            `task::${task.name} is optional and could not be fetched — continuing. ` +
+              `The build may fail at bundling if this sidecar is required by tauri.conf.json.`,
+          )
+          break
+        }
+        throw err
+      }
     }
   }
   return runTask()

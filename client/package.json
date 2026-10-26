@@ -38,6 +38,8 @@
     "perf:test": "node --test scripts/perf/report.test.mjs",
     "rust:lint": "cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets --features clippy -- -D warnings",
     "rust:test": "cargo test --manifest-path src-tauri/Cargo.toml --lib",
+    "gen:contract": "python3 ../server/scripts/gen-ts-contract.py --write",
+    "check:contract": "python3 ../server/scripts/gen-ts-contract.py --check && python3 ../server/scripts/contract-snapshot.py --check",
     "check:release": "pnpm rust:lint && pnpm rust:test && pnpm web:build && bash ../server/scripts/check-consistency.sh"
   },
   "dependencies": {
