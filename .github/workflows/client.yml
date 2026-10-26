@@ -66,6 +66,19 @@ on:
     # front-matter block, or a document the index cannot reach. A docs-only commit
     # that skips CI is a commit whose most likely defect is never tested.
     #
+    # ── 2026-10-26: the documentation vault was removed ──
+    #
+    # The corpus lived encrypted in `docs-vault/vault.7z` for one day and is
+    # plaintext in the tree again, so `docs/**` is back and `docs-vault/**` is
+    # gone. Leaving a filter entry for a path that can no longer exist is the
+    # same silent omission this comment is about in the other direction: a
+    # plausible-looking entry that cannot fire.
+    #
+    # `AGENTS.md` and `README.md` are here because both are checked by
+    # `check-consistency.sh` (§8 resolves their links). So do `client/AGENTS.md`
+    # and the agent shims, which cost one path each and are the first thing an
+    # agent reads.
+    #
     # NOTE: this filter applies to BRANCH pushes only. A `v*` tag push ignores
     # `paths` entirely, which is why a release is never blocked by it — only the
     # preview is.
@@ -75,6 +88,9 @@ on:
       - 'scripts/**'
       - 'docs/**'
       - 'AGENTS.md'
+      - 'client/AGENTS.md'
+      - 'client/CLAUDE.md'
+      - 'client/GEMINI.md'
       - 'README.md'
       - '.github/workflows/client.yml'
   pull_request:
@@ -87,6 +103,9 @@ on:
       - 'scripts/**'
       - 'docs/**'
       - 'AGENTS.md'
+      - 'client/AGENTS.md'
+      - 'client/CLAUDE.md'
+      - 'client/GEMINI.md'
       - 'README.md'
       - '.github/workflows/client.yml'
   workflow_dispatch:
@@ -180,8 +199,6 @@ jobs:
       - name: Cross-language consistency check
         working-directory: .
         run: server/scripts/check-consistency.sh
-
-      # ── Preflight: does the TAG name the version the code actually builds? ──
       #
       # WHY THIS EXISTS: on 2026-09-30 the `v3.2.13` tag was pushed on a commit
       # whose version sites all still said `3.2.12`. Nothing caught it,

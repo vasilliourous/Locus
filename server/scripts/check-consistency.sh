@@ -4541,17 +4541,42 @@ echo "36. Every hub call can verify the hub on a machine with an old root store"
 #
 # VERIFIED TO FAIL: adding `.build()` on a `reqwest::Client::builder()` to
 # `locus/heartbeat.rs` produces the BAD line below. Removing the bundled-roots
-# fallback from `locus/hub.rs` produces the second.
+# fallback from the hub client produces the second.
+#
+# ── THE CLIENT MOVED, AND THIS GUARD HAD TO LEARN WHERE ──
+#
+# `locus/hub.rs` became `locus/hub/{mod,client,roots}.rs` so that the "which
+# store first" DECISION could be tested as a pure function of the platform (see
+# the doc comment in `roots.rs`: a `cfg!`-based test only ever asserts the host's
+# branch, so it passes on Linux CI whatever the macOS rule says). The rule this
+# section enforces is unchanged, but three things it keyed on the FILE NAME broke
+# at once, and all three read as genuine drift:
+#
+#   * the exemption was `/hub\.rs$`, so the hub module's OWN files were reported
+#     as rogue clients;
+#   * `HUB_RS` was one path, so the "fallback removed" and "crypto provider"
+#     assertions failed against a file that legitimately no longer exists;
+#   * the fallback's evidence moved with the code — `webpki_roots` is named in
+#     `hub/client.rs` now, and the `builder_with_provider` pin is in the same
+#     file.
+#
+# So the guard keys on the DIRECTORY `locus/hub/`, accepts the single-file form
+# (`hub.rs`) for any checkout that predates the split, and requires that ONE of
+# them exists — "the hub client is gone" must still fail, which is the assertion
+# that made this section worth having.
 # ─────────────────────────────────────────────────────────────
 LOCUS_DIR="$REPO/client/src-tauri/src/locus"
+HUB_DIR="$LOCUS_DIR/hub"
 
 if [ ! -d "$LOCUS_DIR" ]; then
     warn "no client/src-tauri/src/locus — this guard cannot run"
 else
     # Only the hub-facing modules: these are the ones that talk to the hub over
-    # TLS. `hub.rs` is where the client belongs and is allowed to build one.
+    # TLS. The hub client itself — `locus/hub/` as a directory, or `hub.rs` as the
+    # pre-split single file — is where the client belongs and is allowed to build
+    # one.
     rogue_clients=$(grep -rlE 'reqwest::Client::builder\(\)' "$LOCUS_DIR" 2>/dev/null \
-        | grep -v '/hub\.rs$' || true)
+        | grep -vE '/hub\.rs$|/hub/' || true)
     if [ -n "$rogue_clients" ]; then
         for f in $rogue_clients; do
             bad "hub-facing module builds its own reqwest client: ${f#"$REPO"/}"
@@ -4564,19 +4589,63 @@ else
         ok "no hub-facing module builds its own reqwest client"
     fi
 
-    HUB_RS="$LOCUS_DIR/hub.rs"
-    if [ ! -f "$HUB_RS" ]; then
-        bad "locus/hub.rs is gone — nothing provides the root-store fallback"
+    # The hub client, in either shape. A directory should be preferred, but a
+    # checkout from before the split is still a valid tree to check.
+    HUB_SRC=$(find "$LOCUS_DIR" -maxdepth 2 \( -path "$HUB_DIR/*.rs" -o -path "$LOCUS_DIR/hub.rs" \) -type f 2>/dev/null | sort)
+    if [ -z "$HUB_SRC" ]; then
+        bad "neither locus/hub/ nor locus/hub.rs exists — nothing provides the root-store fallback"
     else
-        if ! grep -q 'webpki_roots::TLS_SERVER_ROOTS' "$HUB_RS"; then
-            bad "locus/hub.rs no longer uses the bundled roots — the Windows fallback is inert"
+        # The assertion is about the client that BUILDS the TLS config, and that is
+        # `client.rs` once the module is split. Searching the whole hub module
+        # would also match `roots.rs`'s doc comments that quote the code shape, so
+        # the file that builds a client is identified by its content, not by a
+        # hard-coded name: any hub file that constructs a `ClientConfig`.
+        cfg_src=$(printf '%s\n' "$HUB_SRC" | while IFS= read -r f; do
+            grep -qE 'ClientConfig::builder' "$f" && echo "$f"
+        done)
+        [ -n "$cfg_src" ] || cfg_src="$HUB_SRC"
+
+        # ── WHY THESE TWO CHECKS LOOK CONVOLUTED ──
+        #
+        # The obvious form is a pipeline:
+        #
+        #     printf '%s\n' "$HUB_SRC" | while read f; do grep -q X "$f" && echo f; done | grep -q .
+        #
+        # It is WRONG, and it fails in the way this repository keeps paying for:
+        # `grep -q` exits as soon as it matches, the writer (`echo`) gets SIGPIPE,
+        # and `pipefail` makes the whole pipeline report failure — so a check that
+        # FOUND what it wanted reports "not found". Measured: the bundled-roots
+        # assertion reported BAD against a tree whose `client.rs` plainly contains
+        # `webpki_roots::TLS_SERVER_ROOTS`.
+        #
+        # So the loop writes to a variable and the test looks at the variable.
+        # No early exit, no SIGPIPE, and the exit status is `[ -n ... ]`'s.
+        has_bundled=""
+        cfg_without_provider=""
+        while IFS= read -r f; do
+            [ -n "$f" ] || continue
+            grep -q 'webpki_roots::TLS_SERVER_ROOTS' "$f" && has_bundled="$f"
+        done <<EOF
+$HUB_SRC
+EOF
+        while IFS= read -r f; do
+            [ -n "$f" ] || continue
+            # The panic that proves a fallback was never run: `ClientConfig::builder()`
+            # refuses to guess a crypto provider, and this crate enables only `ring`.
+            # `builder_with_provider` names it and is the only accepted form.
+            grep -qE 'rustls::ClientConfig::builder\(\)' "$f" && cfg_without_provider="$f"
+        done <<EOF
+$cfg_src
+EOF
+
+        if [ -z "$has_bundled" ]; then
+            bad "the hub client no longer uses the bundled roots — the Windows fallback is inert"
         else
             ok "the hub client has a bundled-roots fallback (webpki_roots)"
         fi
-        # The panic that proves a fallback was never run: `ClientConfig::builder()`
-        # refuses to guess a crypto provider, and this crate enables only `ring`.
-        if grep -qE 'rustls::ClientConfig::builder\(\)' "$HUB_RS"; then
-            bad "locus/hub.rs calls rustls::ClientConfig::builder(), which panics without a"
+
+        if [ -n "$cfg_without_provider" ]; then
+            bad "the hub client calls rustls::ClientConfig::builder(), which panics without a"
             bad "  process-level crypto provider — the fallback would crash the activation"
             bad "  screen instead of fixing it. Use builder_with_provider."
         else

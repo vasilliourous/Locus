@@ -1,44 +1,12 @@
-//! The one HTTP client every Locus hub call uses.
+//! The hub clients: the two root stores, the probe that picks between them, and
+//! the diagnosis that explains the choice.
 //!
-//! # Why this module exists
-//!
-//! Activation, heartbeat and the update download each built their own
-//! `reqwest::Client`. That was three copies of one policy, and the copies had
-//! silently diverged on the only setting that matters when a school PC refuses
-//! the connection: **which certificate roots are trusted**.
-//!
-//! A bare `reqwest::Client::builder()` uses `rustls-platform-verifier`, which on
-//! Windows reads **only the Windows certificate store**. The hub's chain tops out
-//! at `ISRG Root X2`, an ECDSA root that reaches Windows machines solely through
-//! root-certificate update servicing. A machine that has not taken those updates
-//! — an offline image, a school-owned PC with Windows Update disabled — has no
-//! anchor for the chain. rustls does not chase the certificate's AIA extension,
-//! so it cannot go and fetch it, and `webpki` reports **no path to an anchor** in
-//! a way that surfaces as `InvalidCertificate(Expired)`.
-//!
-//! The result is a student staring at:
-//!
-//! ```text
-//! could not reach the Locus hub at https://…/api/activate:
-//!   client error (Connect): invalid peer certificate: Expired
-//! ```
-//!
-//! for a certificate that is valid for months. The word "Expired" is the reason
-//! this cost a day: it accuses the hub, and the hub is fine.
-//!
-//! # What this does about it
-//!
-//! [`client`] tries the platform verifier first, and only on a **certificate**
-//! error retries the same request with the compiled-in [`webpki_roots`] store.
-//! That store is shipped with the binary and updated with every release, so it
-//! does not depend on the machine having been patched. The fallback is narrow on
-//! purpose: a timeout, a DNS failure or a refused connection is not a
-//! certificate problem and must not be retried, because retrying it only delays
-//! the message the student needs.
-//!
-//! [`diagnose`] records which store failed and why, so the log names the real
-//! cause next time instead of borrowing rustls's vocabulary.
+//! Read [`super`](crate::locus::hub) first — it holds the reason this module
+//! exists. The short version: a bare `reqwest` client trusts only the OS store,
+//! which on an unpatched machine has no path to the hub's `ISRG Root X2` anchor
+//! and reports that as `InvalidCertificate(Expired)`.
 
+use super::roots::RootStore;
 use anyhow::{Context as _, Result};
 use std::sync::OnceLock;
 
@@ -46,28 +14,6 @@ use std::sync::OnceLock;
 ///
 /// The hub is reached over school wifi, which drops idle sockets aggressively.
 const HUB_POOL_IDLE: std::time::Duration = std::time::Duration::from_secs(30);
-
-/// Which root store verified — or failed to verify — a connection.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum RootStore {
-    /// `rustls-platform-verifier`: the OS store (Windows store, macOS keychain,
-    /// Linux bundle). Correct first choice — it honours operator-installed roots
-    /// and corporate proxies that a compiled-in list cannot know about.
-    Platform,
-    /// `webpki-roots`: Mozilla's list compiled into the binary. The fallback,
-    /// used only when the platform store cannot build a path to an anchor.
-    Bundled,
-}
-
-impl RootStore {
-    #[must_use]
-    pub const fn label(self) -> &'static str {
-        match self {
-            Self::Platform => "the operating system's certificate store",
-            Self::Bundled => "the certificate roots bundled with Locus",
-        }
-    }
-}
 
 /// The timeouts the hub calls actually use.
 ///
@@ -168,13 +114,12 @@ fn bundled_roots_client(timeout: Timeout) -> Result<&'static reqwest::Client> {
         // The provider is named explicitly, as `utils::network` does. Getting this
         // wrong turns the fallback — the path that exists to rescue a broken
         // machine — into a panic on the activation screen.
-        let config = rustls::ClientConfig::builder_with_provider(std::sync::Arc::new(
-            rustls::crypto::ring::default_provider(),
-        ))
-        .with_safe_default_protocol_versions()
-        .context("could not select TLS protocol versions")?
-        .with_root_certificates(roots)
-        .with_no_client_auth();
+        let config =
+            rustls::ClientConfig::builder_with_provider(std::sync::Arc::new(rustls::crypto::ring::default_provider()))
+                .with_safe_default_protocol_versions()
+                .context("could not select TLS protocol versions")?
+                .with_root_certificates(roots)
+                .with_no_client_auth();
 
         reqwest::Client::builder()
             .timeout(std::time::Duration::from_secs(seconds))
@@ -249,8 +194,12 @@ impl Failure {
     }
 
     /// Whether swapping the root store could plausibly change this outcome.
+    ///
+    /// Named for the store swap rather than for a direction: which store is tried
+    /// first is a platform decision (`RootStore::primary`), and the retry is the
+    /// same rule either way.
     #[must_use]
-    pub const fn retryable_with_bundled_roots(self) -> bool {
+    pub const fn retryable_with_other_roots(self) -> bool {
         matches!(self, Self::Certificate)
     }
 
@@ -303,7 +252,7 @@ impl HubClient {
     #[must_use]
     pub fn describe(&self) -> String {
         match &self.diagnosis {
-            None => format!("verified with {}", RootStore::Platform.label()),
+            None => format!("verified with {}", RootStore::primary().label()),
             Some(diagnosis) => format!(
                 "{} could not verify the hub's certificate ({}), so {} was used instead",
                 diagnosis.failed_store.label(),
@@ -321,27 +270,37 @@ impl HubClient {
 /// property of the machine and the hub, and both change rarely enough that
 /// re-probing within one run buys nothing.
 fn probe_cache() -> &'static std::sync::Mutex<std::collections::HashMap<String, Option<Diagnosis>>> {
-    static CACHE: OnceLock<std::sync::Mutex<std::collections::HashMap<String, Option<Diagnosis>>>> =
-        OnceLock::new();
+    static CACHE: OnceLock<std::sync::Mutex<std::collections::HashMap<String, Option<Diagnosis>>>> = OnceLock::new();
     CACHE.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()))
 }
 
-/// Build the hub client, falling back to the bundled roots on a certificate error.
+/// The client for `store`, or the emergency client if it cannot be built.
+fn client_for(store: RootStore, timeout: Timeout) -> Result<&'static reqwest::Client> {
+    match store {
+        RootStore::Platform => platform_client(timeout),
+        RootStore::Bundled => bundled_roots_client(timeout),
+    }
+}
+
+/// Build the hub client, trying the other root store on a certificate error.
 ///
-/// The probe is a real request to `GET {hub}/api/health` made with the platform
-/// client: there is no cheaper way to learn whether the OS store can build a path
-/// to the hub's chain, and guessing the other way (always use the bundled roots)
-/// would ignore a corporate proxy's root that the OS store correctly trusts.
+/// The probe is a real request to `GET {hub}/api/health` made with the primary
+/// store's client: there is no cheaper way to learn whether that store can build
+/// a path to the hub's chain, and assuming an answer would either ignore a
+/// corporate proxy's root that the OS store correctly trusts (always bundled) or
+/// repeat the old-keychain failure on every launch (always platform).
 ///
-/// Only a *certificate* failure swaps stores. A timeout, a refused connection or
-/// a TLS version mismatch is not fixed by different roots, and retrying it would
-/// only delay the answer the caller needs.
+/// Which store is primary depends on the platform — see [`super::roots`] and
+/// [`RootStore::primary`]. Only a *certificate* failure swaps stores. A timeout,
+/// a refused connection or a TLS version mismatch is not fixed by different roots,
+/// and retrying it would only delay the answer the caller needs.
 pub async fn client(hub: &str, timeout: Timeout) -> HubClient {
-    let platform = match platform_client(timeout) {
+    let primary = RootStore::primary();
+    let primary_client = match client_for(primary, timeout) {
         Ok(client) => client,
         Err(error) => {
             // A client that will not build is not a certificate problem.
-            tracing::error!("locus hub client: {error:#}");
+            tracing::error!("locus hub client ({primary:?}): {error:#}");
             return HubClient {
                 client: emergency_client(),
                 diagnosis: None,
@@ -350,62 +309,61 @@ pub async fn client(hub: &str, timeout: Timeout) -> HubClient {
     };
 
     // A remembered verdict for this hub, so a heartbeat does not probe every
-    // minute. `Some(None)` means "the platform store worked"; a missing key means
+    // minute. `Some(None)` means "the primary store worked"; a missing key means
     // "not probed yet".
-    let remembered = probe_cache()
-        .lock()
-        .ok()
-        .and_then(|cache| cache.get(hub).cloned());
+    let remembered = probe_cache().lock().ok().and_then(|cache| cache.get(hub).cloned());
     if let Some(verdict) = remembered {
         return match verdict {
             None => HubClient {
-                client: platform,
+                client: primary_client,
                 diagnosis: None,
             },
             Some(diagnosis) => HubClient {
-                client: bundled_or_empty(timeout),
+                client: bundled_or_empty(diagnosis.used_store, timeout),
                 diagnosis: Some(diagnosis),
             },
         };
     }
 
     let probe = format!("{hub}/api/health");
-    match platform.get(&probe).send().await {
+    match primary_client.get(&probe).send().await {
         Ok(_) => {
-            // A success is worth remembering: it means the OS store works here.
+            // A success is worth remembering: it means this store works here.
             remember(hub, None);
             HubClient {
-                client: platform,
+                client: primary_client,
                 diagnosis: None,
             }
         }
         Err(error) => {
             let failure = Failure::classify(&error);
-            if !failure.retryable_with_bundled_roots() {
+            if !failure.retryable_with_other_roots() {
                 // A transport failure is NOT remembered. A school network that
-                // drops one packet must not pin this process to the platform
-                // store for the rest of the session — the next attempt gets a
-                // fresh verdict.
+                // drops one packet must not pin this process to one store for
+                // the rest of the session — the next attempt gets a fresh verdict.
                 return HubClient {
-                    client: platform,
+                    client: primary_client,
                     diagnosis: None,
                 };
             }
 
             let error_text = error.to_string();
+            let secondary = primary.fallback();
             tracing::warn!(
-                store = %RootStore::Platform.label(),
+                failed = %primary.label(),
                 %error_text,
-                "the platform certificate store rejected the hub; using the bundled roots"
+                "{} could not verify the hub's certificate; using {} instead",
+                primary.label(),
+                secondary.label(),
             );
             let diagnosis = Diagnosis {
-                failed_store: RootStore::Platform,
-                used_store: RootStore::Bundled,
+                failed_store: primary,
+                used_store: secondary,
                 error: error_text,
             };
             remember(hub, Some(diagnosis.clone()));
             HubClient {
-                client: bundled_or_empty(timeout),
+                client: bundled_or_empty(secondary, timeout),
                 diagnosis: Some(diagnosis),
             }
         }
@@ -422,9 +380,9 @@ fn remember(hub: &str, verdict: Option<Diagnosis>) {
 ///
 /// Returning *something* matters: a hub call that panics on a builder failure
 /// takes the activation screen down with it.
-fn bundled_or_empty(timeout: Timeout) -> &'static reqwest::Client {
-    bundled_roots_client(timeout).unwrap_or_else(|error| {
-        tracing::error!("locus hub client: {error:#}; falling back to a bare client");
+fn bundled_or_empty(store: RootStore, timeout: Timeout) -> &'static reqwest::Client {
+    client_for(store, timeout).unwrap_or_else(|error| {
+        tracing::error!("locus hub client ({store:?}): {error:#}; falling back to a bare client");
         emergency_client()
     })
 }
@@ -449,22 +407,23 @@ pub async fn diagnose(hub: &str) -> Result<Diagnosis> {
     ensure_hub_url(hub)?;
     let probe = format!("{hub}/api/health");
 
-    let platform = platform_client(Timeout::Activation)?;
-    match platform.get(&probe).send().await {
+    let primary = RootStore::primary();
+    let client = client_for(primary, Timeout::Activation)?;
+    match client.get(&probe).send().await {
         Ok(_) => anyhow::bail!(
             "{} verified the hub at {hub}, so a certificate failure there is not a root-store problem",
-            RootStore::Platform.label()
+            primary.label()
         ),
         Err(error) => {
             let failure = Failure::classify(&error);
-            if !failure.retryable_with_bundled_roots() {
+            if !failure.retryable_with_other_roots() {
                 anyhow::bail!(
                     "the hub at {hub} was not reachable ({failure:?}), which is not a certificate problem: {error}"
                 );
             }
             Ok(Diagnosis {
-                failed_store: RootStore::Platform,
-                used_store: RootStore::Bundled,
+                failed_store: primary,
+                used_store: primary.fallback(),
                 error: error.to_string(),
             })
         }
@@ -492,10 +451,10 @@ mod tests {
 
     #[test]
     fn only_a_certificate_failure_swaps_the_root_store() {
-        assert!(Failure::Certificate.retryable_with_bundled_roots());
+        assert!(Failure::Certificate.retryable_with_other_roots());
         for failure in [Failure::Transport, Failure::Protocol, Failure::Response] {
             assert!(
-                !failure.retryable_with_bundled_roots(),
+                !failure.retryable_with_other_roots(),
                 "{failure:?} must not be retried with different roots: the roots cannot change it"
             );
         }
@@ -516,7 +475,10 @@ mod tests {
     #[test]
     fn a_hub_url_must_be_https_with_a_host() {
         assert!(ensure_hub_url("https://hub.example").is_ok());
-        assert!(ensure_hub_url("http://hub.example").is_err(), "plain http must never be a hub");
+        assert!(
+            ensure_hub_url("http://hub.example").is_err(),
+            "plain http must never be a hub"
+        );
         // `url` parses `https:///api` as host `api`, so a case with no host at
         // all has to be one the parser genuinely rejects.
         assert!(ensure_hub_url("not a url").is_err());
@@ -583,8 +545,7 @@ mod live_tests {
     #[tokio::test]
     #[ignore = "needs network access to the live hub"]
     async fn the_bundled_roots_verify_the_live_hub() {
-        let client = bundled_roots_client(Timeout::Activation)
-            .expect("the bundled-roots client must build");
+        let client = bundled_roots_client(Timeout::Activation).expect("the bundled-roots client must build");
         let response = client
             .get("https://networkingguides.jadedns.uk/api/health")
             .send()
