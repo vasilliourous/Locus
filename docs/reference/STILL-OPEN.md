@@ -864,7 +864,12 @@ disappears from `contract.rs` — and it will not, because the client is the hal
 nobody edits during a hub fix. This is the `enforcement_version` failure mode
 (written by a hook against columns that did not exist) one layer out.
 
-## The build still needs the network, and the engine is not vendored
+**Closing both contract gaps** needs the same artifact: a directory of recorded hub responses
+captured from the live host or a replay fixture, deserialised into the client's
+structs in a Rust integration test. That is a real piece of work, it needs the
+live host or a captured transcript, and it is deliberately not started here.
+
+## The build still needs the network
 
 **Added 2026-10-26.** `server/data/sidecar.lock.json` pins the sha256 of every
 downloaded build input, and `prebuild.mjs` verifies each one against it. That
@@ -890,10 +895,6 @@ repository size — the stable engine alone is ~59 MiB per platform, so a four-
 platform vendoring is roughly 240 MiB. That is a deliberate trade nobody has
 made, and it is **not** done here.
 
-**Closing both contract gaps** needs the same artifact: a directory of recorded hub responses
-captured from the live host or a replay fixture, deserialised into the client's
-structs in a Rust integration test. That is a real piece of work, it needs the
-live host or a captured transcript, and it is deliberately not started here.
 
 ## The alpha engine: vendored, and the geo databases now pinned by asset ID
 
