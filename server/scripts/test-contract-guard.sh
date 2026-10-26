@@ -39,6 +39,7 @@ sha256sum \
     client/src/services/locus.ts \
     client/src/services/locus.generated.ts \
     client/src-tauri/sidecar/verge-mihomo-x86_64-unknown-linux-gnu \
+    client/src-tauri/src/core/manager/lifecycle.rs \
     > "$TMP/before.sha256" 2>/dev/null
 
 # expect_caught <label> <file> <python-patch-expr>
@@ -210,6 +211,62 @@ fi
 
 echo "════════════════════════════════════════════════════════════"
 
+# ── §21: the extractor must not report a defect it never looked for ──
+#
+# Observed once on 2026-10-26: §21 printed
+#   BAD prepare_startup does not CALL should_request_install_for_absent_service
+# on a tree where the call site was demonstrably present at line 512, and went
+# green on the identical tree minutes later. A single read had caught the file
+# mid-write (cargo was running), so the extractor returned a truncated body and
+# the guard reported a defect it never looked for. That is exactly the
+# "check cannot distinguish 'wrong' from 'unreadable'" failure this repo has
+# paid for before — and it can now block a release, because release-gate.sh runs
+# this script.
+#
+# The extractor now re-reads until two reads agree. This test proves the two
+# behaviours that matter: a truncated file must NOT produce a code-side BAD, and
+# a genuinely missing call site must still produce one.
+
+LIFECYCLE="client/src-tauri/src/core/manager/lifecycle.rs"
+if [ -f "$LIFECYCLE" ]; then
+    cp "$LIFECYCLE" "$TMP/lifecycle.bak"
+
+    # (a) A file that cannot be read whole. `head -c` produces a valid prefix
+    #     that ends mid-file; the stability check cannot accept it, so the guard
+    #     must report "cannot read", never a BAD about the code.
+    head -c 4000 "$TMP/lifecycle.bak" > "$LIFECYCLE"
+    out=$(bash "$REPO/server/scripts/check-consistency.sh" 2>&1)
+    cp "$TMP/lifecycle.bak" "$LIFECYCLE"
+    if printf '%s' "$out" | grep -q 'BAD.*does not CALL should_request_install'; then
+        miss "a truncated lifecycle.rs reported a code defect (§21)"
+    else
+        pass "a truncated lifecycle.rs does not report a code defect (§21)"
+    fi
+
+    # (b) The real defect must still fail. Without this, (a) could be satisfied
+    #     by a guard that never fails at all.
+    python3 - "$LIFECYCLE" <<'PY'
+import sys
+path = sys.argv[1]
+s = open(path, encoding="utf-8").read()
+old = "        if should_request_install_for_absent_service("
+assert old in s
+open(path, "w", encoding="utf-8").write(
+    s.replace(old, "        if false && should_request_install_for_absent_service(", 1))
+PY
+    out=$(bash "$REPO/server/scripts/check-consistency.sh" 2>&1)
+    cp "$TMP/lifecycle.bak" "$LIFECYCLE"
+    if printf '%s' "$out" | grep -q 'BAD.*does not CALL should_request_install'; then
+        pass "a genuinely missing call site is still reported (§21)"
+    else
+        miss "the §21 guard no longer catches a removed call site"
+    fi
+else
+    miss "§21 truncation test — lifecycle.rs not found"
+fi
+
+echo "════════════════════════════════════════════════════════════"
+
 # The restore must be proved, not assumed: a test that leaves a file patched is
 # worse than no test, because the next person debugs a phantom.
 #
@@ -230,7 +287,8 @@ for f in server/pb_hooks/code_lookup.pb.js \
          client/src-tauri/src/locus/tier.rs \
          client/src/services/locus.ts \
          client/src/services/locus.generated.ts \
-         client/src-tauri/sidecar/verge-mihomo-x86_64-unknown-linux-gnu; do
+         client/src-tauri/sidecar/verge-mihomo-x86_64-unknown-linux-gnu \
+         client/src-tauri/src/core/manager/lifecycle.rs; do
     want=$(sed -n 's/^\([a-f0-9]\{64\}\)  .*/\1/p' "$TMP/before.sha256" 2>/dev/null | head -1)
     if [ -f "$TMP/before.sha256" ]; then
         expected=$(grep "  $f\$" "$TMP/before.sha256" | cut -d' ' -f1)

@@ -2457,7 +2457,30 @@ else
     # the code.
     lifecycle_code="$(python3 - "$LIFECYCLE" 2>&1 <<'PY'
 import sys
-text = open(sys.argv[1], encoding="utf-8", errors="replace").read()
+# Read with a stability check. A single read can catch the file mid-write
+# (cargo, rustfmt, an editor) and return a truncated body; the call site
+# then looks absent through no fault of the code. Read twice with a short
+# pause and accept only when both reads agree AND the text looks whole (a
+# trailing brace is cheap evidence). If it never stabilises, exit non-zero
+# so the caller reports "cannot read" rather than "is wrong".
+import sys, time
+
+path = sys.argv[1]
+text = None
+for _attempt in range(6):
+    first = open(path, encoding="utf-8", errors="replace").read()
+    time.sleep(0.05)
+    second = open(path, encoding="utf-8", errors="replace").read()
+    if first == second and first.rstrip().endswith("}"):
+        text = first
+        break
+if text is None:
+    # Emit a marker on STDOUT, not a SystemExit string. stderr is captured by
+    # the caller (2>&1), so a message there becomes a non-empty "result" and the
+    # guard falls through to reporting a code defect it never looked for — the
+    # exact failure this retry loop was added to prevent.
+    print("__EXTRACTOR_FAILED__")
+    raise SystemExit(0)
 kept = []
 for line in text.splitlines():
     if line.strip().startswith("//"):
@@ -2472,6 +2495,11 @@ PY
         extractor_broken=1
         warn "the lifecycle extractor returned nothing — this guard cannot run"
     fi
+    case "$lifecycle_code" in
+        *__EXTRACTOR_FAILED__*)
+            extractor_broken=1
+            warn "the lifecycle extractor could not read the file whole — this guard cannot run" ;;
+    esac
     case "$lifecycle_code" in
         *Traceback*)
             extractor_broken=1
@@ -2507,9 +2535,23 @@ PY
     # marked string so "could not read" and "read it, and the gate is missing"
     # cannot be confused — a bare exit status is not enough distinction here.
     cfg_gate="$(python3 - "$LIFECYCLE" 2>&1 <<'PY'
-import re, sys
+import re, sys, time
 try:
-    text = open(sys.argv[1], encoding="utf-8", errors="replace").read()
+    # Same stability rule as the call-site extractor: a truncated read is the
+    # guard failing, not the code being wrong. Without this, a file caught
+    # mid-write produced "NOT_GATED" and the guard reported a missing macOS gate
+    # that was present.
+    text = None
+    for _attempt in range(6):
+        first = open(sys.argv[1], encoding="utf-8", errors="replace").read()
+        time.sleep(0.05)
+        second = open(sys.argv[1], encoding="utf-8", errors="replace").read()
+        if first == second and first.rstrip().endswith("}"):
+            text = first
+            break
+    if text is None:
+        print("UNREADABLE", "file did not hold still across repeated reads")
+        raise SystemExit(0)
 except OSError as exc:
     print("UNREADABLE", exc)
     raise SystemExit(0)
