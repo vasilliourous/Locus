@@ -24,6 +24,34 @@ commercial gaps, [`../business/17-not-built.md`](../business/17-not-built.md).
 
 ---
 
+## THE PINNED GEO DATABASES 404'D, AND THE BUILD STOPPED RATHER THAN SHIP NEW DATA (2026-10-29, release 3.3.4)
+
+- **What broke.** Both `Build (linux)` and `Build (windows)` failed at "Fetch
+  sidecars and geo data". Not a code defect: all four assets pinned in
+  `server/data/sidecar.lock.json` returned **404**. MetaCubeX republished the
+  rolling `latest` release on 2026-10-28 (release name `Release 2026-10-28 09:30`),
+  and a republish mints new asset IDs and deletes the old ones.
+- **The pin worked, in the sense that matters.** It refused to build instead of
+  silently downloading whatever `latest` pointed at. That is the property the
+  lock was built for, and this is the first time it earned it.
+- **What the pin could not tell us.** Whether the republish was cosmetic or a
+  real data change. Answering it required fetching the new bytes and hashing
+  them: three of four were re-uploaded **byte-identical** (sha256 still equal to
+  the old pins), and only `geosite.dat` had changed — 4,307,247 → 4,353,539 bytes,
+  a genuine upstream routing-data update.
+- **The fix.** All four asset IDs repinned and `resources_release` advanced to
+  `Release 2026-10-28 09:30`. Three sha256 values are unchanged, so the diff
+  isolates the one file whose content moved. Re-downloaded through
+  `prebuild.mjs`, which reported "on disk does not match its pin — re-downloading"
+  and then verified the new bytes; `sidecar-lock.py --check` is green.
+- **Rule kept.** `STILL-OPEN.md` had already named the residual risk two days
+  earlier — "an asset ID is only as durable as the repository that hosts it" —
+  and it was realised immediately. A predicted risk that is written down is
+  cheaper than one that is discovered, but only if it also says what to do. It
+  now says: expect to repin whenever `resources_release` moves, and mirroring
+  these four files into this project's own release assets is a defect to fix,
+  not an optional hardening.
+
 ## CI COULD NEVER PASS, BECAUSE THE GUARD PROOF NEEDED A FILE CI NEVER FETCHED (2026-10-29, release 3.3.4)
 
 **Found by cutting the release, not by reading the workflow.** `verify-live.sh`

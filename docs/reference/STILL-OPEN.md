@@ -985,6 +985,27 @@ gone — the same class as the alpha engine, minus the repo of last resort. That
 is the argument for eventually mirroring the four files into this project's own
 release assets, and it remains **not done**.
 
+> **This risk was realised on 2026-10-28, two days after it was written.**
+> MetaCubeX republished the rolling `latest` release (new release name
+> `Release 2026-10-28 09:30`), which **deleted every asset ID the lock held**.
+> All four returned 404, so `prebuild.mjs` died and both `Build (linux)` and
+> `Build (windows)` failed on "Fetch sidecars and geo data" — the `v3.3.4` tag
+> produced no release, for a reason that had nothing to do with the code.
+>
+> Repinned in 3.3.4. Three of the four files were re-uploaded byte-identical
+> (their sha256 still matches the old pins); only `geosite.dat` genuinely
+> changed, from 4,307,247 to 4,353,539 bytes. The pin did its job — it refused
+> to build rather than silently ship different data — but it could not tell
+> anyone *which* of those two situations it was in until the bytes were fetched
+> and hashed.
+>
+> **What this changes.** "Pinned by asset ID" is durability, not immortality: it
+> survives a rebuild only if the republished upload is byte-identical. Expect to
+> repin whenever `resources_release` in `sidecar.lock.json` moves. **Mirroring the
+> four files into this project's own release assets is now a defect, not an
+> improvement** — it is the only fix that does not depend on another project's
+> release hygiene.
+
 ## If you are the next agent here
 
 1. **Read the "never met a database" section above first** — the term/renewal
