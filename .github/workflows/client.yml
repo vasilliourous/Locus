@@ -200,19 +200,8 @@ jobs:
         working-directory: .
         run: server/scripts/check-consistency.sh
 
-      # Prove the contract guard (§37) can fail. A guard that cannot fail reads
-      # exactly like one that passed, and this repository has been burned by that
-      # twice — a cited guard that did not exist (FIXES.md, 2026-10-01) and a
-      # section that had silently stopped working. This job injects five real
-      # defects on a copy, asserts each is caught, and asserts it restored them.
-      #
-      # It runs on every CI build, not just when the guard changes, because the
-      # thing most likely to break the guard is a change to the CODE it reads:
-      # a struct moved to another file, a hook renamed, an extractor pattern
-      # that stops matching and quietly returns an empty set — which passes.
-      - name: The contract guard can still fail
-        working-directory: .
-        run: bash server/scripts/test-contract-guard.sh
+      # Tag/version agreement. The comment that used to head this block began
+      # with a stranded `#` line, left behind when an earlier step was moved.
       #
       # WHY THIS EXISTS: on 2026-09-30 the `v3.2.13` tag was pushed on a commit
       # whose version sites all still said `3.2.12`. Nothing caught it,
@@ -314,6 +303,72 @@ jobs:
       # lockfile stale), and it would have broken every clean install.
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+
+      # ── The engine sidecar, so §39 has something to corrupt ──
+      #
+      # WHY THIS JOB DOWNLOADS A 60 MB BINARY TO RUN A GUARD PROOF
+      #
+      # `test-contract-guard.sh` proves the build-input pin can FAIL by
+      # substituting a mihomo core that is a valid gzip, then asserting
+      # `sidecar-lock.py --check` rejects it. That test needs the sidecar on disk.
+      # This job never fetched one — the sidecars are a gitignored download that
+      # only the four build jobs performed — so the proof printed
+      #
+      #   MISSED a substituted engine (§39) — the sidecar is not present, cannot test
+      #
+      # and the script exits 1 on any MISSED. Every run on origin was therefore red
+      # at this step, and the run for `v3.3.3` failed here and never produced a
+      # release. A guard proof that cannot run is not a green guard; per the
+      # repository's own rule it is indistinguishable from a passing one, so the
+      # honest fix is to give it the input rather than to skip it.
+      #
+      # IT MUST COME AFTER `pnpm install`. `prebuild.mjs` imports adm-zip, glob,
+      # https-proxy-agent and tar at module scope, so running it before the
+      # dependencies are installed fails on a bare `Cannot find module` — which
+      # would then be swallowed by `continue-on-error` below and look exactly like
+      # the missing-sidecar case this step exists to fix.
+      #
+      # ONLY THE ENGINE IS NEEDED, BUT THE SCRIPT FETCHES EVERYTHING. `prebuild.mjs`
+      # has no task selection — it runs its whole task list for the triple given —
+      # so this also downloads the service bundle and four geo databases that
+      # nothing in this job reads. That is accepted rather than forked: teaching
+      # the downloader a "just the engine" mode would add a second code path to
+      # the one script that decides what bytes every build ships. The cache is
+      # what makes it cheap; correctness comes from the same pinned fetch the
+      # build job performs.
+      #
+      # The cache key is DELIBERATELY not the build matrix's: this job runs on
+      # linux-x86_64 only, and a shared key would put one 60 MB entry behind both
+      # the gate and all four build runners, where a partially written entry from
+      # a cancelled run could reach a release. A separate key costs one download
+      # per cache miss and keeps the two independent.
+      - name: Cache the engine sidecar for the §39 guard proof
+        uses: actions/cache@v4
+        with:
+          path: client/src-tauri/sidecar
+          key: guard-sidecar-v1-${{ hashFiles('client/scripts/prebuild.mjs', 'server/scripts/sidecar-lock.py', 'server/data/sidecar.lock.json') }}
+
+      - name: Fetch the build inputs
+        # A fetch failure here must not fail the gate for the WRONG reason: if the
+        # network is down, the proof below prints its own MISSED line naming the
+        # missing file, which is the diagnosable message. Letting the proof speak
+        # is what keeps "cannot test" distinct from "tested and passed".
+        continue-on-error: true
+        run: node scripts/prebuild.mjs x86_64-unknown-linux-gnu
+
+      # Prove the contract guard (§37) can fail. A guard that cannot fail reads
+      # exactly like one that passed, and this repository has been burned by that
+      # twice — a cited guard that did not exist (FIXES.md, 2026-10-01) and a
+      # section that had silently stopped working. This job injects five real
+      # defects on a copy, asserts each is caught, and asserts it restored them.
+      #
+      # It runs on every CI build, not just when the guard changes, because the
+      # thing most likely to break the guard is a change to the CODE it reads:
+      # a struct moved to another file, a hook renamed, an extractor pattern
+      # that stops matching and quietly returns an empty set — which passes.
+      - name: The contract guard can still fail
+        working-directory: .
+        run: bash server/scripts/test-contract-guard.sh
 
       # ── The frontend is built ONCE, here, and shared as an artifact ──
       #
@@ -868,6 +923,22 @@ jobs:
       - name: Rust lints
         if: matrix.label == 'linux'
         run: cargo clippy --all-targets --features clippy -- -D warnings
+
+      # ── Doc-tests, which `--all-targets` deliberately does NOT run ──
+      #
+      # WHY THIS IS A SEPARATE STEP. `cargo test --all-targets` above excludes
+      # doc-tests; that is cargo's documented behaviour, not an oversight in the
+      # line, and it meant a broken doc-test could sit in `main` while CI stayed
+      # green. It did: `sysopt.rs` quoted a log line indented by four spaces, so
+      # rustdoc compiled it as Rust, failed, and the failure was invisible to
+      # every CI run. It surfaced only when someone ran a bare `cargo test`.
+      #
+      # These are cheap relative to the suite above (no integration binaries) and
+      # linux-only for the same reason as clippy and fmt: one toolchain answers
+      # the same question four times.
+      - name: Doc-tests
+        if: matrix.label == 'linux'
+        run: cargo test --doc
 
       # ── rustfmt, at last ──
       #

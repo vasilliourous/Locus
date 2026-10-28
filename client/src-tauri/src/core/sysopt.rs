@@ -55,7 +55,9 @@ const GUARD_DRAIN_TIMEOUT: Duration = Duration::from_secs(10);
 /// the failure is then "compensated" by a second write that meets the same lock,
 /// which is the pair of messages a student actually saw:
 ///
-///     Failed to compensate proxy apply failure (… lock preferences) with direct mode.
+/// ```text
+/// Failed to compensate proxy apply failure (… lock preferences) with direct mode.
+/// ```
 ///
 /// The lock is released as soon as the other writer finishes — milliseconds — so
 /// the correct response to *this one error* is to wait and try again, not to

@@ -747,10 +747,19 @@ or written any more. Dropping them is a separate, deliberate operator action.
 ### CI now runs the tests — and it has since been watched doing so
 
 **Added 2026-09-29. RESOLVED — kept as the record.** `cargo test`,
-`cargo clippy -D warnings` and `pnpm test` run in the `verify` job, and the
-workflow has been watched running on GitHub (`CLAIMS.md` §5 **A4**). That A4 is a
-dated observation rather than a standing property is the point of the register;
-re-check with `gh run list --workflow=client.yml`.
+`cargo clippy -D warnings`, `cargo fmt --check` and `pnpm test` run in the
+`verify`/`build` jobs, and the workflow has been watched running on GitHub
+(`CLAIMS.md` §5 **A4**). That A4 is a dated observation rather than a standing
+property is the point of the register; re-check with
+`gh run list --workflow=client.yml`.
+
+> **Correction, 2026-10-29.** This entry said the job was "watched doing so", and
+> that was true of an earlier workflow — but the job could not go green from
+> 2026-10-26 onward: the §39 guard proof needs the mihomo sidecar and `verify`
+> never fetched it, so every run failed at that step (the `v3.3.3` tag produced
+> no release because of it). Fixed in 3.3.4 by fetching the build inputs in
+> `Verify`. The lesson is the entry's own: a green check on a previous commit is
+> evidence about that commit. See `FIXES.md`, 2026-10-29.
 
 ### No update has ever *successfully* been installed
 

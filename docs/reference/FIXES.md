@@ -24,6 +24,68 @@ commercial gaps, [`../business/17-not-built.md`](../business/17-not-built.md).
 
 ---
 
+## CI COULD NEVER PASS, BECAUSE THE GUARD PROOF NEEDED A FILE CI NEVER FETCHED (2026-10-29, release 3.3.4)
+
+**Found by cutting the release, not by reading the workflow.** `verify-live.sh`
+claim **A4** ("a release is published") was red, and the reason is the whole
+entry: the run for `v3.3.3` failed, so no release was ever created for that tag
+and the hub went on serving 3.3.2.
+
+- **What broke.** `test-contract-guard.sh` proves the §39 build-input pin can
+  FAIL by substituting a mihomo core that is still a valid gzip and asserting
+  `sidecar-lock.py --check` rejects it. The test needs that sidecar on disk. The
+  `Verify` job never fetched one — the sidecars are a gitignored download that
+  only the four `build` jobs performed — so every run printed
+
+  ```
+  MISSED a substituted engine (§39) — the sidecar is not present, cannot test
+  ```
+
+  and the script exits 1 on any `MISSED`. **The release path could not produce a
+  green run at all**, on any commit, and nothing said so: the last *successful*
+  run predates this test.
+- **Reproduced before fixing.** Hiding the sidecar locally reproduced the exact
+  `MISSED` line and exit 1; restoring it (lock check green) made the full proof
+  pass, 10 assertions caught. The fix is therefore aimed at the observed failure,
+  not at a guess about it.
+- **The fix.** `Verify` now caches and fetches the build inputs before the proof,
+  and the two steps are ordered **after `pnpm install`** — `prebuild.mjs` imports
+  `adm-zip`, `glob`, `https-proxy-agent` and `tar` at module scope, so placed
+  earlier it fails with `Cannot find module`, which `continue-on-error` would
+  then have rendered identical to the missing-sidecar case this step exists to
+  repair.
+- **Rule kept.** *A guard that cannot run is not a green guard — and a test that
+  skips when its input is absent is a check that cannot fail.* The §39 branch
+  already reported `MISSED` rather than skipping, which is why the defect was
+  visible at all; the missing half was giving it the input.
+
+**A second CI gap, found the same way: the suite CI ran was not the suite.**
+
+- **What broke.** `sysopt.rs` quoted a log line a student actually saw, indented
+  four spaces:
+
+  ```
+  ///     Failed to compensate proxy apply failure (… lock preferences) with direct mode.
+  ```
+
+  Rustdoc reads a four-space-indented block as Rust, tried to compile it as an
+  expression, and failed on the `…` character. The crate's doc-tests therefore
+  did not compile **at all**.
+- **Why nothing caught it.** CI runs `cargo test --all-targets`, which excludes
+  doc-tests. That is cargo's documented behaviour, not a mistake in the line —
+  but it meant a broken doc-test could sit in a green tree indefinitely, and this
+  one did. The 2026-10-26 entry above claimed the suite "Verified"; what was
+  actually run was `--lib` and `--all-targets`, and neither reaches a doc-test.
+  The claim was true about what it ran and misleading about what it covered.
+- **The fix.** The quote is now a fenced `text` block, so rustdoc renders it and
+  does not compile it. `cargo test --doc` is green.
+- **The guard.** `Doc-tests` is a new linux-only step in `build (linux)`, next to
+  clippy and `cargo fmt --check`. Without it the fix is a one-off: the next
+  indented quote in any doc comment reintroduces the same failure silently.
+- **Rule kept.** *A suite is only as complete as the command that runs it.*
+  `--all-targets` reads like "everything"; it excludes doc-tests, and the gap
+  between a flag's name and its behaviour is where this defect lived.
+
 ## 3.3.3 — THE WINDOWS TLS FIX SHIPS, AND THE BUILD BECOMES REPRODUCIBLE (2026-10-26, release)
 
 - **What went out.** The `locus::hub` TLS fix from 2026-10-18, which sat in the
@@ -109,7 +171,6 @@ shape: **a check that reads correct and does not do what its comment says.**
   `chmod 644`, and observed passing (5/5, 10.2s) after the bit was restored.
   *Rule:* a precondition a test relies on must be checked in the form the failure
   takes. `spawn` needs an executable, not a file.
-- **No guard existed for the goja builtin trap.**
 - **No guard existed for the goja builtin trap.** `admin_console.pb.js` refused
   every release because it called `atob`, which PocketBase's goja does not
   define; the crash was caught and turned into `false` for every input. The fix
