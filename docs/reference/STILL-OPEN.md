@@ -932,6 +932,27 @@ made, and it is **not** done here.
 
 ## The alpha engine: vendored, and the geo databases now pinned by asset ID
 
+> **Recurred on 2026-10-29, and the vendoring was too narrow to cover it.**
+> MetaCubeX re-rolled `Prerelease-Alpha` to `alpha-ca8d7c4`, deleting every
+> `alpha-6780eee` asset. Only **linux-x86_64** was vendored, so `Build (linux)`
+> was the one platform that still compiled; macOS and Windows tried the dead URL
+> and failed. Vendoring one platform is what turned a fleet-wide outage into a
+> single-platform survival.
+>
+> Repinned to `alpha-ca8d7c4` in 3.3.4, and the lock now records the alpha's
+> hash for **all four** shipped triples (`aarch64-apple-darwin`,
+> `x86_64-apple-darwin`, `x86_64-pc-windows-msvc`, `x86_64-unknown-linux-gnu`).
+> Only linux is still *vendored*; the other three are pinned and downloaded,
+> which is a checkable fetch rather than a reproducible one. `--check` reports
+> the absent ones as `MISSING`, which `check-consistency.sh` §39 treats as a
+> warning — a decoded pin for a platform this checkout never built — while a
+> hash disagreement stays `BAD`.
+>
+> **Still true, and now the highest-value item here:** vendoring all four alpha
+> binaries (~180 MB) is the only thing that makes the mac/Windows builds
+> reproducible offline. Until then every release depends on a third party not
+> re-rolling a prerelease tag.
+
 **Resolved on 2026-10-26 by vendoring.** The record below is kept because the
 *failure mode* is the point, and it recurs for anything else published as a
 rolling prerelease.

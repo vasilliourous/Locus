@@ -24,6 +24,39 @@ commercial gaps, [`../business/17-not-built.md`](../business/17-not-built.md).
 
 ---
 
+## THE ALPHA ENGINE'S TAG WAS RE-ROLLED, AND ONLY ONE PLATFORM SURVIVED (2026-10-29, release 3.3.4)
+
+- **What broke.** With the engine pin fixed, `Build (linux)` passed and the other
+  three failed fetching the alpha core:
+
+  ```
+  mihomo-darwin-arm64-go122-alpha-6780eee.gz: status 404
+  ```
+
+  MetaCubeX re-rolled the `Prerelease-Alpha` release to `alpha-ca8d7c4` and
+  deleted every `alpha-6780eee` asset. This is the same failure
+  `STILL-OPEN.md` recorded on 2026-10-26, and the fix from then had a gap: only
+  **linux-x86_64** was vendored into the repository.
+- **Why that gap cost three platforms.** `tauri.conf.json` lists
+  `sidecar/verge-mihomo-alpha` in `externalBin`, so every platform needs the
+  file. Linux had a committed copy and built from it. macOS and Windows had
+  nothing but the dead URL, so the one platform that was vendored was the one
+  platform that survived — vendoring a single platform converts a fleet outage
+  into a single-platform success and hides the rest.
+- **The fix.** `engine_versions.mihomo_alpha` is now `alpha-ca8d7c4`, and the
+  lock records the alpha's sha256 for all four shipped triples. The vendored
+  linux binary was replaced so it, too, reports `alpha-ca8d7c4` — a vendored
+  sidecar is never re-downloaded, so a stale one fails the pin forever.
+- **Hashes are of the extracted binary, not the archive.** `assertPinned`
+  compares the file that lands in `sidecar/`, so the pins were computed from the
+  decompressed `.gz` and the unzipped `.exe`. Pinning the transport would have
+  passed locally and failed in CI for a reason that reads like a corrupt
+  download.
+- **What is still not solved.** macOS and Windows remain network-dependent: they
+  are pinned, which makes the fetch *checkable*, not *reproducible*. Vendoring
+  all four (~180 MB) is the only fix that does not depend on a third party not
+  re-rolling a tag, and it is not done.
+
 ## THE ENGINE PIN WAS HALF-WIRED, SO THE ENGINE DRIFTED AND EVERY BUILD STOPPED (2026-10-29, release 3.3.4)
 
 **This is the real reason `v3.3.4` first produced nothing.** The geo-database

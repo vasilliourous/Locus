@@ -1,7 +1,7 @@
 {
   "engine_versions": {
     "mihomo": "v1.19.32",
-    "mihomo_alpha": "alpha-6780eee"
+    "mihomo_alpha": "alpha-ca8d7c4"
   },
   "engine_versions_provenance": "read from the local binaries with `-v`; the gitignored prebuild cache is consulted only as a cross-check and is not required",
   "resources": {
@@ -59,10 +59,25 @@
     },
     "verge-mihomo-alpha": {
       "x86_64-unknown-linux-gnu": {
-        "bytes": 62066814,
+        "bytes": 62075006,
         "file": "verge-mihomo-alpha-x86_64-unknown-linux-gnu",
-        "sha256": "8ef31967dfda95ed75e522be18cb8795cf8c98d230dce245bb4b41127015908c",
+        "sha256": "38ab9caaf2ec69566600b84bbce71bd35e0db7e6eee9a783aef894e1e99836a7",
         "vendored": true
+      },
+      "aarch64-apple-darwin": {
+        "bytes": 57223730,
+        "file": "verge-mihomo-alpha-aarch64-apple-darwin",
+        "sha256": "51deaace2deab8f77d52ae2089db59e6ea165b78719bc8c49c6e0f1e2fdac66a"
+      },
+      "x86_64-apple-darwin": {
+        "bytes": 59787632,
+        "file": "verge-mihomo-alpha-x86_64-apple-darwin",
+        "sha256": "bbecfa8af6d5a2d827fdf6f621cf03b7fe85d5f32a8abc5666ae56936e94490d"
+      },
+      "x86_64-pc-windows-msvc": {
+        "bytes": 61299712,
+        "file": "verge-mihomo-alpha-x86_64-pc-windows-msvc.exe",
+        "sha256": "a36ce643e7ea94525d4aa2a89c08177e9de86e838eba6f4b446f048945eeee77"
       }
     }
   },
