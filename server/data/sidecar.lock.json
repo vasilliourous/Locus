@@ -1,6 +1,6 @@
 {
   "engine_versions": {
-    "mihomo": null,
+    "mihomo": "v1.19.32",
     "mihomo_alpha": "alpha-6780eee"
   },
   "engine_versions_provenance": "read from the local binaries with `-v`; the gitignored prebuild cache is consulted only as a cross-check and is not required",

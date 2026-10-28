@@ -24,6 +24,54 @@ commercial gaps, [`../business/17-not-built.md`](../business/17-not-built.md).
 
 ---
 
+## THE ENGINE PIN WAS HALF-WIRED, SO THE ENGINE DRIFTED AND EVERY BUILD STOPPED (2026-10-29, release 3.3.4)
+
+**This is the real reason `v3.3.4` first produced nothing.** The geo-database
+404 above was the first failure; once repinned, the builds still failed, at a
+different file, for an unrelated reason.
+
+- **What broke.** Every `build` job died with:
+
+  ```
+  "verge-mihomo" does not match its pin:
+    got 07e79c1eb24cab62, lock pins 90529d00b84df144
+  ```
+
+  The pin was **right** and the download was **right**: they described different
+  engines. `sidecar.lock.json` recorded `"engine_versions": {"mihomo": null}`, and
+  `getLatestReleaseVersion()` reads a null pin as "no pin — ask the network":
+
+  ```js
+  const pinned = lockedEngineVersion('mihomo')
+  if (pinned) { META_VERSION = pinned; return }   // taken for alpha…
+  // …falls through to releases/latest for the stable engine
+  ```
+
+  So the *hash* was pinned to the bytes of **v1.19.32** while the *version* was
+  re-resolved from `latest` on every run. When upstream published v1.19.33 the
+  two disagreed and the build refused to proceed. The alpha core was pinned
+  (`alpha-6780eee`) the whole time; only the stable one was left null.
+- **Established by direct download, not by inference.** Fetching
+  `mihomo-linux-amd64-v2-v1.19.32.gz` hashes to `90529d00b84df144…` — exactly the
+  recorded pin — while `v1.19.33.gz` hashes to `07e79c1e…`. The pinned binary
+  reports `v1.19.32` from its own `-v`. Three independent facts agree.
+- **Why it looked fine for months.** Any machine with a warm
+  `node_modules/.verge/` cache short-circuits before the pin is consulted, so
+  local builds passed while every cold CI runner failed. That is the same
+  "a local green run is evidence about your working tree" trap `RELEASING.md`
+  §3.3.1 already records.
+- **The fix.** `engine_versions.mihomo` is now `"v1.19.32"`, so the lock decides
+  which engine to fetch and the network only decides where to get it — the
+  behaviour the code's own comment already claimed.
+- **Observed failing, then passing.** With the lock temporarily pinned to
+  `v1.19.33` and the sidecar deleted (the CI condition), prebuild reproduced the
+  CI error exactly and left the previous binary in place; with the correct pin it
+  downloads and verifies cleanly. A guard that cannot fail would have shown the
+  same output for both.
+- **Rule kept.** *A pin has to pin the thing that is chosen, not just the bytes
+  that arrive.* The repository already knew this for one engine and not the
+  other, which is why the defect survived: half a pin reads like a pin.
+
 ## THE PINNED GEO DATABASES 404'D, AND THE BUILD STOPPED RATHER THAN SHIP NEW DATA (2026-10-29, release 3.3.4)
 
 - **What broke.** Both `Build (linux)` and `Build (windows)` failed at "Fetch
