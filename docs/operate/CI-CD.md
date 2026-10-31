@@ -149,8 +149,9 @@ Two jobs, two suites, and they are not interchangeable:
 
 | Job | Runs | Notes |
 |---|---|---|
-| `verify` | `check-consistency.sh`, the tag/version check, `pnpm run web:build`, `pnpm run lint`, `pnpm test` | **Frontend and docs only.** No Rust is compiled here. |
-| `build` (matrix) | `cargo test --all-targets`, `cargo clippy --all-targets --features clippy -- -D warnings`, then the platform build | The Rust suite runs **once per platform**, inside the matrix. |
+| `verify` | `check-consistency.sh`, the tag/version check, `pnpm run web:build`, `pnpm run lint`, `pnpm test`, `test-contract-guard.sh` | **Frontend and docs only.** No Rust is compiled here. |
+| `build` (linux only) | installs `sing-box`, then `cargo test --all-targets`, `cargo clippy --all-targets --features clippy -- -D warnings` | See "The Rust suite cannot skip" below |
+| `build` (all four) | the platform build, signing and packaging | |
 
 The Rust half was added 2026-09-29 because it existed and passed locally while
 nothing in CI invoked it, which is how the updater's signature encoding mismatch
@@ -214,6 +215,47 @@ executables the updater consumes. The workflow copies the compiled binary
 **Why a partial release is impossible:** `manifest.json` generation fails if any
 binary or signature is missing, and a second check verifies every
 `locus-*` artifact has a `.sig` before the release is created.
+
+### The Rust suite cannot skip, and that is enforced from outside the tests
+
+**Added 2026-10-29.** The engine suites had a silencing problem of two kinds, and
+both made a green run mean less than it appeared to:
+
+- **A skipping test is a passing test.** `tier_profile_engine.rs` and
+  `egress_probe_engine.rs` called `eprintln!("SKIP: …")` and returned when the
+  sidecar was absent, so `cargo test` printed `ok` either way. The three tests
+  that prove *a working config is accepted* and the one that proves *a working
+  tunnel reads as connected* could all be "verified" by not running.
+- **The knob that would have failed instead was never turned.** The suites honour
+  `LOCUS_REQUIRE_LIVE_ENGINE`, and no workflow set it.
+
+Both are now closed in the Linux `build` job, which sets:
+
+| Variable | Effect | Why here |
+|---|---|---|
+| `LOCUS_REQUIRE_LIVE_ENGINE=1` | every skip becomes a failure | `sing-box` is installed by the step above and `prebuild` has fetched the sidecar, so nothing in the engine suites is allowed to be absent |
+| `LOCUS_REQUIRE_EGRESS=1` | "this runner has no network" becomes a failure for the one public-round-trip case | the same job demonstrably has egress — it fetched the registry and the build inputs one step earlier |
+
+**The two requirements are not the same, and conflating them wasted the suite.**
+Engine availability is a fact about the *run* (`prebuild` either ran or the job is
+broken); network egress is a fact about the *runner*. They now have separate
+variables, because one variable gating both meant every no-network test skipped on
+any machine that had simply not run `prebuild` — throwing away the only part of
+the suite that always works.
+
+**`sing-box` is installed, pinned, and its absence fails the step.** It is the
+**hub's** Shadowsocks listener, so it is the only peer whose acceptance of this
+client's outbound means anything — see
+`client/src-tauri/tests/tunnel_end_to_end.rs` and
+[`../reference/EGRESS-READINESS.md`](../reference/EGRESS-READINESS.md). A failed
+download fails the step rather than skipping the test: the test is the reason the
+job claims to prove the tunnel.
+
+> **The positive-egress case retries a second host before failing.** Setting
+> `LOCUS_REQUIRE_EGRESS` immediately produced `504 Timeout` against
+> `cp.cloudflare.com` from the gate — because that is a *convenience* endpoint, not
+> something a release should depend on. The case now tries `gstatic.com` too and
+> names both on failure. One third party's availability was never the assertion.
 
 ### The speed optimisation, and the trap it opened (read before touching `frontendDist`)
 

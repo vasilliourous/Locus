@@ -46,6 +46,7 @@ client/src-tauri/src/locus/tier.rs
 client/src/services/locus.ts
 client/src/services/locus.generated.ts
 client/src-tauri/sidecar/verge-mihomo-x86_64-unknown-linux-gnu
+vendor/build-inputs/verge-mihomo/verge-mihomo-x86_64-unknown-linux-gnu
 client/src-tauri/src/core/manager/lifecycle.rs"
 for f in $TOUCHED; do
     [ -f "$f" ] && cp "$f" "$TMP/pristine/$(echo "$f" | tr '/' '_')"
@@ -220,6 +221,128 @@ if [ -f "$MIHOMO" ]; then
     fi
 else
     miss "a substituted engine (§39) — the sidecar is not present, cannot test"
+fi
+
+# ── §39, the other half: a tampered VENDORED copy, and a false MISSING ──
+#
+# Two defects the vendoring introduced, both found by running rather than by
+# reading, and both proved here so they cannot come back:
+#
+#   1. `sidecar-lock.py` only looked in the gitignored `src-tauri/sidecar/`, so
+#      a fresh clone reported all four already-vendored alphas as MISSING. A
+#      check that fails on a correct tree teaches the reader to ignore it.
+#   2. `prebuild.mjs` gated the vendored branch on a per-entry `vendored` flag
+#      that only the alpha carried, so adding `verge-mihomo` to the lock's
+#      `vendored` table changed nothing and the build kept downloading — proven
+#      by pointing HTTPS_PROXY at a dead port and watching it still "finish".
+#
+# (1) is asserted below by running --check with the sidecar directory absent,
+# which is the fresh-clone condition. (2) is asserted by running prebuild with
+# the network dead and the un-vendored service bundle as the only legal outcome.
+VENDORED_MAIN="vendor/build-inputs/verge-mihomo/verge-mihomo-x86_64-unknown-linux-gnu"
+if [ -f "$VENDORED_MAIN" ]; then
+    # BOTH copies are substituted, and that is the point rather than thoroughness.
+    #
+    # The first version of this test only corrupted the vendored copy, and it
+    # reported MISSED — correctly, because nothing was looking at it. `--check`
+    # verifies whichever copy EXISTS, and after a prebuild the sidecar copy does,
+    # so the vendored bytes were never hashed by anything. The repository would
+    # have been carrying 230 MiB of committed binaries that no check read.
+    #
+    # A tampered vendored copy with its generated twin also tampered is the
+    # state a fresh clone is actually in before prebuild runs, and the state a
+    # cache-poisoned CI runner can be in after. Both must be caught.
+    VENDORED_TWIN="client/src-tauri/sidecar/verge-mihomo-x86_64-unknown-linux-gnu"
+    cp "$VENDORED_MAIN" "$TMP/vendored.bak"
+    [ -f "$VENDORED_TWIN" ] && cp "$VENDORED_TWIN" "$TMP/vendored-twin.bak"
+    # Flip one byte in place rather than prepending a gzip header: the point is
+    # "the bytes differ from the pin", and a length change would also test the
+    # byte count, which is not what is being asserted.
+    printf 'X' | dd of="$VENDORED_MAIN" bs=1 seek=0 conv=notrunc 2>/dev/null
+    [ -f "$VENDORED_TWIN" ] && printf 'X' | dd of="$VENDORED_TWIN" bs=1 seek=0 conv=notrunc 2>/dev/null
+    out=$(python3 "$REPO/server/scripts/sidecar-lock.py" --check 2>&1)
+    st=$?
+    cp "$TMP/vendored.bak" "$VENDORED_MAIN"
+    [ -f "$VENDORED_TWIN" ] && cp "$TMP/vendored-twin.bak" "$VENDORED_TWIN"
+    chmod 0755 "$VENDORED_MAIN" 2>/dev/null
+    [ -f "$VENDORED_TWIN" ] && chmod 0755 "$VENDORED_TWIN" 2>/dev/null
+    if [ "$st" -eq 0 ]; then
+        miss "a tampered VENDORED engine (§39)"
+    elif printf '%s' "$out" | grep -qF "but the lock pins"; then
+        pass "a tampered VENDORED engine (§39)"
+    else
+        miss "a tampered vendored engine — failed, but not for the expected reason"
+        printf '%s\n' "$out" | sed 's/^/        /'
+    fi
+
+    # The fresh-clone condition: no download directory at all, and the committed
+    # copies still hashing to their pins. This must PASS — it is the state every
+    # clone starts in, and a check that fails here gets ignored by everyone.
+    #
+    # `mv` is used rather than `rm -rf sidecar/*` so a failed restore cannot
+    # destroy the only copy of an ignored download. The ext4 overlay this runs on
+    # declines to set attributes on some files during `mv`; that is noise from the
+    # filesystem, not from the check, so it is filtered rather than defaulted on.
+    mv "$REPO/client/src-tauri/sidecar" "$TMP/sidecar-away" 2>/dev/null
+    out=$(python3 "$REPO/server/scripts/sidecar-lock.py" --check 2>&1)
+    st=$?
+    mv "$TMP/sidecar-away" "$REPO/client/src-tauri/sidecar" 2>/dev/null
+    # The assertion is about the VENDORED files specifically. Stated this way on
+    # purpose: the first version asserted "the check exits 0", which is the wrong
+    # claim — the lock also pins three privilege-service binaries that may
+    # legitimately be absent before prebuild on a translated tree, and a check
+    # that fails for an honest reason must not be reported as a defect. What must
+    # never happen is a vendored file being called missing: it is committed, so no
+    # command can be responsible for restoring it.
+    vendored_names="verge-mihomo-x86_64-unknown-linux-gnu verge-mihomo-alpha-x86_64-unknown-linux-gnu"
+    wrong=""
+    for name in $vendored_names; do
+        printf '%s\n' "$out" | grep -q "^MISSING.*${name}" && wrong="$wrong $name"
+    done
+    if [ -n "$wrong" ]; then
+        miss "a fresh clone reports vendored inputs as MISSING (§39):$wrong"
+    elif [ "$st" -eq 2 ]; then
+        miss "a fresh clone reported nothing at all (§39) — the committed copies were not read"
+    else
+        pass "a fresh clone verifies its vendored inputs instead of reporting them MISSING"
+    fi
+else
+    miss "a tampered vendored engine (§39) — $VENDORED_MAIN is not present, cannot test"
+fi
+
+echo "════════════════════════════════════════════════════════════"
+
+# ── §39b: a vendored file that exists but is not COMMITTED ──
+#
+# This is the defect that shipped into the first commit of the vendoring and was
+# caught by eye, not by a check: the root `.gitignore`'s blanket `*.exe` excluded
+# the two Windows engines, so `git add -A` staged 9 of the 11 vendored binaries
+# and the tree still looked vendored. A fresh clone would have downloaded its
+# Windows engine again, and every build the developer ran would have passed.
+#
+# The check must not depend on the file being absent — it must notice a file that
+# is present and untracked, which is the state a dirty tree hides.
+
+#
+VENDORED_WIN="vendor/build-inputs/verge-mihomo/verge-mihomo-x86_64-pc-windows-msvc.exe"
+if [ -f "$VENDORED_WIN" ]; then
+    git -C "$REPO" rm --cached -q -- "$VENDORED_WIN" 2>/dev/null || true
+    out=$(bash "$REPO/server/scripts/check-consistency.sh" 2>&1)
+    st=$?
+    git -C "$REPO" add -- "$VENDORED_WIN" 2>/dev/null || true
+    if [ "$st" -eq 0 ]; then
+        miss "an untracked vendored binary (§39b)"
+    # Two message paths reach this state and both are correct: the per-group pass
+    # ("git does not carry it") and the whole-tree sweep ("is in the vendor tree
+    # but untracked"). Matching only the first made this proof report MISSED on a
+    # guard that was working — a test asserting one of two true descriptions.
+    elif printf '%s' "$out" | grep -qE "git does not carry it|in the vendor tree but untracked"; then
+        pass "an untracked vendored binary (§39b)"
+    else
+        miss "an untracked vendored binary — failed, but not for the expected reason"
+    fi
+else
+    miss "an untracked vendored binary (§39b) — $VENDORED_WIN is not present, cannot test"
 fi
 
 echo "════════════════════════════════════════════════════════════"

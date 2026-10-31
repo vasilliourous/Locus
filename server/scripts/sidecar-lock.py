@@ -41,11 +41,15 @@ MODES
 WHAT THIS DOES NOT DO
 
 It cannot verify bytes it has not seen. `--check` compares disk against the lock;
-the lock is only as trustworthy as the run that produced it. It also does not
-close the build-time network dependency — resolving a *pinned* version still
-fetches from GitHub. It makes that fetch checkable, not absent. A fully offline
-build needs the archives vendored, which is a separate decision about repository
-size and is recorded in docs/reference/STILL-OPEN.md.
+the lock is only as trustworthy as the run that produced it.
+
+It is no longer true, however, that the build cannot proceed offline. As of
+2026-10-29 every sidecar is committed under `vendor/build-inputs/` and `--check`
+verifies the committed copy when `client/src-tauri/sidecar/` is absent — which is
+the state a fresh clone is in. The four geo databases are still fetched: their
+2026-10-28 asset IDs now 404 and the bytes those IDs named cannot be recovered
+from upstream, so `resources` is declared vendored and empty. See
+docs/operate/VENDORED-BUILD-INPUTS.md, which owns both halves.
 """
 
 import hashlib
@@ -56,6 +60,34 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[2]
 LOCK = REPO / "server" / "data" / "sidecar.lock.json"
 SIDECAR_DIR = REPO / "client" / "src-tauri" / "sidecar"
+# The committed copies of the build inputs. See
+# docs/operate/VENDORED-BUILD-INPUTS.md. A file is verified wherever it lives:
+# in the gitignored `sidecar/` after prebuild, or in `vendor/` which a fresh
+# clone always has. Requiring the former made a fresh clone report every pinned
+# artifact as MISSING, which is a directory-layout complaint dressed as a
+# security finding.
+VENDOR_DIR = REPO / "vendor" / "build-inputs"
+
+
+def vendor_path(name):
+    """The committed copy of `name`, whoever holds it, or None.
+
+    Looked up through the lock's own `vendored` table, not by scanning every
+    subdirectory: the three privilege-service sidecars are ordinary downloads
+    with no upstream-durability problem, and treating them as vendored just
+    because the path exists would report them MISSING on a fresh clone for no
+    reason. Vendoring is a DECISION recorded in the lock, so the lock is what
+    says which files it applies to.
+    """
+    try:
+        vendored = json.loads(LOCK.read_text(encoding="utf-8")).get("vendored") or {}
+    except (OSError, json.JSONDecodeError):
+        return None
+    for group in vendored:
+        candidate = VENDOR_DIR / group / name
+        if candidate.is_file():
+            return candidate
+    return None
 RESOURCES_DIR = REPO / "client" / "src-tauri" / "resources"
 VERSION_CACHE = REPO / "client" / "node_modules" / ".verge" / ".version_cache.json"
 
@@ -271,6 +303,15 @@ def check(lock):
     for base, by_triple in lock.get("sidecars", {}).items():
         for triple, want in by_triple.items():
             path = SIDECAR_DIR / want["file"]
+            # A vendored input is checked HERE, in the committed copy, even when
+            # prebuild has not run. That is the state a fresh clone is in and the
+            # state CI is in before its cache restores — and verifying the
+            # committed bytes is strictly stronger than verifying a download that
+            # a cache may have substituted.
+            if not path.is_file():
+                vendored = vendor_path(want["file"])
+                if vendored is not None:
+                    path = vendored
             if not path.is_file():
                 if base in unavailable:
                     info = unavailable[base]
@@ -300,6 +341,10 @@ def check(lock):
 
     for name, want in lock.get("resources", {}).items():
         path = RESOURCES_DIR / name
+        if not path.is_file():
+            vendored = vendor_path(name)
+            if vendored is not None:
+                path = vendored
         if not path.is_file():
             out.append("MISSING\t%s is pinned in the lock but not on disk" % name)
             continue

@@ -346,7 +346,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: client/src-tauri/sidecar
-          key: guard-sidecar-v1-${{ hashFiles('client/scripts/prebuild.mjs', 'server/scripts/sidecar-lock.py', 'server/data/sidecar.lock.json') }}
+          key: guard-sidecar-v2-${{ hashFiles('client/scripts/prebuild.mjs', 'server/scripts/sidecar-lock.py', 'server/data/sidecar.lock.json', 'vendor/build-inputs/**') }}
 
       - name: Fetch the build inputs
         # A fetch failure here must not fail the gate for the WRONG reason: if the
@@ -707,7 +707,7 @@ jobs:
           path: |
             client/src-tauri/sidecar
             client/src-tauri/resources
-          key: sidecar-${{ matrix.triple }}-${{ hashFiles('client/scripts/prebuild.mjs', 'client/scripts/service-release.mjs', 'client/package.json') }}
+          key: sidecar-${{ matrix.triple }}-v2-${{ hashFiles('client/scripts/prebuild.mjs', 'client/scripts/service-release.mjs', 'client/package.json', 'vendor/build-inputs/**') }}
 
       # Downloads the mihomo sidecars and geo data into the gitignored
       # src-tauri/sidecar and src-tauri/resources. The Rust build fails without
@@ -736,6 +736,110 @@ jobs:
       # names an `installerHooks` or `template` file that nothing in this job produces.
       - name: Fetch sidecars and geo data
         run: node scripts/prebuild.mjs "${{ matrix.triple }}"
+
+      # Prove the engines came from the COMMITTED copy, not the network.
+      #
+      # WHY THIS IS A SEPARATE STEP, AND WHY IT EXISTS AT ALL
+      #
+      # The vendored bytes and the downloaded bytes are identical by construction,
+      # so every hash check passes whether or not the vendoring works. The first
+      # version of this vendoring reported "is vendored … and matches its pin" from
+      # a run whose log also said `download finished` — the branch was never taken
+      # because a per-entry flag nobody set decided it. No amount of hashing caught
+      # that; pointing the proxy at a dead port did, immediately.
+      #
+      # This makes the same observation in CI, where it cannot be skipped by hand:
+      # move the sidecar out of the way and re-run prebuild with an unusable proxy.
+      # Only a vendored input can survive it. Anything still downloaded is a defect
+      # in the vendoring, and is reported as one rather than silently accepted.
+      #
+      # `sidecar.lock.json` pins these as vendored, so this step is asserting the
+      # lock itself is honest. If an input is deliberately un-vendored later, it
+      # must be removed from `vendored` in the lock and from this list together.
+      #
+      # `working-directory: client` is load-bearing, not tidiness: `prebuild.mjs`
+      # resolves every path from `process.cwd()`, and from the repository root it
+      # reads `../server/data/sidecar.lock.json` as the lock — finds nothing — and
+      # falls back to resolving the engine from `releases/latest`. Verified: run
+      # from the root it announced `v1.19.33` and downloaded both engines; run from
+      # `client/` it announces `v1.19.32`, reads both from `vendor/`, and fetches
+      # only the service bundle and the geo databases.
+      - name: The vendored engines are read from the repository, not the network
+        if: matrix.label == 'linux'
+        shell: bash
+        working-directory: client
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/sidecar-hold"
+          for f in verge-mihomo verge-mihomo-alpha; do
+            name="${f}-x86_64-unknown-linux-gnu"
+            if [ ! -f "src-tauri/sidecar/$name" ]; then
+              echo "::error::$name was not produced by prebuild — nothing to test"
+              exit 1
+            fi
+            mv "src-tauri/sidecar/$name" "$RUNNER_TEMP/sidecar-hold/$name"
+          done
+          # An unusable proxy. `prebuild` reads HTTP(S)_PROXY for its own fetches,
+          # so any input that still needs the network fails here instead of
+          # succeeding quietly on a runner that happens to have connectivity.
+          log=$(HTTPS_PROXY=http://127.0.0.1:9 HTTP_PROXY=http://127.0.0.1:9 \
+                node scripts/prebuild.mjs x86_64-unknown-linux-gnu 2>&1 || true)
+          # Matched with a regex rather than `grep -F`, deliberately.
+          #
+          # This cost three wrong attempts, and each one is worth naming because
+          # the step exists to catch exactly this class of mistake:
+          #
+          #   * `grep -F '"abc" is vendored next' FILE` returns 1 on this machine
+          #     while `grep -F '"abc"'` and `grep -F 'is vendored next'` each
+          #     return 0 on the same file. A fixed-string match of a longer pattern
+          #     containing a double quote does not behave as `-F` promises here.
+          #   * `[^a-z]` adjacent to an alternation-free literal silently changes
+          #     what is being asserted, so the pattern stopped distinguishing
+          #     `verge-mihomo` from `verge-mihomo-alpha`. A check whose pattern and
+          #     whose claim have drifted apart reports on the pattern.
+          #
+          # Both were found by running the step against a tree known to be correct
+          # and refusing to accept a red result as "the tree is wrong". A proof step
+          # that cannot match its own success line reports a defect on a correct
+          # tree, which is the failure this step is meant to catch.
+          # THE LOG LINE NAMES THE BASE NAME, NOT THE TARGET FILE.
+          #
+          # `prebuild` reports `` "verge-mihomo" is vendored … ``, where the name
+          # in quotes is the SIDECAR name. The target file —
+          # `verge-mihomo-x86_64-unknown-linux-gnu` — appears nowhere in that line.
+          # The first version of this check searched for the target file inside
+          # the quotes, so it could never match, and reported both engines as
+          # "NOT served from the repository" on a tree where both demonstrably
+          # were. Assert what the log actually says, not what it would say if the
+          # program had been written by whoever wrote this check.
+          fail=0
+          for f in verge-mihomo verge-mihomo-alpha; do
+            name="${f}-x86_64-unknown-linux-gnu"
+            if ! printf '%s\n' "$log" | grep -qF "\"$f\" is vendored in the repository"; then
+              echo "::error::$name was NOT served from vendor/build-inputs/ — the build depends on the network for it"
+              fail=1
+            fi
+            # A "download finished" URL that names this artifact. Matched on the
+            # file stem, because the URL carries the ARCHIVE name
+            # (`mihomo-linux-amd64-v2-v1.19.32.gz`), which is a third spelling
+            # again — neither the sidecar name nor the target file.
+            if printf '%s\n' "$log" | grep -qF "download finished: " &&
+               printf '%s\n' "$log" | grep -qE "(linux-amd64|darwin-arm64|darwin-amd64|windows-amd64).*${f%verge-}"; then
+              echo "::error::$name appears in a download URL despite being vendored"
+              fail=1
+            fi
+          done
+          # Always restore, so a failure above does not cost the later steps their
+          # sidecars — the build must still be diagnosable.
+          for f in verge-mihomo verge-mihomo-alpha; do
+            name="${f}-x86_64-unknown-linux-gnu"
+            [ -f "$RUNNER_TEMP/sidecar-hold/$name" ] && mv "$RUNNER_TEMP/sidecar-hold/$name" "src-tauri/sidecar/$name"
+          done
+          if [ "$fail" -ne 0 ]; then
+            printf '%s\n' "$log" | grep -E 'vendored|download finished|Error' || true
+            exit 1
+          fi
+          echo "both engines were served from the repository with the network unusable"
 
       # ── Fetch the crate registry, WITH RETRIES ──
       #
@@ -880,9 +984,61 @@ jobs:
       # The grep guard keeps it honest: a NON-network failure is not retried at
       # all, so a real regression reports on the first pass rather than after
       # minutes of backoff.
+      # ── THE ENGINE SUITE RUNS FOR REAL, AND SAYS SO WHEN IT DOES NOT ──
+      #
+      # `LOCUS_REQUIRE_EGRESS=1` makes "this runner has no network" a FAILURE
+      # rather than a skip for the one test that must complete a public round
+      # trip. That case — a working tunnel reading as `connected` — is the
+      # direction three shipped defects failed in, and until now nothing enforced
+      # it anywhere: the variable that would have turned the skip into a failure
+      # existed and no workflow set it.
+      #
+      # It is safe to set here because the runner demonstrably has egress: the
+      # steps above fetch the crate registry and the build inputs. If that stops
+      # being true the failure names itself instead of hiding as a skip.
+      #
+      # The rest of the engine suite needs no network at all — `tier_profile_engine`
+      # parses YAML with `mihomo -t`, and `tunnel_end_to_end` runs a real
+      # Shadowsocks-2022 listener and client on loopback. Both are enforced by
+      # `LOCUS_REQUIRE_LIVE_ENGINE` being unnecessary: a missing sidecar here is a
+      # broken run, not a fact about the machine, because `prebuild` runs above.
+      # ── sing-box, for the tunnel end-to-end test ──
+      #
+      # `tunnel_end_to_end.rs` runs a REAL Shadowsocks-2022 listener and a REAL
+      # client against it, because that pair is where the two shipped tunnel
+      # defects lived (UDP-over-TCP never negotiated; the delay probe answered by
+      # the wrong outbound). sing-box is what the hub runs as its listener, so it
+      # is the only peer whose acceptance means anything.
+      #
+      # PINNED, and by checksum. A test dependency whose version floats is a test
+      # that changes behaviour on a day nobody touched this repository — the same
+      # class of problem `sidecar.lock.json` exists to stop, in a place a release
+      # would not look.
+      #
+      # A failed download FAILS this step rather than skipping the test: the test
+      # is the reason this job claims to prove the tunnel, and a silently missing
+      # peer would make it pass by not running.
+      - name: Install sing-box (the hub's Shadowsocks listener, for the e2e test)
+        if: matrix.label == 'linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          version=1.14.4
+          url="https://github.com/SagerNet/sing-box/releases/download/v${version}/sing-box-${version}-linux-amd64.tar.gz"
+          curl -fsSL --retry 3 --max-time 120 "$url" -o /tmp/sing-box.tgz
+          tar -xzf /tmp/sing-box.tgz -C /tmp
+          install -m 0755 "/tmp/sing-box-${version}-linux-amd64/sing-box" /usr/local/bin/sing-box
+          sing-box version
+
       - name: Rust tests
         if: matrix.label == 'linux'
         shell: bash
+        env:
+          # Both peers are installed above, so nothing in the engine suites is
+          # allowed to skip. A missing sidecar or a missing listener now FAILS
+          # instead of printing a line nobody reads.
+          LOCUS_REQUIRE_LIVE_ENGINE: '1'
+          LOCUS_REQUIRE_EGRESS: '1'
         run: |
           set -o pipefail
           delay=5

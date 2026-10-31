@@ -83,11 +83,29 @@
   },
   "source": "client/scripts/prebuild.mjs",
   "vendored": {
+    "verge-mihomo": {
+      "see": "docs/operate/VENDORED-BUILD-INPUTS.md",
+      "since": "2026-10-29",
+      "where": "vendor/build-inputs/verge-mihomo/",
+      "why": "Committed bytes, fetched from the commit-pinned raw URL. A stable GitHub release asset is the more durable upstream, but it is still an upstream: the build must not depend on one being reachable."
+    },
     "verge-mihomo-alpha": {
       "see": "docs/reference/STILL-OPEN.md",
       "since": "2026-10-26",
-      "where": "client/src-tauri/sidecar/verge-mihomo-alpha-x86_64-unknown-linux-gnu",
-      "why": "MetaCubeX publishes the mihomo alpha as a single rolling prerelease and deletes older builds, so its download URL stops existing. tauri.conf.json lists it in externalBin, so the build requires a file the network cannot reliably supply."
+      "where": "client/src-tauri/sidecar/verge-mihomo-alpha-x86_64-unknown-linux-gnu; vendor/build-inputs/verge-mihomo-alpha/",
+      "why": "MetaCubeX publishes the mihomo alpha as a single rolling prerelease and deletes older builds, so its download URL stops existing, and a *single* vendored platform converted the 3.3.4 outage into a single-platform build. All four triples are vendored."
+    },
+    "clash-verge-service": {
+      "see": "docs/operate/VENDORED-BUILD-INPUTS.md",
+      "since": "2026-10-29",
+      "where": "vendor/build-inputs/clash-verge-service/",
+      "why": "The privileged helper the client installs. Its upstream is stable, so this is not an outage measure: without it a fresh clone cannot verify every pin it holds, and `--check` reports these three as MISSING before prebuild has ever run \u2014 a check that fails on a correct tree, which is how a check stops being read."
+    },
+    "resources": {
+      "see": "docs/operate/VENDORED-BUILD-INPUTS.md",
+      "since": "2026-10-29",
+      "where": "vendor/build-inputs/resources/",
+      "why": "meta-rules-dat republished on 2026-10-28 and the previously pinned asset IDs 404'd, stopping the 3.3.4 build. An asset ID names one immutable upload but not a permanent one; the bytes that passed their pin are the ones worth keeping."
     }
   },
   "version": 1,

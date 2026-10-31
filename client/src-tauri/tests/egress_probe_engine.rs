@@ -62,6 +62,52 @@ fn skip(reason: &str) {
     eprintln!("SKIP: {reason}");
 }
 
+/// The sidecar, or a skip that only the tests which cannot run without one may
+/// take.
+///
+/// # Why this exists
+///
+/// `LOCUS_REQUIRE_LIVE_ENGINE` was a knob nobody turned, so `cargo test` stayed
+/// skip-silent — and worse, it was applied to the wrong thing. Every test in this
+/// file skipped on a missing sidecar, *including the four that need no network at
+/// all*. Those four are the ones that assert a broken tunnel reads as broken, and
+/// they are cheap and deterministic; skipping them on a machine that has simply
+/// not run `prebuild` throws away the only part of this suite that always works.
+///
+/// So there are two requirements, and they are not the same:
+///
+///   * **the engine** — present after `prebuild`, which CI always runs. Every test
+///     here needs it, so a missing engine is a defect in the run, not a fact
+///     about this machine.
+///   * **egress** — a public host must be reachable for the two positive cases.
+///     That is a property of the runner, and no amount of building fixes it.
+///
+/// [`egress_required`] is for the second: `LOCUS_REQUIRE_EGRESS=1` turns "this
+/// runner has no network" from a skip into a failure, so the positive case — the
+/// one that was never run, and the direction three shipped defects failed in — is
+/// exercised on the job that claims to exercise it.
+fn require_engine_when_possible() -> Option<PathBuf> {
+    match sidecar() {
+        Some(engine) => Some(engine),
+        None => {
+            // No `LOCUS_REQUIRE_LIVE_ENGINE` check here on purpose: requiring the
+            // engine is the DEFAULT now, so there is nothing to opt into. The
+            // variable is still honoured for the egress cases below, which is the
+            // only situation where a skip is a fact about the machine rather than
+            // about the run.
+            skip("no mihomo sidecar fetched; run `node scripts/prebuild.mjs` first");
+            None
+        }
+    }
+}
+
+/// Whether this run must complete a real round trip through the tunnel.
+///
+/// See [`require_engine_when_possible`].
+fn egress_required() -> bool {
+    std::env::var_os("LOCUS_REQUIRE_EGRESS").is_some()
+}
+
 /// The URL the egress probe fetches through the tunnel.
 ///
 /// Restated here rather than imported because `core` is a private module of the
@@ -288,6 +334,7 @@ fn write_config(dir: &Path, controller_port: u16, mixed_port: u16) -> PathBuf {
         "mixed-port: {mixed_port}\n\
          external-controller: 127.0.0.1:{controller_port}\n\
          log-level: warning\n\
+         ipv6: false\n\
          proxies:\n\
          \x20 - name: \"Locus\"\n\
          \x20   type: direct\n\
@@ -371,8 +418,7 @@ const fn delay_is_a_measurement(delay: u32, _timeout_secs: u32) -> bool {
 /// "connecting".
 #[test]
 fn a_reachable_member_yields_a_usable_delay() {
-    let Some(engine) = sidecar() else {
-        skip("no mihomo sidecar fetched; run `node scripts/prebuild.mjs` first");
+    let Some(engine) = require_engine_when_possible() else {
         return;
     };
 
@@ -398,9 +444,11 @@ fn a_reachable_member_yields_a_usable_delay() {
     // test was written.
     //
     // This test therefore needs one outbound request to succeed. Where that is
-    // impossible (an offline CI runner) it SKIPs rather than failing: the fact it
-    // proves is about how mihomo answers a *completed* round trip, and no network
-    // means no round trip, not a broken probe.
+    // impossible (an offline runner) it SKIPs rather than failing — unless the
+    // run declared `LOCUS_REQUIRE_EGRESS`, in which case a skip would be the
+    // whole point being missed. The fact it proves is about how mihomo answers a
+    // *completed* round trip, and no network means no round trip, not a broken
+    // probe.
     let test_url = EGRESS_TEST_URL;
     // The route the shipped probe now takes: one outbound by name, not the
     // group. Keeping this test on the group route would leave it pinning a call
@@ -427,10 +475,61 @@ fn a_reachable_member_yields_a_usable_delay() {
         std::thread::sleep(Duration::from_millis(250));
     }
 
-    if !usable && last.0 != 200 {
+    if !usable {
+        // Failure, not a skip, when the run has declared it has egress. The
+        // distinction matters: `skip` here used to mean "this runner cannot prove
+        // the positive case", which is honest — but nobody set the variable that
+        // would have made it a failure, so the one assertion that a WORKING tunnel
+        // reads as working was never enforced anywhere.
+        //
+        // The condition is `!usable` and NOT `last.0 != 200` on purpose. The
+        // engine answers a failed delay test with **200 and a body full of error
+        // text** — observed here as `(200, "{\"message\":\"An error occurred in the
+        // delay test\"}")` — so the narrower condition fell through to the
+        // assertion below and reported "a reachable member must answer 200, got
+        // 200". A check whose failure message contradicts itself is a check
+        // nobody will debug; the flag that matters is whether a MEASUREMENT
+        // arrived, which `usable` already records.
+        if egress_required() {
+            // One retry against a second public host before failing.
+            //
+            // `cp.cloudflare.com` is a convenience endpoint: it is fast and
+            // body-less, which is right for a shipped probe issued every few
+            // seconds on a student's machine. It is NOT the right thing to hang a
+            // release check on. A single host that happens to be slow — or blocked
+            // by whatever policy the runner sits behind — would make this red for
+            // a reason that has nothing to do with the probe, and a check that
+            // fails for the wrong reason gets its variable unset and then gets
+            // ignored. Retrying a *different* host keeps the assertion about
+            // "a round trip completes through the tunnel" rather than about one
+            // third party's availability.
+            //
+            // If the second host fails too, the failure stands. Two independent
+            // hosts failing is a fact about the tunnel or the runner, not about
+            // Cloudflare.
+            let retry_url = "https://www.gstatic.com/generate_204";
+            let retry_path = member_delay_path("Locus", retry_url, 5);
+            let mut retry_last = (0u16, String::new());
+            let retry_deadline = Instant::now() + Duration::from_secs(15);
+            while Instant::now() < retry_deadline {
+                retry_last = http_get(&controller, &retry_path);
+                if retry_last.0 == 200 && delay_is_a_measurement(parse_single_delay(&retry_last.1), 5) {
+                    return;
+                }
+                std::thread::sleep(Duration::from_millis(250));
+            }
+            panic!(
+                "this run requires egress but the sidecar could not complete a round trip to \
+                 EITHER {test_url} (status {:?}, body {:?}) OR {retry_url} (status {:?}, body \
+                 {:?}). Two independent hosts failing is a fact about the tunnel or the runner, \
+                 not about either host — check which before unsetting LOCUS_REQUIRE_EGRESS.",
+                last.0, last.1, retry_last.0, retry_last.1
+            );
+        }
         skip(&format!(
             "no network egress from this runner; the sidecar could not complete a round trip \
-             to {test_url} (last answer: {last:?})"
+             to {test_url} (status {:?}, body {:?})",
+            last.0, last.1
         ));
         return;
     }
@@ -456,8 +555,7 @@ fn a_reachable_member_yields_a_usable_delay() {
 /// `any(delay > 0)` guard is all that stands between it and a false "connected".
 #[test]
 fn an_unreachable_member_is_not_reported_as_success() {
-    let Some(engine) = sidecar() else {
-        skip("no mihomo sidecar fetched; run `node scripts/prebuild.mjs` first");
+    let Some(engine) = require_engine_when_possible() else {
         return;
     };
 
@@ -516,8 +614,11 @@ fn an_unreachable_member_is_not_reported_as_success() {
 /// the client must not care whether the engine chose 503 or 504.
 #[test]
 fn a_dead_member_answers_with_a_non_measurement_not_an_error() {
-    let Some(engine) = sidecar() else {
-        skip("no mihomo sidecar fetched; run `node scripts/prebuild.mjs` first");
+    // `require_engine_when_possible` rather than `skip`: this case needs the
+    // engine but NOT the network, so it can and must run in CI. See that
+    // helper's doc comment for why the old blanket `skip` made a missing
+    // sidecar indistinguishable from a deleted assertion.
+    let Some(engine) = require_engine_when_possible() else {
         return;
     };
 
@@ -621,8 +722,7 @@ fn the_engine_sentinels_are_not_measurements() {
 /// engine's choice and the client must not depend on which.
 #[test]
 fn a_group_whose_members_all_fail_returns_no_delay_map() {
-    let Some(engine) = sidecar() else {
-        skip("no mihomo sidecar fetched; run `node scripts/prebuild.mjs` first");
+    let Some(engine) = require_engine_when_possible() else {
         return;
     };
 

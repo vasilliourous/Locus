@@ -71,10 +71,19 @@ firewall opens 8447. Each assertion was observed failing first.
 - **That a client tunnels real game traffic at the shaped rate.** Nothing has
   connected a real machine and played. This is the remaining gap and it is a
   hardware observation, not a repo one.
-- **That a free client's game traffic actually flows.** The client needs no
-  change (it keys UoT off its own `uot_port`+`udp_relay`, never the tier name), so
-  this is a hub-side claim — but "no client change was needed" is a structural
-  argument about `contract.rs`, not an observation.
+- ~~**That a free client's game traffic actually flows.**~~ **The mechanism is
+  now proven; the rate is not.** `client/src-tauri/tests/tunnel_end_to_end.rs`
+  (2026-10-29) runs a **real** `sing-box` Shadowsocks-2022 listener and the real
+  mihomo sidecar against each other on loopback, sends a datagram through the
+  `Locus-UoT` outbound, and gets it back — with the server logging
+  `to sp.v2.udp-over-tcp.arpa:0`, which is the v2 revision `tier.rs` pins. So the
+  negotiation, the framing and the cipher all agree across the boundary for the
+  first time. This test was **observed failing** against the 3.3.x shape (the UoT
+  outbound without `udp-over-tcp`) and against the pre-SS2022 cipher, so it is not
+  a check that cannot fail.
+  **Still not proven:** that the *live hub's* listener is reachable, that the
+  1 Mbps class shapes UDP as intended, or that anything is playable. Those need
+  the box and a real network.
 - **Whether 1 Mbps is playable.** The user's premise is that Roblox/Minecraft
   work badly at 1 Mbps and that this is acceptable as a demo. Nobody has measured
   it. If it is *worse* than "badly" — unplayable — then the free plan's games are
@@ -108,6 +117,47 @@ shadowsocks units by hand.
 ---
 
 ## Open, and blocked in this environment
+
+### The activation tunnel: server half built, client half absent, nothing run on a school network
+
+**Added 2026-10-29.** A student on a school network could not activate at all.
+Measured from that network: 443 resets the TLS handshake after the ClientHello
+(the SNI is read and the flow killed) and 8443, when spoken to in plaintext HTTP,
+gets the filter's own `503 Application Control Violation` naming the block as a
+**category** decision. Both blocks fire when a **hostname is visible**; a
+Shadowsocks tunnel presents none, which is why the student's tunnel works and
+enrolment does not. The mechanism and the traces are
+[`ACTIVATION-TUNNEL.md`](ACTIVATION-TUNNEL.md).
+
+**Built and guarded in the tree** (`server/modules/09-activation-tunnel.sh`,
+opened by `08-firewall.sh`, guarded by `check-consistency.sh` §40): a Shadowsocks
+listener on 8453 forwarding three enrolment endpoints through an allowlist and a
+rate limit that mirrors Caddy's.
+
+**NOT verified, and not verifiable from a checkout:**
+
+- **That 8453 is reachable from the school network.** Nothing has run there since
+  the port was opened. Note that an earlier timeout on this port was misread as
+  censorship when the cause was `ufw default deny incoming` with no rule for it —
+  the port was never open, so the network was never asked.
+- **That the appliance tolerates an opaque stream on that port.** Reachability is
+  not tolerance.
+- **That a real activation completes over it**, because **no client code uses the
+  tunnel yet.** The fallback belongs at `activation.rs::post_json` and
+  `heartbeat.rs::beat`, keyed on a `Failure` variant for a reset during the
+  handshake, and must not fire on DNS or certificate failures. Until it exists the
+  tunnel is reachable infrastructure with no caller.
+- **That any of it reaches a deployed device** until `setup.sh` re-runs on the
+  hub from `/root/server/`.
+
+**The durable answer is not code.** The filter blocked the hub by category, which
+is a third party's policy decision; recategorisation is the only fix that does
+not depend on the filter's behaviour, and it cannot be performed from here.
+
+**Re-verify with:** `curl -v --max-time 10 http://<hub>:8453/` from the school
+network. An immediate `Established connection` followed by a stall is the pass
+condition — SS says nothing sensible to HTTP. A timeout now genuinely means the
+network drops the port.
 
 ### Three field reports from the 2026-10 investigation: what is fixed, and what is not
 
@@ -478,11 +528,29 @@ the variable set, `a_reachable_member_yields_a_usable_delay` FAILS on this runne
 instead of passing. On a machine with a real engine and egress, that is the run
 worth trusting; without the variable, behaviour is unchanged.
 
+**CLOSED 2026-10-29, and the mechanism was pointed at the wrong thing.**
+
+- **CI now sets it.** The Linux `build` job runs `cargo test` with
+  `LOCUS_REQUIRE_LIVE_ENGINE=1` *and* `LOCUS_REQUIRE_EGRESS=1`, and installs
+  `sing-box` immediately beforehand. Nothing in the engine suites is allowed to
+  skip on that path; a missing peer is a red build naming it.
+- **The variable was gating the wrong requirement.** It made *every* skip a
+  failure, but the skips were not alike: three of `tier_profile_engine.rs`'s
+  tests need the engine and **no network at all** (`mihomo -t` parses a document),
+  and four of `egress_probe_engine.rs`'s are loopback-only. All seven skipped on a
+  missing sidecar, so on a machine that had simply not run `prebuild` the suite
+  threw away the only part of it that always works — and reported `ok` for it.
+  Requiring the engine is now the default; `LOCUS_REQUIRE_EGRESS` gates the one
+  requirement that genuinely depends on the runner.
+- **A conflicting assertion, found by setting the variable.** The positive-egress
+  case reported `504 Timeout` against `cp.cloudflare.com` from the CI mode, and
+  the first "fix" — skip — was unreachable, because `LOCUS_REQUIRE_LIVE_ENGINE`
+  turns skips into panics. The case now retries a **second independent host**
+  before failing, and its message names both. A single third party's availability
+  was never what this assertion was about.
+
 **Still open:**
 
-- **Nothing sets `LOCUS_REQUIRE_LIVE_ENGINE` in CI.** The mechanism exists and is
-  proven, but no workflow uses it, so the default `cargo test` is still skip-silent.
-  Decide where it belongs — a job with egress, or a required release-time check.
 - **No egress on this runner**, so the positive case is still unrun here. Whichever
   machine closes "the per-member egress probe" must run it with the variable set.
 - The same `eprintln!("SKIP")` pattern may exist in other suites; only these two
@@ -903,32 +971,44 @@ captured from the live host or a replay fixture, deserialised into the client's
 structs in a Rust integration test. That is a real piece of work, it needs the
 live host or a captured transcript, and it is deliberately not started here.
 
-## The build still needs the network
+## The build no longer needs the network for binaries — but four database files still are not mirrored
 
-**Added 2026-10-26.** `server/data/sidecar.lock.json` pins the sha256 of every
-downloaded build input, and `prebuild.mjs` verifies each one against it. That
-closes the *silent wrong binary* path: a substituted or corrupted engine now
-aborts the build instead of shipping.
+**Added 2026-10-26; closed for the binaries on 2026-10-29.** The entry this
+replaces said vendoring was "a deliberate trade nobody has made". It has now been
+made: all eight sidecars are committed under `vendor/build-inputs/` and
+`prebuild.mjs` copies them into place, falling back to the network only when a
+copy is absent. [`operate/VENDORED-BUILD-INPUTS.md`](../operate/VENDORED-BUILD-INPUTS.md)
+owns the layout and the procedure.
 
-It does **not** close the network dependency. The archives are still fetched from
-GitHub on every build that does not already have them; pinning only decides
-*which* bytes are acceptable, not whether they can be obtained offline.
+**Verified by running, not by reading.** With `HTTPS_PROXY` pointed at a dead
+port and `src-tauri/sidecar/` emptied, `prebuild.mjs` reported *"is vendored in
+the repository and matches its pin"* for both engines and downloaded neither.
+The measurement mattered: the first attempt reported the same green line while
+the log also said `download finished`, because `lockedSidecarVendored` consulted
+a per-entry flag that only the alpha carried. **Only a dead proxy distinguishes
+"read from disk" from "happened to get the same bytes."**
 
-Two things follow, and neither is fixed:
+**What is still open, and is not closable from this checkout:**
 
-- **A build on a machine with no network, or on a day GitHub is unreachable,
-  cannot proceed.** For CI this is normal and acceptable.
-- **A pinned artifact can be deleted upstream**, which no lock can prevent — this
-  is exactly what happened to the alpha engine (previous entry). For the stable
-  engine the risk is lower (release assets are kept), but it is not zero.
-
-**What would close it:** vendor the archives into the repository (or a release
-attachment owned by this project) and have `prebuild.mjs` read them locally,
-falling back to the network only when the vendored copy is absent. The cost is
-repository size — the stable engine alone is ~59 MiB per platform, so a four-
-platform vendoring is roughly 240 MiB. That is a deliberate trade nobody has
-made, and it is **not** done here.
-
+- **The four geo databases are pinned but not mirrored.** All four asset IDs from
+  the 2026-10-28 republish now return `404`, and `latest` serves different bytes
+  (`Country.mmdb` hashes `9a485c40…` against a pin of `ccec4d6f…`). Committing
+  wrong bytes under a correct pin is worse than downloading right ones, and
+  repinning to `latest` would reintroduce the drift the asset-ID pin stops. The
+  group is declared in the lock and empty on purpose, and `prebuild` warns on
+  every build that it is fetching rather than lying about it.
+  **[`operate/VENDORED-BUILD-INPUTS.md`](../operate/VENDORED-BUILD-INPUTS.md) §4
+  names the host that can close it:** one holding the pre-republish bytes.
+- **`geosite.dat` will need a decision, not just a copy.** The republish that
+  touched it was a genuine routing-data update (4,307,247 → 4,353,539 bytes). The
+  bytes that passed their pin and the newest bytes are different files, and
+  choosing the second silently changes routing data nobody reviewed.
+- **Repository size is now 464.7 MiB of committed binary**, measured, against a
+  planning estimate of "roughly 240 MiB". The estimate was low by about half
+  because it counted four copies of the stable engine and one alpha; the alpha is
+  four copies at the same size again. It is real cost: a fresh
+  clone and every CI checkout pay it. The alternative was a build that stops when
+  a third party re-rolls a tag, which happened twice in three days.
 
 ## The alpha engine: vendored, and the geo databases now pinned by asset ID
 
@@ -948,10 +1028,16 @@ made, and it is **not** done here.
 > warning — a decoded pin for a platform this checkout never built — while a
 > hash disagreement stays `BAD`.
 >
-> **Still true, and now the highest-value item here:** vendoring all four alpha
-> binaries (~180 MB) is the only thing that makes the mac/Windows builds
-> reproducible offline. Until then every release depends on a third party not
-> re-rolling a prerelease tag.
+> **Closed 2026-10-29: all four alpha binaries are now vendored.**
+> `vendor/build-inputs/verge-mihomo-alpha/` holds each triple, `prebuild.mjs`
+> copies the one this build needs, and `sidecar-lock.py --check` verifies the
+> committed copy on a fresh clone. The duplicate under
+> `client/src-tauri/sidecar/` was retired in the same change — two committed
+> copies of a 62 MiB binary can disagree, and the build bundled whichever the
+> copy step wrote last. Proven by emptying `sidecar/` and pointing `HTTPS_PROXY`
+> at a dead port: both engines reported *"is vendored … and matches its pin"* and
+> neither was downloaded. Layout and procedure:
+> [`../operate/VENDORED-BUILD-INPUTS.md`](../operate/VENDORED-BUILD-INPUTS.md).
 
 **Resolved on 2026-10-26 by vendoring.** The record below is kept because the
 *failure mode* is the point, and it recurs for anything else published as a

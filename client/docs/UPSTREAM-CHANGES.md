@@ -314,6 +314,42 @@ src-tauri/sidecar/verge-mihomo-x86_64-unknown-linux-gnu -t -f <generated>.yaml
 The mihomo check is how the proxy-group loop was found. Run it against
 `tier::build_profile` output whenever that module changes.
 
+### `tunnel_end_to_end.rs` — the pair, not the halves
+
+**Added 2026-10-29.** Every other engine test proves something about one side.
+`tier_profile_engine.rs` proves the generated YAML is *accepted*;
+`egress_probe_engine.rs` proves the delay answers are *classified* correctly.
+Neither runs a client and a server together — and the two shipped tunnel defects
+(§5, the frozen wire names) both lived exactly in that gap. Each side was
+individually correct and the pair were never run against each other.
+
+`src-tauri/tests/tunnel_end_to_end.rs` closes it: a real `sing-box`
+Shadowsocks-2022 listener and the real mihomo sidecar, on loopback, no network.
+
+| Test | Proves |
+|---|---|
+| `tcp_crosses_a_real_shadowsocks_2022_listener` | the cipher, key format and framing agree across the boundary — a 204 comes back through the mixed port |
+| `udp_over_tcp_v2_negotiates_and_carries_a_datagram` | a datagram round-trips **and** the server logs `to sp.v2.udp-over-tcp.arpa:0`, i.e. the v2 revision `tier.rs` pins |
+| `the_probe_reads_a_measurement_through_a_real_tunnel` | the readiness probe's own call (`/proxies/<name>/delay`) yields a usable measurement through a working tunnel |
+
+Requirements, because it is not always runnable:
+
+- **`sing-box` on PATH.** It is the hub's listener, not something this project
+  ships; a missing one is a SKIP unless `LOCUS_REQUIRE_LIVE_ENGINE` is set, which
+  CI does after installing it (`../../docs/operate/CI-CD.md`).
+- **A local target, never a public one.** `probe::EGRESS_TEST_URL` points at
+  `cp.cloudflare.com`, and a sandboxed runner cannot reach it — the engine reports
+  that as `Timeout`, **indistinguishable from a dead tunnel**. The test targets a
+  local 204 responder instead. That is only valid because a *real* proxy outbound
+  tunnels to loopback and times it, while a `direct` outbound reports `0` for
+  loopback; verified against the sidecar before the test was written. If a future
+  engine short-circuits loopback for proxies too, this fails loudly rather than
+  passing for the wrong reason.
+
+Both assertions were **observed failing** against the defects they describe: the
+UoT test against a `Locus-UoT` outbound with `udp-over-tcp` removed (the 3.3.x
+shape), and the probe test against a pre-SS2022 cipher on the TCP member.
+
 ### The readiness probe has its own manual
 
 `core/manager/probe.rs` and the `core/manager/mod.rs` around it are **upstream

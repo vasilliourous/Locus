@@ -5,15 +5,11 @@ gen/
 WixTools
 resources
 
-# The sidecar directory holds downloaded engines, which are reproducible — EXCEPT
-# the alpha, which is vendored on purpose. MetaCubeX publishes the mihomo alpha as
-# a single rolling prerelease and deletes the previous one, so its URL stops
-# existing; on 2026-10-26 that made the client uncompilable because
-# `tauri.conf.json` lists it in `externalBin`. See the root .gitignore and
-# docs/reference/STILL-OPEN.md.
+# The sidecar directory holds downloaded engines, which are reproducible.
 #
-# Git cannot re-include a file inside an excluded DIRECTORY, so the directory is
-# excluded by its contents (`sidecar/*`) rather than wholesale, and the one
-# vendored file is negated. Every other sidecar stays ignored.
+# The one exception used to be the vendored alpha, committed here because its
+# rolling prerelease URL stops existing. It moved to `vendor/build-inputs/` on
+# 2026-10-29 (docs/operate/VENDORED-BUILD-INPUTS.md) and `prebuild.mjs` copies it
+# in, so every file in this directory is now a build artifact and nothing here
+# needs un-ignoring. Nothing is committed from this directory.
 sidecar/*
-!sidecar/verge-mihomo-alpha-x86_64-unknown-linux-gnu

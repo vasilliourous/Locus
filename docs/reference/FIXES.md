@@ -24,6 +24,84 @@ commercial gaps, [`../business/17-not-built.md`](../business/17-not-built.md).
 
 ---
 
+## THE VENDORED COPY WAS NEVER READ, AND ONLY A DEAD PROXY COULD TELL (2026-10-29, unreleased)
+
+- **What was being done.** Vendoring the build inputs — the eight binaries the
+  client build needs, which three upstream deletions in one week had proved
+  cannot be left to a URL. The bytes were committed to
+  `vendor/build-inputs/`, the lock grew a `vendored` table, and `prebuild.mjs`
+  was given a branch that copies the committed file into place and skips the
+  download.
+- **What the first proof reported.** Every file was present, every hash matched,
+  and `prebuild` printed *"verge-mihomo is vendored in the repository and matches
+  its pin"*. A green line, the right bytes, and **the wrong provenance** — the
+  same run's log also contained `download finished:
+  …/mihomo-linux-amd64-v2-v1.19.32.gz`. It had gone to the network.
+- **Why.** `lockedSidecarVendored()` gated the vendored branch on a **per-entry**
+  `vendored: true` flag that only the alpha carried. The new `vendored` table —
+  which is what says *why, when and where* — was read by the helper that builds
+  the path and by nothing that decides whether to take the branch. Adding
+  `verge-mihomo` to the table therefore changed a path nobody consulted.
+- **How it was caught, and why nothing cheaper would have.** Checking the files
+  proved nothing: the downloaded bytes and the committed bytes are *identical by
+  construction*, so every hash in every check agreed. The only observation that
+  separates the two is the one that makes the download impossible — `HTTPS_PROXY`
+  pointed at a dead port — and the `download finished` line that then appeared
+  for a file that could not have been fetched.
+- **Second defect, same change, found the same way.** `sidecar-lock.py --check`
+  only looked in the gitignored `client/src-tauri/sidecar/`, so a fresh clone —
+  the exact state the vendoring exists to serve — reported all four already
+  committed alphas as `MISSING`. A check that fails on a correct tree teaches its
+  reader to ignore it.
+- **Third, and the narrowest.** The alpha had been committed in
+  `client/src-tauri/sidecar/` **and** was now committed in `vendor/`. Two
+  committed copies of the same large binary can disagree, and the build bundles
+  whichever the copy step wrote last. The first was untracked.
+- **The fix.** One function answers "is this vendored" for sidecars and for
+  resources; `--check` verifies whichever copy exists, committed first; and both
+  claims are now asserted by `test-contract-guard.sh`, each observed failing
+  before being kept.
+- **Rule kept.** *A vendored file must be proven to have been read, not merely to
+  have the right hash.* Two identical copies cannot be told apart by content, so
+  a test that only compares hashes will report green while the build does
+  something else entirely — and "matches its pin" printed by a build that
+  downloaded it is the most convincing possible way to be wrong.
+- **The CI version of that proof was wrong twice, in the two ways a proof can be
+  wrong.** Both were caught by running it against a tree known to be correct and
+  refusing to accept red as "the tree is wrong":
+  1. **It ran from the repository root.** `prebuild.mjs` resolves every path from
+     `process.cwd()`, so from the root it read `../server/data/sidecar.lock.json`
+     as the lock, found nothing, and fell back to `releases/latest` — announcing
+     `v1.19.33`, a version the lock does not pin, and downloading both engines.
+     The step now pins `working-directory: client`.
+  2. **It searched for the wrong string.** `prebuild` logs
+     `"verge-mihomo" is vendored …` — the SIDECAR name — while the check searched
+     for the TARGET FILE (`verge-mihomo-x86_64-unknown-linux-gnu`) inside the
+     quotes. It could never match, so it reported both engines as unvendored on a
+     tree where both demonstrably were. Three attempts at "fixing the pattern"
+     chased quoting and regex quirks before the actual mistake surfaced: **the
+     assertion described what the log would say if the program had been written by
+     whoever wrote the assertion.**
+- **Verified failing, then passing.** With the vendored branch removed
+  (`if (vendoredInputFor(targetFile)) return true` deleted — the real bug, put
+  back deliberately), the step exits 1 naming the engine; restored, it exits 0.
+  A check that cannot fail would have printed the same thing for both.
+
+- **Fourth, found while committing: nine of eleven.** The root `.gitignore`
+  excludes `*.exe` to keep build output out, and that rule silently excluded the
+  two Windows engines — so `git add -A` staged 9 of the 11 vendored binaries and
+  the tree still looked vendored. Nothing local catches it: the bytes are on disk,
+  every pin passes, and every build on the committing machine succeeds. A fresh
+  clone is the only state that differs, and it would have downloaded its Windows
+  engine again. `check-consistency.sh` §39b now asserts that every vendored file is
+  **tracked**, which is the check the eye cannot do.
+- **And the guard for it crashed silently on first writing**, which is the same
+  defect one layer down: a literal NUL byte written into the script raised
+  `ValueError: empty separator`, the caller read empty output as "no problems", and
+  the section printed `OK`. Fixed to split on `chr(0)` explicitly and to report a
+  non-zero inner exit as `BAD`. **A guard whose crash is indistinguishable from its
+  pass is worse than no guard, because it also launders trust.**
+
 ## THE ALPHA ENGINE'S TAG WAS RE-ROLLED, AND ONLY ONE PLATFORM SURVIVED (2026-10-29, release 3.3.4)
 
 - **What broke.** With the engine pin fixed, `Build (linux)` passed and the other
@@ -52,10 +130,14 @@ commercial gaps, [`../business/17-not-built.md`](../business/17-not-built.md).
   decompressed `.gz` and the unzipped `.exe`. Pinning the transport would have
   passed locally and failed in CI for a reason that reads like a corrupt
   download.
-- **What is still not solved.** macOS and Windows remain network-dependent: they
-  are pinned, which makes the fetch *checkable*, not *reproducible*. Vendoring
-  all four (~180 MB) is the only fix that does not depend on a third party not
-  re-rolling a tag, and it is not done.
+- **What was still not solved at the time.** macOS and Windows remained
+  network-dependent: they were pinned, which makes the fetch *checkable*, not
+  *reproducible*. Vendoring all four was the only fix that does not depend on a
+  third party not re-rolling a tag.
+  **Closed the same day** — all four triples are committed under
+  `vendor/build-inputs/`, and the CI step below proves the build reads them. See
+  the entry at the top of this file, and
+  [`../operate/VENDORED-BUILD-INPUTS.md`](../operate/VENDORED-BUILD-INPUTS.md).
 
 ## THE ENGINE PIN WAS HALF-WIRED, SO THE ENGINE DRIFTED AND EVERY BUILD STOPPED (2026-10-29, release 3.3.4)
 

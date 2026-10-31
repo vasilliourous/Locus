@@ -32,9 +32,15 @@ const cwd = process.cwd()
 //
 // WHAT IS ENFORCED AND WHAT IS NOT. After a download the sha256 is checked
 // against the lock and a mismatch aborts the build. That closes the
-// silent-wrong-binary path. It does NOT make the build offline: the archive is
-// still fetched from GitHub. Vendoring the archives is recorded in
-// docs/reference/STILL-OPEN.md as not done.
+// silent-wrong-binary path.
+//
+// AND IT IS OFFLINE-CAPABLE FOR THE BINARIES AS OF 2026-10-29. Every sidecar the
+// build needs is committed under `vendor/build-inputs/` and preferred over the
+// network — see docs/operate/VENDORED-BUILD-INPUTS.md for why, the layout and
+// the one group (the four geo databases) that is declared but not yet mirrored.
+// The network is a fallback for an input that is absent, not the source of truth
+// for every build. `assertPinned` runs on the vendored copy exactly as it did on
+// a download, so a tampered or stale vendored file still fails.
 //
 // A missing lock is not fatal — a contributor without one should still be able
 // to build — but it is loud, because it means the build is unpinned.
@@ -64,13 +70,32 @@ function lockedSidecarHash(targetFile) {
   return undefined
 }
 
+/// Where the committed build inputs live, relative to the repository root.
+///
+/// Read `docs/operate/VENDORED-BUILD-INPUTS.md` before changing this layout. The
+/// directory mirrors the keys of the lock's `vendored` table, so a reader can go
+/// from a lock entry to the bytes without guessing.
+const VENDOR_DIR = path.join(cwd, '..', 'vendor', 'build-inputs')
+
 /// Whether this sidecar is vendored in the repository rather than downloaded.
 ///
-/// A vendored sidecar is one whose upstream URL cannot be relied on — today that
-/// is only the mihomo alpha, whose rolling prerelease URL stops existing when a
-/// new alpha lands. It is committed to the repository, so the fetch is skipped
-/// entirely and the file is verified against its pin like any other input.
+/// A vendored sidecar is one whose upstream URL cannot be relied on: today that
+/// is the mihomo alpha, whose rolling prerelease URL stops existing when a new
+/// alpha lands. All four of its triples are committed, because vendoring only
+/// the platform the build happened to run on is what made 3.3.4 green on linux
+/// and red on the other three. The committed copy is verified against its pin
+/// like any other input.
 function lockedSidecarVendored(targetFile) {
+  // Either signal means vendored: a group in the `vendored` table (which
+  // records why, when and where) or the per-entry flag on the sidecar itself.
+  //
+  // The previous version read ONLY the per-entry flag, so adding
+  // `verge-mihomo` to the `vendored` table had no effect at all: the copy sat
+  // in the repository and the build went on downloading. Caught by pointing
+  // HTTPS_PROXY at a dead port and watching a "download finished" line appear
+  // for a file that was supposed to come from disk — the bytes were right and
+  // only the provenance was wrong, which is why nothing else noticed.
+  if (vendoredInputFor(targetFile)) return true
   if (!SIDECAR_LOCK?.sidecars) return false
   for (const byTriple of Object.values(SIDECAR_LOCK.sidecars)) {
     for (const entry of Object.values(byTriple)) {
@@ -78,6 +103,46 @@ function lockedSidecarVendored(targetFile) {
     }
   }
   return false
+}
+
+/// Which `vendored` group owns a file, found by asking the filesystem rather
+/// than by parsing the `where` prose in the lock.
+///
+/// The lock's `where` is for a human reader and is allowed to list more than one
+/// path; using it as data would make a documentation edit change build behaviour.
+/// A group owns a file if `vendor/build-inputs/<group>/<file>` exists, which is
+/// the same path `vendoredInputFor` returns, so the two cannot disagree.
+///
+/// **MUST BE THE ONLY definition of "is this vendored".** `lockedSidecarVendored`
+/// and `resolveResource` both call in here, and an earlier revision had the
+/// sidecar path consult a per-entry `vendored` flag on its own. That divergence
+/// is why `verge-mihomo` was vendored in every sense except the one the code
+/// checked: the bytes sat in the repository and the build went on downloading.
+function vendoredGroupFor(file) {
+  for (const group of Object.keys(SIDECAR_LOCK?.vendored ?? {})) {
+    if (fs.existsSync(path.join(VENDOR_DIR, group, file))) return group
+  }
+  return undefined
+}
+
+/// The committed path for a file, or `undefined` when no group holds it.
+function vendoredInputFor(file) {
+  const group = vendoredGroupFor(file)
+  return group ? path.join(VENDOR_DIR, group, file) : undefined
+}
+
+/// Whether a file is declared vendored in the lock but has no committed copy.
+///
+/// A declared-but-absent entry is a LIE the build must not quietly paper over:
+/// `resources` is declared ahead of its bytes (see
+/// docs/operate/VENDORED-BUILD-INPUTS.md, "What is not vendored yet"), and
+/// treating a missing directory as "not vendored, carry on" would mean the day
+/// somebody deletes a committed binary by accident, the build silently returns to
+/// depending on upstream — which is exactly the failure the vendoring exists to
+/// prevent. It warns loudly instead, because the resources case is legitimate
+/// until that gap closes.
+function declaredButAbsent(file) {
+  return SIDECAR_LOCK?.vendored?.['resources'] !== undefined && !vendoredInputFor(file)
 }
 
 /// The locked sha256 for a geo database filename, or undefined.
@@ -506,7 +571,25 @@ async function resolveSidecar(binInfo) {
   // A vendored sidecar is committed, so there is nothing to fetch. Verify it and
   // stop: downloading one would defeat the reason it exists, and --force must
   // not delete the only copy — that is exactly how the alpha was lost once.
+  //
+  // It is COPIED into `sidecar/` rather than used from `vendor/`, because the
+  // bundler reads `externalBin` and a file outside that directory is not
+  // bundled. The copy is verified, not the original, so what ships is what was
+  // checked.
   if (lockedSidecarVendored(targetFile)) {
+    const source = vendoredInputFor(targetFile)
+    if (!source) {
+      throw new Error(
+        `${name} is marked vendored in the lock, but ${path.relative(cwd, VENDOR_DIR)}/` +
+          `${name}/${targetFile} does not exist. Restore it from the commit that added it — ` +
+          `do not delete the lock entry to get past this, because that returns the build to ` +
+          `depending on an upstream URL that has already stopped existing once.`,
+      )
+    }
+    await fsp.mkdir(path.dirname(sidecarPath), { recursive: true })
+    if (!fs.existsSync(sidecarPath) || FORCE) {
+      await fsp.copyFile(source, sidecarPath)
+    }
     await assertPinned(sidecarPath, pinnedHash, `"${name}" (vendored)`)
     log_success(`"${name}" is vendored in the repository and matches its pin`)
     await ensureExecutable(sidecarPath)
@@ -666,6 +749,37 @@ async function resolveResource(binInfo) {
     // `meta-rules-dat` is exactly as capable of changing under us as mihomo's
     // `releases/latest`.
     const pinnedHash = lockedResourceHash(file)
+
+    // The committed copy wins, for the same reason it does for the sidecars:
+    // `meta-rules-dat` republishes `latest` and deletes the assets a build was
+    // pinned to (2026-10-28, which stopped 3.3.4), so the URL is not something a
+    // build can be allowed to depend on. Copies into place, then verifies the
+    // copy, so what ships is what was checked.
+    const vendored = vendoredInputFor(file)
+    if (!vendored && declaredButAbsent(file)) {
+      log_warn(
+        `"${file}" is declared vendored in the lock but has no committed copy — ` +
+          `fetching it. This is the state recorded in docs/operate/VENDORED-BUILD-INPUTS.md ` +
+          `(the geo databases are pinned by asset ID, not yet mirrored), so it is expected today ` +
+          `and becomes a defect the moment the vendor group exists.`,
+      )
+    }
+    if (vendored) {
+      if (!fs.existsSync(vendored)) {
+        throw new Error(
+          `"${file}" is vendored in the lock, but ${path.relative(cwd, vendored)} does not exist. ` +
+            `Restore it from the commit that added it rather than removing the lock entry.`,
+        )
+      }
+      await fsp.mkdir(baseDir, { recursive: true })
+      if (!fs.existsSync(targetPath) || FORCE) {
+        await fsp.copyFile(vendored, targetPath)
+      }
+      await assertPinned(targetPath, pinnedHash, `"${file}" (vendored)`)
+      log_success(`"${file}" is vendored in the repository and matches its pin`)
+      await updateHashCache(targetPath)
+      return
+    }
     if (!FORCE && fs.existsSync(targetPath)) {
       if (pinnedHash) {
         const actual = await calculateFileHash(targetPath)

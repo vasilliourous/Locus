@@ -19,6 +19,22 @@ node_modules/
 *.zip
 *.tar.gz
 
+# EXCEPTION: the VENDORED Windows binaries are committed on purpose.
+#
+# `vendor/build-inputs/` holds the build inputs the client cannot be built
+# without, and two of them are `.exe` — the Windows mihomo core and its alpha.
+# The blanket `*.exe` above silently excluded them, so the first `git add -A`
+# staged 9 of the 10 vendored binaries and left the repository looking vendored
+# while `Build (windows)` would have had to download its engine again.
+#
+# That is the precise failure `docs/operate/VENDORED-BUILD-INPUTS.md` exists to
+# stop — a partial vendoring that reports success — and it was introduced by a
+# rule written for a different problem (not committing build output). Narrow
+# exceptions per file, so a NEW `.exe` landing in the tree is still ignored until
+# somebody deliberately adds it here and records it in the lock.
+!vendor/build-inputs/verge-mihomo/verge-mihomo-x86_64-pc-windows-msvc.exe
+!vendor/build-inputs/verge-mihomo-alpha/verge-mihomo-alpha-x86_64-pc-windows-msvc.exe
+
 # Rust/Tauri client build output. `client/` has its own .gitignore covering
 # these; repeated here so a root-level `git add -A` cannot pick them up.
 client/target/
@@ -29,23 +45,19 @@ client/target/
 # this change used `client/src-tauri/sidecar/` and the alpha stayed ignored.
 client/src-tauri/sidecar/*
 #
-# EXCEPTION: the alpha engine is VENDORED, deliberately.
+# EXCEPTION (retired 2026-10-29): the vendored alpha used to live HERE.
 #
-# Every other sidecar is a reproducible download from a stable release URL, so
-# ignoring it costs nothing. The mihomo ALPHA is published as a single rolling
-# prerelease — MetaCubeX deletes the previous alpha the moment a new one lands —
-# so its download URL stops existing. On 2026-10-26 that deleted the only copy
-# of `alpha-94b13ae` anywhere, and the client could not compile: `tauri.conf.json`
-# lists the alpha in `externalBin`, so the build requires a file that nothing
-# could reproduce.
+# It now lives in `vendor/build-inputs/`, beside every other build input, and
+# `prebuild.mjs` copies it into `sidecar/` — see
+# docs/operate/VENDORED-BUILD-INPUTS.md. Keeping it here as well was two
+# committed copies of a 62 MiB binary that could disagree: `prebuild` verified
+# one and the build bundled whichever the copy step had last written.
 #
-# A file the build requires and the network cannot supply has to live in the
-# repository. The cost is ~62 MiB; the alternative is that no fresh clone can
-# build the client. `prebuild.mjs` prefers this vendored copy and does not fetch
-# it; `server/scripts/sidecar-lock.py` pins its hash like any other input.
-#
-# This un-ignores exactly this one path. It does NOT un-ignore the directory.
-!client/src-tauri/sidecar/verge-mihomo-alpha-x86_64-unknown-linux-gnu
+# The reasoning that put a copy in the repository at all is unchanged and is
+# recorded at `vendor/build-inputs/`: the mihomo alpha is published as a single
+# rolling prerelease, MetaCubeX deletes the previous one the moment a new one
+# lands, and `tauri.conf.json` lists it in `externalBin`, so a file nothing can
+# reproduce cannot be left to the network.
 
 # Signed release binaries and their manifest, staged here by publish-release.sh
 # before upload. ~330 MB per release, reproducible from the tag, and never

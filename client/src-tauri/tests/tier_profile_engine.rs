@@ -25,14 +25,39 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+/// The engine, or a skip that says why — and that CI turns into a failure.
+///
+/// # What was wrong with the previous shape
+///
+/// Every test in this file skipped on a missing sidecar, and a skipping test is a
+/// PASSING test. Three tests report `ok` whether they ran or not, which made
+/// "the real engine accepted the generated profile" indistinguishable from "there
+/// was no engine" in every log, on every run.
+///
+/// Nothing in this file needs the network — `mihomo -t` parses a document and
+/// exits. So a missing sidecar here is never a fact about the machine's
+/// connectivity; it is a fact about the RUN. CI fetches the sidecar immediately
+/// before `cargo test`, so the only way to reach this branch in CI is that
+/// something upstream broke, and that is worth a red build.
+///
+/// `LOCUS_REQUIRE_LIVE_ENGINE=1` makes that explicit for a release-time run;
+/// `proof()` in `test-contract-guard.sh` covers the same claim from the outside.
+fn require_engine() -> Option<PathBuf> {
+    match sidecar() {
+        Some(engine) => Some(engine),
+        None => {
+            skip("no mihomo sidecar fetched; run `node scripts/prebuild.mjs` first");
+            None
+        }
+    }
+}
+
 /// Report that this test could not run, and fail when the environment asked for
 /// completeness.
 ///
 /// A bare `eprintln!("SKIP: …")` reads exactly like a passing test in `cargo test`
-/// output, so "the engine accepted the profile" and "no engine was present" were
-/// indistinguishable without reading stderr. `LOCUS_REQUIRE_LIVE_ENGINE=1` turns
-/// every skip into a failure, so a green run on a machine that *should* have run
-/// the engine proves it did.
+/// output. `LOCUS_REQUIRE_LIVE_ENGINE=1` turns every skip into a failure, so a
+/// green run on a machine that *should* have run the engine proves it did.
 fn skip(reason: &str) {
     if std::env::var_os("LOCUS_REQUIRE_LIVE_ENGINE").is_some() {
         panic!("SKIP was requested to be a failure (LOCUS_REQUIRE_LIVE_ENGINE is set): {reason}");
@@ -150,8 +175,7 @@ fn eco_profile_yaml() -> String {
 
 #[test]
 fn the_engine_accepts_a_strike_profile() {
-    let Some(engine) = sidecar() else {
-        skip("no mihomo sidecar fetched; run `node scripts/prebuild.mjs` first");
+    let Some(engine) = require_engine() else {
         return;
     };
 
@@ -171,8 +195,7 @@ fn the_engine_accepts_a_strike_profile() {
 
 #[test]
 fn the_engine_accepts_an_eco_profile() {
-    let Some(engine) = sidecar() else {
-        skip("no mihomo sidecar fetched; run `node scripts/prebuild.mjs` first");
+    let Some(engine) = require_engine() else {
         return;
     };
 
@@ -193,8 +216,7 @@ fn the_engine_accepts_an_eco_profile() {
 /// here would produce a config that loads and then never negotiates v2.
 #[test]
 fn the_engine_accepts_the_pinned_uot_protocol_version() {
-    let Some(engine) = sidecar() else {
-        skip("no mihomo sidecar fetched; run `node scripts/prebuild.mjs` first");
+    let Some(engine) = require_engine() else {
         return;
     };
 

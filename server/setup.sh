@@ -328,6 +328,11 @@ MODULES=(
     "${MODULES_DIR}/05-caddy.sh"
     "${MODULES_DIR}/06-pocketbase.sh"
     "${MODULES_DIR}/07-backups.sh"
+    # 09 before 08: the firewall module opens a port for the activation tunnel,
+    # and it reads the port number from the same env the module itself uses. Run
+    # after 02 because it needs `ssserver` installed, and after 06 so the
+    # forwarder's upstream (:8090) exists before its unit is enabled.
+    "${MODULES_DIR}/09-activation-tunnel.sh"
     "${MODULES_DIR}/08-firewall.sh"
 )
 

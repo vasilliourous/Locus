@@ -27,9 +27,28 @@ The Locus server needs several credentials to run:
 | `STRIKE_PASS` | The **paid** plan's Shadowsocks password (port 8445) |
 | `STEALTH_PASS` | **Retired tier's password (port 8444).** Still validated and written to `/root/.tier_passwords` for compatibility, but no service consumes it on a fresh box. Keep it in the secrets file so an upgraded host does not fork, and so removing the old service is not blocked by a missing key. |
 | `PB_ADMIN_EMAIL`, `PB_ADMIN_PASS` | PocketBase admin credentials |
+| `ACTIVATION_TUNNEL_KEY` | The pre-activation activation tunnel's Shadowsocks password (port 8453). **Shipped compiled into the client**, so treat it as public: what bounds it is the forwarder's allowlist and rate limit, not secrecy. Set once and never rotate — rotating it strands every deployed client, and the heartbeat that could deliver a replacement is the call this tunnel exists to make possible. See [`../reference/ACTIVATION-TUNNEL.md`](../reference/ACTIVATION-TUNNEL.md) §3.3. |
 
 The bundle also carries one **non-credential** on the same terms: a base64 copy of
 the update signing key (`LOCUS_UPDATE_KEY_B64`, added 2026-10-16 — see the FAQ).
+
+> **`ACTIVATION_TUNNEL_KEY` is listed above because that is where it belongs, not
+> because the committed bundle contains it yet.** As of 2026-10-29
+> `server/secrets.env.age` predates the activation tunnel, so a deploy takes
+> `09-activation-tunnel.sh`'s generate-and-warn path and the listener ends up with a
+> key that matches no build. Adding it is an operator step that needs the
+> passphrase (and cannot be done from a clone alone):
+>
+> 1. Add `ACTIVATION_TUNNEL_KEY=<base64 of 32 random bytes>` to the plaintext env
+>    that `secrets-encrypt.sh` encrypts.
+> 2. Re-encrypt with `server/scripts/secrets-encrypt.sh`.
+> 3. Re-run `setup.sh` and confirm the module logs *"Using ACTIVATION_TUNNEL_KEY
+>    from the decrypted secrets"* instead of the warning.
+>
+> Step 3 is worth doing even before any client speaks the tunnel: it makes the key
+> stable across deploys, which is a prerequisite for a client ever matching it.
+> The tunnel's own document records the same gap at
+> [`../reference/ACTIVATION-TUNNEL.md`](../reference/ACTIVATION-TUNNEL.md) §3.3.
 
 **That list is stated as a list, not a number, on purpose:** a count in a sentence
 cannot be recomputed and drifts (this document's predecessor said "12" while

@@ -105,8 +105,17 @@ sudo apt-get install -y libxslt1.1 libwebkit2gtk-4.1-dev libayatana-appindicator
 
 ```bash
 pnpm run prebuild
-pnpm run prebuild --force  # Re-download and overwrite Mihomo core and service binaries
+pnpm run prebuild --force  # Re-fetch every input, replacing anything that does not match its pin
 ```
+
+The engines and the privilege-service bundle are **committed** under
+`vendor/build-inputs/`, so `prebuild` copies them into
+`src-tauri/sidecar/` and verifies each against its sha256 in
+`server/data/sidecar.lock.json`. Only the four geo databases are still
+downloaded. If a pin check fails, do not delete the lock entry to get past it —
+see [`../docs/operate/VENDORED-BUILD-INPUTS.md`](../docs/operate/VENDORED-BUILD-INPUTS.md),
+which also covers where a new vendored file goes and how to prove the build reads
+the committed copy rather than the network.
 
 ### Run the Development Server
 

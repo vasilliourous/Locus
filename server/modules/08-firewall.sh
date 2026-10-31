@@ -64,6 +64,30 @@ else
     log "UoT disabled (ENABLE_UOT=0) — ports ${UOT_PORT:-8446}/${UOT_PORT_FREE:-8447} not opened"
 fi
 
+# ── Pre-activation activation tunnel ──
+# A Shadowsocks listener used ONLY for /api/activate, /api/code-lookup and
+# /api/heartbeat, so a device on a network that blocks the hub by name can still
+# enrol. It is not a tier port and must never be advertised as one.
+#
+# WHY A NEW PORT RATHER THAN 8443: 8443 is served by `shadowsocks-eco` with the
+# free tier's live credential, and a shadowsocks listener accepts one password.
+# Repointing it at an activation forwarder would take every free student's tunnel
+# down to fix enrolment.
+#
+# Opening it is what makes it testable at all. Until this rule exists the port is
+# closed by OUR firewall, so a timeout from a school network proves nothing about
+# whether the network blocks it — that distinction cost a round of investigation
+# already (2026-10-29): `curl :8453` timed out and was read as censorship when it
+# was in fact `ufw default deny incoming` with no rule for the port.
+#
+# Disabled deliberately only by setting ACTIVATION_TUNNEL=0.
+if [ "${ACTIVATION_TUNNEL:-1}" = "1" ]; then
+    ufw allow "${ACTIVATION_TUNNEL_PORT:-8453}"/tcp 2>/dev/null || true
+    log "✓ Activation tunnel (${ACTIVATION_TUNNEL_PORT:-8453}/tcp) allowed"
+else
+    log "Activation tunnel disabled (ACTIVATION_TUNNEL=0) — ${ACTIVATION_TUNNEL_PORT:-8453}/tcp not opened"
+fi
+
 # ── Enable UFW (safe — SSH is already allowed) ──
 # NOTE: on some images /etc/ufw/ufw.conf ships with ENABLED=no while the
 # iptables rules are already loaded. `ufw status` then reports "active" but
