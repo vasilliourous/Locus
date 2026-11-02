@@ -648,6 +648,16 @@ reasoning is sound and the asymmetry it rests on is read from the plugin source:
 was written on, it does. "The engine test passed" there means it did not run its
 assertion. Check for the `SKIP:` line, not the green tick.
 
+**In CI the same test FAILS instead of skipping, and it is the runner's network.**
+`LOCUS_REQUIRE_EGRESS=1` turns the skip into a failure by design, so when a runner
+has no working egress the whole `Build (linux)` job goes red on
+`a_reachable_member_yields_a_usable_delay` with a 504 from **both**
+`cp.cloudflare.com` and `gstatic.com`. Observed 2026-11-02 on two runs of one
+commit, with `Build (macos-arm)`, `Build (macos-intel)`, `Build (windows)` and
+`Verify` green throughout — a torn runner, not a torn repository, and **not a
+reason to unset the flag**: the flag is what stops the suite passing by not
+running. Re-run the job; it passed the same commit on the third attempt.
+
 ### Every installed 3.2.17 Windows client is stranded, and the fix cannot reach it
 
 **Added 2026-10-02.** The 2026-10-02 `FIXES.md` entry ("the update to 3.2.18 is
