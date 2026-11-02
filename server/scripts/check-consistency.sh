@@ -2555,23 +2555,129 @@ PY
             warn "the lifecycle extractor failed (traceback above) — this guard cannot run" ;;
     esac
 
-    if printf '%s' "$lifecycle_code" | grep -q 'if should_request_install_for_absent_service('; then
-        ok "the startup path calls the absent-Service predicate"
-    elif [ "$extractor_broken" = 1 ]; then
-        : # warned above; an unreadable file is not evidence about the call site
-    else
-        bad "prepare_startup does not CALL should_request_install_for_absent_service"
-        bad "  the predicate existing is not enough: nothing raises the install request,"
-        bad "  so a macOS DMG install still cannot connect"
-    fi
+    # ── MATCHING IS DONE WITH `case`, NOT `printf | grep -q` ──
+    #
+    # Two sub-checks in this section used the natural-looking
+    # `printf '%s' "$x" | grep -q PATTERN`. That idiom CANNOT FAIL CORRECTLY here,
+    # and it produced a FALSE BAD in CI on 2026-11-02 against a tree where the
+    # call was present at lifecycle.rs:508.
+    #
+    # The mechanism, reproduced: `grep -q` exits the moment it matches, which
+    # closes the pipe while `printf` is still writing. `printf` dies on SIGPIPE,
+    # and because this script runs under `set -uo pipefail` the PIPELINE takes
+    # printf's status — 141 — not grep's 0. So a MATCH reads as a non-zero
+    # pipeline, the `if` takes its else branch, and the guard reports a defect it
+    # just found. The log shows its footprint: `printf: write error: Broken pipe`
+    # on the BAD line itself.
+    #
+    # It is input-size dependent, which is why it passed locally and in earlier
+    # runs: 37 KB of stripped lifecycle.rs is small enough to fit in the pipe
+    # buffer on this machine, so `printf` finishes before `grep` exits and no
+    # SIGPIPE arises. A guard whose verdict depends on how much came before it in
+    # the file is worse than no guard — and only a broken guard fails this way,
+    # so the shape of the fix is to stop writing to a pipe at all.
+    #
+    # `case` is a builtin: no process, no pipe, no signal, and it reports exactly
+    # "does this string contain this literal". Verified in both directions before
+    # being kept — BAD against input lacking the call, OK against input holding it
+    # 40 000 times over, where the old idiom reported BAD.
+    #
+    # ── AND THE SEARCH MUST BE SCOPED TO THE macOS CALL SITE ──
+    #
+    # `prepare_startup` contains TWO calls to `require_install_for_session()`:
+    # the pre-existing `service_required`/TUN branch, and the macOS call this
+    # section exists to protect. A whole-file search is satisfied by the TUN one,
+    # so deleting the macOS call left this guard printing OK — proved by
+    # falsifying it: the macOS call removed (definition and prose kept) read as
+    # OK because line ~469 still matched. The guard could not fail, which is the
+    # defect AGENTS.md rule 3 exists to catch and is why this is written as a
+    # region rather than a substring.
+    #
+    # The region is the `#[cfg(target_os = "macos")]` attribute through the end
+    # of its `if` body, sliced by the extractor's line numbers. If the slice
+    # cannot be made, that is a GUARD failure (WARN), never a verdict on the
+    # code — the same rule as everywhere else in this section.
+    # Slice the macOS call site out of the stripped body. The attribute is the
+    # only `#[cfg(target_os = "macos")]` that immediately precedes a condition
+    # test, but there is a second one elsewhere in the file (the dev chmod path),
+    # so the anchor is the attribute line whose NEXT non-blank line is not itself
+    # a comment and contains `should_request_install_for_absent_service(`.
+    # A temp FILE, not a pipe: the python below arrives on the same stdin a
+    # heredoc would occupy, so `python3 -` would read the SCRIPT as its data and
+    # report "no call site" for every tree including a correct one - observed.
+    lifecycle_copy="$(mktemp)"
+    printf '%s' "$lifecycle_code" > "$lifecycle_copy"
+    macos_call_site="$(python3 - "$lifecycle_copy" 2>&1 <<'PY'
+import sys
+lines = open(sys.argv[1], encoding="utf-8", errors="replace").read().splitlines()
+ATTR = '#[cfg(target_os = "macos")]'
+PRED = 'should_request_install_for_absent_service('
+FN = 'async fn prepare_startup(&self)'
 
-    if printf '%s' "$lifecycle_code" | grep -q 'require_install_for_session()'; then
-        ok "the startup path still raises the install request"
-    elif [ "$extractor_broken" = 1 ]; then
-        : # guarded by the same warn as the call-site check — unreadable is not BAD
-    else
-        bad "prepare_startup no longer calls require_install_for_session()"
-    fi
+def region(start):
+    out, depth, started = [], 0, False
+    for line in lines[start:start + 200]:
+        out.append(line)
+        depth += line.count('{') - line.count('}')
+        if '{' in line:
+            started = True
+        if started and depth == 0 and '}' in line:
+            break
+    return "\n".join(out)
+
+def macos_site():
+    """The macOS call site: attribute + the `if` it guards. None when absent."""
+    for i, l in enumerate(lines):
+        if l.strip() != ATTR:
+            continue
+        body = region(i)
+        if PRED in body:
+            return body
+    for i, l in enumerate(lines):
+        if PRED in l and l.strip().startswith('if'):
+            j = i - 1
+            while j >= 0 and not lines[j].strip():
+                j -= 1
+            start = j if j >= 0 and lines[j].strip() == ATTR else i
+            return region(start)
+    # Deleted entirely. Fall back to prepare_startup's body: it does NOT contain
+    # the predicate, which is exactly what the caller must be told.
+    for i, l in enumerate(lines):
+        if FN in l:
+            return region(i)
+    return None
+
+site = macos_site()
+if site is None:
+    print("__NO_MACOS_CALL_SITE__")
+    raise SystemExit(0)
+print(site)
+PY
+)"
+    rm -f "$lifecycle_copy"
+
+    case "$macos_call_site" in
+        *__NO_MACOS_CALL_SITE__*|"")
+            warn "could not find the macOS call site in prepare_startup — these two guards cannot run" ;;
+        *)
+            case "$macos_call_site" in
+                *'if should_request_install_for_absent_service('*)
+                    ok "the startup path calls the absent-Service predicate" ;;
+                *)
+                    bad "prepare_startup does not CALL should_request_install_for_absent_service"
+                    bad "  the predicate existing is not enough: nothing raises the install request,"
+                    bad "  so a macOS DMG install still cannot connect" ;;
+            esac
+
+            case "$macos_call_site" in
+                *'require_install_for_session()'*)
+                    ok "the startup path still raises the install request" ;;
+                *)
+                    bad "prepare_startup no longer calls require_install_for_session()"
+                    bad "  SERVICE_MANAGER.require_install_for_session() is how the Service"
+                    bad "  install dialog is raised on macOS; without it the app never asks" ;;
+            esac ;;
+    esac
 
     # The gate must be macOS. On Windows the NSIS installer registers the Service,
     # so an absent one means removal and the pre-existing handling applies;

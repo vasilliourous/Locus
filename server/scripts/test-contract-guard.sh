@@ -397,6 +397,28 @@ PY
     else
         miss "the §21 guard no longer catches a removed call site"
     fi
+
+    # (c) The raise, deleted from the macOS call site. `prepare_startup` has TWO
+    #     calls to `require_install_for_session()`: the TUN branch and the macOS
+    #     one. A whole-file search is satisfied by the TUN branch, so deleting
+    #     the macOS call read as OK — a guard that could not fail, found by
+    #     falsifying it on 2026-11-02. That is why the search is now scoped to
+    #     the macOS call site, and this case is what keeps it scoped.
+    python3 - "$LIFECYCLE" <<'PY'
+import sys
+path = sys.argv[1]
+s = open(path, encoding="utf-8").read()
+old = "] ) && SERVICE_MANAGER.require_install_for_session().is_err()".replace("] ", "        ")
+assert s.count(old) == 1, s.count(old)
+open(path, "w", encoding="utf-8").write(s.replace(old, "        ) && true", 1))
+PY
+    out=$(bash "$REPO/server/scripts/check-consistency.sh" 2>&1)
+    cp "$TMP/lifecycle.bak" "$LIFECYCLE"
+    if printf '%s' "$out" | grep -q 'BAD.*no longer calls require_install_for_session'; then
+        pass "a removed macOS install raise is reported, not masked by the TUN branch (§21)"
+    else
+        miss "the §21 raise check is satisfied by the wrong call site"
+    fi
 else
     miss "§21 truncation test — lifecycle.rs not found"
 fi
