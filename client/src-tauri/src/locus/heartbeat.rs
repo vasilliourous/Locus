@@ -443,8 +443,45 @@ pub async fn beat(credential: &Credential, fingerprint: &str) -> BeatOutcome {
     {
         Ok(response) => response,
         Err(error) => {
+            // A reset during the handshake means the network is blocking the hub
+            // by NAME. The tunnel presents none, so it is worth one attempt —
+            // and only that failure, because a DNS failure, a refused connection
+            // or a certificate error is not fixed by a different transport.
+            //
+            // A heartbeat is the one call that runs on a loop, so this must not
+            // become a per-beat engine spawn on a network where the tunnel is
+            // also blocked: the spawned engine exits immediately when the hub
+            // refuses, and `Backoff` already spaces attempts out. The spawn only
+            // happens on the reset path, which cannot happen on a network that
+            // permits the hub at all.
+            let failure = crate::locus::hub::Failure::classify(&error);
+            if failure.retryable_over_tunnel() && crate::locus::activation_tunnel::activation_tunnel_available() {
+                tracing::warn!(
+                    target: "locus::activation_tunnel",
+                    "the direct heartbeat was reset; retrying through the activation tunnel"
+                );
+                match crate::locus::activation_tunnel::post(
+                    "/api/heartbeat",
+                    &body,
+                    crate::locus::hub::Timeout::Heartbeat,
+                )
+                .await
+                {
+                    Ok(parsed) => return classify_tunnel_response(parsed),
+                    Err(tunnel_error) => {
+                        return BeatOutcome::Unreachable {
+                            reason: format!(
+                                "could not reach the hub directly ({}); the activation tunnel also \
+                                 failed ({tunnel_error:#})",
+                                describe_beat_chain(&error)
+                            ),
+                        };
+                    }
+                }
+            }
+
             return BeatOutcome::Unreachable {
-                reason: format!("could not reach the hub: {error}"),
+                reason: format!("could not reach the hub: {}", describe_beat_chain(&error)),
             };
         }
     };
@@ -461,6 +498,43 @@ pub async fn beat(credential: &Credential, fingerprint: &str) -> BeatOutcome {
     };
 
     classify_response(code, &text)
+}
+
+/// Renders a `reqwest::Error` and its source chain.
+///
+/// The same defect as `activation.rs::describe_chain`, and the same reason: a
+/// heartbeat's failure reason reaches the UI and the support log, and `{error}`
+/// prints only "error sending request for url (…)" — which names neither the
+/// network's behaviour nor ours. See that function for the measurement.
+fn describe_beat_chain(error: &reqwest::Error) -> String {
+    use std::error::Error as _;
+
+    let mut rendered = error.to_string();
+    let mut cursor = error.source();
+    while let Some(current) = cursor {
+        rendered.push_str(": ");
+        rendered.push_str(&current.to_string());
+        cursor = current.source();
+    }
+    rendered
+}
+
+/// Classifies a heartbeat that arrived **through the tunnel**.
+///
+/// A tunnel response is a `HeartbeatResponse` that has already been parsed, so
+/// there is no status code to re-read — but the meaning must be identical to the
+/// direct path's, and that meaning lives in one place: the same status rule
+/// [`classify_response`] applies. Rather than restate it, this fails a body whose
+/// `status` is not a success exactly as the direct path does, so a hub that
+/// refuses an expired code cannot be answered as though it had accepted it.
+fn classify_tunnel_response(parsed: HeartbeatResponse) -> BeatOutcome {
+    if parsed.is_ok() {
+        BeatOutcome::Ok(Box::new(parsed))
+    } else {
+        BeatOutcome::Unreachable {
+            reason: format!("the hub reported status {:?}", parsed.status),
+        }
+    }
 }
 
 /// Decides what a response means, from its status code and body. Pure, so the

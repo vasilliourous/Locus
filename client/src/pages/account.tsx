@@ -404,15 +404,26 @@ const AccountPage = () => {
             value={
               // An unset or unknown stored id shows as the theme that will
               // actually render, so the control never claims a look the app is
-              // not showing. The empty string is NOT used as the "none" value,
-              // because that is indistinguishable from "not chosen yet".
-              isValidThemeId(verge?.theme_id) ? verge!.theme_id! : THEME_IDS[0]
+              // not showing. The empty string IS the "no theme" value here, and
+              // is distinct from "unset" only in the dropdown's own selection —
+              // `hasTheme` in `use-custom-theme` treats both the same way, so
+              // writing `''` restores "follow the system" instead of leaving the
+              // Appearance control above inert.
+              isValidThemeId(verge?.theme_id) ? verge!.theme_id! : ''
             }
             onChange={(e) =>
               void patchVerge({ theme_id: e.target.value }).catch(onError)
             }
             sx={{ minWidth: 140 }}
           >
+            {/* The escape hatch. Without this entry every option WRITES a theme,
+                and `hasTheme` stays true forever, so the Appearance control
+                above could never take effect again — "follow the system" was
+                reachable only by hand-editing `verge.yaml`. Recorded as a gap in
+                `STILL-OPEN.md` until this was added. */}
+            <MenuItem value="">
+              {t('home.components.connection.account.themeDefault')}
+            </MenuItem>
             {THEME_IDS.map((id) => (
               <MenuItem key={id} value={id}>
                 {t(THEMES[id].labelKey)}

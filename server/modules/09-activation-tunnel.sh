@@ -255,11 +255,26 @@ SERVICE
 write_config() {
     mkdir -p /etc/shadowsocks
 
-    # `local_addr`/`local_port` is shadowsocks-rust's built-in TCP forward: the
-    # decrypted stream is handed to a local listener instead of to a SOCKS
-    # resolver. That is what makes a path filter possible at all, and it is why
-    # this needs no new protocol between client and hub — it is ordinary
-    # Shadowsocks carrying an ordinary HTTP request.
+    # HOW THE PATH FILTER IS REACHED — corrected 2026-11-01.
+    #
+    # This config used to carry `local_addr`/`local_port` on the assumption that
+    # `ssserver` forwards a decrypted stream to a local listener. IT DOES NOT.
+    # Measured against shadowsocks-rust 1.25.0: `ssserver` decrypts and then
+    # connects to whichever destination the CLIENT named, logging
+    # `tcp tunnel <peer> -> <requested destination>`. Those two keys are
+    # `sslocal`'s SOCKS listen options; `ssserver` ignores them, so the filter was
+    # never in the path and the allowlist that bounds the public bootstrap key did
+    # not exist.
+    #
+    # The filter is reached because the CLIENT asks for it: the tunnelled request
+    # addresses `127.0.0.1:${FORWARD_PORT}`, and the hub dials exactly that. So the
+    # allowlist holds because the client cooperates — which is fine, and is why it
+    # is a filter rather than a boundary against a hostile client. What it bounds
+    # is what a *compromised or reverse-engineered* client could reach, and that
+    # bound is enforced by the filter process, not by the listener config.
+    #
+    # The keys are therefore REMOVED rather than left in as decoration: a comment
+    # claiming a forward that does not happen is how this defect survived review.
     #
     # `mode: tcp_only` — heartbeat and activation are small request/response
     # pairs; UDP would add a second, unauthenticated surface for nothing.
@@ -271,12 +286,12 @@ write_config() {
   "method": "${SS_METHOD}",
   "mode": "tcp_only",
   "fast_open": true,
-  "no_delay": true,
-  "local_addr": "127.0.0.1",
-  "local_port": ${FORWARD_PORT}
+  "no_delay": true
 }
 EOF
-    log "✓ Created ${CONFIG_FILE} (port ${TUNNEL_PORT}, forwarding to 127.0.0.1:${FORWARD_PORT})"
+    log "✓ Created ${CONFIG_FILE} (listener on :${TUNNEL_PORT})"
+    log "   The path filter is reached because the client dials 127.0.0.1:${FORWARD_PORT}"
+    log "   THROUGH this listener; ssserver has no inbound forwarding."
 }
 
 write_service() {

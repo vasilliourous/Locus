@@ -81,7 +81,14 @@ export interface UsageCopy {
   used: string
   /** `{{used}} of {{total}} used — nearly out of free data` */
   nearlyOut: string
-  /** `{{used}} of {{total}} used — slowed until your allowance resets` */
+  /**
+   * `{{used}} of {{total}} used — free data is spent for this month`
+   *
+   * Deliberately does not claim a speed change. Measured 2026-11-01: the engine
+   * accepts `rate-limit` and `max-rate` on outbounds and inbound listeners but
+   * enforces neither, so no per-allowance slowdown exists — the tier's own cap
+   * applies throughout. See `STILL-OPEN.md` and `docs/business/04-tiers.md` §4.4.5.
+   */
   throttled: string
 }
 

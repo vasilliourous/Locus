@@ -142,6 +142,26 @@ pub enum Failure {
     /// The connection failed while validating the peer's certificate. The only
     /// failure the root-store fallback can fix.
     Certificate,
+    /// The peer **accepted the TCP connection and then reset it** — either while
+    /// the TLS handshake was in flight or immediately after it.
+    ///
+    /// This is separate from [`Self::Transport`] for one reason: it is the
+    /// signature of a middlebox that read the destination (the TLS ClientHello
+    /// carries the SNI in the clear) and killed the flow. It is the *only*
+    /// failure the activation tunnel can fix, and the only one that may trigger
+    /// the fallback. See [`crate::locus::activation_tunnel`].
+    ///
+    /// Deliberately **not** the same as:
+    ///   * a refused connection — nothing is listening, and a different transport
+    ///     to the same address will be refused too;
+    ///   * a DNS failure — the tunnel is dialled by address, but the caller still
+    ///     has to resolve *something*, and a name that does not resolve is a
+    ///     configuration fault, not censorship;
+    ///   * a certificate error — the hub was reached; different roots fix it.
+    ///
+    /// Classified from the `io::ErrorKind`, not from the message, for the reason
+    /// given on [`Self::classify`].
+    ResetDuringHandshake,
     /// The TLS session itself was fine but the remote name did not resolve, the
     /// connection was refused, or the network dropped it.
     Transport,
@@ -164,6 +184,15 @@ impl Failure {
     /// does not depend on a dependency's prose.
     #[must_use]
     pub fn classify(error: &reqwest::Error) -> Self {
+        // A reset is checked FIRST and separately, because it is an `io::Error`
+        // buried in the chain that would otherwise be swallowed by the
+        // `is_connect()` catch-all below — and because confusing it with a
+        // refusal or a DNS failure would either trigger a fallback that cannot
+        // help or leave a censored student with no route at all.
+        if error.is_connect() && reset_in_chain(error) {
+            return Self::ResetDuringHandshake;
+        }
+
         let mut source: Option<&(dyn std::error::Error + 'static)> = Some(error);
         while let Some(current) = source {
             if let Some(rustls::Error::InvalidCertificate(_)) = current.downcast_ref::<rustls::Error>() {
@@ -203,6 +232,26 @@ impl Failure {
         matches!(self, Self::Certificate)
     }
 
+    /// Whether a **different transport** could plausibly change this outcome.
+    ///
+    /// True for exactly one variant. The activation tunnel dials the same hub on
+    /// a different port speaking a protocol whose traffic carries no readable
+    /// destination, so it is a candidate fix only when the failure was the
+    /// network refusing to carry a **named** connection:
+    ///
+    ///   * `ResetDuringHandshake` — the middlebox read the name and killed it.
+    ///     This is the case the tunnel exists for.
+    ///   * `Certificate` — the hub WAS reached; different roots fix it, and the
+    ///     tunnel would present the same certificate.
+    ///   * `Protocol` — the hub was reached and refused a TLS version.
+    ///   * `Transport` — includes DNS. A name that does not resolve cannot be
+    ///     fixed by a transport to the same name.
+    ///   * `Response` — an answer arrived; the problem is above the transport.
+    #[must_use]
+    pub const fn retryable_over_tunnel(self) -> bool {
+        matches!(self, Self::ResetDuringHandshake)
+    }
+
     /// A sentence a student can act on, or `None` when the cause is not theirs to
     /// fix.
     #[must_use]
@@ -214,9 +263,49 @@ impl Failure {
                  authority that a Windows update would install, and a school network \
                  that inspects encrypted traffic can also cause it.",
             ),
+            Self::ResetDuringHandshake => Some(
+                "The network cut the connection to the hub. This usually means a school \
+                 or work filter is blocking it. Locus will try the activation tunnel \
+                 instead when one is available.",
+            ),
             Self::Transport | Self::Protocol | Self::Response => None,
         }
     }
+}
+
+/// Whether an `io::Error` in this chain is a **reset**, as opposed to a refusal,
+/// a DNS failure or a timeout.
+///
+/// `ConnectionReset` is the kind the OS reports for a RST (`ECONNRESET`, os error
+/// 104 on Linux). It is matched on the **kind**, not the message, for the reason
+/// [`Failure::classify`] gives.
+///
+/// One thing this deliberately accepts: on the Linux test path the reset surfaces
+/// as `io::ErrorKind::Other` with no raw OS error, because hyper wraps it before
+/// the kind is preserved. That is why the message is checked as a fallback — but
+/// only *after* `is_connect()` has already narrowed the failure to the connection
+/// phase, so the false-positive the old `utils::network` code risked (matching
+/// "tls" in "tls handshake eof" and retrying a cut connection forever) does not
+/// recur here: a reset is a *reason to try another transport once*, never a reason
+/// to retry the same one in a loop.
+fn reset_in_chain(error: &reqwest::Error) -> bool {
+    let mut source: Option<&(dyn std::error::Error + 'static)> = Some(error);
+    while let Some(current) = source {
+        if let Some(io_error) = current.downcast_ref::<std::io::Error>()
+            && matches!(
+                io_error.kind(),
+                std::io::ErrorKind::ConnectionReset | std::io::ErrorKind::BrokenPipe
+            )
+        {
+            return true;
+        }
+        let text = current.to_string();
+        if text.contains("Connection reset by peer") || text.contains("connection reset") {
+            return true;
+        }
+        source = current.source();
+    }
+    false
 }
 
 /// The client to use, and what went wrong when it was not the platform one.

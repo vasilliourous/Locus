@@ -1,4 +1,13 @@
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // Expose the target triple as a compile-time constant so code that must name a
+    // built sidecar can derive it instead of hard-coding a second copy of the
+    // platform list. `TARGET` is set for every build target, including a
+    // cross-compile, which is the case where a hard-coded name would be wrong.
+    println!(
+        "cargo:rustc-env=LOCUS_BUILD_TARGET={}",
+        std::env::var("TARGET").unwrap_or_default()
+    );
+
     if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows")
         && std::env::var("CARGO_CFG_TARGET_ENV").as_deref() == Ok("msvc")
         && std::env::var_os("CARGO_FEATURE_CLIPPY").is_some()

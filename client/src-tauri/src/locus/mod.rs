@@ -13,6 +13,7 @@
 //! them are frozen by clients already in the field.
 
 pub mod activation;
+pub mod activation_tunnel;
 pub mod apply;
 pub mod contract;
 pub mod credential;

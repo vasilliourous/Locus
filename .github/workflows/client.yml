@@ -284,6 +284,33 @@ jobs:
           fi
           echo "LOCUS_UPDATE_KEY is present (value not printed; length ${#LOCUS_UPDATE_KEY} bytes)"
 
+      # ── Report whether the activation tunnel's key is configured ──
+      #
+      # A WARNING, not an error, and the difference is the whole point: a build
+      # without this key is complete and ships fine, it simply cannot use the
+      # pre-activation bootstrap tunnel on a school network that blocks the hub by
+      # name (docs/reference/ACTIVATION-TUNNEL.md). Refusing to build would make a
+      # fresh clone unbuildable for a capability most builds do not need.
+      #
+      # What absence must not do is reach a release unnoticed — a build that ships
+      # without it strands exactly the students this feature exists for, and there
+      # is no way to tell from the artifact afterwards. So it is reported on every
+      # run, and loudly on a tag.
+      - name: Report the activation tunnel key
+        working-directory: .
+        env:
+          LOCUS_ACTIVATION_TUNNEL_KEY: ${{ secrets.LOCUS_ACTIVATION_TUNNEL_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -n "${LOCUS_ACTIVATION_TUNNEL_KEY:-}" ]; then
+            echo "LOCUS_ACTIVATION_TUNNEL_KEY is present (value not printed; length ${#LOCUS_ACTIVATION_TUNNEL_KEY} bytes)"
+          elif [ "${{ github.ref_type }}" = "tag" ]; then
+            echo "::warning::LOCUS_ACTIVATION_TUNNEL_KEY is not set. This RELEASE will ship without the activation tunnel, so no device on a network that blocks the hub by name can activate with it."
+            echo "::warning::Set it with: gh secret set LOCUS_ACTIVATION_TUNNEL_KEY --repo ${GITHUB_REPOSITORY:-<owner>/<repo>}"
+          else
+            echo "LOCUS_ACTIVATION_TUNNEL_KEY is not set — this build has no activation tunnel. Fine for a branch build; see docs/reference/ACTIVATION-TUNNEL.md before tagging."
+          fi
+
       - uses: pnpm/action-setup@v4
         with:
           # package.json is in client/, and defaults.run.working-directory does
@@ -942,6 +969,21 @@ jobs:
           # interpolating `D:\a\Locus\Locus` into JSON, a path that no longer
           # appears here at all.
           TAURI_CONFIG: '{"build":{"beforeBuildCommand":""}}'
+          # The activation tunnel's bootstrap key, compiled in via
+          # `option_env!("LOCUS_ACTIVATION_TUNNEL_KEY")` in
+          # `locus/activation_tunnel.rs`.
+          #
+          # DELIBERATELY NOT PRESENCE-CHECKED, unlike LOCUS_UPDATE_KEY. Its
+          # absence degrades a capability — a device on a school network cannot
+          # use the bootstrap tunnel — but the build is still complete and every
+          # other path works. Failing the pipeline on it would make a fresh clone
+          # unbuildable for a feature most builds do not need. What absence must
+          # NOT do is go unnoticed in a release, and `verify` reports it there.
+          #
+          # The value is not a normal secret: it ships in the binary, so it must
+          # be assumed public. The hub's allowlist and rate limit are what bound
+          # it (docs/reference/ACTIVATION-TUNNEL.md §3.1).
+          LOCUS_ACTIVATION_TUNNEL_KEY: ${{ secrets.LOCUS_ACTIVATION_TUNNEL_KEY }}
         run: |
           set -euo pipefail
 

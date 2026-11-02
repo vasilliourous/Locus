@@ -188,6 +188,32 @@ describe('theme registry', () => {
     expect(resolveTheme({}).id).toBe(DEFAULT_THEME_ID)
   })
 
+  it('the empty string is a valid "no theme" value, distinct from every real id', () => {
+    // The Account dropdown gained a "Default (follow system)" entry that writes
+    // `theme_id: ''`. Two properties make that safe, and both are asserted here
+    // because either failing turns the entry into a bug that looks like a theme:
+    //
+    //   1. `''` is not a theme id, so no registry entry can shadow it and
+    //      `resolveTheme('')` falls through to the default;
+    //   2. `hasTheme` in `use-custom-theme` is `theme_id.length > 0`, so `''`
+    //      makes the app honour `theme_mode` again — which is the entire point.
+    //
+    // Before this entry existed, EVERY option in the dropdown wrote a real id, so
+    // once a student picked any theme the Appearance control above it could never
+    // take effect again. "Follow the system" was reachable only by editing
+    // `verge.yaml` by hand.
+    expect(isThemeId('')).toBe(false)
+    expect(THEME_IDS).not.toContain('')
+    expect(resolveTheme('').id).toBe(DEFAULT_THEME_ID)
+
+    // The `hasTheme` rule, restated as an assertion because it lives in a hook
+    // this suite cannot mount. A non-empty id means "a theme is selected".
+    const hasTheme = (id: string | undefined): boolean => typeof id === 'string' && id.length > 0
+    expect(hasTheme('')).toBe(false)
+    expect(hasTheme(undefined)).toBe(false)
+    expect(hasTheme(DEFAULT_THEME_ID)).toBe(true)
+  })
+
   it('the two default themes are byte-identical to the shipped palette', () => {
     // This is what makes the registry a SUPERSET of the shipped appearance rather
     // than a replacement for it: an install with no `theme_id` must render

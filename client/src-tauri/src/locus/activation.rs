@@ -368,19 +368,44 @@ where
         tracing::warn!(target: "locus::hub", "{}", hub_client.describe());
     }
 
-    let response = hub_client
-        .client()
-        .post(&url)
-        .json(&body)
-        .send()
-        .await
-        .map_err(|error| {
-            // Put the *real* cause in the chain. The raw reqwest text says
-            // "Expired" whatever store failed, which accuses the hub.
+    let response = match hub_client.client().post(&url).json(&body).send().await {
+        Ok(response) => response,
+        Err(error) => {
+            // Before giving up, consider that the network may be blocking the hub
+            // BY NAME. A reset during the handshake is the signature of exactly
+            // that, and the activation tunnel is the one transport that presents no
+            // name. Only that failure is retried — see `Failure::retryable_over_tunnel`
+            // for why a DNS failure, a refusal or a certificate error must not be.
             let failure = crate::locus::hub::Failure::classify(&error);
+            if failure.retryable_over_tunnel() && crate::locus::activation_tunnel::activation_tunnel_available() {
+                tracing::warn!(
+                    target: "locus::activation_tunnel",
+                    "the direct connection to the hub was reset; retrying {path} through the activation tunnel"
+                );
+                match crate::locus::activation_tunnel::post(path, &body, crate::locus::hub::Timeout::Activation).await {
+                    Ok(value) => return Ok(value),
+                    Err(tunnel_error) => {
+                        // Both routes failed. Report the ORIGINAL cause with the
+                        // tunnel attempt attached, because the direct failure is
+                        // what the student's network did and the tunnel failure is
+                        // usually a consequence of the same policy.
+                        return Err(anyhow::anyhow!(
+                            "could not reach the Locus hub at {url}: {}.{} The activation tunnel was \
+                             tried as well and also failed: {tunnel_error:#}",
+                            describe_chain(&error),
+                            failure.remedy().map(|remedy| format!(" {remedy}")).unwrap_or_default(),
+                        ));
+                    }
+                }
+            }
+
             let remedy = failure.remedy().map(|remedy| format!(" {remedy}")).unwrap_or_default();
-            anyhow::anyhow!("could not reach the Locus hub at {url}: {error}.{remedy}")
-        })?;
+            anyhow::bail!(
+                "could not reach the Locus hub at {url}: {}.{remedy}",
+                describe_chain(&error)
+            )
+        }
+    };
 
     let status = response.status();
     let text = response
@@ -390,6 +415,44 @@ where
 
     serde_json::from_str(&text)
         .with_context(|| format!("the hub returned something that is not a Locus response ({status}): {text}"))
+}
+
+/// Renders a `reqwest::Error` **and its source chain**, which `{error}` and
+/// `{error:#}` both fail to do.
+///
+/// This is a corrected version of the fix `ACTIVATION-TUNNEL.md` §5.1 originally
+/// proposed. That section said to format `"{error:#}"`, on the assumption that
+/// `#` makes `reqwest::Error`'s `Display` print its causes. **It does not.**
+/// `reqwest::Error`'s `Display` writes only the kind and the URL:
+///
+/// ```text
+/// error sending request for url (https://…/api/activate)
+/// ```
+///
+/// and `{:#}` produces the *identical* string, because `Display` never consults
+/// the formatter's alternate flag. Measured on a mid-handshake reset, 2026-11-01:
+///
+/// ```text
+/// Display(default) = error sending request for url (…)
+/// Display({:#})   = error sending request for url (…)      ← no change
+/// Display(chain)   = error sending request for url (…): client error (Connect):
+///                    Connection reset by peer (os error 104)
+/// ```
+///
+/// So the chain is walked by hand. Without this, the one sentence that would have
+/// named censorship — "Connection reset by peer" — is the one sentence the
+/// student never sees.
+fn describe_chain(error: &reqwest::Error) -> String {
+    use std::error::Error as _;
+
+    let mut rendered = error.to_string();
+    let mut cursor = error.source();
+    while let Some(current) = cursor {
+        rendered.push_str(": ");
+        rendered.push_str(&current.to_string());
+        cursor = current.source();
+    }
+    rendered
 }
 
 /// Activates this device with an activation code.

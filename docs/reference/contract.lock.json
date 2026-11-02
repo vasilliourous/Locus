@@ -8,6 +8,7 @@
     "client_calls": [
       "/api/activate",
       "/api/code-lookup",
+      "/api/heartbeat",
       "POST /api/heartbeat"
     ],
     "hub_serves": [

@@ -14,7 +14,7 @@ import {
 const COPY: UsageCopy = {
   used: '{{used}} of {{total}} used',
   nearlyOut: '{{used}} of {{total}} used — nearly out of free data',
-  throttled: '{{used}} of {{total}} used — slowed until your allowance resets'
+  throttled: '{{used}} of {{total}} used — free data is spent for this month'
 }
 
 const MIB = 1024 * 1024
@@ -89,7 +89,7 @@ describe('usageSummary', () => {
     expect(usageSummary({ kind: 'none' }, COPY)).toBe('')
   })
 
-  it('states the throttle plainly and says it resets', () => {
+  it('states that the allowance is spent, without claiming a speed change', () => {
     const text = usageSummary(
       {
         kind: 'bar',
@@ -101,8 +101,14 @@ describe('usageSummary', () => {
       },
       COPY
     )
-    expect(text).toContain('slowed')
-    expect(text).toContain('resets')
+    // The banner must not promise a speed the app does not enforce. Measured
+    // 2026-11-01: this engine accepts `rate-limit`/`max-rate` on outbounds and
+    // inbound listeners but enforces neither, so a per-allowance slowdown does not
+    // exist. The tier's own cap applies all along. A message promising "slowed"
+    // would be the one thing on this screen that is untrue.
+    expect(text).toContain('spent')
+    expect(text).not.toContain('slowed')
+    expect(text).not.toContain('resets')
   })
 
   it('warns before the allowance is spent', () => {

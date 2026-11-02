@@ -153,6 +153,7 @@ export const translationKeys = [
   'home.components.connection.account.themeLight',
   'home.components.connection.account.themeDark',
   'home.components.connection.account.theme',
+  'home.components.connection.account.themeDefault',
   'home.components.connection.account.themeDefaultDark',
   'home.components.connection.account.themeDefaultLight',
   'home.components.connection.account.themeSlate',

@@ -474,10 +474,14 @@ pub async fn store_usage(usage: &crate::locus::usage::Usage) -> Result<()> {
 /// the caller must **not** apply any throttle in that case. Absence is not
 /// "zero speed".
 ///
-/// NOTE: this value is persisted and readable, but **nothing applies it to a
-/// running Core yet**. The classification that decides *when* to throttle works
-/// and is tested; the step that acts on it does not exist. Kept honest here
-/// rather than implied by the field's presence — see `STILL-OPEN.md`.
+/// NOTE (2026-11-01): this value is persisted and readable, and **nothing applies
+/// it to a running Core** — and, as measured, nothing *can* at the config level.
+/// The engine accepts `rate-limit` and `max-rate` on outbounds and on inbound
+/// listeners but enforces neither: a 8 MiB download measured 233 MB/s unshaped,
+/// 234 MB/s with `rate-limit: 1`, 379 MB/s with `max-rate: 1000000`, and 355 MB/s
+/// through a rate-limited inbound listener. The value is kept because the hub
+/// sends it and a future shaper — a per-OS action, not a profile field — will need
+/// it. See `STILL-OPEN.md`.
 #[must_use]
 pub async fn throttle_mbps() -> Option<u32> {
     crate::config::Config::verge().await.latest_arc().locus_throttle_mbps

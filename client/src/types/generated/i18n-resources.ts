@@ -103,6 +103,7 @@ export interface TranslationResources {
             themeContrast: string
             themeDark: string
             themeDawn: string
+            themeDefault: string
             themeDefaultDark: string
             themeDefaultLight: string
             themeEmber: string
