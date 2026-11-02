@@ -1072,6 +1072,44 @@ jobs:
           install -m 0755 "/tmp/sing-box-${version}-linux-amd64/sing-box" /usr/local/bin/sing-box
           sing-box version
 
+      # ── shadowsocks-rust, for the activation tunnel's e2e test ──
+      #
+      # A SECOND, different peer, and the difference is the point.
+      # `tunnel_end_to_end.rs` tests the student's tunnel, whose listener on the
+      # hub is sing-box. The ACTIVATION tunnel (`09-activation-tunnel.sh`) is a
+      # separate listener run by `ssserver` from shadowsocks-rust, so
+      # `activation_tunnel_end_to_end.rs` has to be proven against the binary the
+      # hub actually runs — sing-box would prove nothing about it, and vice versa.
+      #
+      # PINNED TO THE SAME VERSION AS THE HUB. `02-shadowsocks.sh` installs
+      # `SS_VERSION="v1.23.0"`; a test peer on a different version can accept a
+      # config the deployed one rejects (or the reverse), which is precisely the
+      # divergence this suite exists to catch.
+      #
+      # This step exists because the test did not have it: the test is gated on
+      # `LOCUS_REQUIRE_LIVE_ENGINE`, which the step below sets, so its own
+      # missing-peer SKIP became a hard failure — `ssserver is not installed`.
+      # The test was right to demand a real listener; the job was wrong to claim
+      # it had installed every peer the engine suites need.
+      #
+      # A failed download FAILS this step rather than skipping the test, for the
+      # reason given above it: a silently missing peer makes the test pass by not
+      # running.
+      - name: Install shadowsocks-rust (the activation tunnel's listener, for the e2e test)
+        if: matrix.label == 'linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Kept in step with server/modules/02-shadowsocks.sh. If that pin moves
+          # and this does not, this test is proving an older listener than ships.
+          version=v1.23.0
+          url="https://github.com/shadowsocks/shadowsocks-rust/releases/download/${version}/shadowsocks-${version}.x86_64-unknown-linux-gnu.tar.xz"
+          curl -fsSL --retry 3 --max-time 120 "$url" -o /tmp/ssrust.tar.xz
+          mkdir -p /tmp/ssrust
+          tar -xJf /tmp/ssrust.tar.xz -C /tmp/ssrust
+          install -m 0755 /tmp/ssrust/ssserver /usr/local/bin/ssserver
+          ssserver --version
+
       - name: Rust tests
         if: matrix.label == 'linux'
         shell: bash
