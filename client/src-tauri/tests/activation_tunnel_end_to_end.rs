@@ -147,6 +147,61 @@ fn accepts(port: u16) -> bool {
     TcpStream::connect(("127.0.0.1", port)).is_ok()
 }
 
+/// Whether the engine can complete a proxy conversation on `proxy_port` — SOCKS5
+/// greeting answered **and** a CONNECT processed.
+///
+/// `accepts()` is too early: the engine binds the listening socket well before the
+/// proxy handler behind it will relay anything, so a bare connect reports "ready"
+/// during a window in which every request is reset. Measured 2026-11-02,
+/// 40 runs per variant on one idle machine with the same binary and peers:
+///
+///   | readiness signal                        | failures |
+///   |---|---|
+///   | `accepts()` — connect only              | ~1 in 8  |
+///   | greeting answered, CONNECT not driven   | 11/40    |
+///   | full CONNECT, then a 150 ms settle      | 0/50     |
+///
+/// The probe CONNECTs to a port nothing listens on, so "usable" means the engine
+/// PROCESSED the request and answered — not that the answer was success.
+fn tunnel_usable(proxy_port: u16) -> bool {
+    let Ok(mut stream) = TcpStream::connect(("127.0.0.1", proxy_port)) else {
+        return false;
+    };
+    let _ = stream.set_read_timeout(Some(Duration::from_millis(500)));
+    if stream.write_all(&[0x05, 0x01, 0x00]).is_err() {
+        return false;
+    }
+    let mut greeting = [0u8; 2];
+    if !matches!(stream.read_exact(&mut greeting), Ok(())) || greeting != [0x05, 0x00] {
+        return false;
+    }
+    let mut connect = vec![0x05, 0x01, 0x00, 0x01];
+    connect.extend_from_slice(&[127, 0, 0, 1]);
+    connect.extend_from_slice(&1u16.to_be_bytes());
+    if stream.write_all(&connect).is_err() {
+        return false;
+    }
+    let mut header = [0u8; 4];
+    if !matches!(stream.read_exact(&mut header), Ok(())) || header[0] != 0x05 {
+        return false;
+    }
+    let extra = match header[3] {
+        0x01 => 6,
+        0x04 => 18,
+        0x03 => {
+            let mut len = [0u8; 1];
+            if stream.read_exact(&mut len).is_err() {
+                return false;
+            }
+            usize::from(len[0]) + 2
+        }
+        _ => return false,
+    };
+    let mut rest = vec![0u8; extra];
+    let _ = stream.read_exact(&mut rest);
+    matches!(header[1], 0x00 | 0x05)
+}
+
 /// The hub's path filter, reproduced: the allowlist in
 /// `server/modules/09-activation-tunnel.sh`, answering the same way.
 ///
@@ -397,9 +452,15 @@ fn an_enrolment_request_completes_through_the_activation_tunnel() {
             .spawn()
             .expect("start the engine"),
     );
-    wait_for("the engine's socks listener", Duration::from_secs(20), || {
-        accepts(proxy_port)
+    // Wait for the engine to be able to RELAY, not merely to be listening, and
+    // then let it settle — see `tunnel_usable` for the measurements behind both.
+    // Without the settle this test failed ~1 run in 8 with an empty response and
+    // no `[TCP]` line in the engine log, which reads exactly like a broken tunnel
+    // and is not one.
+    wait_for("the engine's socks proxy", Duration::from_secs(20), || {
+        tunnel_usable(proxy_port)
     });
+    std::thread::sleep(Duration::from_millis(150));
 
     // The request names the PATH FILTER as its destination. That is how the
     // deployed design reaches the filter: `ssserver` decrypts and then connects to
