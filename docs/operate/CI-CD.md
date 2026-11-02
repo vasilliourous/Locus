@@ -243,6 +243,21 @@ variables, because one variable gating both meant every no-network test skipped 
 any machine that had simply not run `prebuild` — throwing away the only part of
 the suite that always works.
 
+> **"The same job demonstrably has egress" is a weaker claim than it looks.
+> Added 2026-11-03.** It is true that the job installed `sing-box` and
+> `shadowsocks-rust` minutes earlier, and that is the justification for the flag.
+> It does **not** follow that the runner can reach `cp.cloudflare.com` or
+> `www.gstatic.com`: those are two specific third-party hosts, and the flag's
+> rationale is about the runner having *a* network. On 2026-11-02 every Linux job
+> went red on `a_reachable_member_yields_a_usable_delay` with a `504` from both —
+> and, per `client/docs/UPSTREAM-CHANGES.md`, a `Timeout` is what the engine
+> returns both when the tunnel is dead *and* when the host is unreachable.
+>
+> The flag stays set: it is what stops the suite passing by not running. What was
+> missing is the control. A **`Diagnose the runner's own egress`** step now runs on
+> `failure()` and `curl`s both hosts directly, bypassing the engine, into the job
+> summary. Read it before blaming the probe, and before blaming the runner.
+
 **`sing-box` is installed, pinned, and its absence fails the step.** It is the
 **hub's** Shadowsocks listener, so it is the only peer whose acceptance of this
 client's outbound means anything — see

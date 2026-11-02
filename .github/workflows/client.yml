@@ -1153,6 +1153,44 @@ jobs:
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
+      # ── IS IT THE RUNNER, OR IS IT THE PROBE? ──
+      #
+      # `a_reachable_member_yields_a_usable_delay` failed on the 2026-11-02 runs,
+      # and its failure message names two hosts without saying which side is at
+      # fault. `client/docs/UPSTREAM-CHANGES.md` records exactly why that matters:
+      # a runner with no egress makes the engine answer `Timeout`, which is
+      # **indistinguishable from a dead tunnel**. Without the control below, the
+      # only way to tell them apart was to argue from memory.
+      #
+      # So when the suite fails, ask each host DIRECTLY, with curl, bypassing the
+      # engine entirely:
+      #
+      #   curl 204, engine Timeout  -> the runner has egress; the probe is wrong
+      #   curl fails too            -> the runner has no path to the host; the
+      #                                assertion cannot run here, and the fix is
+      #                                about where it runs, not about the code
+      #
+      # This is EVIDENCE, not a gate: it writes to the job summary and fails
+      # nothing. It cannot go green by not running because it runs on the one
+      # condition that matters — a failed test step.
+      - name: Diagnose the runner's own egress (only when the suite failed)
+        if: failure() && matrix.label == 'linux'
+        shell: bash
+        run: |
+          {
+            echo '## Runner egress, measured directly (not through the engine)'
+            echo ''
+            echo '| URL | curl result |'
+            echo '|---|---|'
+            for u in http://cp.cloudflare.com/generate_204 https://www.gstatic.com/generate_204; do
+              code=$(curl -s -o /dev/null -w '%{http_code} in %{time_total}s' --max-time 10 "$u" || echo 'FAILED')
+              echo "| \`$u\` | $code |"
+            done
+            echo ''
+            echo 'A 204 here with a `Timeout` in the test above means the failure is'
+            echo 'in the probe or its config, NOT in the runner.'
+          } >> "$GITHUB_STEP_SUMMARY"
+
       # `-D warnings` so a new lint fails the gate. `--features clippy` matches
       # the `clippy-only` alias in client/.cargo/config.toml, which is how this
       # was verified locally.

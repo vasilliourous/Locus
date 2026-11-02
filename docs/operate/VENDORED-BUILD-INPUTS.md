@@ -104,12 +104,32 @@ copy against the pin. It does not build from `vendor/` directly, because
 
 ---
 
-## 4. What is not vendored yet: the four geo databases
+## 4. The four geo databases: mirrored as of 2026-11-03
 
-`ASN.mmdb`, `Country.mmdb`, `geoip.dat` and `geosite.dat` are **pinned by
-GitHub release-asset ID, and not mirrored**. They are downloaded at build time
-into `client/src-tauri/resources/` (gitignored) and hashed against the lock by
-`check-consistency.sh` §39.
+`ASN.mmdb`, `Country.mmdb`, `geoip.dat` and `geosite.dat` live in
+`vendor/build-inputs/resources/` and are **committed**. `prebuild.mjs` copies
+them into `client/src-tauri/resources/` (gitignored) and verifies each against
+its pin; the asset ID in the lock is what the bytes were fetched from once, not
+something a build reaches for. The earlier "declared but no committed copy"
+warning path in `prebuild.mjs` is now a defect if it fires.
+
+**Why it was done now, and not earlier.** The lock's `vendored.resources` entry
+was written on 2026-10-29 with the directory empty, deliberately: the risk was
+recorded before the fix. Five outages in nine days followed, the fifth within an
+hour of the fourth, and the 2026-11-02 CI runs showed the real cost — `Build
+(macos-arm)` could not fetch `geosite.dat` at all (403 from the API), while
+`Build (linux)` succeeded only because that runner's cache still held the bytes.
+A build that passes because a cache is warm is not a build.
+
+**Verified, in the order it matters.** The four committed files match the pins
+the lock already held, so **no repin happened**; `prebuild.mjs` run with
+`HTTPS_PROXY` pointed at a dead port reported all four *"is vendored in the
+repository and matches its pin"* and printed no `download finished` line naming
+them; and the real vendored engine loaded them — `GeoSite cn records: 110177`,
+`GeoIP cn records: 10012`.
+
+**Cost:** 35.8 MiB committed.
+
 
 **Repinned twice on 2026-11-02.** The 2026-10-28 pins returned `404` after
 MetaCubeX rebuilt the rolling release on 2026-11-01, which failed every
@@ -132,15 +152,19 @@ confirm it logs both a GeoSite record count and an MMDB load. A stub, a truncate
 download or an HTML error page fails to parse; "the size looks plausible" does
 not distinguish them.
 
-**Still not mirrored.** These four remain the one build input that can break a
-build without any change here. Mirroring them into this project's own release
-assets is **not done** and is the only fix that does not depend on upstream
-release hygiene — see `STILL-OPEN.md`, which now records the risk as realised
-twice in five days.
+**What is still fetched from upstream.** Mirroring these four closed the input
+that actually broke builds. Two remain downloaded when a checkout lacks a
+vendored copy, and neither is protected by this change:
 
-**Why the pin still protects in the meantime.** Asset IDs are immutable
-per-upload even when not permanent; §39 fails the build when the bytes stop
-matching the pin. The gap is durability, not integrity.
+- **`clash-verge-service-ipc` — the real remaining gap.** This is the `.tar.gz`
+  that `prebuild.mjs` unpacks into the three service helpers. It is downloaded
+  **unconditionally, with no lock entry and no hash check** (`resolveServiceRelease`
+  derives the URL from the Cargo manifest), so it is the one build input that
+  both depends on an upstream URL and cannot be verified when it arrives. Its
+  upstream has been stable, which is the only reason it has not caused an
+  outage. It is the next thing to pin and mirror.
+- the engines themselves, when `vendor/build-inputs/` is absent — but there they
+  are committed, so a fresh clone reads them from disk.
 
 ---
 

@@ -658,6 +658,36 @@ commit, with `Build (macos-arm)`, `Build (macos-intel)`, `Build (windows)` and
 reason to unset the flag**: the flag is what stops the suite passing by not
 running. Re-run the job; it passed the same commit on the third attempt.
 
+> **"It is the runner's network" is UNVERIFIED, and the evidence points the other
+> way. Added 2026-11-03.**
+>
+> The paragraph above was written from a green run on 2026-10-29 and three red ones
+> on 2026-11-02. Investigating the red runs found the claim was never checked — and
+> that two facts weigh against it:
+>
+> 1. **The runner demonstrably HAS egress**, by this repository's own criterion in
+>    `CI-CD.md`. That job downloads the `frontend-dist` artifact, runs `pnpm
+>    install` against the registry, and installs `sing-box` and
+>    `shadowsocks-rust` from GitHub releases before the test runs.
+> 2. **A `504 Timeout` from the engine is exactly what a runner that cannot reach
+>    the host ALSO produces.** `client/docs/UPSTREAM-CHANGES.md` says so about this
+>    very URL: *"a sandboxed runner cannot reach it — the engine reports that as
+>    `Timeout`, indistinguishable from a dead tunnel."* The failure message cannot
+>    tell the two diagnoses apart, and the one written down is the more comfortable
+>    of them.
+>
+> **Verified:** the test passes where egress works (green 2026-10-28 and
+> 2026-10-29) and fails on the 2026-11-02 runners. **Not verified: which side is
+> broken, because the job never measured the control.**
+>
+> `client.yml` gained a *Diagnose the runner's own egress* step that runs exactly
+> when the suite fails: it `curl`s both hosts directly, bypassing the engine, and
+> writes the result to the job summary. `curl 204` beside an engine `Timeout` means
+> a probe defect; `curl` failing too confirms the runner. **Until that has been
+> read, do not re-run-and-hope, and do not record a cause.** This is
+> DEBUGGING-METHOD §3 — the check cannot distinguish "wrong" from "unreachable", so
+> a verdict either way is a guess wearing evidence's clothes.
+
 ### Every installed 3.2.17 Windows client is stranded, and the fix cannot reach it
 
 **Added 2026-10-02.** The 2026-10-02 `FIXES.md` entry ("the update to 3.2.18 is
@@ -1222,6 +1252,20 @@ release assets, and it remains **not done**.
 >    `geosite.dat` moved (4,353,536 → 4,356,006), which is an ordinary routing-data
 >    update. That is luck, not a guarantee: the 2026-11-01 rebuild changed all
 >    four. Treat any repin as a possible data change and verify it as one.
+>
+> **CLOSED 2026-11-03 — mirrored, not repinned.** The sixth repin was made on
+> 2026-11-02 and did not survive the day either: `Build (macos-arm)` could not
+> fetch `geosite.dat` at all (403 from the GitHub API) and `Build (linux)` passed
+> "Fetch sidecars and geo data" only because that runner's cache still held the
+> bytes. The four files are now committed in `vendor/build-inputs/resources/` and
+> `prebuild` reads them from disk; the lock's pins are unchanged, so this was a
+> mirror and not a repin. `VENDORED-BUILD-INPUTS.md` §4 owns the detail.
+>
+> **What is still not mirrored:** `clash-verge-service-ipc`, the archive the three
+> service helpers are unpacked from. It is downloaded with no lock entry and no
+> hash check, so it is both the one remaining upstream dependency *and* the one
+> input that cannot be verified on arrival. Stable upstream is the only reason it
+> has not bitten. It is the next one to pin.
 > 2. *Verify the new bytes do the job, not just that they are new.* Because the
 >    content changed, a hash check proves only that the download is self-consistent
 >    with whatever was just written into the lock. The 2026-11-02 repin was

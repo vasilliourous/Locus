@@ -24,6 +24,72 @@ commercial gaps, [`../business/17-not-built.md`](../business/17-not-built.md).
 
 ---
 
+## THE §21 GUARD COULD NOT REPORT A TRUE RESULT, AND COULD NOT FAIL (2026-11-03, unreleased)
+
+- **What broke.** CI run `41446549157` failed `Verify` on
+  `BAD prepare_startup no longer calls require_install_for_session()` — against a
+  tree where the call is present at `lifecycle.rs:508`. The same script on an
+  identical clean checkout of the same commit passed locally, which is the detail
+  that made it a defect rather than a flake.
+- **The mechanism, reproduced before the fix.** The sub-check matched with
+  `printf '%s' "$x" | grep -q PATTERN`. `grep -q` exits on its first match, which
+  closes the pipe while `printf` is still writing; `printf` dies on SIGPIPE and,
+  because `check-consistency.sh` runs under `set -uo pipefail`, the **pipeline**
+  takes `printf`'s status (141) rather than grep's 0. A match therefore read as
+  "not found". The log carries the footprint on the BAD line itself:
+  `printf: write error: Broken pipe`. It is input-size dependent — 37 KB of
+  stripped `lifecycle.rs` fits a pipe buffer on a desktop and does not on the
+  runner — so the verdict depended on how much text preceded the match.
+- **The second defect, found only by falsifying the first fix.** The check
+  searched the whole file, and `prepare_startup` calls that function **twice**: the
+  pre-existing `service_required`/TUN branch, and the macOS call the section
+  exists to protect. Deleting the macOS call left the guard printing `OK`,
+  satisfied by the TUN call 40 lines above it. **A guard that cannot fail**, which
+  is the exact shape AGENTS.md rule 3 was written for; the previous proof suite
+  missed it because its defect (`if false && …`) tripped the other sub-check.
+- **Fix.** Matching is `case` (a builtin: no process, no pipe, no signal), and the
+  search is **scoped** to the macOS call site, sliced from the
+  `#[cfg(target_os = "macos")]` attribute by line, with a `WARN` — never a `BAD`
+  — when the slice cannot be made. `test-contract-guard.sh` gained the case that
+  keeps it scoped.
+- **The rule.** A guard that matches by piping into `grep -q` under `pipefail` can
+  report a match as a miss. And a search for "the code calls X" must be scoped to
+  the call site that matters, or a second call elsewhere in the same function
+  silently stands in for the one that was deleted.
+
+---
+
+## THE GEO DATABASES ARE NOW VENDORED (2026-11-03, unreleased)
+
+- **What was still broken.** The four files were pinned by `meta-rules-dat`
+  release-asset ID and fetched at build time. That is the dependency that failed
+  five times in nine days (see the entries below). The sixth repin was made on
+  2026-11-02 and CI failed again the same day — `Build (macos-arm)` could not
+  fetch `geosite.dat` at all, and `Build (linux)` only got past it because the
+  runner's own cache happened to hold the bytes. That is not a build; it is a
+  cache that was warm.
+- **What changed.** `ASN.mmdb`, `Country.mmdb`, `geoip.dat` and `geosite.dat` are
+  committed under `vendor/build-inputs/resources/`. The `vendored.resources`
+  entry in `sidecar.lock.json` already named that directory and had no bytes in
+  it; it now does. `prebuild.mjs` needed no change — its vendored branch already
+  wins over the URL — so the effect is that the network is no longer consulted at
+  all for these four.
+- **Verified.** Bytes match the existing pins exactly, so the lock is unchanged
+  and no repin happened. `prebuild.mjs` with `HTTPS_PROXY` pointed at a dead port
+  reported all four as *"is vendored in the repository and matches its pin"* with
+  no `download finished` line naming them — the distinction that only a dead proxy
+  makes visible. The real vendored engine then loaded them: `GeoSite cn records:
+  110177`, `GeoIP cn records: 10012`.
+- **What it costs.** 35.8 MiB of committed data, on top of the 464.7 MiB the
+  vendored engines already spend. This is the trade `STILL-OPEN.md` recorded and
+  the 2026-11-02 entry said should be made instead of a sixth repin.
+- **What it does not fix.** The alpha engine and the stable engine are still
+  fetched from upstream *when a checkout lacks the vendored copy*, and the
+  `clash-verge-service` IPC bundle is still downloaded. Those upstreams are stable
+  by comparison; the present defect was these four.
+
+---
+
 ## THE GEO DATABASES WERE DELETED UPSTREAM A FOURTH TIME, AND THIS TIME IT WAS THE CONTENT THAT MOVED (2026-11-02, unreleased)
 
 - **What broke.** Every `Build (platform)` job failed in *Fetch sidecars and geo
