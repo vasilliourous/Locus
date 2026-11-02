@@ -335,6 +335,12 @@ fn write_config(dir: &Path, controller_port: u16, mixed_port: u16) -> PathBuf {
          external-controller: 127.0.0.1:{controller_port}\n\
          log-level: warning\n\
          ipv6: false\n\
+         dns:\n\
+         \x20 enable: true\n\
+         \x20 ipv6: false\n\
+         \x20 enhanced-mode: redir-host\n\
+         \x20 nameserver:\n\
+         \x20   - system\n\
          proxies:\n\
          \x20 - name: \"Locus\"\n\
          \x20   type: direct\n\
@@ -355,6 +361,29 @@ fn write_config(dir: &Path, controller_port: u16, mixed_port: u16) -> PathBuf {
     config
 }
 
+/// Why `dns.nameserver: [system]` is in the config above, and why it is not
+/// optional.
+///
+/// With no `dns:` block, mihomo falls back to its **built-in default resolver**,
+/// whose upstreams are `114.114.114.114`, `223.5.5.5`, `8.8.8.8`, `1.0.0.1`
+/// (`dns.defaultNameserver` / `dns.nameserver` in `config/config.go`). Those are
+/// working resolvers and quite the wrong ones for this test:
+///
+///   * a CI runner resolves `cp.cloudflare.com` in ~10 ms through the system
+///     resolver and answers `204` (measured on the runner, 2026-11-03);
+///   * the engine, asking `223.5.5.5` and `doh.pub`, got **no** answer inside the
+///     probe's 5 s budget, so the delay test returned `504 Timeout`.
+///
+/// `Timeout` is the exact string a *dead tunnel* produces, so the test failed
+/// and the recorded cause was "the runner's network" — for four red runs over
+/// two days, while the runner demonstrably had egress the whole time. Any
+/// machine whose view of a Chinese DNS server is slow or blocked loses this test
+/// for a reason that has nothing to do with what it asserts.
+///
+/// `system` makes the engine use the resolver the operating system already
+/// trusts, which is the same one `curl` and `getent` use — so the control and the
+/// measurement cannot disagree about naming. The shipped client's own config is
+/// untouched by this: it is a property of the *test harness*, not of the product.
 /// The path the egress probe asks for, with the tier group name.
 ///
 /// Mirrors `probe::probe_egress`: the URL is passed as the `url` query
