@@ -1199,6 +1199,19 @@ release assets, and it remains **not done**.
 >    assets is still **not done**, and it is the only option that does not depend
 >    on someone else's release hygiene. Until it is done, a build failure in
 >    "Fetch sidecars and geo data" should be read as *this*, not as a code defect.
+>
+>    **The repin to the 2026-11-01 IDs survived under an hour.** MetaCubeX
+>    republished again at **2026-11-02 01:42** and the four IDs were 404 before
+>    the next CI run finished — so the fifth repin (to the 2026-11-02 IDs, same
+>    day) is equally temporary, and there is no longer any question of whether
+>    repinning is sustainable. It is not. Two deletions in one hour is what
+>    settles it: **the next person to see this failure should mirror, not repin.**
+>
+>    The 2026-11-02 republish was benign by comparison — three of the four files
+>    came back byte-identical (`ASN.mmdb`, `Country.mmdb`, `geoip.dat`) and only
+>    `geosite.dat` moved (4,353,536 → 4,356,006), which is an ordinary routing-data
+>    update. That is luck, not a guarantee: the 2026-11-01 rebuild changed all
+>    four. Treat any repin as a possible data change and verify it as one.
 > 2. *Verify the new bytes do the job, not just that they are new.* Because the
 >    content changed, a hash check proves only that the download is self-consistent
 >    with whatever was just written into the lock. The 2026-11-02 repin was

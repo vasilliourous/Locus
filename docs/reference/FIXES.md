@@ -49,6 +49,13 @@ commercial gaps, [`../business/17-not-built.md`](../business/17-not-built.md).
   … records: 110177`, and `Country.mmdb`/`ASN.mmdb` each logged `Load MMDB file`
   and `Load ASN file` while resolving real traffic through a `GEOIP,CN` rule.
   A stub or truncated download would fail to parse; these parse and match.
+- **Resolved by a second repin the same day, which then also 404'd within the
+  hour.** MetaCubeX republished again at 2026-11-02 01:42 and deleted the
+  2026-11-01 IDs before CI finished. That makes five repins in nine days and
+  settles the question this entry opened: repinning is not the fix. See
+  `STILL-OPEN.md` — the next occurrence should be met with mirroring, not a sixth
+  repin. The 2026-11-02 upload was byte-identical for three of four files
+  (verified by sha256), with only `geosite.dat` moving.
 - **The rule.** A pin buys reproducibility, not availability. When a build input
   is pinned by upstream asset ID, that ID is still an upstream fact that can be
   withdrawn, and the newest content is not necessarily the old content — verify

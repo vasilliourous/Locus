@@ -6,28 +6,28 @@
   "engine_versions_provenance": "read from the local binaries with `-v`; the gitignored prebuild cache is consulted only as a cross-check and is not required",
   "resources": {
     "ASN.mmdb": {
-      "asset_id": 696971459,
+      "asset_id": 700127065,
       "bytes": 9000080,
       "sha256": "3169b9ea7dad762f6837b95408dadc1173f47be33be2d83b6c90e67a57a7eb2e"
     },
     "Country.mmdb": {
-      "asset_id": 696971509,
+      "asset_id": 700127093,
       "bytes": 7651117,
       "sha256": "9a485c40b6fda868f3d3b981f928b8ab3d1e400fac1bf9cc8d27ebc08ae9bb0b"
     },
     "geoip.dat": {
-      "asset_id": 696971554,
+      "asset_id": 700127144,
       "bytes": 16549675,
       "sha256": "fbf747a085be25eb61ecac8c27140b4ab0bf8181af6fdb104caa325bd93cf117"
     },
     "geosite.dat": {
-      "asset_id": 696971626,
-      "bytes": 4354536,
-      "sha256": "c2ec1559aa5de2420f61ced348dd45ef44f07673d3bfc95dfab86174db3fd926"
+      "asset_id": 700127218,
+      "bytes": 4356006,
+      "sha256": "7297bf574a563aed8a69528e1f3a2bb275911fb83ebe3082494213d97ab09deb"
     }
   },
   "resources_provenance": "Pinned by GitHub release-asset ID. meta-rules-dat publishes only a rolling `latest` release with no dated tag, so download/latest/... points at whatever was rebuilt most recently and changes without notice. An asset ID names one immutable upload.",
-  "resources_release": "Release 2026-11-01 01:21 (repinned 2026-11-02 after the 2026-10-28 release's asset IDs were deleted upstream)",
+  "resources_release": "Release 2026-11-02 01:42 (repinned twice on 2026-11-02: the 2026-10-28 and 2026-11-01 releases were both deleted upstream within the hour)",
   "sidecars": {
     "clash-verge-service": {
       "x86_64-unknown-linux-gnu": {

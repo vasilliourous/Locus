@@ -18,16 +18,17 @@ and as of **2026-10-29 the eight binaries are also committed**, under
 
 ## 1. Why a build input is in the repository at all
 
-Four separate outages in eight days, all of the same shape: the build depended on
-a URL that a third party owned. The fourth proves the point the first three made —
-a repin is a repair, not a fix.
+Five separate outages in nine days, all of the same shape: the build depended on
+a URL that a third party owned. The last two prove the point the first three made
+— a repin is a repair, not a fix. The fifth followed the fourth by under an hour.
 
 | Date | What disappeared | Cost |
 |---|---|---|
 | 2026-10-26 | `alpha-94b13ae`, the mihomo alpha, deleted when the prerelease was re-rolled | The only copy anywhere. The client could not compile. |
 | 2026-10-28 | Four `meta-rules-dat` asset IDs, republished under new IDs | Both `Build (linux)` and `Build (windows)` stopped. |
 | 2026-10-29 | `alpha-6780eee`, re-rolled to `alpha-ca8d7c4` | macOS and Windows stopped; linux survived **only** because it was the one platform vendored. |
-| 2026-11-02 | The same four `meta-rules-dat` IDs again, after a 2026-11-01 rebuild — and this time the **content changed** too | Every `Build (platform)` job stopped in "Fetch sidecars and geo data". A fourth repin, not a fix; mirroring is still not done. |
+| 2026-11-02 | The same four `meta-rules-dat` IDs again, after a 2026-11-01 rebuild — and this time the **content changed** too | Every `Build (platform)` job stopped in "Fetch sidecars and geo data". Repinned. |
+| 2026-11-02 | **Those replacement IDs, again, within the hour** (2026-11-02 01:42 rebuild) | Same step, same four assets. Repinned again — five in nine days. **This is the row that says repinning is not a fix.** |
 
 That third row is the important one, and it is a lesson about the shape of the
 fix rather than the size of it: **vendoring one platform converted a fleet-wide
@@ -110,9 +111,11 @@ GitHub release-asset ID, and not mirrored**. They are downloaded at build time
 into `client/src-tauri/resources/` (gitignored) and hashed against the lock by
 `check-consistency.sh` §39.
 
-**Repinned 2026-11-02.** The previous pins (the 2026-10-28 republish) returned
-`404` after MetaCubeX rebuilt the rolling release on 2026-11-01, which failed
-every `Build (platform)` job. The lock now carries the 2026-11-01 asset IDs.
+**Repinned twice on 2026-11-02.** The 2026-10-28 pins returned `404` after
+MetaCubeX rebuilt the rolling release on 2026-11-01, which failed every
+`Build (platform)` job. That repin was itself dead within the hour: a third
+rebuild on 2026-11-02 at 01:42 deleted those IDs too, and the lock now carries
+the **2026-11-02** asset IDs. Five repins in nine days.
 
 **The content moved, so the hash alone was not enough.** Unlike the 2026-10-28
 event — where three of four files came back byte-identical — the 2026-11-01
