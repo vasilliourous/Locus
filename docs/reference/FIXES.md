@@ -24,6 +24,35 @@ commercial gaps, [`../business/17-not-built.md`](../business/17-not-built.md).
 
 ---
 
+## THE VENDORING GUARD ACCUSED A CORRECT TREE, BECAUSE IT LOOKED IN THE WRONG PLACE (2026-11-01, unreleased)
+
+- **What was being done.** The activation tunnel's client half, its guards, and a
+  theme fix. Running the release gate — `pnpm check:release`, which is
+  `check-consistency.sh` invoked from `client/` — reported
+  `BAD the lock declares vendored inputs but vendor/build-inputs does not exist`.
+- **Why.** §39b set `VENDOR_ROOT="vendor/build-inputs"` and read
+  `server/data/sidecar.lock.json` **relative to the caller's working directory**,
+  while the script's own usage line says it is runnable *from anywhere*. From
+  `client/`, the `[ ! -d ]` test failed on a directory that exists, and the guard
+  went on to accuse the code. Inside that block `Path.cwd()` and a relative
+  `git ls-files` made the rest of it cwd-dependent too.
+- **How it was caught.** By the failure disagreeing with itself: the same commit
+  passed from the repo root and failed from `client/`, so the guard was reporting
+  a property of the shell rather than of the tree. Reproduced deterministically
+  by running both.
+- **The fix.** Anchor the root to `$REPO`, derive the repository root from
+  `git rev-parse` rather than assuming the cwd, and normalise every path to
+  repo-relative before comparing — `git ls-files` prints repo-relative names, so
+  comparing them with absolute paths would have marked *every* vendored file
+  untracked. An untracked canary file dropped into `vendor/build-inputs/` still
+  produces `BAD`, from either directory.
+- **The rule.** A guard that reads a path relative to the caller inherits the
+  caller's mistakes. `$REPO` is computed at the top of this script for exactly
+  this reason; use it. And a guard's verdict must not depend on where it was
+  invoked from — that is a property of the guard, never of the code it judges.
+
+---
+
 ## THE VENDORED COPY WAS NEVER READ, AND ONLY A DEAD PROXY COULD TELL (2026-10-29, unreleased)
 
 - **What was being done.** Vendoring the build inputs — the eight binaries the

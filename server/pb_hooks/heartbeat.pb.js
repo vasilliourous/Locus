@@ -268,10 +268,14 @@ routerAdd("POST", "/api/heartbeat", function(e) {
             // `free_allowance_mb` — the monthly allowance in MEBIBYTES.
             // 10240 MiB = 10 GiB, matching docs/business/04-tiers.md §4.4.1.
             response.free_allowance_mb = 10240;
-            // `free_throttle_mbps` — speed after the allowance is spent. The
-            // client switches its tc-independent local cap to this; the server's
-            // 1mbit tc class is the hard ceiling either way. "Throttled further",
-            // not cut off, is the decided behaviour (04-tiers.md §4.4.5).
+            // `free_throttle_mbps` — speed after the allowance is spent, as the
+            // decided design (04-tiers.md §4.4.5: "throttled further", not cut
+            // off). SENT, NOT HONOURED: the client parses and stores this value
+            // and nothing lowers a running Core's speed from it, because the
+            // vendored engine accepts `rate-limit`/`max-rate` and enforces
+            // neither (measured 2026-11-01; docs/reference/STILL-OPEN.md).
+            // Do not describe this as an applied cap — the only cap that acts is
+            // the server's 1mbit `tc` class, which is the ceiling either way.
             response.free_throttle_mbps = 1;
         }
 

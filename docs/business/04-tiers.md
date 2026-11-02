@@ -23,7 +23,7 @@ code, what changed from the legacy model, and the free tier's design in full.
 
 | Plan | TCP port | UDP (UoT) | Hard cap (tc) | Kernel | Data | What the student gets |
 |---|:--:|:--:|:--:|---|---|---|
-| **Free** | 8443 | ✓ 8447 | **1 Mbps** (both TCP and UDP) | BBR | 10 GB/mo, then throttled | Chat, browsing, **and light gaming** (Roblox, Minecraft). |
+| **Free** | 8443 | ✓ 8447 | **1 Mbps** (both TCP and UDP) | BBR | 10 GB/mo; intended to slow after that — **no further slowdown is applied today** (§4.4.5) | Chat, browsing, **and light gaming** (Roblox, Minecraft). |
 | **Full** | 8445 | ✓ 8446 | **100 Mbps** TCP; UDP uncapped | BBR | Unmetered | Everything, **including heavy FPS titles** and 4K streaming. |
 
 > **UDP is on both plans; the rate is the difference.** That is the whole ladder
@@ -260,12 +260,16 @@ session):
 |---|---|---|
 | **Usage bar** | Always, on the connection screen, once an allowance applies. | ✅ `components/connection/usage-bar.tsx` |
 | **Warning** | At 80% of the allowance. | ✅ the warning colour plus a one-line notice |
-| **Persistent banner** | Once throttled, for the rest of the month. | ✅ the bar's summary line states it, in the error colour |
-| **Upgrade CTA** | Beside the throttle state — one tap to Stealth. | ⚠️ **NOT BUILT** — the copy names the throttle but there is no purchase link yet (see [`18-open-items.md`](18-open-items.md)) |
+| **Persistent banner** | Once the allowance is spent, for the rest of the window. | ✅ the bar's summary line states it, in the error colour |
+| **Upgrade CTA** | Beside the spent-allowance state only. | ✅ `usage-bar.tsx` — names the **action** ("ask the person who sold you your code about upgrading"), not a purchase button. There is no self-serve checkout: a code is a physical card ([`08-distribution.md`](08-distribution.md)), so "Buy now" would have nowhere to go. |
 
-The point is that a throttled student **knows why**, and knows exactly what
-fixes it. A silently slow app reads as a broken product; a visibly throttled
-one reads as a working free tier with a clear upgrade.
+The point is that a student whose allowance is spent **knows why**, and knows
+what fixes it. A silently slow app reads as a broken product; a visibly
+constrained one reads as a working free tier with a clear upgrade.
+
+> **The banner claims no speed change.** It reads *"free data is spent for this
+> month"*, not *"slowed until your allowance resets"* — see §4.4.5 for why the
+> second sentence was untrue and was removed.
 
 > The component renders **nothing at all** for a paying tier — `unlimited` is its
 > own case, not "metered with zero", so a Strike student is never shown a data
@@ -275,28 +279,44 @@ one reads as a working free tier with a clear upgrade.
 
 ### 4.4.5 What "throttled further" means
 
-Not cut off — slowed. The free tier keeps working after 10 GB, at a much
-lower speed, until the month resets. This is deliberately kinder than a hard
-stop: it keeps the app *useful* (so the student does not uninstall it) while
+**This is a design intention, not a behaviour, and the client no longer says
+otherwise.** Read this section as the decision; read
+[`../reference/STILL-OPEN.md`](../reference/STILL-OPEN.md) §"The free tier's
+throttle" for what actually happens.
+
+The intention: not cut off — slowed. The free tier keeps working after 10 GB, at
+a much lower speed, until the window resets. This is deliberately kinder than a
+hard stop: it keeps the app *useful* (so the student does not uninstall it) while
 making the paid tier obviously worth it.
 
-**How it works now.** The `tc` class on port 8443 is the hard ceiling at 1 Mbps
-either way; the "further" throttle is the speed the client drops to once the
-allowance is spent, sent by the hub as `free_throttle_mbps` and *stored* by the
-client.
+**How it works today.** The `tc` class on port 8443 is the hard ceiling at 1 Mbps
+for the whole of the free tier, spent allowance or not. The hub sends
+`free_throttle_mbps` and the client parses and *stores* it — and that is the end
+of the chain.
 
-> **The honest limit, and it is unchanged by this merge.** The client stores that
-> speed and **does not yet lower a running Core's speed from it**. The behaviour
-> is decided, the number arrives, and the act of applying it to a live tunnel
-> does not exist — see [`17-not-built.md`](17-not-built.md) and
-> [`../reference/STILL-OPEN.md`](../reference/STILL-OPEN.md). Because the server's
-> 1 Mbps `tc` class is the hard ceiling regardless, no student is worse off than
-> the free tier's promise; but the app's wording describes an intention, not a
-> behaviour. The 30-day window, the 80% warning line and the classification all live
-in one pure module (`client/src-tauri/src/locus/usage.rs`) so the warning and the
-throttle cannot disagree about where the line is.
+> **The honest limit, measured 2026-11-01 — do not write around it.** Nothing
+> lowers a running Core's speed from that value, and the obvious implementation
+> **cannot** work: the vendored engine accepts `rate-limit`/`max-rate` on
+> outbounds and on inbound listeners and **enforces neither** (8 MiB over a real
+> Shadowsocks-2022 peer: 233 MB/s baseline, 234 MB/s with `rate-limit: 1`). The
+> capability does not exist at the profile level, so adding the field would ship
+> a no-op that *looks* like a working limiter. Closing it needs a per-OS traffic
+> shaper — `tc` / `pfctl` / WFP — which the client has none of. Full measurements
+> and the closing argument: [`../reference/STILL-OPEN.md`](../reference/STILL-OPEN.md).
+>
+> **No student is worse off.** The server's 1 Mbps `tc` class is the ceiling
+> either way, so what a spent allowance does *not* do is lower it further.
 
-**The window is 30 days, not a calendar month.** The client has no trustworthy
+**What changed on 2026-11-01 instead of the throttle.** The banner used to read
+*"slowed until your allowance resets"*, which was the one statement on that
+screen the app did not honour. It now says the allowance is spent, which is true.
+`usage-bar-model.test.ts` asserts the copy contains neither "slowed" nor
+"resets", and was observed failing against the old wording.
+
+**The window is 30 days, not a calendar month.** The 30-day window, the 80%
+warning line and the classification all live in one pure module
+(`client/src-tauri/src/locus/usage.rs`), so the warning and the allowance state
+cannot disagree about where the line is. The client has no trustworthy
 timezone and the hub stores no billing date per student, so a fixed 30-day window
 is the one rule that cannot disagree with itself across a daylight-saving
 boundary. A student who returns after three months gets a **fresh** allowance,

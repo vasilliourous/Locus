@@ -118,7 +118,7 @@ shadowsocks units by hand.
 
 ## Open, and blocked in this environment
 
-### The activation tunnel: server half built, client half absent, nothing run on a school network
+### The activation tunnel: both halves built, nothing run on a school network
 
 **Added 2026-10-29.** A student on a school network could not activate at all.
 Measured from that network: 443 resets the TLS handshake after the ClientHello
@@ -142,13 +142,30 @@ rate limit that mirrors Caddy's.
   the port was never open, so the network was never asked.
 - **That the appliance tolerates an opaque stream on that port.** Reachability is
   not tolerance.
-- **That a real activation completes over it**, because **no client code uses the
-  tunnel yet.** The fallback belongs at `activation.rs::post_json` and
-  `heartbeat.rs::beat`, keyed on a `Failure` variant for a reset during the
-  handshake, and must not fire on DNS or certificate failures. Until it exists the
-  tunnel is reachable infrastructure with no caller.
+- ~~**That a real activation completes over it, because no client code uses the
+  tunnel yet.**~~ **CLOSED 2026-11-01: the client half now exists.** The fallback
+  lives in `locus/activation_tunnel.rs` and is wired at `activation.rs::post_json`
+  and `heartbeat.rs::beat`, keyed on `Failure::ResetDuringHandshake` — which does
+  **not** fire on DNS, refusal or certificate failures. See
+  [`ACTIVATION-TUNNEL.md`](ACTIVATION-TUNNEL.md) §6.
+- **That a deployed device activates over it end to end.** The mechanism is
+  proven on loopback, against a stand-in for the hub's filter, by
+  `client/src-tauri/tests/activation_tunnel_end_to_end.rs` — and that test was
+  shown to fail against a broken outbound and against an open allowlist. What it
+  does not cover is the deployed hub's own Python filter, or a real machine on a
+  school network.
 - **That any of it reaches a deployed device** until `setup.sh` re-runs on the
   hub from `/root/server/`.
+
+**A defect this work found, and what it means for whoever deploys it.** Building
+the client half showed that the module's `local_addr`/`local_port` keys are inert:
+`ssserver` has no inbound forwarding and dials whatever destination the client
+names. The forward keys are removed and `check-consistency.sh` §40.6 now rejects
+them. The consequence for the operator is that **the client must be built with a
+`FILTER_PORT` that matches the hub's `ACTIVATION_FORWARD_PORT`** (default 18090);
+§40.7 fails the build when they disagree. Establishing that took a running
+`ssserver` and its log, not a reading of the config — a sentence in a comment
+claimed the forward existed and nothing checked it.
 
 **The durable answer is not code.** The filter blocked the hub by category, which
 is a third party's policy decision; recategorisation is the only fix that does
@@ -350,9 +367,9 @@ argument plus CI guard**, and it should not be recorded as working.
 
 ---
 
-### The free tier's throttle is decided, stored — and applied to nothing
+### The free tier's throttle: the hub sends it, and no mechanism can apply it
 
-**Added 2026-10-04, updated for 3.2.26.** This is the largest remaining gap in
+**Added 2026-10-04; measured 2026-11-01.** This is the largest remaining gap in
 the free tier, and it is worth stating precisely because the field looks wired.
 
 What exists: the hub sends `free_throttle_mbps`; the client parses it (tolerantly
@@ -361,25 +378,45 @@ and can read it back (`store::throttle_mbps`). `check-consistency.sh` §23 asser
 that reader exists.
 
 What does **not** exist: anything that lowers a running Core's speed from that
-value. The **decision** to throttle works end to end; the **act** does not.
+value.
 
-So today's honest behaviour for a student past their allowance is:
+**Measured 2026-11-01, and it changes the shape of this gap.** The obvious
+implementation is a `rate-limit` on the generated mihomo profile, so that was
+tried against the vendored engine rather than assumed. **The engine accepts both
+field spellings and enforces neither.** Throughput for an 8 MiB download over a
+real Shadowsocks-2022 peer on loopback:
 
-- the usage bar says "slowed until your allowance resets" — which is the
-  committed copy, and is therefore **currently untrue**;
-- the connection is **not** actually slowed, beyond the server's 1 Mbps `tc` cap
-  that applies to the tier regardless.
+| Config | Measured |
+|---|---|
+| no rate field at all (baseline) | 233 MB/s |
+| `rate-limit: 1` on the `ss` outbound | 234 MB/s |
+| `max-rate: 1000000` on the `ss` outbound | 379 MB/s |
+| `rate-limit: 1000000` on an inbound listener | 355 MB/s |
 
-That is a documentation-shaped problem as much as a code one: 3.2.26 shipped the
-sentence before the mechanism. The `td` cap on the hub means no student is worse
-off than before — 1 Mbps is the free tier's ceiling either way — but the app is
-claiming something it does not do.
+So this is **not** a missing three-line config change — at the profile level the
+capability does not exist, and adding the field would have shipped a no-op that
+looks like a working limiter. (The same trap as the audit of this repo's own
+`tc` verifier: a check that cannot fail reads exactly like one that passed.)
 
-**The specific observation that would settle it.** A free code, past its
-allowance, on a machine with a client: measure throughput and compare against a
-fresh free window. They are identical today. Until the applying step exists,
-`04-tiers.md` §4.4.5's "throttled further" is a design intention rather than a
-behaviour, and the banner's wording should be read as aspirational.
+**What closing it actually requires:** a per-OS traffic shaper acting on the
+running Core's traffic — `tc` on Linux, `pfctl`/`dnctl` on macOS, WFP or a
+callout driver on Windows — which is privileged, platform-specific code this
+client has none of today. It is deliberately not started: it cannot be verified
+on any platform from this checkout, and a defect in it degrades the tunnel for
+**paying** users, not just free ones.
+
+**What was changed instead (2026-11-01).** The banner no longer claims a speed
+change. It said *"slowed until your allowance resets"*, which was the one
+statement on that screen the app did not honour; it now says the allowance is
+spent, which is true. A test asserts the copy contains no "slowed" and no
+"resets", and was observed failing against the old wording. `04-tiers.md` §4.4.5
+now says the same thing in the same words — it previously described the throttle
+as an applied behaviour, which was the document side of this same defect — and
+the upgrade CTA it marked NOT BUILT is in `usage-bar.tsx`.
+
+**No student is worse off.** The hub's `tc` cap applies to the free tier all
+along, so 1 Mbps is the ceiling either way; what a spent allowance does *not*
+do is lower it further.
 
 ---
 
@@ -688,40 +725,48 @@ Confirming these needs a device, a hub, and a real uninstall. Do not read
 
 ## Open, and needs a decision rather than work
 
-### Nothing in the UI can clear a selected theme — `theme_mode` becomes unreachable
+### RESOLVED — nothing in the UI could clear a selected theme
 
-**Added 2026-10-01.** From the theme work (2026-10-01 entry in `FIXES.md`; design
-record in [`THEMES.md`](THEMES.md)).
+**Added 2026-10-01; closed 2026-11-01.**
 
 A theme carries its own light/dark mode and **supersedes `theme_mode` while one is
-set** (`THEMES.md` §2). The dropdown on Account only ever *writes* a theme id —
-every option in it is a theme — and nothing clears the field. So after a student
-picks any theme, the Appearance control above it becomes inert: it still stores a
-value, and the value is no longer what the app honours. "Follow the system" is
+set** (`THEMES.md` §2). The dropdown on Account only ever *wrote* a theme id —
+every option in it was a theme — and nothing cleared the field. So after a student
+picked any theme, the Appearance control above it became inert: it still stored a
+value, and the value was no longer what the app honoured. "Follow the system" was
 reachable only by editing `verge.yaml` by hand.
 
-**This is a decision, not a coding task.** The obvious shape is an explicit
-*Default (follow system)* entry that writes an empty/absent `theme_id`, but that
-changes what the dropdown means for an existing install (it would gain an option
-meaning "none of the above"), and it interacts with the 3rd gap below. Picking a
-shape is a product call, so it was not made silently.
+**The shape chosen** was the explicit *Default (follow system)* entry, writing
+`theme_id: ''`. The empty string was already a safe sentinel — `isThemeId('')` is
+false, so no registry entry can shadow it, and `hasTheme` in
+`use-custom-theme.ts` is `theme_id.length > 0`, so `''` makes the app honour
+`theme_mode` again. Both properties are now asserted in
+`client/tests/theme-colors.test.ts`, and the assertion was written because the
+alternative — a sentinel that accidentally matched a real theme — would look
+exactly like a theme bug.
 
-**Until it is made:** the two Appearance controls can visibly disagree, and the
-honest description of the second one is "overrides the first while set".
+That leaves the second entry below, which is unchanged: the two controls are
+still separate, and now the second one can be *cleared* rather than only set.
 
 ### The theme dropdown and the `theme_mode` dropdown are separate and can disagree
 
-**Added 2026-10-01.** Same change.
+**Added 2026-10-01; partly addressed 2026-11-01.** Same change.
 
-`account.tsx` now has two adjacent controls in Preferences: Appearance
-(`theme_mode`, 3 options) and Theme (`theme_id`, one option per entry in the
-registry — nine today; `check-consistency.sh` §9 recomputes the id list). When a
-theme is set, the first shows a value the app is not honouring. `THEMES.md` §7 records this as
-deliberately deferred rather than overlooked — merging them is a UI change with
-its own migration question (what does an existing "Dark" choice become?) and is
-not needed for themes to work. **The point where this becomes confusing to a
-student is the point to do it,** and that point is probably the same change as the
+`account.tsx` has two adjacent controls in Preferences: Appearance
+(`theme_mode`, 3 options) and Theme (`theme_id`, one option per registry entry plus
+*Default (follow system)*; `check-consistency.sh` §9 recomputes the id list). When
+a theme is set, the first shows a value the app is not honouring.
+
+**What improved:** the Theme control can now be *cleared*, so the state above is
+recoverable by the student rather than only by hand-editing `verge.yaml` — see the
 entry above.
+
+**What remains:** the two controls are still separate, so while a theme is set the
+Appearance select shows a value that has no effect. Merging them is a UI change
+with its own migration question (what does an existing "Dark" choice become?) and
+is not needed for themes to work. `THEMES.md` §7 records it as deliberately
+deferred rather than overlooked. Nothing here is wrong or unrecoverable; it is two
+controls where one would be tidier.
 
 ---
 
@@ -850,6 +895,32 @@ is actually in the field before relying on an update to reach it.
 
 Finished items, collected here so the live sections hold only live gaps. Nothing
 here needs work.
+
+### RESOLVED — three documents described behaviour the code did not have
+
+**Found and fixed 2026-11-01**, while refreshing the docs for the activation
+tunnel and theme work. Recorded because none of these had a guard, and the class
+is worth naming: **a sentence is the one artefact in this repository that nothing
+recomputes.**
+
+1. **`04-tiers.md` §4.4.5 described the spent-allowance slowdown as an applied
+   behaviour** — "the speed the client drops to" — when the client only stores the
+   value and the engine cannot enforce a rate at all. §4.4.4 also still marked the
+   upgrade CTA `NOT BUILT` and described it as "one tap to Stealth", a tier that
+   was retired in the merge. Both now match `usage-bar.tsx` and the measured
+   finding.
+2. **`heartbeat.pb.js` said "the client switches its tc-independent local cap to
+   this"** — a hub comment asserting a client behaviour that does not exist. A
+   comment is not guarded, so it survived reviews that checked the field's
+   presence. It now says plainly that the value is sent and not honoured.
+3. **`THEMES.md` §10 item 1 and `ACTIVATION-TUNNEL.md` §4 both described gaps
+   that this change closed** — a dropdown with no way to clear a theme, and a
+   tunnel the client "cannot use yet". The code moved; the prose did not.
+
+**The rule, and it is the one `CLAIMS.md` already states:** when a change makes a
+document false, the document is part of the change. Items 1 and 2 had drifted for
+weeks because no guard reads prose for intent — `§28` checks that live documents
+are *indexed*, not that they are *true*.
 
 - **Fork versioning (settled 2026-09-26).** The client's own line began at
   **3.0.0**, not Clash Verge's inherited `2.5.5`. Three version sites must agree at

@@ -4,12 +4,17 @@
 audience:    builder + human-operator
 status:      live
 authoritative-for: why enrolment is blocked on a censored network, what the activation tunnel is, and what is not yet proven about it
-verified-against: server/modules/09-activation-tunnel.sh, server/modules/05-caddy.sh, server/modules/08-firewall.sh, client/src-tauri/src/locus/hub/client.rs
+verified-against: server/modules/09-activation-tunnel.sh, server/modules/05-caddy.sh, server/modules/08-firewall.sh, client/src-tauri/src/locus/hub/client.rs, client/src-tauri/src/locus/activation_tunnel.rs, client/src-tauri/src/locus/activation.rs, client/src-tauri/src/locus/heartbeat.rs, client/src-tauri/tests/activation_tunnel_end_to_end.rs
 ```
 
-> **Status of this work: built and guarded in the tree; the client half does not
-> exist yet, and nothing here has been tested from a school network.** Read
-> "What is verified" and "What is not" before treating any of it as working.
+> **Status of this work: both halves built and guarded in the tree; the mechanism
+> is proven on loopback, and nothing here has been tested from a school network.**
+> Read "What is verified" (§4) and §6.6 before treating any of it as working.
+>
+> *Updated 2026-11-01: the client half now exists (`locus/activation_tunnel.rs`,
+> wired at `activation.rs::post_json` and `heartbeat.rs::beat`), and building it
+> exposed that the server's `local_addr`/`local_port` forward does not exist — see
+> §6.3.*
 
 ---
 
@@ -120,6 +125,8 @@ client ──SS (no readable name)──▶ :8453 ssserver
 | The opened port | `server/modules/08-firewall.sh` (`ACTIVATION_TUNNEL_PORT`, default 8453) |
 | Module ordering | `server/setup.sh` — after `02` (needs `ssserver`) and `06` (needs `:8090`), before `08` |
 | The guards | `server/scripts/check-consistency.sh` §40 |
+| The **client** half | `client/src-tauri/src/locus/activation_tunnel.rs` — see §6 |
+| Its proof | `client/src-tauri/tests/activation_tunnel_end_to_end.rs` |
 
 ### 3.1 The allowlist is the security boundary
 
@@ -224,8 +231,10 @@ deploys, which is a prerequisite for a client ever matching it.
   not that the inspector leaves an opaque stream alone. Observed behaviour of the
   student's own tunnel is the reason to expect it will, and that is an argument,
   not a measurement.
-- **That a real activation completes over it.** The client cannot use this
-  listener yet — see §6.
+- **That a real activation completes over it.** The client half now exists (§6)
+  and the mechanism was proven on loopback against a stand-in filter, but the
+  *deployed* hub's Python filter has never answered a tunnelled request and no
+  device has activated over this path. §6.6 lists the four things that remain.
 - **That any of this reaches a deployed device**, until `setup.sh` re-runs on the
   hub. See [`../reference/STILL-OPEN.md`](../reference/STILL-OPEN.md).
 
@@ -239,7 +248,22 @@ bug in its own right.
 1. **The error is truncated before it is shown.** `locus/activation.rs` formats
    `"{error}"`, where `reqwest::Error`'s `Display` is the generic outer message
    ("error sending request for url …"). The cause is in the `source()` chain and
-   is discarded. `"{error:#}"` would have named DNS, connect, or TLS.
+   is discarded.
+
+   **Corrected 2026-11-01.** This entry used to say `"{error:#}"` would have
+   named the cause. **It does not.** `reqwest::Error`'s `Display` prints only the
+   kind and the URL and never consults the alternate flag, so `{:#}` produces the
+   identical string. Measured on a mid-handshake reset:
+
+   ```text
+   Display(default) = error sending request for url (…)
+   Display({:#})   = error sending request for url (…)      ← no change
+   Display(chain)   = error sending request for url (…): client error (Connect):
+                      Connection reset by peer (os error 104)
+   ```
+
+   Fixed by walking `source()` in `activation.rs::describe_chain` and
+   `heartbeat.rs::describe_beat_chain`.
 2. **`locus::hub::diagnose()` has no callers.** The one function written to
    distinguish a root-store failure from a reachability failure is `pub` and
    never invoked, so the diagnostic does not reach a support log.
@@ -248,26 +272,114 @@ bug in its own right.
    `None` for all of them — the student is told nothing, and the log records
    nothing that separates them.
 
-A `Failure` variant for "the session was reset during the handshake" is also
-what the client-side fallback in §6 must key on. It must **not** fire on DNS
-failures or certificate errors, which a different transport cannot fix.
+   **Fixed 2026-11-01.** `Failure::ResetDuringHandshake` now separates the reset,
+   classified from the `io::ErrorKind` (`ConnectionReset`/`BrokenPipe`) rather
+   than from prose, and only when `is_connect()` has already narrowed the failure
+   to the connection phase. It carries its own `remedy()` sentence.
+   `Failure::retryable_over_tunnel()` is true for that variant and nothing else,
+   which is the rule the fallback in §6 keys on: a DNS failure, a refusal and a
+   certificate error are all explicitly excluded, because a different transport
+   cannot fix them.
 
 ---
 
-## 6. What does not exist yet
+## 6. The client half — built 2026-11-01
 
-**There is no client code that uses this tunnel.** As built, the repository has
-the server half only.
-
-To finish it, the fallback belongs at the two call sites that already resolve the
-hub through `contract::hub_url()` and share one HTTP client:
+**This section used to say "there is no client code that uses this tunnel." That
+is no longer true.** The client half is `client/src-tauri/src/locus/activation_tunnel.rs`,
+and the fallback is wired at the two call sites that resolve the hub through
+`contract::hub_url()`:
 
 - `locus/activation.rs::post_json` — `/api/activate`, `/api/code-lookup`
 - `locus/heartbeat.rs::beat` — `/api/heartbeat`
 
-Scope is **activation and heartbeat**, matching what the tunnel carries. Tunnelling
-the update path is a separate decision with its own signature surface and is not
-part of this work.
+Scope stays **activation and heartbeat**. Tunnelling the update path is a separate
+decision with its own signature surface and is still not part of this work.
+
+### 6.1 How it decides to fall back
+
+A direct hub call that fails is classified (`hub::Failure::classify`). The tunnel
+is attempted **only** when the class is `ResetDuringHandshake` and a bootstrap key
+was compiled into the build (`activation_tunnel_available()`). Everything else —
+DNS, refusal, certificate, protocol, an answered-but-unreadable response — is
+reported as before. That rule is `Failure::retryable_over_tunnel()`, and §5.3
+records why the other cases must not trigger it.
+
+### 6.2 How a request actually gets through
+
+The engine is the vendored mihomo sidecar, started as a **separate, ephemeral
+instance**: loopback only, one Shadowsocks outbound, one `MATCH` rule, no
+external controller, killed on drop. Not the Core — before activation the Core
+does not exist, which is the whole problem.
+
+```text
+post_json / beat
+  └─ engine (SOCKS 127.0.0.1:<ephemeral>) ──SS──▶ hub:8453
+       └─ HTTP POST http://127.0.0.1:18090<path>
+            └─ path filter (allowlist + rate limit) ──▶ PocketBase:8090
+```
+
+### 6.3 The correction that mattered: the destination is the FILTER
+
+**Measured 2026-11-01, and it invalidated the deployed design.** `ssserver` has
+**no inbound forwarding**. It decrypts the stream and then connects to whichever
+destination the client named, logging
+`tcp tunnel <peer> -> <requested destination>`. The `local_addr`/`local_port` keys
+in its config are `sslocal`'s SOCKS listen options; `ssserver` ignores them.
+
+So `09-activation-tunnel.sh`'s claim that "the decrypted stream is handed to a
+local listener" was **false**, and the path filter — and with it the allowlist
+that bounds a public bootstrap key — was never in the path. The keys have been
+removed from the module and the guard now rejects them (§40.6).
+
+The filter is reached because the **client** asks for it: a tunnelled request
+addresses `127.0.0.1:${ACTIVATION_FORWARD_PORT}` (default 18090). The client's
+`FILTER_PORT` and the module's `FORWARD_PORT` must agree, and §40.7 fails the
+build when they do not, or when the destination equals the listener's own port.
+
+This is honest about what the allowlist is: a bound on what a **client** can
+reach, enforced by the filter process. It is not a boundary against a hostile
+client, which could ask for any destination the hub can dial.
+
+### 6.4 Verified by running
+
+`client/src-tauri/tests/activation_tunnel_end_to_end.rs` stands up a real
+`ssserver` on the bootstrap port and the real engine, then drives a hand-rolled
+SOCKS5 request through them to a stand-in for the hub's filter. It asserts that an
+allowlisted path returns 200 **from the far side**, and that `/api/admin/*` is
+refused with an empty 403 after the tunnel carried it.
+
+**The test was shown to fail.** Pointing the engine's outbound at a dead port
+fails it; removing the allowlist from the filter (`|| true`) fails it with
+`a privileged path must be refused over the tunnel too, got 200`.
+
+An earlier version of this test *could not fail*: it addressed the filter's own
+port, so the request arrived whether or not the tunnel worked, and removing the
+server's forward keys still passed. That is recorded here because it is the trap
+`AGENTS.md` §3 names — a check that cannot fail reads exactly like one that
+passed.
+
+### 6.5 The bootstrap key
+
+Compiled in via `option_env!("LOCUS_ACTIVATION_TUNNEL_KEY")`, absent by default,
+never tracked. Absent ⇒ the tunnel is unavailable and the fallback is not
+attempted; the build is still complete. CI's `verify` job reports presence on
+every run and warns loudly on a tag, because a release shipped without it strands
+exactly the students this exists for and nothing in the artifact shows it.
+
+The value belongs in `server/secrets.env.age`; see §3.3 for the steps, which are
+still an operator action nobody has taken.
+
+### 6.6 What is still NOT verified
+
+- That `hub:8453` is reachable **from the school network**. Nothing has run there.
+- That the appliance tolerates an opaque stream on that port. Reachability is not
+  tolerance.
+- That a real device activates over it end to end. The mechanism is proven on
+  loopback against a stand-in filter; the deployed hub's Python filter has never
+  answered a tunnelled request.
+- That the deployed hub is running this module at all — `setup.sh` deploys from
+  `/root/server/` and has not re-run.
 
 ---
 

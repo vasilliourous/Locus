@@ -491,18 +491,21 @@ should be treated as review-blocking:
 Recorded here rather than left in a comment, because a gap that lives only in code
 is a gap the next agent rediscovers. None of these has a guard.
 
-1. **No control clears `theme_id`.** The dropdown only ever writes a value, and
-   every value is a theme — so once a theme is chosen, `theme_mode` (and with it
-   "follow the system") is unreachable from the UI. This is the sharpest edge of
-   the one-mode-per-theme decision in §2. Clearing it needs a UI decision, not a
-   code change: an explicit "Default (follow system)" entry is the obvious shape,
-   but it changes what the dropdown means for an existing install, so it is not
-   being made silently here.
-2. **The two Appearance controls can disagree in appearance.** The theme dropdown
-   and the `theme_mode` dropdown are separate and both visible on Account. When a
-   theme is set, the mode control shows a value the app is not honouring. §7 defers
-   merging them; the point where that becomes confusing to a student is the point
-   to do it.
+1. **~~No control clears `theme_id`.~~ Closed 2026-11-01.** The dropdown now carries
+   an explicit **Default (follow system)** entry that writes `theme_id: ''`, so
+   `theme_mode` is reachable again after a theme has been chosen. `''` is a safe
+   sentinel — `isThemeId('')` is false so no registry entry can shadow it, and
+   `hasTheme` in `use-custom-theme.ts` is `theme_id.length > 0` — and both
+   properties are asserted in `client/tests/theme-colors.test.ts`. Recorded in
+   [`STILL-OPEN.md`](STILL-OPEN.md) as the resolution, because it was a real gap
+   students could only escape by hand-editing `verge.yaml`.
+2. **The two Appearance controls can still disagree in appearance.** The theme
+   dropdown and the `theme_mode` dropdown are separate and both visible on
+   Account. When a theme is set, the mode control shows a value the app is not
+   honouring. Clearing the theme (item 1) makes the state *recoverable*, which is
+   the part that was actually harmful; the two controls being separate is a
+   tidiness question, and §7 defers merging them. The point where that becomes
+   confusing to a student is the point to do it.
 3. **A decoration designed for one mode can be named by the other.** `forest-glow`
    is a translucent wash designed against a dark background; `risograph` is
    designed against a light one. Nothing prevents a light theme from naming a
