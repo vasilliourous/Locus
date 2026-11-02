@@ -6,28 +6,28 @@
   "engine_versions_provenance": "read from the local binaries with `-v`; the gitignored prebuild cache is consulted only as a cross-check and is not required",
   "resources": {
     "ASN.mmdb": {
-      "asset_id": 683454234,
-      "bytes": 8981086,
-      "sha256": "4f480469576dba3e84b1f5c17313059982b70a62b8d35fb1ed225e39109b0531"
+      "asset_id": 696971459,
+      "bytes": 9000080,
+      "sha256": "3169b9ea7dad762f6837b95408dadc1173f47be33be2d83b6c90e67a57a7eb2e"
     },
     "Country.mmdb": {
-      "asset_id": 683454259,
-      "bytes": 7649827,
-      "sha256": "ccec4d6fa69de3a79960a460c377ac9a23c1a90e5f9052dae3488921e56201df"
+      "asset_id": 696971509,
+      "bytes": 7651117,
+      "sha256": "9a485c40b6fda868f3d3b981f928b8ab3d1e400fac1bf9cc8d27ebc08ae9bb0b"
     },
     "geoip.dat": {
-      "asset_id": 683454328,
-      "bytes": 16570425,
-      "sha256": "a6271d3c96361d96156e6d3f7cf1550ef21b00d2f951deb772f464db91e89ac5"
+      "asset_id": 696971554,
+      "bytes": 16549675,
+      "sha256": "fbf747a085be25eb61ecac8c27140b4ab0bf8181af6fdb104caa325bd93cf117"
     },
     "geosite.dat": {
-      "asset_id": 683454387,
-      "bytes": 4353539,
-      "sha256": "ba8968847bfb82a4f9b0c33da77b6d95f4f8fe1d7d3bb241a7ebac6c23b71631"
+      "asset_id": 696971626,
+      "bytes": 4354536,
+      "sha256": "c2ec1559aa5de2420f61ced348dd45ef44f07673d3bfc95dfab86174db3fd926"
     }
   },
   "resources_provenance": "Pinned by GitHub release-asset ID. meta-rules-dat publishes only a rolling `latest` release with no dated tag, so download/latest/... points at whatever was rebuilt most recently and changes without notice. An asset ID names one immutable upload.",
-  "resources_release": "Release 2026-10-28 09:30",
+  "resources_release": "Release 2026-11-01 01:21 (repinned 2026-11-02 after the 2026-10-28 release's asset IDs were deleted upstream)",
   "sidecars": {
     "clash-verge-service": {
       "x86_64-unknown-linux-gnu": {

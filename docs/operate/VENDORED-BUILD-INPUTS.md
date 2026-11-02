@@ -18,14 +18,16 @@ and as of **2026-10-29 the eight binaries are also committed**, under
 
 ## 1. Why a build input is in the repository at all
 
-Three separate outages in one week, all of the same shape: the build depended on
-a URL that a third party owned.
+Four separate outages in eight days, all of the same shape: the build depended on
+a URL that a third party owned. The fourth proves the point the first three made —
+a repin is a repair, not a fix.
 
 | Date | What disappeared | Cost |
 |---|---|---|
 | 2026-10-26 | `alpha-94b13ae`, the mihomo alpha, deleted when the prerelease was re-rolled | The only copy anywhere. The client could not compile. |
 | 2026-10-28 | Four `meta-rules-dat` asset IDs, republished under new IDs | Both `Build (linux)` and `Build (windows)` stopped. |
 | 2026-10-29 | `alpha-6780eee`, re-rolled to `alpha-ca8d7c4` | macOS and Windows stopped; linux survived **only** because it was the one platform vendored. |
+| 2026-11-02 | The same four `meta-rules-dat` IDs again, after a 2026-11-01 rebuild — and this time the **content changed** too | Every `Build (platform)` job stopped in "Fetch sidecars and geo data". A fourth repin, not a fix; mirroring is still not done. |
 
 That third row is the important one, and it is a lesson about the shape of the
 fix rather than the size of it: **vendoring one platform converted a fleet-wide
@@ -104,26 +106,34 @@ copy against the pin. It does not build from `vendor/` directly, because
 ## 4. What is not vendored yet: the four geo databases
 
 `ASN.mmdb`, `Country.mmdb`, `geoip.dat` and `geosite.dat` are **pinned by
-GitHub release-asset ID, and not mirrored**. Their group is declared in the lock
-and the directory does not exist, on purpose:
+GitHub release-asset ID, and not mirrored**. They are downloaded at build time
+into `client/src-tauri/resources/` (gitignored) and hashed against the lock by
+`check-consistency.sh` §39.
 
-- **I could not fetch the pinned bytes.** All four asset IDs from the 2026-10-28
-  republish now return `404`; the `latest` URL serves different bytes
-  (`Country.mmdb` hashes `9a485c40…` against a pin of `ccec4d6f…`). Committing
-  the wrong bytes under a correct pin would be strictly worse than downloading
-  the right ones, and repinning to `latest` would reintroduce exactly the
-  drift-by-republish the asset-ID pin exists to stop.
-- **One of them differs by design.** The republish that touched `geosite.dat`
-  was a genuine upstream routing-data update (4,307,247 → 4,353,539 bytes).
-  "The bytes that passed their pin" and "the newest bytes" are different files,
-  and choosing the second silently is a data change nobody reviewed.
+**Repinned 2026-11-02.** The previous pins (the 2026-10-28 republish) returned
+`404` after MetaCubeX rebuilt the rolling release on 2026-11-01, which failed
+every `Build (platform)` job. The lock now carries the 2026-11-01 asset IDs.
 
-**What would close it.** On a host that still holds the pre-2026-10-28 bytes —
-a CI cache, or an image built before the republish — run
-`server/scripts/sidecar-lock.py --check`, copy the four files it verifies into
-`vendor/build-inputs/resources/`, and re-run `--check` to confirm. Then the
-`declaredButAbsent` warning in `prebuild.mjs` becomes a defect rather than the
-expected state, and that step should be removed in the same change.
+**The content moved, so the hash alone was not enough.** Unlike the 2026-10-28
+event — where three of four files came back byte-identical — the 2026-11-01
+rebuild changed all four (`Country.mmdb` +1290 bytes, `ASN.mmdb` +18994,
+`geosite.dat` +997, `geoip.dat` −20810). A `--write` would have recorded any bytes
+that happened to download. The repin was accepted only after the real vendored
+engine loaded each one: `geosite.dat` as `Load GeoSite rule: cn … records:
+110177`, and `Country.mmdb`/`ASN.mmdb` as `Load MMDB file` / `Load ASN file`
+while matching live traffic through a `GEOIP` rule.
+
+**Verifying a geo repin — the short version.** Point the vendored engine at a
+config with a `GEOIP` and a `GEOSITE` rule, run it against the new files, and
+confirm it logs both a GeoSite record count and an MMDB load. A stub, a truncated
+download or an HTML error page fails to parse; "the size looks plausible" does
+not distinguish them.
+
+**Still not mirrored.** These four remain the one build input that can break a
+build without any change here. Mirroring them into this project's own release
+assets is **not done** and is the only fix that does not depend on upstream
+release hygiene — see `STILL-OPEN.md`, which now records the risk as realised
+twice in five days.
 
 **Why the pin still protects in the meantime.** Asset IDs are immutable
 per-upload even when not permanent; §39 fails the build when the bytes stop

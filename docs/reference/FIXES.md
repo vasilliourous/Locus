@@ -24,6 +24,40 @@ commercial gaps, [`../business/17-not-built.md`](../business/17-not-built.md).
 
 ---
 
+## THE GEO DATABASES WERE DELETED UPSTREAM A FOURTH TIME, AND THIS TIME IT WAS THE CONTENT THAT MOVED (2026-11-02, unreleased)
+
+- **What broke.** Every `Build (platform)` job failed in *Fetch sidecars and geo
+  data* with `Failed to download …/meta-rules-dat/releases/assets/683454259:
+  status 404` (403 on macos-intel). All four `resources` pins — `ASN.mmdb`,
+  `Country.mmdb`, `geoip.dat`, `geosite.dat` — returned 404: the whole release
+  had been deleted, not just one asset.
+- **Why it was not caught by a guard.** The pins were correct when written. This
+  is a **world** fact — an upstream release is a thing that can be deleted — and
+  no check in this repository can read it. `check-consistency.sh` §39 verifies the
+  bytes *against the lock*; both agreed, and both were about a URL that had
+  stopped existing. The first evidence is CI, which is why the `Verify` job is
+  green while `Build` is red.
+- **What is different this time.** The three earlier repins (see the 2026-10-28
+  entries) replaced IDs for the *same* bytes. `meta-rules-dat` rebuilt the release
+  on **2026-11-01**, so the new assets carry new content: `Country.mmdb` grew
+  1290 bytes, `ASN.mmdb` 18994, `geosite.dat` 997, and `geoip.dat` *shrank* 20810.
+  A repin is therefore not a safe no-op here — the size and hash changes are the
+  review artifact.
+- **How the new bytes were verified, rather than assumed.** All four were
+  downloaded and checked with `file`, then loaded by the **real vendored engine**
+  (`verge-mihomo v1.19.32`): `geosite.dat` was accepted as `Load GeoSite rule: cn
+  … records: 110177`, and `Country.mmdb`/`ASN.mmdb` each logged `Load MMDB file`
+  and `Load ASN file` while resolving real traffic through a `GEOIP,CN` rule.
+  A stub or truncated download would fail to parse; these parse and match.
+- **The rule.** A pin buys reproducibility, not availability. When a build input
+  is pinned by upstream asset ID, that ID is still an upstream fact that can be
+  withdrawn, and the newest content is not necessarily the old content — verify
+  the *behaviour* (the engine loads it) before repinning, not only the hash the
+  lock will then record. `docs/reference/DEBUGGING-METHOD.md`'s "the artifact
+  exists" is not the same claim as "the artifact works".
+
+---
+
 ## THE VENDORING GUARD ACCUSED A CORRECT TREE, BECAUSE IT LOOKED IN THE WRONG PLACE (2026-11-01, unreleased)
 
 - **What was being done.** The activation tunnel's client half, its guards, and a

@@ -1184,6 +1184,27 @@ release assets, and it remains **not done**.
 > improvement** — it is the only fix that does not depend on another project's
 > release hygiene.
 
+> **Realised a second time on 2026-11-02, and this one settles the question.**
+> MetaCubeX rebuilt the release again (**2026-11-01 01:21**) and deleted all four
+> IDs the 3.3.4 repin held. All four 404'd (403 on one runner), failing every
+> `Build (platform)` job. Unlike the 2026-10-28 event, **the content moved too** —
+> `Country.mmdb` +1290 bytes, `ASN.mmdb` +18994, `geosite.dat` +997, `geoip.dat`
+> −20810 — so this was a repin of *different data*, not of identical bytes.
+>
+> **Two things follow, and the second is the one worth acting on.**
+>
+> 1. *A recurring failure needs a fix, not a fourth repin.* The pattern is now
+>    twice in five days: a rolling `latest` release means every upstream rebuild
+>    breaks the build. Mirroring the four files into this project's own release
+>    assets is still **not done**, and it is the only option that does not depend
+>    on someone else's release hygiene. Until it is done, a build failure in
+>    "Fetch sidecars and geo data" should be read as *this*, not as a code defect.
+> 2. *Verify the new bytes do the job, not just that they are new.* Because the
+>    content changed, a hash check proves only that the download is self-consistent
+>    with whatever was just written into the lock. The 2026-11-02 repin was
+>    accepted only after the real vendored engine loaded all four and matched
+>    traffic through them — not because the sizes looked plausible.
+
 ## If you are the next agent here
 
 1. **Read the "never met a database" section above first** — the term/renewal
