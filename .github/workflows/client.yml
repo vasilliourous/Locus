@@ -1191,39 +1191,6 @@ jobs:
             echo 'in the probe or its config, NOT in the runner.'
           } >> "$GITHUB_STEP_SUMMARY"
 
-      # ── ONE-OFF EGRESS MEASUREMENT (temporary, remove once the answer is in) ──
-      #
-      # `a_reachable_member_yields_a_usable_delay` failed on every Linux run since
-      # 2026-11-02. STILL-OPEN.md blames the runner; the failure message cannot
-      # tell "the runner cannot reach the host" from "the probe is wrong",
-      # because both produce a 504 Timeout. The step below measures both sides in
-      # one place and PRINTS them, so the answer is readable in the step log.
-      #
-      # It deliberately does NOT set LOCUS_REQUIRE_EGRESS: without it the test
-      # SKIPs and prints the status code it got, instead of panicking. That status
-      # code is the whole measurement.
-      - name: MEASURE runner egress vs probe (temporary)
-        if: matrix.label == 'linux'
-        shell: bash
-        run: |
-          echo "──────── CONTROL: curl straight at the two probe hosts ────────"
-          for u in http://cp.cloudflare.com/generate_204 https://www.gstatic.com/generate_204; do
-            printf '%-46s ' "$u"
-            curl -s -o /dev/null -w 'status=%{http_code} in %{time_total}s (ip=%{remote_ip})\n' \
-              --max-time 10 "$u" || echo 'curl FAILED'
-          done
-          echo "──────── DNS, as the engine would see it ────────"
-          getent ahosts cp.cloudflare.com | head -4 || echo "(getent failed)"
-
-      - name: MEASURE the probe with the assertion OFF (temporary)
-        if: matrix.label == 'linux'
-        shell: bash
-        env:
-          LOCUS_REQUIRE_LIVE_ENGINE: '1'
-        run: |
-          cargo test -p locus --test egress_probe_engine a_reachable_member_yields_a_usable_delay \
-            -- --nocapture 2>&1 | tail -30
-
       # `-D warnings` so a new lint fails the gate. `--features clippy` matches
       # the `clippy-only` alias in client/.cargo/config.toml, which is how this
       # was verified locally.
