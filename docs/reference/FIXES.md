@@ -24,6 +24,59 @@ commercial gaps, [`../business/17-not-built.md`](../business/17-not-built.md).
 
 ---
 
+## THE EGRESS PROBE SENT MILLISECONDS AS SECONDS, AND COULD NEVER REPORT EGRESS (2026-11-04, unreleased)
+
+- **What broke.** The readiness probe's through-tunnel check called mihomo's delay
+  route with `EGRESS_ATTEMPT_TIMEOUT.as_secs()` — the integer `5`. mihomo parses
+  that field with `strconv.ParseInt(q.Get("timeout"), 10, 16)` and applies it as
+  `time.Millisecond * timeout` (`hub/route/proxies.go`), so every delay test ran on
+  a **5-millisecond** budget, which no round trip can meet. It answered
+  `504 {"message":"Timeout"}` in about **7 ms**; the plugin maps a non-2xx to
+  `Ok(ProxyDelay { delay: 0 })`; `delay_is_a_measurement` correctly rejects `0`.
+  **Every member failed on every platform from 2026-10-02 until this fix.** Since
+  `decide` reaches `Ready` only on `egress == Ok` or `traffic == Flowing`, the app's
+  readiness had been resting entirely on the traffic websocket: the egress probe
+  was not a second source of evidence, it was dead weight.
+- **Why it survived a month.** Three reasons, none of them "nobody looked":
+  `Timeout` is the exact string a dead tunnel produces, so every diagnosis was a
+  guess and a wrong guess explained the symptom as well as the right one; the
+  integration test passed a literal `5` with a parameter named `timeout_secs`, so
+  the test and the code were wrong in the same direction and only the engine
+  disagreed; and the single assertion that could have failed needed egress, so its
+  redness was read as an environment problem and excluded.
+- **The tell that was in hand the whole time.** A `504` in 7 milliseconds did not
+  time out — its budget was too small to lose. The failure had been printed with
+  its elapsed time for two days.
+- **Reproduced before fixing.** Against `verge-mihomo v1.19.32`, through a real
+  Shadowsocks-2022 outbound: `timeout=5` → `504 Timeout` in 0.007 s; `timeout=5000`
+  → `200 {"delay":27}` in 0.029 s. The field is a **signed 16-bit** integer in
+  milliseconds, so `32767` parses and `32768` is `400 {"message":"Body invalid"}`.
+- **The fix.** `delay_timeout_millis` converts the budget with `as_millis` and
+  clamps to `1..=i16::MAX`; the call site reads a single `DELAY_BUDGET_MILLIS`
+  constant, which two compile-time `assert!`s bound. The test files stopped
+  duplicating the wrong number.
+- **Guards, each observed failing.** `the_delay_budget_is_sent_in_milliseconds_and_fits_mihomo`
+  (asserts the value the **call site** reads — the first version asserted only on
+  the helper and still passed with the defect restored, which is exactly the class
+  of guard this log exists to warn about); the compile-time range assertions; and
+  `the_delay_timeout_field_is_milliseconds`, an **egress-free** engine test that
+  pins `32767`/`32768` against the real binary so a no-network runner cannot skip
+  it into silence.
+- **Two second-order defects found by fixing it.** `tunnel_end_to_end.rs` also sent
+  `timeout=5` and passed only because loopback round trips are ~2 ms — a test that
+  was green for the wrong reason. And the first version of the new unit test
+  pointed the delay test at the engine's own controller, which was intermittently
+  `503` because `start_engine` returns when `/version` answers, before
+  `Start initial compatible provider` completes; it now uses its own responder and
+  polls.
+- **The rule.** A wire field's unit is a contract, and both sides of an integration
+  boundary can be wrong in the same direction while agreeing perfectly with each
+  other. When a clock is involved, **measure what came back** — a timeout that
+  returns faster than any network could is not a timeout — and pin the *engine's*
+  acceptance behaviour, not the caller's intent.
+
+---
+
 ## THE EGRESS TEST WAS BLAMED ON THE RUNNER FOR TWO DAYS, AND THE RUNNER WAS FINE (2026-11-04, unreleased)
 
 - **What broke.** `a_reachable_member_yields_a_usable_delay` failed every

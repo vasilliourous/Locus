@@ -365,6 +365,22 @@ trap that caused the recurrence: **do not derive the classifier's acceptance
 window from the timeout budget, and do not make it agree with the frontend's
 `classifyDelay`.** The probe asks "did a packet move?", not "how fast was it?".
 
+> **`timeout` is milliseconds, and this was a shipped defect (found 2026-11-04).**
+> `egress_attempt_once` passed `EGRESS_ATTEMPT_TIMEOUT.as_secs()` (`5`) to a field
+> the engine reads as **milliseconds** in a **signed 16-bit** integer, so every
+> delay test ran on a 5 ms budget and answered `504 Timeout` in ~7 ms — the probe
+> could never report egress from 2026-10-02 until the fix. §4b of
+> `EGRESS-READINESS.md` is the account; `FIXES.md` has the entry. The reason it is
+> repeated *here* is the trap below.
+>
+> **The `direct` outbound is not a stand-in for a proxy in a delay test.** A
+> `direct` member reports `delay: 0` for a loopback target (loopback bypasses the
+> proxy path), so a loopback delay assertion against `direct` proves nothing —
+> that is why `tunnel_end_to_end.rs` uses a **real** Shadowsocks-2022 listener, and
+> it is the shape any new positive case should copy. `egress_probe_engine.rs` still
+> uses `direct` with a *public* target, which is legitimate; do not point it at
+> loopback.
+
 ---
 
 ## 10. Related

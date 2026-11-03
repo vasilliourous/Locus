@@ -570,7 +570,17 @@ fn the_probe_reads_a_measurement_through_a_real_tunnel() {
     let mut last = (0u16, String::new());
     let deadline = Instant::now() + Duration::from_secs(15);
     while Instant::now() < deadline {
-        last = http_get(&h.controller_addr, &format!("/proxies/Locus/delay?url={url}&timeout=5"));
+        // `timeout` is MILLISECONDS — mihomo parses it with
+        // `strconv.ParseInt(..., 10, 16)` and applies `time.Millisecond * timeout`.
+        // This read `timeout=5`, a 5 ms budget, which no round trip can meet; it
+        // answered `504 Timeout` in ~7 ms and passed only because the loop retried
+        // against loopback where the round trip is ~2 ms. The shipped probe had the
+        // same unit error (`probe.rs`, fixed 2026-11-04) and there it was fatal,
+        // because its target is a public host.
+        last = http_get(
+            &h.controller_addr,
+            &format!("/proxies/Locus/delay?url={url}&timeout=5000"),
+        );
         if last.0 == 200 && usable(delay_of(&last.1)) {
             return;
         }

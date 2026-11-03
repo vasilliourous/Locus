@@ -56,11 +56,11 @@ each hop is named beside it.
             ▲
   core/manager/probe.rs  probe_egress(core_serving)
     egress_attempt_once() -> for each name in tier::OUTBOUND_NAMES:
-        delay_proxy_by_name(name, EGRESS_TEST_URL, 5)
-        -> Ok(ProxyDelay { delay }) ; accept if delay_is_a_measurement(delay, 5)
+        delay_proxy_by_name(name, EGRESS_TEST_URL, DELAY_BUDGET_MILLIS)
+        -> Ok(ProxyDelay { delay }) ; accept if delay_is_a_measurement(delay, …)
     up to EGRESS_ATTEMPTS (2) inside EGRESS_DEADLINE (12 s)
             ▲
-  mihomo  GET /proxies/<name>/delay?url=…&timeout=5
+  mihomo  GET /proxies/<name>/delay?url=…&timeout=5000   ← MILLISECONDS
     -> Ok({"delay": N})   (also on failure, as N = 0 — see §4)
 
   core/manager/traffic_probe.rs   the OTHER proof, and the one that cannot miss
@@ -181,12 +181,32 @@ curl -s http://127.0.0.1:<external-controller>/version
 # The through-tunnel check, exactly as the probe makes it (probe_egress):
 curl -s -G "http://127.0.0.1:<external-controller>/group/Locus%20Auto/delay" \
      --data-urlencode "url=http://cp.cloudflare.com/generate_204" \
-     --data-urlencode "timeout=5"
+     --data-urlencode "timeout=5000"
 # -> 200 {"Locus":1234}     a member reported a round trip
 # -> 200 {"Locus-UoT":5000} a member HIT ITS BUDGET (see §4 — this was the bug)
-# -> 504 "get delay: all proxies timeout"   every member timed out
+# -> 504 "get proxy: all timeout"   every member timed out
 # -> 200 {}                 no member reported at all
 ```
+
+> **`timeout` is MILLISECONDS, and this manual used to say `5`.** mihomo parses the
+> field with `strconv.ParseInt(q.Get("timeout"), 10, 16)` and applies
+> `time.Millisecond * timeout` (`hub/route/proxies.go`), so a hand-typed `timeout=5`
+> asks for a **5-millisecond** budget. It answers `504 {"message":"Timeout"}` in
+> about 7 ms, which reads exactly like a dead tunnel and is not one.
+>
+> This was not only a documentation defect: `probe.rs` made the same mistake
+> (`EGRESS_ATTEMPT_TIMEOUT.as_secs()` → `5`) from 2026-10-02 until 2026-11-04, so
+> the **shipped probe could never report egress** and readiness fell back to the
+> traffic signal alone. Widening the budget to 5000 ms made the positive case pass
+> immediately. See `FIXES.md` and §4.
+>
+> Two tells that distinguish "too small a budget" from "nothing came back":
+>
+> - the `504` arrives in **single-digit milliseconds** rather than after the budget
+>   — a `Timeout` that fast did not time out, it was never given time;
+> - the field is a **signed 16-bit** integer, so `timeout=32768` answers
+>   `400 {"message":"Body invalid"}`. If you can reproduce that boundary, your
+>   invocation is in the right unit.
 
 `<external-controller>` is the address the app configured (see `clash-verge.yaml`
 / the run state). The group name must be **`Locus Auto`** — the *group*, not the
@@ -277,8 +297,10 @@ probe's own question by hand:
 curl -s "http://127.0.0.1:<controller>/proxies/Locus%20Auto" | jq .now
 
 # the probe's question, per outbound — note 200-with-delay:0 means "member failed"
-curl -s "http://127.0.0.1:<controller>/proxies/Locus/delay?url=<enc(EGRESS_TEST_URL)>&timeout=5"
-curl -s "http://127.0.0.1:<controller>/proxies/Locus-UoT/delay?url=<enc(EGRESS_TEST_URL)>&timeout=5"
+# `timeout` is MILLISECONDS: 5000 = 5 s. A hand-typed 5 is a 5 ms budget and
+# answers `504 Timeout` in ~7 ms on a perfectly good tunnel.
+curl -s "http://127.0.0.1:<controller>/proxies/Locus/delay?url=<enc(EGRESS_TEST_URL)>&timeout=5000"
+curl -s "http://127.0.0.1:<controller>/proxies/Locus-UoT/delay?url=<enc(EGRESS_TEST_URL)>&timeout=5000"
 ```
 
 A `200` carrying a usable `delay` on **either** outbound means the probe should be
@@ -312,6 +334,60 @@ likely to fail on exactly the slow links it was meant to tolerate.
 
 Everything else positive is egress. "Slow" is not "dead".
 
+---
+
+## 4b. The unit trap (the 2026-11-04 defect) — the one that hid for a month
+
+**What happened.** `egress_attempt_once` passed `EGRESS_ATTEMPT_TIMEOUT.as_secs()`
+to `delay_proxy_by_name`, which is `5` for a 5-second budget. mihomo reads that
+field as **milliseconds** and as a **signed 16-bit** integer. So every delay test
+ran with a 5 ms budget, answered
+
+```text
+504 {"message":"Timeout"}      in 0.007 s
+```
+
+which the plugin maps to `Ok(ProxyDelay { delay: 0 })`, which
+`delay_is_a_measurement` correctly rejects. **Every member failed, on every
+platform, for a month.** `decide` could then only reach `Ready` through
+`traffic == Flowing`, so the egress probe was not a second source of evidence at
+all — it was dead weight, and the app's readiness rested entirely on the traffic
+websocket.
+
+**Why nothing caught it.** Three separate reasons, and each is worth keeping:
+
+1. **The string is ambiguous.** `Timeout` is exactly what a dead tunnel returns.
+   The failure named no mechanism, so every diagnosis was a guess — and a wrong
+   guess explained the symptom as well as the right one.
+2. **The test agreed with the code.** `egress_probe_engine.rs` passed a literal
+   `5` with a parameter named `timeout_secs`. The test and the code were wrong in
+   the same direction; only the engine disagreed, and nothing asked it.
+3. **The only test that could have failed needed egress**, and it was red for an
+   "environment" reason, so it was excluded rather than read.
+
+**The tell, and the rule.** *A `504 Timeout` that arrives in single-digit
+milliseconds did not time out — its budget was too small to lose.* Measurement
+time is evidence; the string alone is not.
+
+**What now prevents a recurrence.**
+
+| Guard | What it holds | Can it fail? |
+|---|---|---|
+| `probe.rs::the_delay_budget_is_sent_in_milliseconds_and_fits_mihomo` | the value the **call site** reads (`DELAY_BUDGET_MILLIS`) is `5000`, not `5` | yes — observed failing with `5` restored |
+| `probe.rs` `const _: () = assert!(…)` × 2 | the budget is inside `1..=i16::MAX` — a compile error, not a clamp | yes — build fails |
+| `egress_probe_engine.rs::the_delay_timeout_field_is_milliseconds` | against a **real engine**: `32767` parses, `32768` is `400` | yes — observed failing when inverted |
+| `egress_probe_engine.rs::a_reachable_member_yields_a_usable_delay` | a real round trip through the shipped route yields a measurement | yes — this was the red CI test |
+
+The unit test is deliberately **egress-free** (a loopback target), so it runs on a
+network-less runner instead of skipping into silence — which is how the defect
+survived the suite that was meant to catch it.
+
+**Do not re-derive this field's unit from the plugin's signature.** It is
+`timeout: u32` on both `delay_group` and `delay_proxy_by_name`, with nothing
+naming the unit; the same `u32` is also used as
+`Duration::from_millis(timeout)` for the *client's* own request timeout. Read the
+engine's handler, which is the authority:
+
 **Why it can look like a deliberate decision.** The rule was introduced to *agree*
 with the frontend's `classifyDelay`, and a test was written asserting it. Both were
 wrong together: `classifyDelay` answers *how fast is this node?* for a latency list,
@@ -323,6 +399,11 @@ yourself making the two identical, stop — that is the bug being reintroduced.
 
 ## 5. Facts that are easy to get wrong
 
+- **`timeout` is MILLISECONDS, in a signed 16-bit field.** Not seconds, and not a
+  `u32` in practice — the engine parses `ParseInt(..., 10, 16)`, so `32768` is a
+  `400`. The shipped budget is `DELAY_BUDGET_MILLIS` (`5000`), derived from
+  `EGRESS_ATTEMPT_TIMEOUT` by `delay_timeout_millis`. Getting this wrong cost a
+  month of a dead probe; see §4b.
 - **Probe each OUTBOUND, not the group.** Since 2026-10-02 the probe asks
   `/proxies/<name>/delay` for every name in `tier::OUTBOUND_NAMES`, and never the
   group. The group route tests only the group's *currently selected* member, and

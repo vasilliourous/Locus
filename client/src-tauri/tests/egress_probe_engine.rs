@@ -120,6 +120,23 @@ fn egress_required() -> bool {
 /// change there is visible in review.
 const EGRESS_TEST_URL: &str = "http://cp.cloudflare.com/generate_204";
 
+/// The delay budget this test asks for, **in milliseconds**, matching the
+/// shipped probe.
+///
+/// This constant exists because the defect it guards was a unit error that both
+/// sides of the boundary made identically. `probe.rs` passed
+/// `EGRESS_ATTEMPT_TIMEOUT.as_secs()` (the integer `5`) and this test passed a
+/// literal `5` with a parameter named `timeout_secs` — so the test and the code
+/// agreed with each other and were both wrong about mihomo, which reads the field
+/// as milliseconds. Every delay test therefore ran on a 5 ms budget, answered
+/// `504 Timeout` in about 7 ms, and no positive-egress assertion could ever pass.
+///
+/// The value is deliberately written as the *shipped* budget
+/// (`EGRESS_ATTEMPT_TIMEOUT` = 5 s) in milliseconds, not as a convenient round
+/// number, so that a change to the shipped budget shows up here as a mismatch to
+/// reconcile rather than as a test that quietly keeps passing on its own value.
+const DELAY_BUDGET_MILLIS: u32 = 5_000;
+
 /// The repository's `client/` directory, found from this test's manifest dir.
 fn client_dir() -> PathBuf {
     let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
@@ -288,6 +305,47 @@ struct PortReservation {
     port: u16,
 }
 
+/// A local HTTP responder that answers every request with `204 No Content`.
+///
+/// # Why a separate server rather than the engine's own controller
+///
+/// The unit test below needs *a* target that completes, and nothing more. Its first
+/// version pointed the delay test at the engine's own `/proxies`, on the theory that
+/// this avoided a second process. It was flaky: the controller had to answer both
+/// the delay request and the proxied request that request triggered, and under
+/// `cargo test`'s parallel load it intermittently returned
+/// `503 An error occurred in the delay test` — a failure with nothing to do with the
+/// unit under test. A target that only has to complete should not also be the thing
+/// being tested.
+///
+/// Bound to port 0 and read back, so two concurrent runs cannot collide.
+struct HttpResponder {
+    port: u16,
+}
+
+impl HttpResponder {
+    fn start() -> Self {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind the 204 responder");
+        let port = listener.local_addr().expect("local addr").port();
+        std::thread::spawn(move || {
+            for stream in listener.incoming() {
+                let Ok(mut stream) = stream else { continue };
+                // Drain the request line and headers before answering; a client
+                // that sent nothing gets nothing, which reads as a timeout.
+                let mut buf = [0u8; 1024];
+                let _ = stream.read(&mut buf);
+                let _ = stream.write_all(b"HTTP/1.1 204 No Content\r\nContent-Length: 0\r\n\r\n");
+                let _ = stream.flush();
+            }
+        });
+        Self { port }
+    }
+
+    fn url(&self) -> String {
+        format!("http://127.0.0.1:{}/generate_204", self.port)
+    }
+}
+
 impl PortReservation {
     fn bind() -> Self {
         let listener = TcpListener::bind("127.0.0.1:0").expect("bind reservation");
@@ -396,9 +454,15 @@ fn write_config(dir: &Path, controller_port: u16, mixed_port: u16) -> PathBuf {
 /// Mirrors `probe::probe_egress`: the URL is passed as the `url` query
 /// parameter, percent-encoded the way the plugin encodes it, so this test
 /// exercises the same route the app reaches.
-fn group_delay_path(test_url: &str, timeout_secs: u32) -> String {
+///
+/// `timeout_millis` is **milliseconds**, because mihomo says so: its handler
+/// parses the field with `strconv.ParseInt(q.Get("timeout"), 10, 16)` and applies
+/// it as `time.Millisecond * timeout` (`hub/route/proxies.go`). It is a signed
+/// 16-bit field, so the usable range is `1..=32767`; `32768` is answered with
+/// `400 {"message":"Body invalid"}`.
+fn group_delay_path(test_url: &str, timeout_millis: u32) -> String {
     format!(
-        "/group/Locus%20Auto/delay?url={}&timeout={timeout_secs}",
+        "/group/Locus%20Auto/delay?url={}&timeout={timeout_millis}",
         encode(test_url)
     )
 }
@@ -409,9 +473,11 @@ fn group_delay_path(test_url: &str, timeout_secs: u32) -> String {
 /// only the group's currently selected member; the shipped probe asks about each
 /// outbound in turn so a tunnel cannot be reported dead because mihomo happened
 /// to have a different member selected.
-fn member_delay_path(member: &str, test_url: &str, timeout_secs: u32) -> String {
+///
+/// `timeout_millis` is milliseconds — see [`group_delay_path`].
+fn member_delay_path(member: &str, test_url: &str, timeout_millis: u32) -> String {
     format!(
-        "/proxies/{}/delay?url={}&timeout={timeout_secs}",
+        "/proxies/{}/delay?url={}&timeout={timeout_millis}",
         encode(member),
         encode(test_url)
     )
@@ -444,7 +510,13 @@ fn encode(value: &str) -> String {
 /// was the version that refuses `5000`, the case the previous fix existed to stop
 /// refusing. Keeping the two in step is the price of restating the rule; the
 /// shipped rule now points back here so the pair is findable.
-const fn delay_is_a_measurement(delay: u32, _timeout_secs: u32) -> bool {
+///
+/// The second parameter is **milliseconds**, matching what is sent on the wire —
+/// see [`DELAY_BUDGET_MILLIS`]. It is not read by the rule (which is the point of
+/// the previous paragraph), but naming the unit correctly is the whole lesson of
+/// the 2026-11-04 defect: this file's copy and `probe.rs`'s call site agreed with
+/// each other on the wrong unit and the engine disagreed with both.
+const fn delay_is_a_measurement(delay: u32, _timeout_millis: u32) -> bool {
     const IMPLAUSIBLE_DELAY: u32 = 100_000;
     delay > 0 && delay <= IMPLAUSIBLE_DELAY
 }
@@ -490,7 +562,7 @@ fn a_reachable_member_yields_a_usable_delay() {
     // group. Keeping this test on the group route would leave it pinning a call
     // the app no longer makes — the exact staleness that let the previous
     // classifier drift go unnoticed for a release.
-    let path = member_delay_path("Locus", test_url, 5);
+    let path = member_delay_path("Locus", test_url, DELAY_BUDGET_MILLIS);
 
     // ── THE CONTROL, INSIDE THE TEST ──
     //
@@ -509,9 +581,15 @@ fn a_reachable_member_yields_a_usable_delay() {
         let socks = format!("127.0.0.1:{mixed_port}");
         let out = std::process::Command::new("curl")
             .args([
-                "-s", "-o", "/dev/null", "-w", "%{http_code}",
-                "--max-time", "10",
-                "-x", &format!("http://{socks}"),
+                "-s",
+                "-o",
+                "/dev/null",
+                "-w",
+                "%{http_code}",
+                "--max-time",
+                "10",
+                "-x",
+                &format!("http://{socks}"),
                 test_url,
             ])
             .output();
@@ -532,7 +610,11 @@ fn a_reachable_member_yields_a_usable_delay() {
             // rather than about which endpoint happened to be called.
             let delays = parse_delay_map(&last.1);
             let single = parse_single_delay(&last.1);
-            if delays.iter().any(|(_, delay)| delay_is_a_measurement(*delay, 5)) || delay_is_a_measurement(single, 5) {
+            if delays
+                .iter()
+                .any(|(_, delay)| delay_is_a_measurement(*delay, DELAY_BUDGET_MILLIS))
+                || delay_is_a_measurement(single, DELAY_BUDGET_MILLIS)
+            {
                 usable = true;
                 break;
             }
@@ -573,12 +655,13 @@ fn a_reachable_member_yields_a_usable_delay() {
             // hosts failing is a fact about the tunnel or the runner, not about
             // Cloudflare.
             let retry_url = "https://www.gstatic.com/generate_204";
-            let retry_path = member_delay_path("Locus", retry_url, 5);
+            let retry_path = member_delay_path("Locus", retry_url, DELAY_BUDGET_MILLIS);
             let mut retry_last = (0u16, String::new());
             let retry_deadline = Instant::now() + Duration::from_secs(15);
             while Instant::now() < retry_deadline {
                 retry_last = http_get(&controller, &retry_path);
-                if retry_last.0 == 200 && delay_is_a_measurement(parse_single_delay(&retry_last.1), 5) {
+                if retry_last.0 == 200 && delay_is_a_measurement(parse_single_delay(&retry_last.1), DELAY_BUDGET_MILLIS)
+                {
                     return;
                 }
                 std::thread::sleep(Duration::from_millis(250));
@@ -640,6 +723,146 @@ fn a_reachable_member_yields_a_usable_delay() {
     );
 }
 
+/// The `timeout` field is **milliseconds**, and the difference is not academic.
+///
+/// # The defect this pins, and why nothing caught it for a month
+///
+/// From 2026-10-02 to 2026-11-04 the shipped probe passed `5` in this field,
+/// because `probe.rs` computed it with `EGRESS_ATTEMPT_TIMEOUT.as_secs()`. mihomo
+/// reads the field as milliseconds (`time.Millisecond * timeout` in
+/// `hub/route/proxies.go`), so every delay test ran on a **5 ms** budget, could
+/// never complete a round trip, and answered `504 {"message":"Timeout"}`. The
+/// plugin maps that to `Ok(ProxyDelay { delay: 0 })`, the classifier rejects `0`,
+/// and so **every member failed on every platform** — the egress probe could not
+/// report egress at all, and readiness silently fell back to the traffic signal.
+///
+/// Nothing caught it because the failure mode is `Timeout`, which is exactly what
+/// a dead tunnel returns, and because *this very file* passed the same wrong
+/// number: the test and the code agreed with each other, and only the engine
+/// disagreed. The positive case could not pass, so it was read as an environment
+/// problem for the better part of a week.
+///
+/// # What makes this assertion able to fail
+///
+/// It probes the field's **accepted range** against the real engine, on a
+/// loopback target, so it needs no egress and cannot skip into silence on a
+/// network-less runner — which is how the defect survived: the only test that
+/// covered it needed egress, and it was red for an "environment" reason.
+///
+/// The engine parses this field with `strconv.ParseInt(q.Get("timeout"), 10, 16)`
+/// — a **signed 16-bit** integer, applied as `time.Millisecond * timeout`. Two
+/// consequences follow, and both are egress-free and unambiguous:
+///
+///   * `32767` is accepted and `32768` is rejected (`400 Body invalid`). A field
+///     parsed as seconds could not have an `int16` ceiling at all, let alone one
+///     visible at this exact boundary.
+///   * the shipped budget (`EGRESS_ATTEMPT_TIMEOUT` = 5 s → 5000) must be inside
+///     that range. If the field were read as seconds, the shipped value would be
+///     `5`, which is *also* inside the range — which is exactly why a range check
+///     alone is not enough and why [`DELAY_BUDGET_MILLIS`] is asserted separately
+///     in `probe.rs` against the value the call site actually reads.
+///
+/// A loopback target cannot discriminate 5 ms from 5000 ms — the round trip is
+/// ~2 ms — so this test does **not** claim to. The contrast that needs network
+/// latency lives in `a_reachable_member_yields_a_usable_delay`, which is the
+/// egress-gated case.
+#[test]
+fn the_delay_timeout_field_is_milliseconds() {
+    let Some(engine) = require_engine_when_possible() else {
+        return;
+    };
+
+    let dir = std::env::temp_dir().join("locus-egress-probe-units");
+    let mut controller_res = PortReservation::bind();
+    let mut mixed_res = PortReservation::bind();
+    let controller_port = controller_res.port();
+    let mixed_port = mixed_res.port();
+    let controller = format!("127.0.0.1:{controller_port}");
+
+    let config = write_config(&dir, controller_port, mixed_port);
+    controller_res.release();
+    mixed_res.release();
+    let _guard = start_engine(&engine, &dir, &config, &controller);
+
+    // A target that needs no network and answers 2xx, reached through the `direct`
+    // member this file's config builds.
+    //
+    // **Do not point this at the engine's own controller.** That was the first
+    // version of this test and it was flaky: the controller would be answering both
+    // the delay request and the proxied request it triggered, and under load it
+    // sometimes returned `503 An error occurred in the delay test`. Nothing about
+    // the unit was being tested there — it was testing the engine's own connection
+    // handling. The unit is a property of the *request*, so the target only has to
+    // complete.
+    //
+    // A separate responder on its own port, bound to port 0 so concurrent tests
+    // cannot collide.
+    let responder = HttpResponder::start();
+
+    // The shipped budget must be accepted and must measure.
+    //
+    // **Polled, not asserted once.** `start_engine` returns when `/version` answers,
+    // and that is *before* `Start initial compatible provider Locus Auto` completes
+    // — the controller is up while the proxy is still being initialised. A delay
+    // request in that window answers `503 An error occurred in the delay test`,
+    // which has nothing to do with the unit and made this test fail roughly half
+    // the time. The measurement is what is being asserted; how long the engine
+    // takes to become answerable is not.
+    let deadline = Instant::now() + Duration::from_secs(15);
+    let mut ok_status = 0u16;
+    let mut ok_body = String::new();
+    while Instant::now() < deadline {
+        (ok_status, ok_body) = http_get(
+            &controller,
+            &member_delay_path("Locus", &responder.url(), DELAY_BUDGET_MILLIS),
+        );
+        if ok_status == 200 && delay_is_a_measurement(parse_single_delay(&ok_body), DELAY_BUDGET_MILLIS) {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    assert_eq!(
+        ok_status, 200,
+        "a {DELAY_BUDGET_MILLIS} ms budget must be accepted and must measure a loopback round \
+         trip; got {ok_status} with body {ok_body:?}"
+    );
+    let measured = parse_single_delay(&ok_body);
+    assert!(
+        delay_is_a_measurement(measured, DELAY_BUDGET_MILLIS),
+        "a completed loopback round trip must read as a measurement, got {measured} from {ok_body:?}"
+    );
+
+    // The unit boundary. `i16::MAX` parses; one past it is a **parse** rejection.
+    //
+    // This half needs no round trip at all: the engine refuses an out-of-range
+    // value before it dials anything, so it is immune to the responder.
+    //
+    // The two failures are different shapes and only one is about parsing: an
+    // out-of-range value is refused before any dial is attempted, with
+    // `400 Body invalid`, while a value that parses but whose test fails answers
+    // `503`/`504`. So the assertion is on the *parse* rejection specifically —
+    // asserting `200` at the boundary would be asserting that a delay test
+    // succeeds, which depends on the target rather than on the field.
+    let max_ok = i16::MAX as u32;
+    let (at_max, at_max_body) = http_get(&controller, &member_delay_path("Locus", &responder.url(), max_ok));
+    assert_ne!(
+        at_max, 400,
+        "the engine must PARSE timeout={max_ok} (i16::MAX ms); it answered 400 with \
+         {at_max_body:?}, so the field's range is narrower than a signed 16-bit integer and \
+         the budget clamp in probe.rs is wrong"
+    );
+
+    let (past_max, past_max_body) = http_get(&controller, &member_delay_path("Locus", &responder.url(), max_ok + 1));
+    assert_eq!(
+        past_max,
+        400,
+        "the engine must REJECT timeout={} with 400 — the field is a signed 16-bit integer of \
+         MILLISECONDS. It answered {past_max} with {past_max_body:?}, which means the field's \
+         parsing has changed and every unit assumption in probe.rs needs re-deriving",
+        max_ok + 1
+    );
+}
+
 /// An unreachable member must produce a non-2xx. mihomo answers 504 with
 /// `"get delay: all proxies timeout"`; the probe reads any non-success as
 /// `Failing`, so this is the branch that (correctly) holds at "connecting".
@@ -668,7 +891,7 @@ fn an_unreachable_member_is_not_reported_as_success() {
 
     // A port with nothing listening: the delay test cannot complete.
     let dead_url = format!("http://127.0.0.1:{}/generate_204", unused_port());
-    let (status, body) = http_get(&controller, &group_delay_path(&dead_url, 2));
+    let (status, body) = http_get(&controller, &group_delay_path(&dead_url, 2_000));
 
     assert_ne!(
         status, 200,
@@ -679,7 +902,7 @@ fn an_unreachable_member_is_not_reported_as_success() {
     // success: whatever numeric values appear, none classifies as a measurement.
     let delays = parse_delay_map(&body);
     assert!(
-        delays.iter().all(|(_, delay)| !delay_is_a_measurement(*delay, 2)),
+        delays.iter().all(|(_, delay)| !delay_is_a_measurement(*delay, 2_000)),
         "a failed test must not yield a usable measurement, got {delays:?}"
     );
 }
@@ -730,14 +953,14 @@ fn a_dead_member_answers_with_a_non_measurement_not_an_error() {
 
     // A target nothing is listening on, so the member cannot complete a round trip.
     let dead_url = format!("http://127.0.0.1:{}/generate_204", unused_port());
-    let (status, body) = http_get(&controller, &member_delay_path("Locus-UoT", &dead_url, 2));
+    let (status, body) = http_get(&controller, &member_delay_path("Locus-UoT", &dead_url, 2_000));
 
     // The plugin maps a non-2xx here to `Ok(ProxyDelay { delay: 0 })`, so the
     // probe receives a value it can classify rather than an `Err` it cannot
     // inspect. What must never happen is a *usable measurement* coming back.
     let delay = parse_single_delay(&body);
     assert!(
-        !delay_is_a_measurement(delay, 2),
+        !delay_is_a_measurement(delay, 2_000),
         "a dead member must not yield a usable measurement (status {status}, body {body:?})"
     );
 }
@@ -773,18 +996,19 @@ fn parse_single_delay(body: &str) -> u32 {
 /// classifier from memory.
 #[test]
 fn the_engine_sentinels_are_not_measurements() {
-    let timeout_secs = 3;
+    // The budget, in the unit it is actually sent in.
+    let timeout_millis = 3_000;
     // The zero sentinel mihomo uses for a failed single-proxy test: not a
     // measurement.
-    assert!(!delay_is_a_measurement(0, timeout_secs));
+    assert!(!delay_is_a_measurement(0, timeout_millis));
     // An implausible value is an error sentinel, not a latency.
-    assert!(!delay_is_a_measurement(100_001, timeout_secs));
+    assert!(!delay_is_a_measurement(100_001, timeout_millis));
     // A genuine round trip counts.
-    assert!(delay_is_a_measurement(120, timeout_secs));
+    assert!(delay_is_a_measurement(120, timeout_millis));
     // THE CASE THE OLD RULE GOT WRONG: the timeout value is egress. Slow is not
     // dead, and treating it as dead is what stranded working tunnels.
     assert!(
-        delay_is_a_measurement(timeout_secs * 1000, timeout_secs),
+        delay_is_a_measurement(timeout_millis, timeout_millis),
         "a delay at the probe's own budget is egress, not failure — see \
          docs/reference/EGRESS-READINESS.md"
     );
@@ -836,7 +1060,7 @@ fn a_group_whose_members_all_fail_returns_no_delay_map() {
     let _guard = start_engine(&engine, &dir, &config, &controller);
 
     let dead_url = format!("http://127.0.0.1:{}/generate_204", unused_port());
-    let (status, body) = http_get(&controller, &group_delay_path(&dead_url, 2));
+    let (status, body) = http_get(&controller, &group_delay_path(&dead_url, 2_000));
 
     assert_ne!(status, 200, "an all-dead group must not answer 200; body was {body:?}");
     assert!(

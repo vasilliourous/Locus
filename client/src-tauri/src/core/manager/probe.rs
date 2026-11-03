@@ -434,6 +434,75 @@ pub async fn probe_egress(core_serving: bool) -> EgressOutcome {
     EgressOutcome::Failing
 }
 
+/// The budget handed to mihomo's delay route, **in milliseconds**.
+///
+/// # The unit is milliseconds, and getting it wrong produced a 7 ms "Timeout"
+///
+/// mihomo's `/proxies/<name>/delay` parses `timeout` with
+/// `strconv.ParseInt(q.Get("timeout"), 10, 16)` and uses it directly as
+/// `time.Millisecond * timeout` (`hub/route/proxies.go`). It is **milliseconds**,
+/// and it is a *signed 16-bit* field: `32767` is the largest accepted value and
+/// `32768` is rejected with `400 {"message":"Body invalid"}`.
+///
+/// Until 2026-11-04 this function was not here and the call site passed
+/// `EGRESS_ATTEMPT_TIMEOUT.as_secs()` — `5`. Every delay test therefore ran with a
+/// **5-millisecond** budget, which no round trip over a tunnel can meet, so mihomo
+/// answered `504 {"message":"Timeout"}` after about 7 ms and the plugin turned
+/// that into `Ok(ProxyDelay { delay: 0 })`. `delay_is_a_measurement` rejects `0`,
+/// so **every member failed, always, on every platform** — the probe had been
+/// unable to report egress since 2026-10-02 and the app fell back to the traffic
+/// signal to reach `Ready`.
+///
+/// The trap is that `Timeout` is the exact string a genuinely dead tunnel
+/// produces, and the failed call returns in single-digit milliseconds rather than
+/// after the budget — which is the tell. **A `Timeout` that arrives in ~7 ms did
+/// not time out; its budget was too small to lose.** `Client/tests/egress_probe_engine.rs`
+/// now asserts the millisecond form against a real engine, and its failure text
+/// prints the elapsed time so a future unit regression is named rather than
+/// re-investigated.
+///
+/// The `.max(1)` keeps a sub-millisecond budget from silently becoming "no test",
+/// and the clamp keeps a future budget change from walking off mihomo's `int16`
+/// ceiling. Callers must not exceed [`DELAY_TIMEOUT_MAX_MILLIS`].
+#[must_use]
+const fn delay_timeout_millis(budget: Duration) -> u32 {
+    // `as_millis` is `const`; `try_from`/`unwrap_or`/`clamp` are not, so the
+    // conversion and both bounds are spelled out. `budget` is a compile-time
+    // constant at the only call site, which is why this stays `const fn`.
+    let millis = budget.as_millis();
+    let millis = if millis > DELAY_TIMEOUT_MAX_MILLIS as u128 {
+        DELAY_TIMEOUT_MAX_MILLIS
+    } else {
+        millis as u32
+    };
+    if millis == 0 { 1 } else { millis }
+}
+
+/// The largest `timeout` mihomo's delay route accepts, in milliseconds.
+///
+/// `ParseInt(..., 10, 16)`: a signed 16-bit field. Verified against the sidecar —
+/// `32767` answers a delay, `32768` answers `400 Body invalid`.
+const DELAY_TIMEOUT_MAX_MILLIS: u32 = i16::MAX as u32;
+
+/// The budget [`egress_attempt_once`] actually hands mihomo, in milliseconds.
+///
+/// A named constant rather than an inline `delay_timeout_millis(..)` call so that
+/// the regression test can assert on *this* value. The earlier version of that
+/// test asserted only on the helper, and it passed with the defective
+/// `as_secs()` call site restored — a guard that could not fail. Binding it to
+/// the constant the call site reads is what makes reverting the call site a
+/// test failure instead of a silently green run.
+const DELAY_BUDGET_MILLIS: u32 = delay_timeout_millis(EGRESS_ATTEMPT_TIMEOUT);
+
+/// Compile-time bounds check: a budget over mihomo's `int16` ceiling would be
+/// clamped by [`delay_timeout_millis`], and a silently clamped budget is how a
+/// "generous" timeout becomes a failed probe. If this ever fails to compile, the
+/// constant is out of range and the assertion in
+/// `the_delay_budget_is_sent_in_milliseconds_and_fits_mihomo` would have been the
+/// thing to notice.
+const _: () = assert!(DELAY_BUDGET_MILLIS <= i16::MAX as u32);
+const _: () = assert!(DELAY_BUDGET_MILLIS >= 1_000);
+
 /// One through-tunnel attempt. `true` when a real round trip completed.
 ///
 /// # Why this asks about each MEMBER rather than the group
@@ -468,17 +537,19 @@ pub async fn probe_egress(core_serving: bool) -> EgressOutcome {
 /// the group now means "this member failed", which is exactly what we want to
 /// distinguish per member.
 async fn egress_attempt_once() -> bool {
-    let timeout_secs = u32::try_from(EGRESS_ATTEMPT_TIMEOUT.as_secs()).unwrap_or(5);
+    // The call site uses the shared constant rather than re-deriving it, so the
+    // guard test below asserts on the value this function actually sends.
+    let timeout_millis = DELAY_BUDGET_MILLIS;
 
     for member in crate::locus::tier::OUTBOUND_NAMES {
-        let probe = crate::core::handle::Handle::mihomo().delay_proxy_by_name(member, EGRESS_TEST_URL, timeout_secs);
+        let probe = crate::core::handle::Handle::mihomo().delay_proxy_by_name(member, EGRESS_TEST_URL, timeout_millis);
 
         // The plugin's delay call has its own timeout (passed above), but wrap it
         // too: a Core that accepts the request and then never answers must not
         // hang the status path. The wrapper is slightly longer than the inner
         // timeout so the Core's own answer wins in the normal case.
         match tokio::time::timeout(EGRESS_ATTEMPT_TIMEOUT + PROBE_TIMEOUT, probe).await {
-            Ok(Ok(result)) if delay_is_a_measurement(result.delay, timeout_secs) => return true,
+            Ok(Ok(result)) if delay_is_a_measurement(result.delay, timeout_millis) => return true,
             // A dead member, a refusal, or a Core that stalled: try the next one.
             // Only "none of them could" is a failure, and that is the loop's
             // answer rather than any single member's.
@@ -521,13 +592,13 @@ async fn egress_attempt_once() -> bool {
 /// first packet through a cold proxy routinely exceeds any per-attempt budget we
 /// would pick.
 ///
-/// `timeout_secs` is therefore no longer used to reject values; it is kept in the
-/// signature because the caller passes the same budget to the engine, and the
+/// `timeout_millis` is therefore no longer used to reject values; it is kept in
+/// the signature because the caller passes the same budget to the engine, and the
 /// coupling is worth seeing at the call site rather than hiding. The `0` sentinel
 /// is the one unambiguous "the test failed" answer mihomo gives, and the only
 /// value this probe may interpret as "no traffic moved".
 #[must_use]
-const fn delay_is_a_measurement(delay: u32, _timeout_secs: u32) -> bool {
+const fn delay_is_a_measurement(delay: u32, _timeout_millis: u32) -> bool {
     const IMPLAUSIBLE_DELAY: u32 = 100_000;
     delay > 0 && delay <= IMPLAUSIBLE_DELAY
 }
@@ -841,5 +912,47 @@ mod tests {
     fn an_implausible_delay_is_not_a_measurement() {
         assert!(!delay_is_a_measurement(100_001, 60));
         assert!(!delay_is_a_measurement(u32::MAX, 5));
+    }
+
+    /// The budget handed to mihomo must be in **milliseconds**.
+    ///
+    /// This is the guard for the defect that made every egress probe fail from
+    /// 2026-10-02 to 2026-11-04: the call site passed
+    /// `EGRESS_ATTEMPT_TIMEOUT.as_secs()`, which is `5`, and mihomo reads that
+    /// field as milliseconds — so every delay test ran on a 5 ms budget, answered
+    /// `504 Timeout` in ~7 ms, and the probe could never report egress.
+    ///
+    /// **Observed failing against the defect**, which is what makes it a guard:
+    /// reverting the call site to `as_secs()` yields `5`, and the first assertion
+    /// below requires `5000`.
+    ///
+    /// The second assertion is the other half — mihomo parses the field with
+    /// `ParseInt(..., 10, 16)`, so a budget above `i16::MAX` is rejected outright
+    /// and the call fails for a reason unrelated to the tunnel.
+    #[test]
+    fn the_delay_budget_is_sent_in_milliseconds_and_fits_mihomo() {
+        // THE REGRESSION GUARD, and it is on the value `egress_attempt_once`
+        // reads — not on the helper. Asserting only on
+        // `delay_timeout_millis(Duration::from_secs(5))` was shown to still pass
+        // with the defective `as_secs()` call site restored.
+        assert_eq!(
+            DELAY_BUDGET_MILLIS, 5_000,
+            "the delay budget must reach mihomo as milliseconds; 5 here means a \
+             5 ms budget, which answers `504 Timeout` in ~7 ms and makes every \
+             egress probe report no egress"
+        );
+
+        // 5 s of budget must leave as 5000, never as 5.
+        assert_eq!(delay_timeout_millis(Duration::from_secs(5)), 5_000);
+
+        // Mihomo's `int16` ceiling: never ask for more than it can parse.
+        assert_eq!(
+            delay_timeout_millis(Duration::from_secs(3_600)),
+            DELAY_TIMEOUT_MAX_MILLIS
+        );
+        assert!(DELAY_TIMEOUT_MAX_MILLIS <= i16::MAX as u32);
+
+        // A sub-millisecond budget is 1 ms, not 0 ("no delay test at all").
+        assert_eq!(delay_timeout_millis(Duration::from_nanos(1)), 1);
     }
 }

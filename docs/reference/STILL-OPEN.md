@@ -690,6 +690,54 @@ assertion. Check for the `SKIP:` line, not the green tick.
 > red run's log is what will answer it. What is no longer open is the question this
 > section asked for two days: **it is not the runner.**
 
+> **CLOSED 2026-11-04, from the next red run's log, and the answer was in the request.**
+> The run this section was waiting for (`41666161485`) printed the control and the
+> engine log: the proxied GET returned `204` and the delay route returned
+> `504 {"message":"Timeout"}` — the same evidence as before, which localised the
+> fault but did not name it. The naming came from reading the engine's handler
+> rather than the symptom.
+>
+> **The cause: a unit error.** `egress_attempt_once` passed
+> `EGRESS_ATTEMPT_TIMEOUT.as_secs()` to mihomo's delay route, which reads that field
+> as **milliseconds** — and as a **signed 16-bit** integer. So every delay test ran
+> with a **5 ms** budget and answered `504 Timeout` in about **7 ms**. The plugin
+> maps that to `Ok(ProxyDelay { delay: 0 })`, which `delay_is_a_measurement`
+> correctly rejects, so **every member failed on every platform from 2026-10-02 to
+> 2026-11-04**. The probe could not report egress at all; `decide` reached `Ready`
+> only through `traffic == Flowing`.
+>
+> **Why it took a month, recorded because it will happen again.** `Timeout` is the
+> same string a dead tunnel produces, so the failure named no mechanism and every
+> guess "explained" it; the *test* passed a literal `5` with a parameter called
+> `timeout_secs`, so the test and the code were wrong in the same direction and
+> only the engine disagreed; and the one assertion that could have failed needed
+> egress, so it was read as an environment problem. The tell was in hand the whole
+> time: **a `504` in 7 ms did not time out.** Widening the budget to 5000 ms makes
+> the positive case pass immediately, against the real engine, on the shipped route.
+>
+> **Reproduced, not inferred.** Locally against `verge-mihomo v1.19.32`, through a
+> real Shadowsocks-2022 outbound and a local 204 responder:
+>
+> | `timeout` | answer | elapsed |
+> |---|---|---|
+> | `5` (the defect) | `504 {"message":"Timeout"}` | 0.007 s |
+> | `5000` | `200 {"delay":27}` | 0.029 s |
+> | `32767` | `200` (`i16::MAX` parses) | — |
+> | `32768` | `400 {"message":"Body invalid"}` | — |
+>
+> Four guards now hold it, each **observed failing** against the defect it catches:
+> the value the call site reads, a compile-time range assertion, an egress-free
+> engine test on the field's `i16` boundary, and the positive round-trip case
+> itself. `EGRESS-READINESS.md` §4b is the manual; its copy-paste diagnostics said
+> `timeout=5` and were corrected in the same change.
+
+> **Still open from this thread, and it is small:** the shipped probe now *can*
+> report egress, but no device on a working tier has been observed reaching
+> `connected` **through the egress signal** rather than through traffic — the
+> per-member probe's own entry below says why. That is a hardware observation, not
+> a repo one, and this fix does not change it: it removes the reason the signal
+> could never fire, it does not prove a real device fires it.
+
 `LOCUS_REQUIRE_EGRESS=1` stays set. It turns the skip into a failure by design, and
 it is what stops the suite passing by not running — the flag was never the problem.
 

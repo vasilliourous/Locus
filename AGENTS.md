@@ -47,6 +47,10 @@ One clause each; the file that owns it has the story.
 - **The proxy group name must differ from the proxy name** (`Locus Auto` vs
   `Locus`) — mihomo treats a match as a reference loop and refuses the whole
   config, which is valid YAML. Only running the engine catches it.
+- **mihomo's delay `timeout` is milliseconds, in a signed 16-bit field** — and
+  `Timeout` is the same string a dead tunnel returns, so a 5 ms budget reads as a
+  dead tunnel. A `504` that arrives in single-digit milliseconds never timed out.
+  This shipped for a month ([`docs/reference/EGRESS-READINESS.md`](docs/reference/EGRESS-READINESS.md) §4b).
 - **Frozen wire names** (`uot_port`, `download_*`→`update_*`, the
   `macos_intel`/`darwin-*` asymmetry, the `eco`/`free` and `strike`/`Full`
   splits) are contracts with deployed clients and the hub. Do not "tidy" them.

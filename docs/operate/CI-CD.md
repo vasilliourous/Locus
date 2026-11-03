@@ -272,6 +272,28 @@ the suite that always works.
 > **Do not record a cause for this test without one of those two outputs.** The
 > previous cause recorded here was a guess, and it cost two days.
 
+> **RESOLVED 2026-11-04 — the delay path failed because the probe sent milliseconds
+> as seconds.** The instrumentation above is what localised it; the cause was in the
+> request, not the runner and not the engine. `probe.rs` passed
+> `EGRESS_ATTEMPT_TIMEOUT.as_secs()` (`5`) to a field mihomo reads as **milliseconds
+> in a signed 16-bit integer**, so every delay test ran on a 5 ms budget and
+> answered `504 Timeout` in ~7 ms. `Build (linux)` was red because the test was
+> **right**. See [`../reference/FIXES.md`](../reference/FIXES.md) and
+> [`../reference/EGRESS-READINESS.md`](../reference/EGRESS-READINESS.md) §4b.
+>
+> Two lessons for this file specifically:
+>
+> - **"The job demonstrably has egress" settles whether the runner can dial. It says
+>   nothing about whether the client asked correctly.** That was the inference that
+>   kept this open, and it was made twice.
+> - **A red run that is indistinguishable from an environment problem will be
+>   treated as one.** The control and the engine log are what made it diagnosable;
+>   keep them in the failure message rather than behind a re-run.
+>
+> The unit is now pinned by an **egress-free** engine test
+> (`the_delay_timeout_field_is_milliseconds`), so a no-network runner can no longer
+> skip the only assertion that covers this into silence.
+
 **`sing-box` is installed, pinned, and its absence fails the step.** It is the
 **hub's** Shadowsocks listener, so it is the only peer whose acceptance of this
 client's outbound means anything — see
