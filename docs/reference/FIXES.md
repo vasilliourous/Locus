@@ -24,6 +24,45 @@ commercial gaps, [`../business/17-not-built.md`](../business/17-not-built.md).
 
 ---
 
+## THE EGRESS TEST WAS BLAMED ON THE RUNNER FOR TWO DAYS, AND THE RUNNER WAS FINE (2026-11-04, unreleased)
+
+- **What broke.** `a_reachable_member_yields_a_usable_delay` failed every
+  `Build (linux)` run from 2026-11-02 onward. The recorded cause — a "torn
+  runner" — was a guess nobody had measured, and the guidance it produced was
+  "re-run the job".
+- **Why the guess survived.** The test asserts on mihomo's
+  `/proxies/<name>/delay`, which answers `504 Timeout` **both** when a dial fails
+  and when it merely exceeds `timeout`. A runner with no network and a broken
+  probe therefore return the same string, so every diagnosis was unfalsifiable
+  from the failure message. `client/docs/UPSTREAM-CHANGES.md` had already written
+  this trap down for the sibling tunnel test and it was not applied here.
+- **The measurement, taken on the runner.** `curl` to both probe hosts returned
+  `204` in 10 ms and 30 ms; `getent` resolved both; a plain GET proxied through
+  the engine's mixed port returned `204`; the delay route returned `504 Timeout`.
+  The runner has egress and the engine can dial from it. **The delay path is at
+  fault.**
+- **Two fixes attempted before the measurement, both wrong, both reverted or
+  superseded.** Removing `ipv6: false` from the test config changed nothing; adding
+  `dns.nameserver: [system]` changed nothing. Both were reasoned from the symptom
+  rather than measured, which is the rule this entry exists to restate.
+- **A third wrong turn worth naming.** A local reproduction appeared to implicate
+  the engine's built-in resolver, because this workstation's own resolver answers
+  those hosts with fake-IP addresses (`198.18.0.x`) that nothing can dial. Every
+  local observation inherited that artefact, so local evidence was worthless for
+  this fault and said so only after the runner's log showed a real address
+  (`142.251.34.67`).
+- **What the test now does about it.** The failure carries its own control — the
+  HTTP code of a proxied GET through the engine's mixed port — and the last 40
+  lines of the engine's debug log. `client.yml` gained a *Diagnose the runner's own
+  egress* step. The next red run names the failing side instead of prompting a
+  second investigation.
+- **The rule.** A check that cannot distinguish "wrong" from "unreachable" will be
+  resolved in favour of whichever explanation is cheaper and it will be wrong. Attach
+  the control to the assertion, in the assertion's own failure message, where the
+  person reading the red build will see it.
+
+---
+
 ## THE §21 GUARD COULD NOT REPORT A TRUE RESULT, AND COULD NOT FAIL (2026-11-03, unreleased)
 
 - **What broke.** CI run `41446549157` failed `Verify` on

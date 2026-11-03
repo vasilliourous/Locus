@@ -243,20 +243,34 @@ variables, because one variable gating both meant every no-network test skipped 
 any machine that had simply not run `prebuild` — throwing away the only part of
 the suite that always works.
 
-> **"The same job demonstrably has egress" is a weaker claim than it looks.
-> Added 2026-11-03.** It is true that the job installed `sing-box` and
-> `shadowsocks-rust` minutes earlier, and that is the justification for the flag.
-> It does **not** follow that the runner can reach `cp.cloudflare.com` or
-> `www.gstatic.com`: those are two specific third-party hosts, and the flag's
-> rationale is about the runner having *a* network. On 2026-11-02 every Linux job
-> went red on `a_reachable_member_yields_a_usable_delay` with a `504` from both —
-> and, per `client/docs/UPSTREAM-CHANGES.md`, a `Timeout` is what the engine
-> returns both when the tunnel is dead *and* when the host is unreachable.
+> **Measured 2026-11-03, after two days of blaming the runner.** `Build (linux)`
+> had gone red on `a_reachable_member_yields_a_usable_delay` since 2026-11-02, and
+> this file's own justification — "the job demonstrably has egress" — was treated as
+> settling which side was at fault. It does not settle that, and the failure message
+> could not either: mihomo returns `504 Timeout` both when a dial fails and when it
+> exceeds `timeout`, so "the runner has no network" and "the probe is wrong" produce
+> the same string.
 >
-> The flag stays set: it is what stops the suite passing by not running. What was
-> missing is the control. A **`Diagnose the runner's own egress`** step now runs on
-> `failure()` and `curl`s both hosts directly, bypassing the engine, into the job
-> summary. Read it before blaming the probe, and before blaming the runner.
+> The runner, measured directly:
+>
+> | probe | result on the runner |
+> |---|---|
+> | `curl http://cp.cloudflare.com/generate_204` | `204` in 10 ms |
+> | `curl https://www.gstatic.com/generate_204` | `204` in 30 ms |
+> | the same GET through the engine's mixed port | `204` |
+> | the delay route (`/proxies/<name>/delay`) | `504 Timeout` |
+>
+> So the runner has egress **and the engine can dial from it**; the delay path is
+> what fails. The flag stays set — it is what stops the suite passing by not
+> running — but a red run is now self-diagnosing rather than open-ended:
+>
+> - the test prints the engine's proxied-GET control code and its last 40 debug log
+>   lines in the failure message;
+> - a `Diagnose the runner's own egress` step `curl`s both hosts directly when the
+>   suite fails.
+>
+> **Do not record a cause for this test without one of those two outputs.** The
+> previous cause recorded here was a guess, and it cost two days.
 
 **`sing-box` is installed, pinned, and its absence fails the step.** It is the
 **hub's** Shadowsocks listener, so it is the only peer whose acceptance of this

@@ -648,45 +648,50 @@ reasoning is sound and the asymmetry it rests on is read from the plugin source:
 was written on, it does. "The engine test passed" there means it did not run its
 assertion. Check for the `SKIP:` line, not the green tick.
 
-**In CI the same test FAILS instead of skipping, and it is the runner's network.**
-`LOCUS_REQUIRE_EGRESS=1` turns the skip into a failure by design, so when a runner
-has no working egress the whole `Build (linux)` job goes red on
-`a_reachable_member_yields_a_usable_delay` with a 504 from **both**
-`cp.cloudflare.com` and `gstatic.com`. Observed 2026-11-02 on two runs of one
-commit, with `Build (macos-arm)`, `Build (macos-intel)`, `Build (windows)` and
-`Verify` green throughout — a torn runner, not a torn repository, and **not a
-reason to unset the flag**: the flag is what stops the suite passing by not
-running. Re-run the job; it passed the same commit on the third attempt.
+**In CI the same test FAILS instead of skipping, and the cause is now MEASURED.**
 
-> **"It is the runner's network" is UNVERIFIED, and the evidence points the other
-> way. Added 2026-11-03.**
+> **2026-11-04. The earlier entries here blamed the runner. That was wrong.**
 >
-> The paragraph above was written from a green run on 2026-10-29 and three red ones
-> on 2026-11-02. Investigating the red runs found the claim was never checked — and
-> that two facts weigh against it:
+> The paragraph that used to stand here said the failure was "a torn runner, not a
+> torn repository", and told the next person to re-run the job. It was written from
+> a green run on 2026-10-29 and three red ones on 2026-11-02, and the cause was
+> never measured. Five red runs and several wrong fixes later, the measurement:
 >
-> 1. **The runner demonstrably HAS egress**, by this repository's own criterion in
->    `CI-CD.md`. That job downloads the `frontend-dist` artifact, runs `pnpm
->    install` against the registry, and installs `sing-box` and
->    `shadowsocks-rust` from GitHub releases before the test runs.
-> 2. **A `504 Timeout` from the engine is exactly what a runner that cannot reach
->    the host ALSO produces.** `client/docs/UPSTREAM-CHANGES.md` says so about this
->    very URL: *"a sandboxed runner cannot reach it — the engine reports that as
->    `Timeout`, indistinguishable from a dead tunnel."* The failure message cannot
->    tell the two diagnoses apart, and the one written down is the more comfortable
->    of them.
+> | measured on the runner, 2026-11-03 | result |
+> |---|---|
+> | `curl http://cp.cloudflare.com/generate_204` | `204` in **10 ms** |
+> | `curl https://www.gstatic.com/generate_204` | `204` in **30 ms** |
+> | `getent ahosts cp.cloudflare.com` | resolves |
+> | the probe, through the engine | `504 Timeout` |
+> | a plain proxied GET through the engine's mixed port | `204` |
 >
-> **Verified:** the test passes where egress works (green 2026-10-28 and
-> 2026-10-29) and fails on the 2026-11-02 runners. **Not verified: which side is
-> broken, because the job never measured the control.**
+> **The runner has egress, and the engine can dial from it.** The last two rows are
+> the ones that localise the fault: the same engine, on the same runner, reaches the
+> same host through its proxy port while the delay route returns `Timeout`. The
+> probe's *delay path* is what fails, not the network.
 >
-> `client.yml` gained a *Diagnose the runner's own egress* step that runs exactly
-> when the suite fails: it `curl`s both hosts directly, bypassing the engine, and
-> writes the result to the job summary. `curl 204` beside an engine `Timeout` means
-> a probe defect; `curl` failing too confirms the runner. **Until that has been
-> read, do not re-run-and-hope, and do not record a cause.** This is
-> DEBUGGING-METHOD §3 — the check cannot distinguish "wrong" from "unreachable", so
-> a verdict either way is a guess wearing evidence's clothes.
+> **What made this take so long, recorded because it will happen again.** A `504
+> Timeout` is returned by mihomo both when a dial fails and when it merely exceeds
+> `timeout`. The failure message named two hosts and no mechanism, so every
+> diagnosis was a guess about third-party availability, and each guess "explained"
+> the symptom equally well. `client/docs/UPSTREAM-CHANGES.md` had already written
+> the trap down for a sibling test — *"the engine reports that as `Timeout`,
+> indistinguishable from a dead tunnel"* — and it was not applied here.
+>
+> **What the test now does about it.** It carries its own control: before failing,
+> it prints the HTTP code of a plain GET through the engine's mixed port, and the
+> last 40 lines of the engine's debug log. The next red run says which side is
+> wrong in the failure text itself instead of requiring a second investigation.
+> `client.yml` also gained a `Diagnose the runner's own egress` step, which `curl`s
+> both hosts directly when the suite fails.
+>
+> **Still open:** *why* the delay route times out when a proxied GET succeeds from
+> the same engine. That is unexplained, and it is the remaining question — the next
+> red run's log is what will answer it. What is no longer open is the question this
+> section asked for two days: **it is not the runner.**
+
+`LOCUS_REQUIRE_EGRESS=1` stays set. It turns the skip into a failure by design, and
+it is what stops the suite passing by not running — the flag was never the problem.
 
 ### Every installed 3.2.17 Windows client is stranded, and the fix cannot reach it
 
