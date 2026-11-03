@@ -701,6 +701,55 @@ jobs:
       #
       # The download MUST precede the build, because that macro runs during
       # compilation.
+      #
+      # ── IT MUST ALSO WAIT, AND `needs: verify` IS NOT THE WAY ──
+      #
+      # This job has no `needs: verify` on purpose (see the job header): dropping
+      # it is what stopped four expensive runners sitting idle behind the gate.
+      # But the artifact this step downloads is PRODUCED BY `verify`, so removing
+      # the ordering dependency left a race — and on 2026-11-03 run
+      # `41676943383` both macOS jobs hit it:
+      #
+      #   macOS-arm  reached this step at 16:43:45  -> "Artifact not found"
+      #   verify     uploaded `frontend-dist` at 16:44:57  (72 s later)
+      #
+      # It did not bite Linux or Windows only because those runners are slower to
+      # reach this point; the race is real on every platform and it is a matter of
+      # seconds. A red build whose message says "Artifact not found" names
+      # `toolkit/upload-artifact` and the Artifacts FAQ, and nothing in it points
+      # at a job-ordering mistake — which is exactly the shape of failure this
+      # repository has already paid for twice.
+      #
+      # The fix keeps the parallelism and waits only where the dependency is real:
+      # poll the run's artifacts until `frontend-dist` appears. `gh` is on every
+      # runner and reads the token from the environment, so no new secret is
+      # needed. The timeout is generous relative to the artifact's normal upload
+      # time (about 2 minutes after the run starts) and short relative to this
+      # job's 50-minute ceiling, so a genuinely missing artifact still fails
+      # rather than hanging.
+      - name: Wait for the frontend bundle to be uploaded
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ github.run_id }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          deadline=$((SECONDS + 900))
+          while :; do
+            if gh api "repos/$REPO/actions/runs/$RUN_ID/artifacts" \
+                 --jq '[.artifacts[].name] | index("frontend-dist") != null' \
+                 2>/dev/null | grep -qx true; then
+              echo "frontend-dist is available"
+              exit 0
+            fi
+            if [ "$SECONDS" -ge "$deadline" ]; then
+              echo "::error::frontend-dist was never uploaded after 15 minutes — this is the 'verify' job failing or its upload step erroring, not a problem in THIS job. Check the Verify job's output; if it reports an artifact-storage quota error, see the purge-caches job."
+              exit 1
+            fi
+            sleep 10
+          done
+
       - name: Download the frontend bundle
         uses: actions/download-artifact@v4
         with:
