@@ -333,7 +333,7 @@ fn write_config(dir: &Path, controller_port: u16, mixed_port: u16) -> PathBuf {
     let yaml = format!(
         "mixed-port: {mixed_port}\n\
          external-controller: 127.0.0.1:{controller_port}\n\
-         log-level: warning\n\
+         log-level: debug\n\
          ipv6: false\n\
          dns:\n\
          \x20 enable: true\n\
@@ -361,6 +361,13 @@ fn write_config(dir: &Path, controller_port: u16, mixed_port: u16) -> PathBuf {
     config
 }
 
+/// Why `log-level: debug` is in the config above.
+///
+/// At `warning` the engine logs nothing about a dial that fails, so this test's
+/// failure message had no engine-side evidence at all and could not be
+/// debugged from CI. `debug` puts the resolver's answer and the dial's error in
+/// `engine.log`, which the failure path now prints.
+///
 /// Why `dns.nameserver: [system]` is in the config above, and why it is not
 /// optional.
 ///
@@ -547,11 +554,34 @@ fn a_reachable_member_yields_a_usable_delay() {
                 }
                 std::thread::sleep(Duration::from_millis(250));
             }
+            // The engine's own log, printed on failure.
+            //
+            // WHY: this test failed on every Linux run from 2026-11-02, with
+            // `Timeout` — the one string a dead tunnel and an unreachable host
+            // both produce. The engine was writing a log the whole time and
+            // nothing printed it, so four separate diagnoses were attempted
+            // against an assumption and all four were wrong. A failure that
+            // arrives with no engine-side evidence cannot be debugged from CI,
+            // and asking someone to reproduce a runner-only network condition on
+            // a laptop wastes the one advantage CI has: it is where the failure
+            // actually happens.
+            let engine_log = dir.join("engine.log");
+            let log_tail = std::fs::read_to_string(&engine_log)
+                .map(|text| {
+                    let lines: Vec<&str> = text.lines().collect();
+                    let from = lines.len().saturating_sub(40);
+                    lines[from..].join("\n")
+                })
+                .unwrap_or_else(|e| format!("(could not read {}: {e})", engine_log.display()));
+
             panic!(
                 "this run requires egress but the sidecar could not complete a round trip to \
                  EITHER {test_url} (status {:?}, body {:?}) OR {retry_url} (status {:?}, body \
-                 {:?}). Two independent hosts failing is a fact about the tunnel or the runner, \
-                 not about either host — check which before unsetting LOCUS_REQUIRE_EGRESS.",
+                 {:?}).\n\
+                 \n\
+                 --- the engine's last 40 log lines ---\n\
+                 {log_tail}\n\
+                 ----------------------------------------",
                 last.0, last.1, retry_last.0, retry_last.1
             );
         }
