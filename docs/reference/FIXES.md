@@ -62,13 +62,20 @@ commercial gaps, [`../business/17-not-built.md`](../business/17-not-built.md).
   `the_delay_timeout_field_is_milliseconds`, an **egress-free** engine test that
   pins `32767`/`32768` against the real binary so a no-network runner cannot skip
   it into silence.
-- **Two second-order defects found by fixing it.** `tunnel_end_to_end.rs` also sent
-  `timeout=5` and passed only because loopback round trips are ~2 ms — a test that
-  was green for the wrong reason. And the first version of the new unit test
-  pointed the delay test at the engine's own controller, which was intermittently
-  `503` because `start_engine` returns when `/version` answers, before
-  `Start initial compatible provider` completes; it now uses its own responder and
-  polls.
+- **Three second-order defects found by fixing it, two of them in the new guard.**
+  `tunnel_end_to_end.rs` also sent `timeout=5` and passed only because loopback
+  round trips are ~2 ms — a test that was green for the wrong reason. And the new
+  unit test failed **twice** for reasons that were not the unit: first it pointed
+  the delay test at the engine's own controller, which is `503` while
+  `Start initial compatible provider` is still running (`start_engine` returns on
+  `/version`, before that); then — the real mistake — it asserted that a loopback
+  target **yields a measurement**, through the `direct` outbound this file's config
+  builds. A `direct` member reports `delay: 0` for loopback because loopback
+  bypasses the proxy path, `0` is correctly not a measurement, and the guard went
+  red in CI while the shipped behaviour was already fixed. The file had documented
+  that exact fact at line 549 for two releases. The guard now asserts only the
+  `32767`/`32768` parse boundary, which needs no round trip and cannot be defeated
+  by a target.
 - **The rule.** A wire field's unit is a contract, and both sides of an integration
   boundary can be wrong in the same direction while agreeing perfectly with each
   other. When a clock is involved, **measure what came back** — a timeout that

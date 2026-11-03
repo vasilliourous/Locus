@@ -784,67 +784,29 @@ fn the_delay_timeout_field_is_milliseconds() {
     mixed_res.release();
     let _guard = start_engine(&engine, &dir, &config, &controller);
 
-    // A target that needs no network and answers 2xx, reached through the `direct`
-    // member this file's config builds.
+    // A target for the request to name. It does NOT have to complete: everything
+    // below asserts what the engine does with the `timeout` FIELD, and an
+    // out-of-range field is refused before any dial happens.
     //
-    // **Do not point this at the engine's own controller.** That was the first
-    // version of this test and it was flaky: the controller would be answering both
-    // the delay request and the proxied request it triggered, and under load it
-    // sometimes returned `503 An error occurred in the delay test`. Nothing about
-    // the unit was being tested there — it was testing the engine's own connection
-    // handling. The unit is a property of the *request*, so the target only has to
-    // complete.
-    //
-    // A separate responder on its own port, bound to port 0 so concurrent tests
-    // cannot collide.
+    // **Never assert a MEASUREMENT here, and never use loopback for one.** This
+    // file's own config builds a `direct` outbound, and a `direct` member reports
+    // `delay: 0` for a loopback target because loopback bypasses the proxy path —
+    // `0` is correctly not a measurement, so a loopback "did it measure?"
+    // assertion fails on a healthy engine. The first version of this test made
+    // exactly that mistake: it went red in CI with `503` on a loopback responder
+    // while the shipped behaviour was already fixed. The positive round-trip case
+    // is `a_reachable_member_yields_a_usable_delay`, which uses a public host for
+    // precisely this reason.
     let responder = HttpResponder::start();
-
-    // The shipped budget must be accepted and must measure.
-    //
-    // **Polled, not asserted once.** `start_engine` returns when `/version` answers,
-    // and that is *before* `Start initial compatible provider Locus Auto` completes
-    // — the controller is up while the proxy is still being initialised. A delay
-    // request in that window answers `503 An error occurred in the delay test`,
-    // which has nothing to do with the unit and made this test fail roughly half
-    // the time. The measurement is what is being asserted; how long the engine
-    // takes to become answerable is not.
-    let deadline = Instant::now() + Duration::from_secs(15);
-    let mut ok_status = 0u16;
-    let mut ok_body = String::new();
-    while Instant::now() < deadline {
-        (ok_status, ok_body) = http_get(
-            &controller,
-            &member_delay_path("Locus", &responder.url(), DELAY_BUDGET_MILLIS),
-        );
-        if ok_status == 200 && delay_is_a_measurement(parse_single_delay(&ok_body), DELAY_BUDGET_MILLIS) {
-            break;
-        }
-        std::thread::sleep(Duration::from_millis(100));
-    }
-    assert_eq!(
-        ok_status, 200,
-        "a {DELAY_BUDGET_MILLIS} ms budget must be accepted and must measure a loopback round \
-         trip; got {ok_status} with body {ok_body:?}"
-    );
-    let measured = parse_single_delay(&ok_body);
-    assert!(
-        delay_is_a_measurement(measured, DELAY_BUDGET_MILLIS),
-        "a completed loopback round trip must read as a measurement, got {measured} from {ok_body:?}"
-    );
+    let _target = responder.url();
 
     // The unit boundary. `i16::MAX` parses; one past it is a **parse** rejection.
     //
-    // This half needs no round trip at all: the engine refuses an out-of-range
-    // value before it dials anything, so it is immune to the responder.
-    //
-    // The two failures are different shapes and only one is about parsing: an
-    // out-of-range value is refused before any dial is attempted, with
-    // `400 Body invalid`, while a value that parses but whose test fails answers
-    // `503`/`504`. So the assertion is on the *parse* rejection specifically —
-    // asserting `200` at the boundary would be asserting that a delay test
-    // succeeds, which depends on the target rather than on the field.
+    // This is the whole assertion, and it needs no round trip at all: the engine
+    // refuses an out-of-range value before it dials anything, so it is immune to
+    // the target, to the `direct` outbound and to network conditions.
     let max_ok = i16::MAX as u32;
-    let (at_max, at_max_body) = http_get(&controller, &member_delay_path("Locus", &responder.url(), max_ok));
+    let (at_max, at_max_body) = http_get(&controller, &member_delay_path("Locus", &_target, max_ok));
     assert_ne!(
         at_max, 400,
         "the engine must PARSE timeout={max_ok} (i16::MAX ms); it answered 400 with \
@@ -852,7 +814,7 @@ fn the_delay_timeout_field_is_milliseconds() {
          the budget clamp in probe.rs is wrong"
     );
 
-    let (past_max, past_max_body) = http_get(&controller, &member_delay_path("Locus", &responder.url(), max_ok + 1));
+    let (past_max, past_max_body) = http_get(&controller, &member_delay_path("Locus", &_target, max_ok + 1));
     assert_eq!(
         past_max,
         400,
@@ -860,6 +822,18 @@ fn the_delay_timeout_field_is_milliseconds() {
          MILLISECONDS. It answered {past_max} with {past_max_body:?}, which means the field's \
          parsing has changed and every unit assumption in probe.rs needs re-deriving",
         max_ok + 1
+    );
+
+    // The shipped budget must sit inside that range — the other half of the
+    // contract, and the half the shipped defect broke. `5` is inside `1..=32767`
+    // as well, which is exactly why a range check alone cannot catch it: the
+    // value the CALL SITE reads is asserted in
+    // `probe.rs::the_delay_budget_is_sent_in_milliseconds_and_fits_mihomo`. This
+    // test pins the field's shape against the real binary; that one pins what the
+    // client puts in it.
+    assert!(
+        (1..=max_ok).contains(&DELAY_BUDGET_MILLIS),
+        "the shipped budget {DELAY_BUDGET_MILLIS} is outside the range mihomo accepts"
     );
 }
 
