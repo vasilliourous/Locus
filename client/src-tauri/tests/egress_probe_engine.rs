@@ -492,6 +492,35 @@ fn a_reachable_member_yields_a_usable_delay() {
     // classifier drift go unnoticed for a release.
     let path = member_delay_path("Locus", test_url, 5);
 
+    // ── THE CONTROL, INSIDE THE TEST ──
+    //
+    // Is the engine able to reach ANYTHING from this runner? Without this, a
+    // `Timeout` on the real URL cannot be attributed: it is what a broken probe,
+    // a blocked egress and a dead tunnel all return. Measured on the runner on
+    // 2026-11-03: `cp.cloudflare.com` came back `204` to curl in 10 ms while the
+    // engine never completed a dial to it — so the question "can the engine dial
+    // at all" must be answered here, not assumed.
+    //
+    // The mixed port proxies a plain GET through the SAME outbound the delay test
+    // uses. A 2xx here with a `Timeout` above localises the fault to the delay
+    // path; a failure here means the engine cannot egress on this runner, and the
+    // panic below says so instead of blaming the probe.
+    let engine_can_dial = {
+        let socks = format!("127.0.0.1:{mixed_port}");
+        let out = std::process::Command::new("curl")
+            .args([
+                "-s", "-o", "/dev/null", "-w", "%{http_code}",
+                "--max-time", "10",
+                "-x", &format!("http://{socks}"),
+                test_url,
+            ])
+            .output();
+        match out {
+            Ok(o) => String::from_utf8_lossy(&o.stdout).trim().to_string(),
+            Err(e) => format!("curl-spawn-failed: {e}"),
+        }
+    };
+
     let deadline = Instant::now() + Duration::from_secs(10);
     let mut last = (0u16, String::new());
     let mut usable = false;
@@ -578,6 +607,12 @@ fn a_reachable_member_yields_a_usable_delay() {
                 "this run requires egress but the sidecar could not complete a round trip to \
                  EITHER {test_url} (status {:?}, body {:?}) OR {retry_url} (status {:?}, body \
                  {:?}).\n\
+                 \n\
+                 \n\
+                 --- control: a proxied GET through the engine's mixed port {mixed_port} ---\n\
+                 http_code = {engine_can_dial}\n\
+                 (2xx with a Timeout above = the delay path is at fault.\n\
+                  anything else   = the engine cannot egress on this runner.)\n\
                  \n\
                  --- the engine's last 40 log lines ---\n\
                  {log_tail}\n\
