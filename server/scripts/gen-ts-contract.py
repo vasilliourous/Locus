@@ -359,7 +359,22 @@ def render(items):
             parts.extend(emit_doc(it["docs"]))
             parts.append("export type %s =" % it["name"])
             for v in it["variants"]:
-                tag_value = v["rust"].lower() if it["camel"] else v["rust"]
+                # `rename_all = "camelCase"` applies to VARIANT names too, and the
+                # generator used to lowercase instead of camelCasing — so `Active`
+                # became `active` (right by accident, it is one word) and
+                # `NotConfirmed` became `notconfirmed` (wrong). Single-word
+                # variants hid it, which is why it survived until the first
+                # multi-word one (`HubOutcome`) exposed it.
+                #
+                # serde's `camelCase` for a variant is the identifier with the
+                # first letter lowercased; `camel()` does the same job for
+                # snake_case field names and is the wrong function here, because
+                # a variant is already CamelCase. So the two cases are distinct
+                # on purpose.
+                if it["camel"]:
+                    tag_value = v["rust"][:1].lower() + v["rust"][1:]
+                else:
+                    tag_value = v["rust"]
                 if not v["fields"]:
                     head = "  | { %s: '%s' }" % (it["tag"], tag_value)
                     if v["docs"]:

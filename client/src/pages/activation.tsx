@@ -1,6 +1,7 @@
 import { Box, Button, CircularProgress, Typography, alpha } from '@mui/material'
 import { useCallback, useEffect, useRef, useState } from 'react'
 
+import { SupportBlock } from '@/components/shared/support-block'
 import { useSubscription } from '@/hooks/use-subscription'
 import { LOCUS_COLORS } from '@/pages/_theme'
 import { activationRefusal } from '@/pages/connect-notice'
@@ -396,27 +397,40 @@ const ActivationScreen = ({ onActivated }: Props) => {
 
         <Typography
           variant="caption"
-          sx={{ display: 'block', mt: 3, color: LOCUS_COLORS.textSecondary }}
+          sx={{ display: 'block', mt: 3, mb: 2, color: LOCUS_COLORS.textSecondary }}
         >
           Nothing on your card? The code is 15 characters and never contains{' '}
           <strong>0</strong>, <strong>O</strong>, <strong>1</strong> or{' '}
           <strong>I</strong>.
         </Typography>
 
-        {/* No hub URL here.
+        {/* The support route, on the one screen a stuck student is guaranteed to
+            be looking at.
             //
-            // This used to render `HUB_URL` as a visible link. The hub host is
-            // infrastructure — `networkingguides.duckdns.org` is the address the
-            // client *calls*, not a place a student should be pointed at. Showing
-            // it on the one screen a student meets before they have any context
-            // invites them to treat a backend hostname as product surface, and a
-            // hostname is not a support route: it cannot answer "my code says it
-            // is already used".
+            // This space used to be empty ON PURPOSE, and the comment that stood
+            // here argued for it: the hub host is infrastructure and must not be
+            // shown, and "the card is the support route — the code is printed on
+            // it, beside whatever contact details the reseller puts there".
             //
-            // The card is the support route: the code is printed on it, beside
-            // whatever contact details the reseller puts there. There is
-            // deliberately nothing here in its place — inventing a placeholder
-            // address would only move the same problem. */}
+            // The first half is still right and the link was never restored: the
+            // hub is an address the client CALLS, not product surface, and a
+            // hostname cannot answer "my code says it is already used".
+            //
+            // The second half was wrong about this screen in particular. It
+            // assumed every student still has the card in front of them, and the
+            // student who arrives here is precisely the one who may not: a code
+            // that was refused, a card lost, a device handed to them without it,
+            // or a middleman they no longer have a number for. Telling them
+            // nothing leaves the product's least self-sufficient screen as its
+            // only dead end — and it is the screen that stands between a sale
+            // and a paying customer.
+            //
+            // So the block names the middleman FIRST (the card's contact still
+            // applies, and the middleman can fix most of this on the spot) and
+            // then gives the operator's address and the reply promise for
+            // everyone the middleman could not help. It deliberately does not
+            // mention the hub. */}
+        <SupportBlock palette="brand" />
       </Box>
     </Box>
   )

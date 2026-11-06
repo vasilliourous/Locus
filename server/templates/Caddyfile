@@ -42,6 +42,23 @@ ${DOMAIN} {
         reverse_proxy 127.0.0.1:8090
     }
 
+    # Student sign-out: 10 requests per 10 min per IP.
+    #
+    # Its own limit rather than /api/*'s general one: this endpoint writes an
+    # audit row and is authenticated only by possession of a code, which is
+    # printed on every card. It deliberately does NOT share the activation zone —
+    # signing out must not consume the five activation attempts.
+    handle /api/release-entitlement {
+        rate_limit {
+            zone release {
+                key {remote_host}
+                events 10
+                window 10m
+            }
+        }
+        reverse_proxy 127.0.0.1:8090
+    }
+
     # ── Ordering matters. Read before editing ──
     #
     # Caddy evaluates `handle` blocks in file order and a request matches only

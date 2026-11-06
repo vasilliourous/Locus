@@ -511,6 +511,155 @@ routerAdd("POST", "/api/admin/console", function(e) {
         }
 
         // ─────────────────────────────────────────────────────────────
+        // codes.import — add codes that are MISSING from the hub
+        // ─────────────────────────────────────────────────────────────
+        //
+        // WHY THIS EXISTS
+        //
+        // A code that the hub does not hold is not a cosmetic gap. heartbeat.pb.js
+        // answers 404 "Code not found"; the client files 404 as a REFUSAL, and
+        // handle_refusal() stops the tunnel and calls clear_entitlement(), which
+        // DELETES the code from the device and its durable mirror. The student is
+        // left logged in with no tunnel and no code, and no error is ever shown —
+        // because the state that would have explained it was erased a beat
+        // earlier. The code set and the hub disagreeing is what makes that
+        // reachable, so reconciling them has to be an operation the console can
+        // do idempotently, not a hand-written INSERT.
+        //
+        // THREE OUTCOMES, REPORTED SEPARATELY. "skipped" is not "created": a code
+        // already on the hub may carry real history (activated_at, events), and
+        // an import must never overwrite that. Use codes.renew / codes.update for
+        // changes to an existing row.
+        //
+        //   created    — the row did not exist and was added
+        //   skipped    — already present; left byte-for-byte alone
+        //   remapped   — created, but the requested tier has no config row, so it
+        //                was written under `remap_to` (the caller decides this)
+        //   rejected   — would not be servable; NOT written. The reason is
+        //                returned per code so the operator can act on it rather
+        //                than discovering a dead batch weeks later.
+        //
+        // THE TIER GUARD IS THE POINT OF THE GUARD. activation.pb.js returns the
+        // stored `tier` to the client, and the client resolves server_config by
+        // that string alone. A tier with no active tier_configs row therefore
+        // activates "successfully" and hands the device NO server_config — a
+        // connected app that cannot reach the internet, which is the failure mode
+        // this whole handler is trying to remove. So a code is only written for a
+        // tier that can actually be served, and `stealth` (retired, merged into
+        // `strike`, 04-tiers.md §4.2.4) is remapped by the caller, never silently.
+        //
+        // Luhn is re-checked here for the same reason: formatCode() enforces it on
+        // generation, but an import accepts externally-supplied strings, and a
+        // malformed code is rejected by code_lookup.pb.js before it ever reaches
+        // the database — it would look present in the console and be unusable on
+        // the device.
+        if (action === "codes.import") {
+            var items = body.codes;
+            if (!items || typeof items.length !== "number") return bad(400, "codes must be an array");
+            if (items.length === 0) return bad(400, "codes is empty");
+            if (items.length > 500) return bad(400, "at most 500 codes per import");
+
+            var remapTo = String(body.remap_to || "").trim();
+            var skipDup = body.on_duplicate !== "error";
+
+            // Which tiers can actually be served right now? Read once, not per code.
+            var servable = {};
+            var tierRows = $app.dao().findRecordsByExpr("tier_configs", $dbx.exp("id != ''"));
+            for (var ti = 0; ti < tierRows.length; ti++) {
+                if (tierRows[ti].getBool("active")) servable[tierRows[ti].getString("tier")] = true;
+            }
+            if (remapTo && !servable[remapTo]) {
+                return bad(400, "remap_to '" + remapTo + "' has no active tier config — it would be unservable too");
+            }
+
+            var collI = $app.dao().findCollectionByNameOrId("codes");
+            var created = [], skipped = [], remapped = [], rejected = [];
+
+            // De-duplicate WITHIN the request first. codes.json is hand-maintained
+            // and has shipped the same code twice; without this the second copy
+            // would be reported as rejected-by-unique-constraint, which reads like
+            // a database fault rather than a duplicate in the source list.
+            var seen = {};
+
+            for (var k = 0; k < items.length; k++) {
+                var entry = items[k] || {};
+                var rawCode = String(entry.code || "").trim().toUpperCase();
+                var wantTier = String(entry.tier || "").trim();
+
+                if (!rawCode) { rejected.push({code: "(empty)", reason: "no code"}); continue; }
+
+                var canon = canonical(rawCode);
+                var flat = canon.replace(/-/g, "");
+                if (flat.length !== 15) {
+                    rejected.push({code: rawCode, reason: "not in RQ-XXXX-XXXX-XXXX-C form"});
+                    continue;
+                }
+                var bodyPart = flat.substring(0, 14);
+                if (checksum(bodyPart) !== flat.substring(14)) {
+                    rejected.push({code: canon, reason: "checksum does not match (Luhn)"});
+                    continue;
+                }
+                if (seen[canon]) { skipped.push(canon); continue; }
+                seen[canon] = true;
+
+                var useTier = wantTier;
+                var wasRemapped = false;
+                if (!servable[useTier]) {
+                    if (!remapTo) {
+                        rejected.push({code: canon, reason: "tier '" + useTier + "' has no active tier config"});
+                        continue;
+                    }
+                    useTier = remapTo;
+                    wasRemapped = true;
+                }
+
+                var exists = null;
+                try { exists = $app.dao().findFirstRecordByData("codes", "code", canon); } catch (nfI) { exists = null; }
+                if (exists) {
+                    if (!skipDup) { rejected.push({code: canon, reason: "already exists"}); continue; }
+                    skipped.push(canon);
+                    continue;
+                }
+
+                try {
+                    var nri = new Record(collI);
+                    nri.set("code", canon);
+                    nri.set("tier", useTier);
+                    nri.set("used", false);
+                    nri.set("suspended", false);
+                    nri.set("notes", String(entry.notes || ""));
+                    if (entry.label) nri.set("label", String(entry.label));
+                    if (entry.middleman) nri.set("middleman", String(entry.middleman));
+                    if (entry.expires_at) nri.set("expires_at", String(entry.expires_at));
+                    $app.dao().saveRecord(nri);
+                    if (wasRemapped) {
+                        remapped.push(canon);
+                        // The remap is recorded as its own event, because "why is
+                        // this card strike when it was sold as stealth" is a
+                        // question someone will ask, and the answer must not live
+                        // only in a chat log.
+                        logEvent(canon, "generated",
+                                 "imported from code set; tier remapped '" + wantTier + "' -> '" + useTier + "'", "");
+                    } else {
+                        created.push(canon);
+                        logEvent(canon, "generated", "imported from code set (" + useTier + ")", "");
+                    }
+                } catch (saveI) {
+                    rejected.push({code: canon, reason: "save failed: " + String(saveI)});
+                }
+            }
+
+            return ok({
+                created: created,
+                skipped: skipped,
+                remapped: remapped,
+                rejected: rejected,
+                servable_tiers: Object.keys(servable),
+                remap_to: remapTo || null,
+            });
+        }
+
+        // ─────────────────────────────────────────────────────────────
         // codes.generate
         // ─────────────────────────────────────────────────────────────
         if (action === "codes.generate") {

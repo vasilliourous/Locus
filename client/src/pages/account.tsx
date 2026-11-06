@@ -28,11 +28,14 @@ import { useTranslation } from 'react-i18next'
 import { TierBadge } from '@/components/connection/tier-badge'
 import { TrafficSummaryCard } from '@/components/connection/traffic-summary'
 import { useConnection } from '@/components/connection/use-connection'
+import { SignOutCard } from '@/components/shared/sign-out-card'
+import { SupportBlock } from '@/components/shared/support-block'
 import { useI18n } from '@/hooks/use-i18n'
 import { useSubscription } from '@/hooks/use-subscription'
 import { useVerge } from '@/hooks/use-verge'
 import { cardSx } from '@/pages/_surfaces'
 import { isThemeId as isValidThemeId, THEMES, THEME_IDS } from '@/pages/_themes'
+import { requestEntitlementRefresh } from '@/services/entitlement-refresh'
 import { supportedLanguages } from '@/services/i18n'
 import { locusUpdateStatus, type UpdateStatus } from '@/services/locus'
 import { showNotice } from '@/services/notice-service'
@@ -307,6 +310,47 @@ const AccountPage = () => {
           value={status?.deviceId ?? '—'}
           mono
         />
+        {/* Copy the ID.
+            //
+            // The whole value of this row is that it ends up in an email, and
+            // "select this monospace text with the mouse and get it right" is a
+            // step that produces truncated IDs and reports support cannot match
+            // to an install. The hint below has always told the student to quote
+            // it; this is the affordance that makes quoting it possible.
+            //
+            // The outcome is stated ("Device ID copied") rather than left
+            // silent: a copy button that says nothing is indistinguishable from
+            // one that did not work — and `navigator.clipboard` genuinely can
+            // fail, so silence would be a lie half the time. */}
+        <Box sx={{ display: 'flex', justifyContent: 'flex-end', mt: -0.5 }}>
+          <Button
+            size="small"
+            variant="text"
+            disabled={!status?.deviceId}
+            onClick={() => {
+              const id = status?.deviceId
+              if (!id) return
+              void navigator.clipboard
+                .writeText(id)
+                .then(() =>
+                  showNotice.success(
+                    t('home.components.connection.signOut.deviceIdCopied'),
+                  ),
+                )
+                // A rejected promise means the OS refused the clipboard (no user
+                // gesture recognised, or a locked session). The student can
+                // still read the ID off the row, so this is an error notice and
+                // not a blocked action — and it says what to do instead.
+                .catch(() =>
+                  showNotice.error(
+                    t('home.components.connection.signOut.deviceIdCopyFailed'),
+                  ),
+                )
+            }}
+          >
+            {t('home.components.connection.signOut.deviceIdCopy')}
+          </Button>
+        </Box>
         <Row
           label={t('home.components.connection.account.platform')}
           value={status?.platform ?? '—'}
@@ -322,7 +366,35 @@ const AccountPage = () => {
         >
           {t('home.components.connection.account.deviceIdHint')}
         </Typography>
+
+        {/* The support route, on the page that holds the two things a report
+            needs: the Device ID and the app version. A student who opens Account
+            is usually there to quote something to someone, and this is where
+            they should find who to quote it to. */}
+        <SupportBlock showDeviceIdHint sx={{ mt: 1.5 }} />
       </Paper>
+
+      {/* ── Sign out ─────────────────────────────────────────────────────────
+          Last on the page and visually last of the day-to-day controls, because
+          it is the one action here that takes something away. Everything above
+          (the subscription, the traffic, the preferences) is what a student
+          normally comes to Account for.
+
+          Gated on `status.activated`: an unactivated device has no key to forget,
+          and offering "sign out" to someone who is not signed in reads as a
+          control that does nothing. */}
+      {status?.activated && (
+        <SignOutCard
+          // The gate re-reads at once (`services/entitlement-refresh`), so the
+          // app returns to the activation screen immediately rather than after
+          // the five-minute poll. This page also refreshes its own status so the
+          // cards behind the dialog stop describing a signed-in device.
+          onSignedOut={() => {
+            requestEntitlementRefresh()
+            void refresh()
+          }}
+        />
+      )}
 
       {/* ── Preferences ──────────────────────────────────────────────────── */}
       <Paper elevation={0} sx={{ p: 2, ...cardSx(theme) }}>

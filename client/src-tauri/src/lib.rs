@@ -201,6 +201,7 @@ mod app_init {
             cmd::locus_disconnect,
             cmd::locus_hub_url,
             cmd::locus_check_subscription,
+            cmd::locus_sign_out,
             cmd::locus_update_staging_dir,
             cmd::locus_update_status,
             cmd::locus_install_update,

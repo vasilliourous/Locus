@@ -142,6 +142,22 @@ export const useConnection = (): ConnectionState => {
   // which is a disconnect. This ref is what tells the two apart.
   const connectInFlightRef = useRef(false)
 
+  /**
+   * Whether *any* transition this hook started is still running.
+   *
+   * Separate from `connectInFlightRef`, which answers a different question: that
+   * one says "the connect is ours, so a press means cancel". This one says
+   * "do not start a second transition", and it is set for disconnects too.
+   *
+   * The phase cannot stand in for it. `locus_connect` takes up to the backend's
+   * whole readiness budget to resolve, and the phase is re-derived by the poll in
+   * the meantime, so there is a real window in which the screen reads
+   * `disconnected` while a connect is still in flight. Without this guard a press
+   * in that window starts a second command, and the two race over a single
+   * process-global cancel flag and over the core's lifecycle.
+   */
+  const transitionInFlightRef = useRef(false)
+
   // Whether a status read is already running.
   //
   // The poll is a `setInterval`, which fires on the clock rather than after the
@@ -233,6 +249,11 @@ export const useConnection = (): ConnectionState => {
     // the button would look dead. In that case the useful action is to take the
     // half-formed tunnel down — a disconnect — which is what the student means.
     if (current === 'connecting') {
+      // A disconnect while a connect of ours is still running is deliberately
+      // NOT issued: `locus_disconnect` and `locus_connect` would then race, and
+      // whichever finished last would decide the tunnel. The cancel flag is the
+      // one supported way to abandon, and the connect unwinds itself by stopping
+      // the core.
       if (!connectInFlightRef.current) {
         setError(null)
         setPhase('disconnecting')
@@ -245,6 +266,14 @@ export const useConnection = (): ConnectionState => {
         void refresh()
         return
       }
+      // Raised, but the command stays in flight and this hook keeps watching it.
+      //
+      // The press must not settle the screen itself: `locus_connect` resolves with
+      // its own verdict ("Cancelled", or a real reason), and a screen that reset
+      // here instead would show a settled state for a command still unwinding —
+      // then flip again when it resolved. Leaving the phase on `connecting` is
+      // also what keeps the button's cancel affordance live if the first press was
+      // lost.
       try {
         await locusCancelConnect()
       } catch (err) {
@@ -265,10 +294,22 @@ export const useConnection = (): ConnectionState => {
       return
     }
 
+    // One transition at a time, checked BEFORE the phase is changed.
+    //
+    // `connectInFlightRef` used to be raised only on the connect branch, after
+    // this point, so a press that arrived in the window between two reads could
+    // start a second `locus_connect` while the first was still running: the
+    // backend flag is global, so the second connect's own cancel check could
+    // consume the first one's cancellation, or one of them could stop the core
+    // the other had just started. The guard belongs here, before anything is
+    // mutated, and it covers disconnect for the same reason.
+    if (transitionInFlightRef.current) return
+
     setError(null)
     const connecting = current !== 'connected'
     setPhase(connecting ? 'connecting' : 'disconnecting')
-    if (connecting) connectInFlightRef.current = true
+    transitionInFlightRef.current = true
+    connectInFlightRef.current = connecting
 
     try {
       const result = connecting ? await locusConnect() : await locusDisconnect()
@@ -295,6 +336,7 @@ export const useConnection = (): ConnectionState => {
       setPhase(connecting ? 'disconnected' : 'connected')
     } finally {
       connectInFlightRef.current = false
+      transitionInFlightRef.current = false
     }
   }, [refresh])
 

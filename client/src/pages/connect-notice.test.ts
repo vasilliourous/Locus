@@ -2,7 +2,12 @@ import { describe, expect, test } from 'vitest'
 
 import type { SubscriptionStatus } from '@/services/locus'
 
-import { activationRefusal, connectNotice } from './connect-notice'
+import {
+  activationRefusal,
+  blockerNotice,
+  connectNotice,
+  connectionNeedsSupport,
+} from './connect-notice'
 
 const refused: SubscriptionStatus = {
   state: 'refused',
@@ -151,5 +156,89 @@ describe('the activation screen refusal banner', () => {
     for (const status of [unknown, lapsed, active, activeUrgent]) {
       expect(activationRefusal(status), status.state).toBeNull()
     }
+  })
+})
+
+describe('when the connection screen offers the support route', () => {
+  /**
+   * The four stuck states, each of which must show the block.
+   *
+   * Tested as a rule rather than through a render because the app has no DOM
+   * test environment: the failure this guards is a screen that quietly stopped
+   * offering a way to reach a person, and nothing else in the build notices that.
+   */
+  test('a refused, lapsed, errored or unconnectable device is offered support', () => {
+    expect(connectionNeedsSupport('connected', false, refused, true)).toBe(true)
+    expect(connectionNeedsSupport('disconnected', false, lapsed, true)).toBe(
+      true,
+    )
+    expect(connectionNeedsSupport('disconnected', true, active, true)).toBe(true)
+    expect(connectionNeedsSupport('disconnected', false, unknown, false)).toBe(
+      true,
+    )
+  })
+
+  /**
+   * A healthy session must NOT show it. This is the assertion that stops someone
+   * "fixing" the rule into `return true` — which would look correct on every
+   * stuck screen and turn the block into furniture on every working one.
+   */
+  test('a working session does not show the block', () => {
+    expect(connectionNeedsSupport('connected', false, active, true)).toBe(false)
+    expect(
+      connectionNeedsSupport('connected', false, activeUrgent, true),
+    ).toBe(false)
+  })
+
+  /**
+   * "No read yet" and "not activated" are not failures. `unactivated` is the one
+   * state where `canConnect` is also false, so a rule that keyed on `!canConnect`
+   * alone would show the block on a fresh install BEFORE the student has been
+   * told to enter their code — burying the instruction they actually need.
+   */
+  test('a state that has not been read, or has nothing set up, is not a failure', () => {
+    expect(connectionNeedsSupport('checking', false, unknown, false)).toBe(false)
+    expect(connectionNeedsSupport('unactivated', false, unknown, false)).toBe(
+      false,
+    )
+  })
+})
+
+/**
+ * A reported blocker is the sentence "it connects, then fails and cancels with no
+ * error message" was missing.
+ *
+ * The cases below are the ones that matter for whether the message is *useful*,
+ * not merely present: no blocker must render nothing (or the screen accuses a
+ * healthy machine), the backend's own reason must survive verbatim (or the
+ * sentence loses the one word naming the fault), and a missing service must point
+ * at the OS prompt rather than at the app — the failure is that the prompt was
+ * dismissed or never shown, so "try again in the app" is the wrong instruction.
+ */
+describe('blockerNotice', () => {
+  test('no blocker renders nothing', () => {
+    expect(blockerNotice(null)).toBeNull()
+  })
+
+  test('the backend reason is passed through, not paraphrased', () => {
+    const notice = blockerNotice({
+      kind: 'unavailable',
+      reason: 'launchd: Permission denied',
+    })
+    expect(notice?.values?.reason).toBe('launchd: Permission denied')
+  })
+
+  test('an absent service points at the system prompt, not at the app', () => {
+    const notice = blockerNotice({ kind: 'installRequired' })
+    expect(notice?.key).toBe(
+      'home.components.connection.blockerServiceInstallRequired',
+    )
+  })
+
+  test('an operation in flight is not reported as a fault', () => {
+    const notice = blockerNotice({ kind: 'operationInFlight' })
+    expect(notice?.key).toBe(
+      'home.components.connection.blockerServiceOperationInFlight',
+    )
   })
 })

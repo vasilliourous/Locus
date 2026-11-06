@@ -6,6 +6,7 @@ import type {
   ActivationResult,
   ConnectionResult,
   UpdateStatus,
+  SignOutResult,
 } from './locus.generated'
 
 /**
@@ -51,6 +52,9 @@ export type {
   ConnectionResult,
   UpdateStatus,
   UpdateProgress,
+  SignOutResult,
+  HubOutcome,
+  ConnectBlocker,
 } from './locus.generated'
 
 export interface CodeCheck {
@@ -162,4 +166,26 @@ export const locusInstallUpdate = () => invoke<void>('locus_install_update')
  * the same version on every launch. A newer offer still prompts.
  */
 export const locusDismissUpdate = () => invoke<void>('locus_dismiss_update')
+
+/**
+ * Signs this computer out of its activation code.
+ *
+ * Forgets the key on this device — including the machine-scoped copy that
+ * survives an uninstall — stops the heartbeat, takes the tunnel down, and tells
+ * the hub so the operator can tell a device move apart from a shared key.
+ *
+ * **What it does NOT do:** it does not cancel the subscription, and it does not
+ * shorten it. The key is still the student's to enter on another machine.
+ *
+ * Resolves with a {@link SignOutResult}, and the `hub` field is the part callers
+ * must not flatten: `released` and `nothingToRelease` both mean the student is
+ * free to move on, while `notConfirmed` means the device is signed out but Locus
+ * was never told — which is a different sentence, and a true one. Rendering all
+ * three as "signed out" would tell a student on a dead network that their key had
+ * been released.
+ *
+ * Rejects only when the LOCAL half failed, in which case nothing changed on this
+ * computer and the message says so.
+ */
+export const locusSignOut = () => invoke<SignOutResult>('locus_sign_out')
 

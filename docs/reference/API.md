@@ -411,6 +411,87 @@ attempts.
 
 ---
 
+## 5c. Device Release (the student sign-out record)
+
+### `POST /api/release-entitlement`
+
+A student pressed "Sign out on this device". The client forgets the code locally
+(`client/src-tauri/src/locus/signout.rs`) and this endpoint records that the code
+was signed out of, so the operator can tell **"this student moved to a new
+computer"** apart from **"this key is being shared"**. From the console those two
+reports are otherwise identical.
+
+**It is an audit fact, not a revocation.** This is the most important thing about
+the endpoint, and the reason it does not simply call the admin release:
+
+- It does **not** clear `codes.activated_at`. That field is the base a
+  re-activation restarts the term from, so clearing it would let any student reset
+  their own clock — or, worse, reset someone else's, because the only credential
+  here is possession of a code that is printed on a card and held in middleman
+  stock.
+- It does **not** change `expires_at`, `tier`, or `suspended`.
+- Re-activation was **already** allowed for a redeemed code ("Already activated"
+  restores access), so nothing about the student's next device depends on this
+  call succeeding. The client therefore treats a failure here as
+  "signed out, not confirmed" rather than failing the sign-out.
+
+**Authentication:** possession of the code, exactly like `/api/code-lookup`. No
+admin token — a student cannot have one, and requiring it would make the feature
+unreachable by the only person it is for.
+
+**Rate limit:** two limits, both keyed on the requester. Caddy allows 10 per
+10 minutes per IP (`release` zone); the hook enforces the same bound in its own
+`release_` bucket in `activation_attempts`. The bucket is **deliberately separate
+from `activate_`**: signing out is not an activation attempt, and consuming that
+budget would lock a student out of the screen that explains their code.
+
+**Request:**
+```json
+{
+  "code": "RQ-ABCD-EFGH-JKMN-T",
+  "fingerprint": "…"
+}
+```
+
+`fingerprint` is the same rate-limit and support correlator every other call
+carries. It is compared against nothing.
+
+**Response `200` — recorded:**
+```json
+{ "code": 200, "message": "Release recorded", "released": true, "count": 2 }
+```
+
+**Response `404` — nothing to release:**
+```json
+{ "code": 404, "message": "Nothing to release", "released": false }
+```
+
+Four situations answer this way, deliberately indistinguishable: the code does
+not exist, it was never redeemed, it is suspended, or it has expired. Telling the
+caller which would make this an unauthenticated **code-existence oracle** — the
+request is authenticated by the very value being probed. The client maps `404` to
+"nothing to release", which is a successful no-op for the student (their local
+sign-out has already happened and is unaffected).
+
+**Fields written:** `codes.released_at` (latest), `codes.release_count`
+(monotonic), and one `code_events` row with `event = "signed_out"`. The log line
+and the event row record the code **prefix** and a truncated fingerprint only —
+a code is a bearer credential and logs are things people paste.
+
+**Error responses:**
+
+| Status | Code | Message | Meaning |
+|:------:|:----:|---------|---------|
+| 400 | 400 | "Missing code" | No `code` in the body |
+| 429 | 429 | "Too many attempts" | Rate limited; retry later |
+| 500 | 500 | hub message | Unexpected failure |
+
+> **The 500 arm is not a student-facing outcome.** The client's sign-out is
+> best-effort at the hub and reports `notConfirmed` for anything it cannot
+> interpret, so a hub fault here costs an audit row, never a student's access.
+
+---
+
 ## 6. Update Check
 
 ### `GET /api/update?version=<running>&platform=<key>`

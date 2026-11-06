@@ -250,6 +250,30 @@ ${HUB_BLOCK_NAMES} {
         reverse_proxy 127.0.0.1:8090
     }
 
+    # ── Student sign-out record (rate limited: 10 per 10 min per IP) ──
+    #
+    # POST /api/release-entitlement, from device_release.pb.js. Its own limit
+    # rather than inheriting /api/*'s 100-per-10s, because this endpoint WRITES
+    # (an audit row and a counter) and is authenticated by nothing but possession
+    # of a code — which is printed on every card. The hook applies the same bound
+    # from the other side in its own `release_` rate-limit bucket; this one is
+    # the outer door, and having both means a flood is shed before it reaches
+    # goja.
+    #
+    # It must NOT share the `activation` zone: sign-out is not an activation
+    # attempt, and a student who signs out and then fails to activate would
+    # otherwise have spent the five attempts on the wrong thing.
+    handle /api/release-entitlement {
+        rate_limit {
+            zone release {
+                key {remote_host}
+                events 10
+                window 10m
+            }
+        }
+        reverse_proxy 127.0.0.1:8090
+    }
+
     # ── Admin console ──
     # The console is a static SPA served at /admin/. A request for /admin
     # (no slash) is redirected so a typed URL or bookmark does not 404.

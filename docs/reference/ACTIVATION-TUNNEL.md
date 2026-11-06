@@ -176,24 +176,26 @@ loudly** that it will match no shipped client. That is deliberate: a deploy must
 not stop because a key is missing, but a silent mismatch would waste a whole test
 round.
 
-**The bundle does not contain it yet, and that is a step nobody has taken.** The
-row above describes where the value *belongs*; as of 2026-10-29
-`server/secrets.env.age` predates this feature, so a deploy today takes the
-generate-and-warn path and the listener's key matches no build. Closing it is:
+**The bundle now contains it** (added 2026-11-04), so a deploy takes the
+`"Using ACTIVATION_TUNNEL_KEY from the decrypted secrets"` path rather than
+generate-and-warn. Remaining work:
 
-1. Generate a 32-byte key (`head -c 32 /dev/urandom | base64`) and put it in the
-   plaintext env the bundle is built from — the one `secrets-encrypt.sh` encrypts.
-   It is not in this repository and cannot be reconstructed from here.
-2. Re-encrypt: `server/scripts/secrets-encrypt.sh` (it needs the passphrase, which
-   is likewise not in the repo — see [`../operate/SECRETS-MANAGEMENT.md`](../operate/SECRETS-MANAGEMENT.md)).
-3. **Compile the same value into the client** before any build that is expected to
+1. ~~Put a 32-byte key in the plaintext env and re-encrypt.~~ **Done 2026-11-04**;
+   `secrets-decrypt.sh --check` reports the bundle at 11 variables.
+2. **Compile the same value into the client** before any build that is expected to
    use the tunnel. There is no client code for it yet (§6), so this lands with that
-   work, not before.
-4. Re-run `setup.sh` and confirm the module logs *"Using ACTIVATION_TUNNEL_KEY from
-   the decrypted secrets"* rather than the warning.
+   work, not before — and until it does, the key is stable on the hub but matches
+   no shipped client.
+3. Re-run `setup.sh` and confirm the module logs *"Using ACTIVATION_TUNNEL_KEY from
+   the decrypted secrets"* **and** *"Activation tunnel key verified"*.
 
-Until 3 exists, steps 1–2 are still worth doing: they make the key stable across
-deploys, which is a prerequisite for a client ever matching it.
+> **Why step 3 now has a second line.** The generate path had a defect: it wrote
+> the key to `/root/.tier_passwords` but never `export`ed it, so the config that
+> ssserver actually ran could disagree with the value an operator reads. Nothing
+> on the hub reports that — clients are simply refused. `setup_key` now exports on
+> every path, and `verify_key_consistency` compares the stored key against the
+> config's `password` by sha256 before any service restarts. See
+> [`../operate/SECRETS-MANAGEMENT.md`](../operate/SECRETS-MANAGEMENT.md).
 
 > **Not written down here, on purpose.** The value is a credential; this document
 > says where it lives and what shape it is, which is everything a reader needs.

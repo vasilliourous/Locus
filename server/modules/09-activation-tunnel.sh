@@ -100,6 +100,19 @@ setup_key() {
     umask "$UMASK_SAVED"
     chmod 600 "$PASS_FILE"
     export ACTIVATION_TUNNEL_KEY
+
+    # ── Prove what was stored is what will be configured ──
+    # The key reaches two places that must never disagree: $PASS_FILE (the copy an
+    # operator reads to compile into a release) and the `password` field of
+    # $CONFIG_FILE (what ssserver actually runs). They are written by separate
+    # steps, so a mismatch is silent — clients just fail to connect, with no
+    # error anywhere on the hub. A trailing newline or a stray quote in the
+    # secrets value is enough to cause it.
+    #
+    # This compares at write time, not at use time, so it fails before any service
+    # is touched. `verify_key_consistency` re-checks the on-disk state after the
+    # config exists.
+    ACTIVATION_KEY_SHA="$(printf '%s' "$ACTIVATION_TUNNEL_KEY" | sha256sum | cut -d' ' -f1)"
 }
 
 # ── The path filter ──
@@ -128,6 +141,7 @@ address, matching 05-caddy.sh exactly — a second, laxer limit on the endpoint
 that mints entitlements would be the weakest link.
 """
 import http.client
+import sys
 import time
 import urllib.parse
 
@@ -142,6 +156,18 @@ ALLOWED = ("/api/activate", "/api/code-lookup", "/api/heartbeat")
 #   /api/release      operator-only
 #   /updates/*        static payloads; large, and not needed to enrol
 #   /admin/, /_/      operator surfaces
+#   /api/release-entitlement
+#                     the student sign-out record. NOT here on purpose, and it
+#                     is the closest call in this list. The case FOR adding it is
+#                     real: a student signing out on a network that blocks the
+#                     hub by name is in the same situation as one activating.
+#                     The case AGAINST wins — this listener's credential is
+#                     compiled into every client, so its allowlist must stay as
+#                     small as the product allows, and a sign-out already works
+#                     WITHOUT the hub (the client forgets the code locally and
+#                     tells the student it could not reach us). Adding it would
+#                     widen the surface of a public key to make an optional
+#                     audit row more reliable.
 RATE_LIMIT_PATH = "/api/activate"
 RATE_EVENTS = 5
 RATE_WINDOW = 600  # seconds
@@ -224,7 +250,19 @@ def main() -> None:
             self.wfile.write(body)
 
     socketserver.ThreadingTCPServer.allow_reuse_address = True
-    with socketserver.ThreadingTCPServer(LISTEN, Handler) as server:
+    # Bind BEFORE entering the serve loop, and say so on the log. A forwarder that
+    # loses the bind race (ssserver holds 127.0.0.1:$FORWARD_PORT while it starts)
+    # dies with a traceback between ssserver's own restarts; without this line that
+    # looks exactly like a healthy service that silently refuses everything.
+    try:
+        server = socketserver.ThreadingTCPServer(LISTEN, Handler)
+    except OSError as exc:
+        print(f"locus-activation-forwarder: cannot bind {LISTEN[0]}:{LISTEN[1]}: {exc}",
+              file=sys.stderr, flush=True)
+        raise SystemExit(1)
+    print(f"locus-activation-forwarder: listening on {LISTEN[0]}:{LISTEN[1]} -> {UPSTREAM[0]}:{UPSTREAM[1]}",
+          flush=True)
+    with server:
         server.serve_forever()
 
 
@@ -294,6 +332,70 @@ EOF
     log "   THROUGH this listener; ssserver has no inbound forwarding."
 }
 
+# ── The stored key and the configured key must be the same bytes ──
+# $PASS_FILE is what an operator reads to compile the key into a release.
+# $CONFIG_FILE's `password` is what ssserver authenticates against. If they differ,
+# every client is stranded and nothing on the hub reports an error — the symptom
+# is "the tunnel is up but activation never completes", which is indistinguishable
+# from a network fault.
+#
+# Runs AFTER both files exist and BEFORE any service restart, so a mismatch stops
+# the deploy with the services still in their previous state.
+verify_key_consistency() {
+    [ -f "$CONFIG_FILE" ] || fail "verify_key_consistency: ${CONFIG_FILE} does not exist"
+    [ -f "$PASS_FILE" ]   || fail "verify_key_consistency: ${PASS_FILE} does not exist"
+
+    local stored configured stored_sha configured_sha
+    # Read the file WITHOUT command substitution: `$(cat f)` strips trailing
+    # newlines, so a stored key ending in "\n" would hash identically to the clean
+    # one and this guard would pass on exactly the corruption it exists to catch.
+    # `read -r -d ''` keeps every byte after the value intact.
+    stored=""
+    IFS= read -r -d '' stored < "$PASS_FILE" || true
+
+    # Read exactly the JSON string value, without sourcing the file or matching a
+    # greedy regex across lines.
+    configured="$(python3 - "$CONFIG_FILE" <<'PY'
+import json, sys
+with open(sys.argv[1]) as fh:
+    print(json.load(fh)["password"], end="")
+PY
+)" || fail "verify_key_consistency: could not read password from ${CONFIG_FILE}"
+
+    stored_sha="$(printf '%s' "$stored" | sha256sum | cut -d' ' -f1)"
+    configured_sha="$(printf '%s' "$configured" | sha256sum | cut -d' ' -f1)"
+
+    if [ "$stored_sha" != "$configured_sha" ]; then
+        fail "activation tunnel key MISMATCH between ${PASS_FILE} and ${CONFIG_FILE}.
+  stored (${PASS_FILE}):     sha256 ${stored_sha} (${#stored} bytes)
+  configured (${CONFIG_FILE}): sha256 ${configured_sha} (${#configured} bytes)
+  Clients carrying the stored value would be refused with no error on the hub.
+  Services were NOT restarted. Fix the value in server/secrets.env.age (it must
+  be a single base64 line with no trailing whitespace or quotes), re-encrypt,
+  and re-run."
+    fi
+
+    # A trailing newline is the specific corruption that survives every `cat`-based
+    # comparison, so it gets its own message: whitespace in a base64 key is
+    # invisible in a diff and in `tail -f`, and it changes the authenticated bytes.
+    if printf '%s' "$stored" | grep -qE '[[:space:]]$'; then
+        fail "${PASS_FILE} ends in whitespace.
+  A Shadowsocks key is the literal bytes: a trailing newline silently authenticates
+  a different key. Rewrite it with printf '%s' (not echo), or fix the value in
+  server/secrets.env.age and re-encrypt."
+    fi
+
+    # Belt and braces: the value that went into the config must be the one sourced
+    # in this run, not merely equal to the file we just wrote from it.
+    if [ -n "${ACTIVATION_KEY_SHA:-}" ] && [ "$ACTIVATION_KEY_SHA" != "$configured_sha" ]; then
+        fail "activation tunnel key was MUTATED between setup_key and write_config
+  (expected sha256 ${ACTIVATION_KEY_SHA}, config has ${configured_sha}).
+  Services were NOT restarted."
+    fi
+
+    log "✓ Activation tunnel key verified: ${PASS_FILE} == ${CONFIG_FILE} (sha256 ${configured_sha:0:12}…)"
+}
+
 write_service() {
     cat > "$UNIT_FILE" <<SERVICE
 [Unit]
@@ -334,6 +436,11 @@ setup_key
 write_forwarder
 write_config
 write_service
+
+# Before any service is touched: the key an operator will compile into a release
+# and the key ssserver will run must be the same bytes. A mismatch here is silent
+# at runtime, so it is checked while everything is still on disk and restorable.
+verify_key_consistency
 
 systemctl daemon-reload
 systemctl enable locus-activation-forwarder.service 2>/dev/null || true

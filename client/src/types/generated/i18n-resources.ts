@@ -123,6 +123,9 @@ export interface TranslationResources {
             updateUpToDate: string
           }
           activeConnections: string
+          blockerServiceInstallRequired: string
+          blockerServiceOperationInFlight: string
+          blockerServiceUnavailable: string
           cancel: string
           checking: string
           connect: string
@@ -142,11 +145,39 @@ export interface TranslationResources {
           requiresSetup: string
           sessionDownload: string
           sessionUpload: string
+          signOut: {
+            action: string
+            body: string
+            confirmAction: string
+            confirmBody: string
+            confirmKeeps: string
+            confirmMoving: string
+            confirmTitle: string
+            countingDown: string
+            deviceIdCopied: string
+            deviceIdCopy: string
+            deviceIdCopyFailed: string
+            signedOut: string
+            signedOutFailed: string
+            signedOutOffline: string
+            signedOutReleased: string
+            title: string
+            undo: string
+          }
           speed: string
           subscriptionExpiresIn: string
           subscriptionExpiresToday: string
           subscriptionLapsed: string
           support: string
+          supportBlock: {
+            deviceIdHint: string
+            emailLead: string
+            emailNote: string
+            middleman: string
+            replyPromise: string
+            title: string
+            why: string
+          }
           supportEmail: string
           takingLonger: string
           toggleHint: string

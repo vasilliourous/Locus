@@ -107,6 +107,19 @@ KEYERR
     source "$SECRETS_TMP" || { rm -f "$SECRETS_TMP"; fail "Failed to source decrypted secrets."; }
     set +a
     rm -f "$SECRETS_TMP"
+
+    # ── VPS_PW is root SSH and must NOT ride along in every child process ──
+    # It lives in the bundle deliberately (an agent deploying needs it to reach
+    # the box). But `set -a` above exported it, so without this it would appear in
+    # /proc/<pid>/environ of every module, hook, and engine this deploy starts,
+    # for the duration of the deploy — a far wider audience than "whoever ran
+    # setup.sh". Take it back out of the environment and hand it to the few
+    # callers that need it explicitly. See docs/operate/SECRETS-MANAGEMENT.md.
+    if [ -n "${VPS_PW:-}" ]; then
+        VPS_PW_LOCAL="$VPS_PW"
+        unset VPS_PW
+        log "  VPS_PW sourced but not exported (root SSH stays out of child envs)"
+    fi
     log "✓ Secrets decrypted from ${SECRETS_FILE}"
 fi
 

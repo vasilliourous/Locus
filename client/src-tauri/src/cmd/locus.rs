@@ -14,6 +14,7 @@
 use super::CmdResult;
 use crate::config::Config;
 use crate::core::CoreManager;
+use crate::core::manager::CoreStartRefusal;
 use crate::core::manager::traffic_probe;
 use crate::locus::{activation, apply, contract, store};
 use crate::utils::dirs;
@@ -49,6 +50,33 @@ static CANCEL_CONNECT: AtomicBool = AtomicBool::new(false);
 /// for. Keeping it in one function means no caller can forget.
 fn take_cancellation() -> bool {
     CANCEL_CONNECT.swap(false, Ordering::AcqRel)
+}
+
+/// The result of a connect the student abandoned while the config guard was held,
+/// and the one place that flag is consumed on this path.
+///
+/// # Why this is a function and not three lines inline
+///
+/// A test could not reach the inline version, so the guard written for it
+/// asserted on a *copy* of the logic and passed while the real branch leaked. That
+/// is the "a check that cannot fail reads exactly like one that passed" trap, one
+/// layer down: the copy was right and the code was wrong. Extracting it means the
+/// test drives this function — the same one the command calls — so deleting the
+/// `take_cancellation()` here turns the test red.
+///
+/// # Why consuming here is load-bearing
+///
+/// This branch returns **before** the readiness loop, and the loop is the only
+/// other place that consumes the flag. The old code relied on text that said the
+/// loop would do it; the loop was never reached, so the flag outlived the command
+/// and the student's *next* connect cancelled itself on its first pass — reporting
+/// "Cancelled" for a press they had not made on that attempt.
+fn cancelled_outcome() -> ConnectionResult {
+    let _ = take_cancellation();
+    ConnectionResult {
+        connected: false,
+        message: "Cancelled".to_owned(),
+    }
 }
 
 /// Whether the app has an activation to work with, and what it is.
@@ -190,6 +218,52 @@ pub struct LocusStatus {
     /// boolean. This field is the missing sentence, so the next report of "free
     /// does not work" starts from a fact instead of from a rebuild.
     pub udp: UdpStatus,
+
+    /// Why a connect cannot bring the core up on this machine, when that is known.
+    ///
+    /// # The report this exists for
+    ///
+    /// "It tries to connect, then just fails and cancels with no error message."
+    /// That sentence has no diagnosis in it, and the reason is structural: a
+    /// connect whose core is *never started* has no error to report. On macOS a
+    /// start can be deferred deliberately (`StartupDecision::Wait`) because the
+    /// Service is absent and the install request could not be raised — a denied or
+    /// auto-cancelled elevation prompt. Nothing upstream of that treats it as a
+    /// failure, so the student waits out the 30 s readiness budget and is told the
+    /// tunnel is "taking longer than usual", which is not what happened.
+    ///
+    /// This field is that missing sentence. It is computed from the same run-state
+    /// snapshot the connect gate reads, so the screen and the gate cannot disagree
+    /// about whether a connect is possible.
+    ///
+    /// `None` means no blocker is known — which is *not* the same as "connecting
+    /// will work".
+    pub connect_blocker: Option<ConnectBlocker>,
+}
+
+/// A known reason a connect cannot start the core, in the student's terms.
+///
+/// Deliberately a closed set rather than a string: the UI decides *where* to say
+/// this (under the button, or in the support block) and a free-form message would
+/// make that decision a string comparison. The copy for each lives in the locale
+/// files, keyed by `kind`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(tag = "kind", rename_all = "camelCase", rename_all_fields = "camelCase")]
+pub enum ConnectBlocker {
+    /// The service is installed but not usable, with the reason the run state
+    /// carries. `reason` is the backend's own words and is shown verbatim.
+    Unavailable { reason: String },
+    /// The Service is absent and its installation has been requested but not
+    /// answered — the elevation prompt was dismissed, denied, or never appeared
+    /// because the OS remembered an earlier answer for the old signature.
+    ///
+    /// This is the macOS case that produced "cancels with no error message": the
+    /// app asked for elevation, the OS said no without telling the student, and
+    /// every layer above treated the deferred start as a start in progress.
+    InstallRequired,
+    /// A privileged operation is in flight, so the answer is genuinely unknown
+    /// right now. Not an error; the screen waits rather than accusing anything.
+    OperationInFlight,
 }
 
 /// Whether this tier's UDP path is configured, and what it is configured to do.
@@ -464,6 +538,44 @@ pub async fn locus_status() -> LocusStatus {
         traffic_flowing,
         allowance,
         udp,
+        connect_blocker: classify_connect_blocker(&crate::core::runstate::RUN_STATE.state()),
+    }
+}
+
+/// Why a connect cannot start the core right now, in the student's terms.
+///
+/// Read from the **same** `RunState` snapshot the connect gate consumes, so a
+/// blocker reported here is a blocker the connect will actually hit. Deriving it
+/// from anything else would be a second implementation of `tun_capable()`, and a
+/// second implementation is the thing that eventually disagrees with the gate.
+///
+/// Order matters, and mirrors the gate's: an operation in flight is checked first
+/// because the rest of the snapshot may be stale underneath it, and a stale
+/// "not installed" during an install would tell a student their fix had failed
+/// while it was still running.
+fn classify_connect_blocker(run: &crate::core::runstate::RunState) -> Option<ConnectBlocker> {
+    use crate::core::runstate::ServiceHealth;
+
+    if run.op_in_flight {
+        return Some(ConnectBlocker::OperationInFlight);
+    }
+
+    match &run.health {
+        ServiceHealth::Ready => None,
+        ServiceHealth::NotInstalled => Some(ConnectBlocker::InstallRequired),
+        ServiceHealth::Unavailable(reason) => {
+            Some(ConnectBlocker::Unavailable { reason: reason.clone() })
+        }
+        // `VersionMismatch` is actionable and the migration dialog owns it, so it
+        // is reported as unavailable rather than as a missing service.
+        ServiceHealth::VersionMismatch => Some(ConnectBlocker::Unavailable {
+            reason: "the installed Locus service is a different version from this app".to_owned(),
+        }),
+        // `Unknown` is "no read has settled". Reporting a blocker from an
+        // unsettled read is the `unknown`-means-two-things defect this codebase
+        // has already paid for: it would accuse the machine before anything had
+        // been checked.
+        ServiceHealth::Unknown => None,
     }
 }
 
@@ -607,6 +719,14 @@ pub async fn locus_activate(code: String) -> CmdResult<ActivationResult> {
             if let Err(error) = store::clear_refusal().await {
                 logging!(warn, Type::Cmd, "[locus] could not clear a previous refusal: {error:#}");
             }
+
+            // This computer is signed in again, so the mirror may hold a code
+            // once more. The marker outlives the sign-out on purpose (it is what
+            // stops an in-flight beat from re-adopting the old code); clearing it
+            // here is the one event that means "signed in", and it must happen
+            // BEFORE the code is stored below or the store would refuse to mirror
+            // it and a reinstall would lose a freshly activated code.
+            crate::locus::credential::clear_signed_out();
 
             // Record the expiry the hub just gave us, so the date is correct the
             // moment activation completes.
@@ -1034,15 +1154,7 @@ pub async fn locus_connect() -> CmdResult<ConnectionResult> {
     // "rejected", which is what makes the retry below possible.
     match apply_tier_waiting_for_the_guard(&config, udp_relay, tokio::time::Instant::now()).await? {
         ApplyWait::Done => {}
-        ApplyWait::Cancelled => {
-            // The student pressed Cancel while the guard was held. Report it the
-            // way the readiness loop reports a cancellation, and consume the flag
-            // there rather than here.
-            return Ok(ConnectionResult {
-                connected: false,
-                message: "Cancelled".to_owned(),
-            });
-        }
+        ApplyWait::Cancelled => return Ok(cancelled_outcome()),
     }
 
     // Wait for the tunnel to actually be ready, rather than returning the moment
@@ -1078,6 +1190,11 @@ pub async fn locus_connect() -> CmdResult<ConnectionResult> {
     let started = tokio::time::Instant::now();
     loop {
         if CoreManager::global().observe_readiness().await.is_ready() {
+            // A cancel that arrived while the last poll was in flight is stale by
+            // the time we get here: the tunnel is demonstrably ready, and leaving
+            // the flag set would abort the NEXT connect for no reason. Only the
+            // not-ready path may honour it.
+            let _ = take_cancellation();
             return Ok(ConnectionResult {
                 connected: true,
                 message: "Connected".to_owned(),
@@ -1230,7 +1347,15 @@ async fn apply_tier_waiting_for_the_guard(
                 // guard that never clears still ends in a sentence and a Cancel
                 // button rather than a hang.
                 let message = format!("{error:#}");
-                let held = message.contains("already running");
+                // Typed, not textual. This decided `held` with
+                // `message.contains("already running")` — a string match across a
+                // module boundary, where any rewording of the manager's own bail
+                // silently turned "wait for the caller that holds the guard" into
+                // a hard refusal (or the reverse). Neither direction fails a test.
+                let held = matches!(
+                    CoreStartRefusal::classify(&error),
+                    CoreStartRefusal::Held
+                );
 
                 if held && started.elapsed() < CONNECT_READY_BUDGET {
                     if !waiting_logged {
@@ -1596,6 +1721,85 @@ pub async fn locus_check_subscription() -> bool {
     crate::locus::runtime::beat_now_and_wait().await
 }
 
+/// What the hub did with a sign-out notification.
+///
+/// These are the three things a student can be told, and they are kept distinct
+/// because only one of them is silence. The seam is deliberate: `Released` says
+/// the key is free for the next device, `NothingToRelease` says there was nothing
+/// for the hub to release (which is still success), and `NotConfirmed` says the
+/// device is signed out but Locus was not told — so the key will still work
+/// elsewhere, because nothing was taken away.
+///
+/// Defined here rather than in `locus::signout` because this is where the type
+/// crosses the IPC boundary, and `server/scripts/gen-ts-contract.py` reads the
+/// types in THIS file to generate the TypeScript mirror. A type defined elsewhere
+/// would serialise fine and be undocumented in TypeScript — the `uot_port` defect
+/// one layer in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum HubOutcome {
+    /// The hub recorded the release. The key can be used on another machine.
+    Released,
+    /// The hub answered and had nothing to release (never redeemed, or already
+    /// released). Not a failure: the end state is what the student asked for.
+    NothingToRelease,
+    /// The hub could not be reached, or answered unintelligibly. The device is
+    /// signed out regardless.
+    NotConfirmed,
+}
+
+/// The result of signing out.
+///
+/// Deliberately not a `bool`. "Signed out" and "signed out and the hub knows" are
+/// different facts and the UI says a different sentence for each; collapsing them
+/// would tell a student on a dead network that their key had been released, which
+/// is the reassurance that costs them a second email.
+#[derive(Debug, Clone, Copy, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SignOutResult {
+    /// Whether this device forgot the key. Always `true` when this is returned at
+    /// all — present so the frontend has an explicit field rather than inferring
+    /// success from the absence of an error.
+    pub signed_out: bool,
+    /// What the hub was told, and what it said.
+    pub hub: HubOutcome,
+}
+
+/// Signs this device out of its activation code.
+///
+/// Forgets the key on this computer, and tells the hub so the operator can tell a
+/// device move apart from a shared key. The full sequence, and the reason for its
+/// order, is in [`crate::locus::signout`].
+///
+/// # Why a failure here is an error, but a hub failure is not
+///
+/// The student asked for "this computer should not be signed in". If the LOCAL
+/// half could not be done, that request was not honoured, and reporting success
+/// would leave them holding a machine they believe is signed out. If only the hub
+/// notification failed, the request WAS honoured — so it comes back in the result
+/// (`hub: "notConfirmed"`) and the UI says the true thing: signed out here, and
+/// the key will still work on your next device. The frontend renders a different
+/// sentence for each of the three outcomes; they are documented on
+/// [`crate::locus::signout::HubOutcome`].
+#[tauri::command]
+pub async fn locus_sign_out() -> CmdResult<SignOutResult> {
+    crate::locus::signout::sign_out()
+        .await
+        .map(|result| SignOutResult {
+            signed_out: result.signed_out,
+            // Re-mapped rather than shared, because the IPC type is the contract
+            // and `locus::signout`'s enum is an implementation detail. A single
+            // mismatch here would show every student the wrong sentence, so the
+            // mapping is exhaustive and total.
+            hub: match result.hub {
+                crate::locus::signout::HubOutcome::Released => HubOutcome::Released,
+                crate::locus::signout::HubOutcome::NothingToRelease => HubOutcome::NothingToRelease,
+                crate::locus::signout::HubOutcome::NotConfirmed => HubOutcome::NotConfirmed,
+            },
+        })
+        .map_err(|error| super::coded_error("LOCUS_SIGN_OUT_FAILED", format!("{error:#}")))
+}
+
 #[cfg(test)]
 #[allow(clippy::expect_used, clippy::panic, reason = "tests assert by panicking")]
 mod tests {
@@ -1780,6 +1984,78 @@ mod tests {
         }
     }
 
+    /// The blocker must name the state the gate is about to refuse on.
+    ///
+    /// This is the "it fails and cancels with no error message" sentence, turned
+    /// into something a status dump can answer. The test can fail in both
+    /// directions, which is what makes it worth having: a `None` here for a
+    /// machine that cannot connect restores the silent failure, and a blocker for
+    /// a healthy machine accuses a working service.
+    #[test]
+    fn the_connect_blocker_names_the_gate_it_will_hit() {
+        use crate::core::runstate::ServiceHealth;
+
+        let ready = run_state(ServiceHealth::Ready, false, false);
+        assert!(classify_connect_blocker(&ready).is_none(), "a ready service is not a blocker");
+
+        let absent = run_state(ServiceHealth::NotInstalled, false, false);
+        assert_eq!(
+            classify_connect_blocker(&absent),
+            Some(ConnectBlocker::InstallRequired),
+            "an absent service is why the macOS connect never starts"
+        );
+
+        let broken = run_state(ServiceHealth::Unavailable("launchd refused".into()), false, false);
+        assert_eq!(
+            classify_connect_blocker(&broken),
+            Some(ConnectBlocker::Unavailable {
+                reason: "launchd refused".into()
+            }),
+            "the run state's own words are passed through, not paraphrased"
+        );
+
+        // An unsettled read must not produce an accusation.
+        let unknown = run_state(ServiceHealth::Unknown, false, false);
+        assert!(
+            classify_connect_blocker(&unknown).is_none(),
+            "an unsettled read is not evidence about the machine"
+        );
+
+        // In-flight outranks the rest: the snapshot underneath may be stale.
+        let installing = run_state(ServiceHealth::NotInstalled, false, true);
+        assert_eq!(
+            classify_connect_blocker(&installing),
+            Some(ConnectBlocker::OperationInFlight),
+            "during an install the honest answer is neither 'fine' nor 'broken'"
+        );
+    }
+
+    /// Every blocker the classifier can produce must be one the gate also refuses.
+    ///
+    /// Deliberately checks the pairing rather than the values: the point is that
+    /// the sentence shown and the refusal returned describe one fact.
+    #[test]
+    fn a_reported_blocker_implies_the_gate_refuses() {
+        use crate::core::runstate::ServiceHealth;
+
+        for (label, health) in [
+            ("absent", ServiceHealth::NotInstalled),
+            ("unavailable", ServiceHealth::Unavailable("x".into())),
+            ("version mismatch", ServiceHealth::VersionMismatch),
+        ] {
+            let state = run_state(health, false, false);
+            assert!(
+                classify_connect_blocker(&state).is_some(),
+                "a {label} service is a blocker, so the screen may say why"
+            );
+            assert!(
+                !state.tun_capable(),
+                "a {label} service must also fail the gate, or the screen would explain \
+                 a refusal that never happens"
+            );
+        }
+    }
+
     /// A machine with neither privileges nor a usable service must be refused.
     ///
     /// This is the exact configuration that produced the dead end: an ordinary
@@ -1854,6 +2130,39 @@ mod tests {
 
         // And an unflagged connect is never cancelled.
         assert!(!take_cancellation());
+    }
+
+    /// Every exit from a connect must leave the flag clear.
+    ///
+    /// The test above proves the flag *can* be consumed. It does not prove that
+    /// each exit path consumes it, and one did not: the `ApplyWait::Cancelled`
+    /// branch returned while comment-documented as "the readiness loop below
+    /// consumes it" — but that branch returns **before** the loop, so it never
+    /// reached it. The next connect then cancelled itself on its first pass and
+    /// reported "Cancelled" for a press the student had made on a *different*
+    /// attempt.
+    ///
+    /// This drives the exit that leaked rather than asserting on an empty flag:
+    /// raise the cancellation, run the same consume-and-return the branch
+    /// performs, and check that a *second* connect would not start cancelled. It
+    /// fails against the old shape, where the branch returned without consuming.
+    #[test]
+    fn the_apply_cancel_exit_does_not_leak_into_the_next_connect() {
+        CANCEL_CONNECT.store(true, Ordering::Release);
+
+        // The REAL branch body, not a copy of it: `locus_connect` calls exactly
+        // this on `ApplyWait::Cancelled`. An earlier version of this test open-coded
+        // the consume and therefore passed while the shipped branch leaked.
+        let outcome = cancelled_outcome();
+        assert!(!outcome.connected);
+        assert_eq!(outcome.message, "Cancelled");
+
+        // The next attempt's first observation inside the readiness loop.
+        assert!(
+            !take_cancellation(),
+            "a cancellation consumed by one attempt must not cancel the next \
+             attempt before it dials anything"
+        );
     }
 
     /// A service operation in flight is not a usable service.
@@ -2308,5 +2617,60 @@ mod tests {
         assert_eq!(at(99 * mb), (true, false), "under the allowance still warns");
         assert_eq!(at(100 * mb), (false, true), "the allowance itself throttles");
         assert_eq!(at(200 * mb), (false, true), "over the allowance throttles");
+    }
+
+    /// The three sign-out outcomes reach the frontend under the names
+    /// `services/locus.generated.ts` declares.
+    ///
+    /// This is the `uot_port` class of defect, caught one layer in: the generated
+    /// TypeScript used to LOWER-CASE each variant while serde camel-cased it, so
+    /// `HubOutcome` would have serialised as `notConfirmed` and been compared
+    /// against `'notconfirmed'` in the UI. Every branch would have fallen through
+    /// and every student would have been shown the same (wrong) sentence. This
+    /// test pins the Rust side; `gen-ts-contract.py` was fixed to match it, and
+    /// `--check` fails if the generated file drifts.
+    #[test]
+    fn each_hub_outcome_reaches_the_wire_as_camel_case() {
+        for (outcome, expected) in [
+            (HubOutcome::Released, "released"),
+            (HubOutcome::NothingToRelease, "nothingToRelease"),
+            (HubOutcome::NotConfirmed, "notConfirmed"),
+        ] {
+            let value = serde_json::to_value(outcome).expect("HubOutcome must serialize");
+            assert_eq!(
+                value.get("kind").and_then(serde_json::Value::as_str),
+                Some(expected),
+                "the frontend switches on this exact string; got {value}"
+            );
+        }
+    }
+
+    /// The sign-out result carries both facts the UI renders separately.
+    ///
+    /// `signedOut` and `hub` are not redundant: the first says this device forgot
+    /// the key, the second says whether the hub was told. A result that dropped
+    /// either would force the UI to infer one from the other, which is how a
+    /// student on a dead network gets told their key was released.
+    #[test]
+    fn the_sign_out_result_carries_both_facts() {
+        let value = serde_json::to_value(SignOutResult {
+            signed_out: true,
+            hub: HubOutcome::NotConfirmed,
+        })
+        .expect("SignOutResult must serialize");
+
+        assert_eq!(
+            value.get("signedOut").and_then(serde_json::Value::as_bool),
+            Some(true),
+            "the frontend reads `signedOut`; got {value}"
+        );
+        assert!(
+            value.get("hub").is_some(),
+            "the frontend reads `hub`; got {value}"
+        );
+        assert!(
+            value.get("signed_out").is_none(),
+            "snake_case must not reach the wire; got {value}"
+        );
     }
 }

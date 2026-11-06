@@ -9,6 +9,7 @@
       "/api/activate",
       "/api/code-lookup",
       "/api/heartbeat",
+      "/api/release-entitlement",
       "POST /api/heartbeat"
     ],
     "hub_serves": [
@@ -19,7 +20,8 @@
       "POST /api/admin/unbind-code",
       "POST /api/code-lookup",
       "POST /api/device-recognise",
-      "POST /api/heartbeat"
+      "POST /api/heartbeat",
+      "POST /api/release-entitlement"
     ]
   },
   "enums": {
@@ -50,6 +52,7 @@
       "locus_hub_url",
       "locus_install_update",
       "locus_js_log",
+      "locus_sign_out",
       "locus_status",
       "locus_update_staging_dir",
       "locus_update_status",
@@ -66,6 +69,7 @@
       "locus_hub_url",
       "locus_install_update",
       "locus_js_log",
+      "locus_sign_out",
       "locus_status",
       "locus_update_staging_dir",
       "locus_update_status",
@@ -82,6 +86,7 @@
       "locus_hub_url",
       "locus_install_update",
       "locus_js_log",
+      "locus_sign_out",
       "locus_status",
       "locus_update_staging_dir",
       "locus_update_status",
@@ -214,6 +219,28 @@
       "version": {
         "default": true,
         "wire_name": "version"
+      }
+    },
+    "ReleaseRequest": {
+      "code": {
+        "wire_name": "code"
+      },
+      "fingerprint": {
+        "wire_name": "fingerprint"
+      }
+    },
+    "ReleaseResponse": {
+      "code": {
+        "default": true,
+        "wire_name": "code"
+      },
+      "message": {
+        "default": true,
+        "wire_name": "message"
+      },
+      "released": {
+        "default": true,
+        "wire_name": "released"
       }
     },
     "TierConfig": {

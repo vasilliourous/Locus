@@ -4,6 +4,8 @@ pub mod probe;
 mod state;
 pub mod traffic_probe;
 
+pub use lifecycle::CoreStartRefusal;
+
 use anyhow::Result;
 use arc_swap::ArcSwapOption;
 use clash_verge_logging::{LogRing, Type, logging};

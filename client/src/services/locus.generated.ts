@@ -175,6 +175,28 @@ export interface LocusStatus {
    * does not work" starts from a fact instead of from a rebuild.
    */
   udp: UdpStatus
+  /**
+   * Why a connect cannot bring the core up on this machine, when that is known.
+   *
+   * # The report this exists for
+   *
+   * "It tries to connect, then just fails and cancels with no error message."
+   * That sentence has no diagnosis in it, and the reason is structural: a
+   * connect whose core is *never started* has no error to report. On macOS a
+   * start can be deferred deliberately (`StartupDecision::Wait`) because the
+   * Service is absent and the install request could not be raised — a denied or
+   * auto-cancelled elevation prompt. Nothing upstream of that treats it as a
+   * failure, so the student waits out the 30 s readiness budget and is told the
+   * tunnel is "taking longer than usual", which is not what happened.
+   *
+   * This field is that missing sentence. It is computed from the same run-state
+   * snapshot the connect gate reads, so the screen and the gate cannot disagree
+   * about whether a connect is possible.
+   *
+   * `None` means no blocker is known — which is *not* the same as "connecting
+   * will work".
+   */
+  connectBlocker: ConnectBlocker | null
 }
 
 /**
@@ -274,6 +296,60 @@ export interface UpdateProgress {
    */
   contentLength: number | null
 }
+
+/**
+ * The result of signing out.
+ *
+ * Deliberately not a `bool`. "Signed out" and "signed out and the hub knows" are
+ * different facts and the UI says a different sentence for each; collapsing them
+ * would tell a student on a dead network that their key had been released, which
+ * is the reassurance that costs them a second email.
+ */
+export interface SignOutResult {
+  /**
+   * Whether this device forgot the key. Always `true` when this is returned at
+   * all — present so the frontend has an explicit field rather than inferring
+   * success from the absence of an error.
+   */
+  signedOut: boolean
+  /**
+   * What the hub was told, and what it said.
+   */
+  hub: HubOutcome
+}
+
+/**
+ * A known reason a connect cannot start the core, in the student's terms.
+ *
+ * Deliberately a closed set rather than a string: the UI decides *where* to say
+ * this (under the button, or in the support block) and a free-form message would
+ * make that decision a string comparison. The copy for each lives in the locale
+ * files, keyed by `kind`.
+ */
+export type ConnectBlocker =
+  /**
+   * The service is installed but not usable, with the reason the run state
+   * carries. `reason` is the backend's own words and is shown verbatim.
+   */
+  | {
+      kind: 'unavailable'
+      reason: string
+    }
+  /**
+   * The Service is absent and its installation has been requested but not
+   * answered — the elevation prompt was dismissed, denied, or never appeared
+   * because the OS remembered an earlier answer for the old signature.
+   *
+   * This is the macOS case that produced "cancels with no error message": the
+   * app asked for elevation, the OS said no without telling the student, and
+   * every layer above treated the deferred start as a start in progress.
+   */
+  | { kind: 'installRequired' }
+  /**
+   * A privileged operation is in flight, so the answer is genuinely unknown
+   * right now. Not an error; the screen waits rather than accusing anything.
+   */
+  | { kind: 'operationInFlight' }
 
 /**
  * Whether this tier's UDP path is configured, and what it is configured to do.
@@ -388,3 +464,35 @@ export type SubscriptionStatus =
       state: 'refused'
       reason: string
     }
+
+/**
+ * What the hub did with a sign-out notification.
+ *
+ * These are the three things a student can be told, and they are kept distinct
+ * because only one of them is silence. The seam is deliberate: `Released` says
+ * the key is free for the next device, `NothingToRelease` says there was nothing
+ * for the hub to release (which is still success), and `NotConfirmed` says the
+ * device is signed out but Locus was not told — so the key will still work
+ * elsewhere, because nothing was taken away.
+ *
+ * Defined here rather than in `locus::signout` because this is where the type
+ * crosses the IPC boundary, and `server/scripts/gen-ts-contract.py` reads the
+ * types in THIS file to generate the TypeScript mirror. A type defined elsewhere
+ * would serialise fine and be undocumented in TypeScript — the `uot_port` defect
+ * one layer in.
+ */
+export type HubOutcome =
+  /**
+   * The hub recorded the release. The key can be used on another machine.
+   */
+  | { kind: 'released' }
+  /**
+   * The hub answered and had nothing to release (never redeemed, or already
+   * released). Not a failure: the end state is what the student asked for.
+   */
+  | { kind: 'nothingToRelease' }
+  /**
+   * The hub could not be reached, or answered unintelligibly. The device is
+   * signed out regardless.
+   */
+  | { kind: 'notConfirmed' }

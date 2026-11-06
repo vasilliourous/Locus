@@ -109,6 +109,7 @@ The commercial plan: the product as it ships, and how it is run as a business.
 | [`business/17-not-built.md`](business/17-not-built.md) | live | Legacy claims that are prose only. |
 | [`business/18-open-items.md`](business/18-open-items.md) | live | Proposals awaiting a decision. |
 | [`business/19-cross-reference.md`](business/19-cross-reference.md) | live | Question → file index. |
+| [`business/20-client-business-risks.md`](business/20-client-business-risks.md) | live | What in the client risks the business, ranked, with evidence. |
 
 ### The design record — `docs/business/redesign/`
 

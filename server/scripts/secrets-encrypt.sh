@@ -69,17 +69,90 @@ if [ -z "$IN_FILE" ]; then
 fi
 [ -f "$IN_FILE" ] || fail "plaintext not found: $IN_FILE"
 
-# ── Refuse to encrypt something that is not a secrets file ──
-# A missing variable here is invisible until a deploy half-fails on a blank box.
-# This is a form check, not a security one: it cannot verify the VALUES are right.
+# ── Refuse to encrypt something that is not a complete secrets file ──
+# A missing variable here is invisible until a deploy half-fails on a blank box,
+# so the check is exhaustive rather than illustrative. It used to test DOMAIN and
+# ADMIN_API_TOKEN only — and that is exactly how ACTIVATION_TUNNEL_KEY went
+# missing: the guard could not fail on it, so its absence read as a pass.
+#
+# This is a FORM check, not a security one: it cannot verify values are correct,
+# only that each required variable is present, non-empty, non-placeholder, and
+# (for tier keys) the right shape. Keep this list in sync with the table in
+# docs/operate/SECRETS-MANAGEMENT.md — that page is the contract.
+REQUIRED_VARS="
+DOMAIN
+ADMIN_API_TOKEN
+RELEASE_FETCH_SECRET
+B2_APPLICATION_KEY_ID
+B2_APPLICATION_KEY
+B2_BUCKET
+ECO_PASS
+STRIKE_PASS
+PB_ADMIN_EMAIL
+PB_ADMIN_PASS
+LOCUS_UPDATE_KEY_B64
+VPS_PW
+"
+# STEALTH_PASS is optional now (retired tier) but must still be a real value if
+# present, so an upgraded host does not fork. ACTIVATION_TUNNEL_KEY is reported
+# separately below because its absence is survivable-but-wrong, not fatal.
+
 missing=""
-for var in DOMAIN ADMIN_API_TOKEN; do
-    grep -qE "^${var}=" "$IN_FILE" || missing="${missing} ${var}"
+for var in $REQUIRED_VARS; do
+    line="$(grep -E "^${var}=" "$IN_FILE" 2>/dev/null | tail -n1 || true)"
+    if [ -z "$line" ]; then
+        missing="${missing} ${var}(absent)"
+        continue
+    fi
+    val="${line#*=}"
+    # strip one layer of surrounding quotes
+    val="$(printf '%s' "$val" | sed -e 's/^"\(.*\)"$/\1/' -e "s/^'\(.*\)'$/\1/")"
+    if [ -z "$val" ]; then
+        missing="${missing} ${var}(empty)"
+    elif printf '%s' "$val" | grep -qiE '^(changeme|change_me|todo|xxx+|secret|password|example|placeholder|<.*>)$'; then
+        missing="${missing} ${var}(placeholder)"
+    fi
 done
+
+# Duplicate definitions silently shadow each other: bash keeps the LAST.
+while IFS= read -r dup; do
+    [ -n "$dup" ] || continue
+    missing="${missing} ${dup}(duplicate)"
+done <<EOF
+$(grep -oE '^[A-Za-z_][A-Za-z0-9_]*=' "$IN_FILE" | tr -d '=' | sort | uniq -d)
+EOF
+
+# SS2022 keys are base64 of 16/32 bytes; a passphrase-shaped or truncated value
+# produces a config that validates and then refuses every client at connect time.
+for tier in ECO_PASS STRIKE_PASS STEALTH_PASS; do
+    line="$(grep -E "^${tier}=" "$IN_FILE" 2>/dev/null | tail -n1 || true)"
+    [ -n "$line" ] || continue
+    val="${line#*=}"
+    val="$(printf '%s' "$val" | sed -e 's/^"\(.*\)"$/\1/' -e "s/^'\(.*\)'$/\1/")"
+    [ -n "$val" ] || continue
+    # base64 alphabet only, and a length that decodes to 16 or 32 bytes
+    if ! printf '%s' "$val" | grep -qE '^[A-Za-z0-9+/]+={0,2}$'; then
+        missing="${missing} ${tier}(not-base64/SS2022-shape)"
+    else
+        case "${#val}" in
+            22|24|43|44) : ;;
+            *) missing="${missing} ${tier}(bad-length:${#val})" ;;
+        esac
+    fi
+done
+
 if [ -n "$missing" ]; then
-    fail "plaintext is missing required variable(s):${missing}
-  Refusing to encrypt an incomplete secrets file — see
-  docs/operate/SECRETS-MANAGEMENT.md for the full variable list."
+    fail "plaintext is missing or malformed:${missing}
+  Refusing to encrypt an incomplete secrets file — a key absent here becomes a
+  surprise on the VPS, not at this prompt. Required list + shapes:
+  docs/operate/SECRETS-MANAGEMENT.md."
+fi
+
+# Optional-but-warn: absence is tolerated (the module generates one) but it is
+# still a gap worth naming, because a generated key changes on every deploy.
+if ! grep -qE '^ACTIVATION_TUNNEL_KEY=' "$IN_FILE"; then
+    warn "ACTIVATION_TUNNEL_KEY absent — module 09 will generate one per deploy,"
+    warn "  which re-activates every client. Add a stable value to the plaintext."
 fi
 
 # ── Resolve the passphrase source, but do NOT read the value yet ──

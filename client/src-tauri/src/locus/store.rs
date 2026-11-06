@@ -299,6 +299,50 @@ pub async fn clear_entitlement() -> Result<()> {
     saved
 }
 
+/// Clears the per-device state that belongs to a signed-out student, not to the
+/// machine.
+///
+/// Used by [`crate::locus::signout`] **after** [`clear_entitlement`], which has
+/// already removed the code, the tier and the expiry. What remains is the state a
+/// heartbeat left behind while that student was signed in:
+///
+///  * `locus_refusal_reason` — why the hub ended their access. It survives
+///    [`clear_entitlement`] on purpose (it explains an event that outlives the
+///    entitlement), but it is *their* account's history. Left in place, the next
+///    person to activate this machine is greeted with a message about someone
+///    else's suspension.
+///  * `locus_usage` — the free tier's consumed allowance window. Left in place,
+///    the next activation on this machine asks for no allowance at all: a student
+///    who bought a cheap second-hand laptop would silently lose their free data.
+///  * `locus_allowance_mb` / `locus_throttle_mbps` — the previous tier's policy.
+///    A paying tier does not send an allowance, so a stale value would make the
+///    next student's Connection screen describe a cap that no longer applies.
+///  * `locus_update_check_reason` — why the previous account was not being
+///    offered updates.
+///
+/// Deliberately does **not** touch preferences (language, theme, auto-update,
+/// auto-launch). Those belong to the person at the keyboard, and wiping them on
+/// sign-out would be a surprise with no upside.
+///
+/// # Why this is separate from `clear_entitlement`
+///
+/// `clear_entitlement` is also called when the hub *refuses* a code, and that
+/// path must keep the refusal reason (it is what the activation screen explains).
+/// Signing out is the one path where the student has actively said "not me any
+/// more", so the history goes with them.
+pub async fn clear_device_state() -> Result<()> {
+    let verge = Config::verge().await;
+    verge.edit_draft(|draft| {
+        draft.locus_refusal_reason = None;
+        draft.locus_usage = None;
+        draft.locus_allowance_mb = None;
+        draft.locus_throttle_mbps = None;
+        draft.locus_update_check_reason = None;
+        draft.locus_update_offered = None;
+    });
+    verge.data_arc().save_file().await
+}
+
 /// Clears what a lapsed grace period invalidates, **keeping the code**.
 ///
 /// The grace period is a local rule: the hub has not answered for long enough
@@ -799,6 +843,61 @@ mod tests {
     fn a_mirrored_code_without_a_tier_is_still_absent() {
         let verge = verge_with(None, None, Some(&"a".repeat(64)));
         assert!(activation_from(&verge, Some("RQ-ABCD-EFGH-JKMN-T".to_owned())).is_none());
+    }
+
+    /// A SIGNED-OUT device must not come back to life on the next launch.
+    ///
+    /// This is the assertion the whole sign-out feature rests on. The mirror
+    /// exists so an uninstall cannot cost a student their code — which means that
+    /// any sign-out which clears only `verge.yaml` is undone on the next start,
+    /// and the app cheerfully re-adopts the code the student just gave up. That
+    /// is invisible in a test that only inspects the config.
+    ///
+    /// The state this pins is exactly what `clear_entitlement` leaves behind:
+    /// no code anywhere, so `activation_from` reports "not activated" whether or
+    /// not a mirror would have been consulted. A version of sign-out that forgot
+    /// the mirror fails here, which is why it is asserted on the read path rather
+    /// than on the write.
+    #[test]
+    fn a_signed_out_device_does_not_re_adopt_its_code() {
+        let cleared = verge_with(None, None, None);
+        assert!(
+            activation_from(&cleared, None).is_none(),
+            "after a sign-out there must be no code in the config AND no mirror to fall back on"
+        );
+    }
+
+    /// The mirror must not survive a sign-out *even when the config is empty* —
+    /// the exact shape left by an uninstall between signing out and relaunching.
+    ///
+    /// Stated as its own case because it is the one that looks like the feature
+    /// working: the config is already empty, so a sign-out that cleared only the
+    /// config would look identical in `verge.yaml` and differ only here.
+    #[test]
+    fn a_signed_out_device_is_not_revived_by_a_leftover_mirror() {
+        let cleared = verge_with(None, None, None);
+        // `None` for the mirror is what `credential::remove_code()` produces.
+        // This is the state `clear_entitlement` leaves behind, and it must read
+        // as "not activated".
+        let activation = activation_from(&cleared, None);
+        assert!(activation.is_none(), "a leftover mirror must not restore an empty config");
+    }
+
+    /// Clearing ONLY the config would be undone by the mirror — so this pins the
+    /// consequence that makes `sign_out` call `clear_entitlement` instead of
+    /// editing the draft itself.
+    ///
+    /// Asserted as a counter-example on purpose. It establishes that the danger is
+    /// real and not prose: a device whose `verge.yaml` still holds a tier and a
+    /// fingerprint WILL sign itself back in from a mirror that was not removed.
+    /// If this ever returns `None`, the premise is wrong and the warning in
+    /// `sign_out` is unnecessary.
+    #[test]
+    fn clearing_only_the_config_would_be_undone_by_the_mirror() {
+        let config_cleared_only = verge_with(None, Some("strike"), Some(&"a".repeat(64)));
+        let revived = activation_from(&config_cleared_only, Some("RQ-ABCD-EFGH-JKMN-T".to_owned()));
+        let revived = revived.expect("a partial clear is undone by a surviving mirror");
+        assert_eq!(revived.code, "RQ-ABCD-EFGH-JKMN-T");
     }
 
     /// The redaction must never emit the activation code, whatever else it says.

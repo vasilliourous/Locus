@@ -22,6 +22,7 @@ pub mod expiry;
 pub mod heartbeat;
 pub mod hub;
 pub mod runtime;
+pub mod signout;
 pub mod store;
 pub mod tier;
 pub mod update;

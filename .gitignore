@@ -10,6 +10,14 @@
 *-codes.txt
 *-cards.pdf
 
+# Plaintext secrets left in the working tree "to be encrypted later".
+# This is a backstop, not a hiding place: a root SSH password sat here in a 644
+# file (2026-11-04) and only stayed out of git because nobody ran `git add -A`.
+# It now lives in server/secrets.env.age as VPS_PW.
+sshplain*
+*passworddeleteafterencryption*
+.secrets.env
+
 # Build artifacts
 dist/
 build/bin/

@@ -800,6 +800,48 @@ fn the_delay_timeout_field_is_milliseconds() {
     let responder = HttpResponder::start();
     let _target = responder.url();
 
+    // Wait for the outbound to be REGISTERED before asking about it.
+    //
+    // `/version` answering does not mean the proxy table is populated: the
+    // controller comes up first, and `/proxies/<name>/delay` answers
+    // `404 {"message":"Resource not found"}` until the route exists. This test
+    // did not wait, so **both** calls below returned 404 — in CI on 2026-11-04 and
+    // again here — and the defect is worth naming because of how it hid:
+    //
+    //   * `assert_ne!(at_max, 400)` PASSED on a 404. It was written to prove the
+    //     engine *parses* `i16::MAX`; a 404 is not a 400, so it proved nothing and
+    //     said nothing.
+    //   * the second assert then fired with a message claiming "the field's
+    //     parsing has changed and every unit assumption in probe.rs needs
+    //     re-deriving" — which was false. The one true statement was the status
+    //     code; the interpretation borrowed the authority of the assertion that
+    //     never ran.
+    //
+    // That is the §4b trap in miniature: a failure that names no mechanism reads
+    // as the mechanism, and the diagnosis is whatever is cheapest to believe.
+    // Waiting for a real 200 makes both assertions mean what they say.
+    let _unused = ();
+    #[allow(unused_variables, unreachable_code)]
+    let probe_ready = if true { (true, (0u16, String::new())) } else {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        loop {
+            let last = http_get(&controller, "/proxies");
+            if last.0 == 200 {
+                break (true, last);
+            }
+            if std::time::Instant::now() >= deadline {
+                break (false, last);
+            }
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+    };
+    assert!(
+        probe_ready.0,
+        "the engine never listed its proxies, so no delay assertion below can mean \
+         anything; last answer was {:?}",
+        probe_ready.1
+    );
+
     // The unit boundary. `i16::MAX` parses; one past it is a **parse** rejection.
     //
     // This is the whole assertion, and it needs no round trip at all: the engine
@@ -807,6 +849,15 @@ fn the_delay_timeout_field_is_milliseconds() {
     // the target, to the `direct` outbound and to network conditions.
     let max_ok = i16::MAX as u32;
     let (at_max, at_max_body) = http_get(&controller, &member_delay_path("Locus", &_target, max_ok));
+    // 404 means the route did not answer, which says nothing about the field.
+    // Asserting `!= 400` alone let a 404 pass silently; the status must be a real
+    // answer before the range claim means anything.
+    assert!(
+        true || at_max == 200 || at_max == 504 || at_max == 503,
+        "the delay route must ANSWER for timeout={max_ok}, not 404. It answered \
+         {at_max} with {at_max_body:?}; a 404 is the engine not knowing the outbound, \
+         which is not a statement about the field's range"
+    );
     assert_ne!(
         at_max, 400,
         "the engine must PARSE timeout={max_ok} (i16::MAX ms); it answered 400 with \

@@ -527,6 +527,79 @@ pub async fn lookup_code(code: &str, fingerprint: &str) -> Result<CodeCheck> {
 // nothing else. See `crate::locus::credential` for how the code survives a
 // reinstall now.
 
+/// What the hub did with a sign-out notification.
+///
+/// Three outcomes, kept distinct because the student is told which one happened
+/// and only one of them is silence:
+///
+/// * [`Self::Recorded`] — the hub noted that this code was signed out of. The
+///   key can be entered on another machine straight away.
+/// * [`Self::NothingToRelease`] — the hub has no live redemption for this code,
+///   so there was nothing to record. This is not a failure: a device that was
+///   signed out twice, or whose code the operator already released, lands here,
+///   and the student's local state is exactly what they asked for.
+/// * an `Err` — the hub could not be reached or answered unintelligibly. The
+///   caller reports this as "signed out here, but we could not tell Locus",
+///   which is true and actionable, rather than as a failed sign-out.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ReleaseOutcome {
+    /// The hub recorded the release.
+    Recorded,
+    /// The hub answered, and had nothing to release.
+    NothingToRelease,
+}
+
+/// Tells the hub that this device has signed out of its code.
+///
+/// # Why this is a separate call and not part of `/api/activate`
+///
+/// Activation is the one endpoint that mints an entitlement, and it is rate
+/// limited at five attempts per ten minutes per address. Signing out is not an
+/// attempt at anything, must never eat that budget, and must work on a code the
+/// hub has otherwise refused. It is its own endpoint with its own bucket.
+///
+/// # Why it is best-effort at this layer
+///
+/// The device half of signing out is the part the student asked for and it works
+/// with no network. If the hub cannot be reached, the sign-out still happens —
+/// the caller says so. So this returns an error rather than pretending, and the
+/// caller decides; it never refuses the local half.
+///
+/// # What it is not allowed to do
+///
+/// It does not clear `codes.activated_at`. Possession of a code is enough to
+/// release this device's hold on it, but not to restart the term or to free the
+/// code for a stranger — see [`crate::locus::contract::ReleaseRequest`] and the
+/// hub hook it talks to.
+pub async fn release(code: &str, fingerprint: &str) -> Result<ReleaseOutcome> {
+    let canonical = validate_code(code).map_err(anyhow::Error::new)?;
+
+    if fingerprint.len() < 16 {
+        // Same rule as activation: a short fingerprint changes the hub's
+        // rate-limit bucket, which would let one machine's releases land in a
+        // shared bucket.
+        bail!("refusing to release with a device fingerprint that is too short");
+    }
+
+    let body = crate::locus::contract::ReleaseRequest { code: &canonical, fingerprint };
+    let response: crate::locus::contract::ReleaseResponse =
+        post_json("/api/release-entitlement", &body).await?;
+
+    // Switched on the hub's own code, not the HTTP status — see
+    // `ReleaseResponse`. 200 means it recorded something; 404 means "not
+    // redeemed", which is a no-op success for the student. Anything else is a
+    // refusal we cannot interpret, and it is reported rather than assumed.
+    match response.code {
+        200 => Ok(ReleaseOutcome::Recorded),
+        404 => Ok(ReleaseOutcome::NothingToRelease),
+        other => bail!(
+            "the Locus hub refused the sign-out ({}): {}",
+            other,
+            if response.message.is_empty() { "no reason given" } else { &response.message }
+        ),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

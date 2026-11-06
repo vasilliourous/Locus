@@ -267,6 +267,61 @@ pub struct ActivateResponse {
     pub expires_at: Option<String>,
 }
 
+/// Request body for `POST /api/release-entitlement`.
+///
+/// # Why signing out talks to the hub at all
+///
+/// The device half of signing out is local: forget the code, stop beating, take
+/// the tunnel down. That half works with no network and is what the student
+/// actually asked for.
+///
+/// The hub half exists because the operator cannot otherwise tell "this student
+/// moved to a new computer" apart from "this student's key was shared, lost, or
+/// is being used by someone else". It is an AUDIT record, not a revocation.
+///
+/// # What it deliberately does NOT do
+///
+/// It does not clear `codes.activated_at`, which is what an operator's
+/// `/api/admin/unbind-code` does. That field is the base a re-activation
+/// restarts the term from, so clearing it on a request any code-holder can make
+/// would let a student reset their own clock — and, worse, the same request
+/// against a code they merely obtained would reset someone else's.
+///
+/// So possession of the code is allowed to RELEASE the device's hold on it and
+/// to allow an immediate re-activation elsewhere, but never to move the expiry.
+/// The two operations stay separate: this one is a student saying "not me any
+/// more", the admin one is an operator saying "this code is free again".
+///
+/// `fingerprint` rides along for the same reason as on every other call — it is
+/// the hub's rate-limit bucket and support correlator, and is compared against
+/// nothing.
+#[derive(Debug, Clone, Serialize)]
+pub struct ReleaseRequest<'a> {
+    pub code: &'a str,
+    pub fingerprint: &'a str,
+}
+
+/// Response body for `POST /api/release-entitlement`.
+///
+/// `code` is the hub's own status code, switched on rather than the HTTP status,
+/// exactly as [`ActivateResponse`] is — the hub uses a JSON `code` for its
+/// classification and the HTTP status is only inspected separately for 429.
+#[derive(Debug, Clone, Deserialize)]
+pub struct ReleaseResponse {
+    #[serde(default)]
+    pub code: i32,
+    #[serde(default)]
+    pub message: String,
+    /// Whether the hub recorded a release for this code.
+    ///
+    /// Separate from the status code because "already released" and "released
+    /// now" are both success to the student and neither should be reported as a
+    /// failure — but a hub that recorded *nothing* (because the code was never
+    /// redeemed) must not be described as having released anything.
+    #[serde(default)]
+    pub released: bool,
+}
+
 /// Response body for `POST /api/code-lookup`.
 #[derive(Debug, Clone, Deserialize)]
 pub struct LookupResponse {

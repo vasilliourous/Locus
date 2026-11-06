@@ -156,6 +156,70 @@ refused device renders and therefore the only place the reason can be told.
 
 ---
 
+## 3b. The support route, and signing out
+
+### Every stuck screen offers a way to reach a person
+
+`components/shared/support-block.tsx` is the one implementation of "here is who
+to email and what to say", rendered on:
+
+| Screen | When |
+|---|---|
+| Activation gate | Always. The student is stuck by definition, and this is the only screen a person who has not activated will ever see. |
+| Connection | Only when something is wrong: `connectNotice(...).kind === 'refused'`, a lapsed subscription, a live `error`, or `!canConnect`. See `connectionNeedsSupport` in `connect-notice.ts` — a pure rule, because a screen that quietly stops offering the block is a dead end nothing else in the build notices. |
+| Account | Always, with the Device ID hint. This page holds the two things a report needs: the Device ID and the app version. |
+
+Two facts live in exactly **one** place — the address (`supportEmail`) and the
+reply promise (`supportBlock.replyPromise`) — and `check-consistency.sh` §41
+fails if the address is duplicated or the promise stops naming its window.
+
+**The reply promise is a world claim, not a code property.** "Answered within 12
+hours, not counting nighttime" is a statement about the operator's behaviour; it
+is recorded in [`../../docs/operate/CLAIMS.md`](../../docs/operate/CLAIMS.md) §5
+with a re-verify, and the app renders it because the operator made it. Changing
+the sentence in the bundle changes what students are promised, so it is a product
+decision, not a copy edit.
+
+The hub URL is deliberately **not** here (or anywhere in the UI except the
+Account diagnostics command's own output). It is an address the client calls, not
+a place a student is sent, and a hostname cannot answer "my code says it is
+already used".
+
+### Signing out
+
+"Sign out on this device" (`components/shared/sign-out-card.tsx`) forgets the key
+on this computer and tells the hub. What it must **not** do is read as "cancel my
+subscription": the dialog says in words that the subscription is not cancelled and
+not shortened, and that this is the control to use when moving to a new computer.
+Without those two sentences nobody dares press it, and whoever does expects to
+lose the time they paid for.
+
+Two three-second promises, both owned by `pages/sign-out-timer.ts` and asserted
+there:
+
+1. **An undo window.** Confirming starts a countdown; the sign-out runs when the
+   window closes, so nothing is destroyed while the student can still change their
+   mind. The countdown reads 3, 2, 1 — never a final `0`, which reads as "nothing
+   is happening" during the second something happens.
+2. **A readable result.** The outcome stays on screen for three seconds before the
+   app returns to the activation gate.
+
+The outcome is **three sentences, not one**: the backend reports
+`released | nothingToRelease | notConfirmed`, and only the first two mean the hub
+knows. Collapsing them would tell a student on a dead network that their key had
+been released.
+
+After a sign-out the gate re-reads immediately rather than waiting for its
+five-minute poll — `services/entitlement-refresh.ts` is the signal, and the reason
+it is a module rather than a prop is in that file. The five-minute cadence is
+right for a fact the *hub* changes; it is wrong for one this device just changed.
+
+The Rust half, and why its step order is load-bearing twice over, is
+[`../../client/src-tauri/src/locus/signout.rs`](../src-tauri/src/locus/signout.rs);
+the hub half is [`../../docs/reference/API.md`](../../docs/reference/API.md) §5c.
+
+---
+
 ## 4. The status the UI reads
 
 `locus_status` (`cmd/locus.rs`) is the single poll the UI is built on. It is

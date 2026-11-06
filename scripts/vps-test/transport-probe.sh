@@ -54,9 +54,11 @@ fi
 chmod 600 /root/.ssh/authorized_keys
 
 echo "=== SSH reachability matrix (from candidate box) ==="
-# The hub appears here by its RESOLVED address; the other two are throwaway
-# candidate test boxes kept as literals on purpose.
-for ip in $HUB_IP 114.23.136.183 114.23.136.1; do
+# The hub appears here by its RESOLVED address ($HUB_IP from $HUB_DOMAIN), never
+# as a literal — a hardcoded hub IP goes stale the moment the hub is rebuilt and
+# silently probes the wrong box. The remaining address is a throwaway candidate
+# test box, kept as a literal on purpose (AGENTS.md rule 2: no hub IP in the repo).
+for ip in $HUB_IP 114.23.136.1; do
   for port in 22 443 8443 8445 8446; do
     if timeout 6 bash -c "exec 3<>/dev/tcp/$ip/$port" 2>/dev/null; then
       echo "  $ip:$port OPEN"

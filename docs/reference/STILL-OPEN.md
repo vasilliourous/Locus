@@ -1087,6 +1087,59 @@ Recording these so they are not re-investigated:
 
 ---
 
+## The student sign-out: built and green in the tree, never run on the hub
+
+**Added 2026-11-04.** "Sign out on this device" (Account page) forgets the key
+locally and records the release on the hub. The local half is exercised by tests;
+the hub half is **structural only**.
+
+**Verified in the tree (and each guard observed failing):**
+
+- The client sequence, including "the hub is told before the key is forgotten"
+  and "the entitlement is cleared last" — `locus::signout`'s tests read the real
+  `sign_out` body and compare call offsets (`FIXES.md`, 2026-11-04).
+- That a signed-out device does not re-adopt its code, and that clearing only
+  `verge.yaml` *would* be undone by the machine-scoped mirror — the
+  counter-example test in `locus::store`.
+- That the `signed-out` marker blocks a mirror rewrite, which is the in-flight-beat
+  race `runtime::stop()` does not by itself close.
+- The countdown reads 3, 2, 1, cancel stays available for the whole window, and a
+  backwards clock cannot shorten it — `pages/sign-out-timer.test.ts`.
+- `gen-ts-contract.py --check`, `contract-snapshot.py --check`,
+  `check-consistency.sh` (all sections, including the new §41), `cargo test
+  --lib` (640), `clippy -D warnings`, `vitest` (106), `tsc`, `vite build`.
+
+**NOT verified anywhere:**
+
+1. **That the hub hook works.** `device_release.pb.js` has never run. PocketBase
+   hooks have no local harness in this repo, and goja's semantics differ enough
+   (no `atob`, function declarations not hoisted across scopes) that "it is valid
+   JavaScript" is not evidence. What would close it: `hooks-sync.sh`, then a
+   throwaway code activated and signed out, checking that `released_at` and
+   `release_count` moved and that `activated_at`/`expires_at` did **not**.
+2. **That `released_at`/`release_count` exist on the live `codes` collection.**
+   `seed-pb.py` merges missing columns additively, but it has to be re-run, and
+   the same "the hook is inert until the box takes it" rule applies
+   (`FIXES.md` header). A release that writes a column the schema lacks is
+   **silently discarded** — this project has paid for that once already with
+   `unbound_at`/`unbind_reason`.
+3. **That Caddy serves the new route.** `05-caddy.sh`/`templates/Caddyfile` carry
+   a dedicated `release` rate-limit zone, but a Caddy reload is needed, and
+   `handle` order is load-bearing (the general `/api/*` block would otherwise
+   swallow it into the 100-per-10s zone — which still proxies to PocketBase, so
+   the endpoint would work while the limit was the wrong one).
+4. **That sign-out is usable end to end on a real device** — tunnel down, profile
+   removed, activation gate shown within the three-second window rather than after
+   the five-minute poll.
+
+> **Nothing here blocks shipping the client half.** A hub that has not taken the
+> hook answers 404 to `/api/release-entitlement`, which the client reads as
+> `notConfirmed` and reports as "signed out here; we could not tell Locus". That
+> sentence is true, and the student's local sign-out is unaffected — which is why
+> the failure mode was designed to be a true sentence rather than an error.
+
+---
+
 ## The key recovery path is documented but has never been run
 
 **Added 2026-10-05.** [`../operate/RELEASE-RECOVERY.md`](../operate/RELEASE-RECOVERY.md)

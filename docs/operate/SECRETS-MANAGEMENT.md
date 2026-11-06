@@ -27,28 +27,66 @@ The Locus server needs several credentials to run:
 | `STRIKE_PASS` | The **paid** plan's Shadowsocks password (port 8445) |
 | `STEALTH_PASS` | **Retired tier's password (port 8444).** Still validated and written to `/root/.tier_passwords` for compatibility, but no service consumes it on a fresh box. Keep it in the secrets file so an upgraded host does not fork, and so removing the old service is not blocked by a missing key. |
 | `PB_ADMIN_EMAIL`, `PB_ADMIN_PASS` | PocketBase admin credentials |
+| `VPS_USER`, `VPS_PW` | **Root SSH access to the hub** (added 2026-11-04). Not consumed by any module: `setup.sh` sources it only to strip it back out of the child environment, and `scripts/vps-test/sshp.py` uses it for password-auth deploys. See *Root SSH credentials live here on purpose*. |
 | `ACTIVATION_TUNNEL_KEY` | The pre-activation activation tunnel's Shadowsocks password (port 8453). **Shipped compiled into the client**, so treat it as public: what bounds it is the forwarder's allowlist and rate limit, not secrecy. Set once and never rotate — rotating it strands every deployed client, and the heartbeat that could deliver a replacement is the call this tunnel exists to make possible. See [`../reference/ACTIVATION-TUNNEL.md`](../reference/ACTIVATION-TUNNEL.md) §3.3. |
 
 The bundle also carries one **non-credential** on the same terms: a base64 copy of
 the update signing key (`LOCUS_UPDATE_KEY_B64`, added 2026-10-16 — see the FAQ).
 
-> **`ACTIVATION_TUNNEL_KEY` is listed above because that is where it belongs, not
-> because the committed bundle contains it yet.** As of 2026-10-29
-> `server/secrets.env.age` predates the activation tunnel, so a deploy takes
-> `09-activation-tunnel.sh`'s generate-and-warn path and the listener ends up with a
-> key that matches no build. Adding it is an operator step that needs the
-> passphrase (and cannot be done from a clone alone):
+> **`ACTIVATION_TUNNEL_KEY` is now present in the committed bundle** (added
+> 2026-11-04, base64 of 32 random bytes), so a deploy takes
+> `09-activation-tunnel.sh`'s *"Using ACTIVATION_TUNNEL_KEY from the decrypted
+> secrets"* path and the key is stable across deploys.
 >
-> 1. Add `ACTIVATION_TUNNEL_KEY=<base64 of 32 random bytes>` to the plaintext env
->    that `secrets-encrypt.sh` encrypts.
-> 2. Re-encrypt with `server/scripts/secrets-encrypt.sh`.
-> 3. Re-run `setup.sh` and confirm the module logs *"Using ACTIVATION_TUNNEL_KEY
->    from the decrypted secrets"* instead of the warning.
+> It was listed in this table from 2026-10-29 while absent from the file, so every
+> deploy minted a fresh random key — which re-activates every client, the exact
+> failure the pre-generated tier passwords exist to prevent. **Why it went
+> unnoticed is the lesson:** `secrets-encrypt.sh` checked only `DOMAIN` and
+> `ADMIN_API_TOKEN`, so a guard that could not fail on this key read exactly like
+> one that passed. It now checks the whole list above and names every miss.
 >
-> Step 3 is worth doing even before any client speaks the tunnel: it makes the key
-> stable across deploys, which is a prerequisite for a client ever matching it.
-> The tunnel's own document records the same gap at
+> **The generate-path defect is fixed** (2026-11-04). When
+> `ACTIVATION_TUNNEL_KEY` was absent, module 09 generated a key, wrote it to
+> `/root/.tier_passwords`, and did not `export` it — so the `password` field in
+> the ssserver config could disagree with the value an operator reads to compile
+> into a release, and every client would be refused with **no error anywhere on
+> the hub**. `setup_key` now exports the key on all three paths, and
+> `verify_key_consistency` compares the stored key against the config's `password`
+> by sha256 **before any service is restarted**, failing the module on a mismatch
+> or on trailing whitespace.
+>
+> That check is shown to fail: matching keys pass, while a trailing newline, two
+> different keys, and a value mutated between `setup_key` and `write_config` are
+> each refused with their own message. The newline case is the reason it reads the
+> file with `read -r -d ''` rather than `$(cat …)` — command substitution strips
+> trailing newlines, which would have made the guard pass on exactly the
+> corruption it exists to catch.
+>
+> The tunnel's own document records the original gap at
 > [`../reference/ACTIVATION-TUNNEL.md`](../reference/ACTIVATION-TUNNEL.md) §3.3.
+
+### Root SSH credentials live here on purpose
+
+`VPS_PW` is the hub's **root SSH password**, and it is in this bundle deliberately:
+an agent or operator running a deploy needs to reach the box immediately, from a
+clone plus the passphrase alone.
+
+This is a considered trade, not an oversight — do not "tidy" it out:
+
+- **Sourcing does not equal propagating.** `setup.sh` sources the bundle with
+  `set -a`, which would export `VPS_PW` into every module, hook, and engine child
+  process and into `/proc/<pid>/environ` for the whole deploy. It therefore
+  `unset`s `VPS_PW` immediately after sourcing. If you add a consumer, pass it
+  explicitly; do not assume it is in the environment.
+- **It is not a keyspace for the hub.** This is a login credential for the host,
+  not an `authorized_keys` entry, and it must never become one.
+- **Reading the bundle already implies host trust.** Anyone who can decrypt it can
+  also read every tier key and the PocketBase admin password, so root SSH adds
+  proportionally little — but it is the credential with the widest blast radius,
+  which is why it is unset early and why the bundle's passphrase is what actually
+  guards it.
+- Key auth remains the preferred route (`OPS.md` §SSH access). The password is the
+  fallback for when the key is unavailable.
 
 **That list is stated as a list, not a number, on purpose:** a count in a sentence
 cannot be recomputed and drifts (this document's predecessor said "12" while

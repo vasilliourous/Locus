@@ -35,6 +35,65 @@ const fn should_request_install_for_absent_service(absent: bool, no_pending_acti
     absent && no_pending_action
 }
 
+/// Why a start could not even be attempted.
+///
+/// # Why this is a type and not a sentence
+///
+/// It used to be a bare `anyhow::bail!("configuration update is already running")`
+/// and the caller in `cmd/locus.rs` decided whether to wait or to report a
+/// refusal with `message.contains("already running")`. That is a **string** across
+/// a crate boundary: rewording the bail — or any other error whose text happened
+/// to carry those two words — silently converted "somebody else is applying, wait
+/// for them" into a hard `LOCUS_CONNECT_FAILED`, or the reverse. Neither direction
+/// fails a test, and both reach a student as a sentence about their tunnel that is
+/// not true.
+///
+/// The distinction the caller actually needs is *whose* fault this is:
+/// [`Held`](CoreStartRefusal::Held) is the scheduler (`Busy`), which the caller
+/// waits out; [`Refused`](CoreStartRefusal::Refused) is a verdict it must report.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CoreStartRefusal {
+    /// Another caller holds the config-update guard. Nothing is wrong; wait.
+    Held,
+    /// The start was refused for a reason of its own; report it.
+    Refused,
+}
+
+impl CoreStartRefusal {
+    /// The error a start raises when [`start_core`](CoreManager::start_core) finds
+    /// the guard held.
+    ///
+    /// Built here so the raise and the recognition cannot drift: the sentence is
+    /// still what a log and a student see, but nothing *decides* on it.
+    #[must_use]
+    pub fn held_error() -> anyhow::Error {
+        anyhow::anyhow!("{}", Self::HELD_MESSAGE)
+    }
+
+    /// The text of [`held_error`](CoreStartRefusal::held_error), kept in one place.
+    pub const HELD_MESSAGE: &'static str = "configuration update is already running";
+
+    /// Classifies an error from the start path. Defaults to [`Refused`] — the
+    /// honest answer when we cannot prove the guard was the cause.
+    ///
+    /// The text is still consulted as a *fallback only*, because the guard can be
+    /// taken by upstream callers (`update_config`, `restart_core`) that raise the
+    /// same sentence without going through [`held_error`]. It is deliberately the
+    /// last resort rather than the mechanism: a new `Held` site should call
+    /// [`held_error`] and need not touch this function.
+    #[must_use]
+    pub fn classify(error: &anyhow::Error) -> Self {
+        if error
+            .chain()
+            .any(|cause| cause.to_string().contains(Self::HELD_MESSAGE))
+        {
+            Self::Held
+        } else {
+            Self::Refused
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum StartupDecision {
     Service,
@@ -247,7 +306,7 @@ impl CoreManager {
 
     pub async fn start_core(&self) -> Result<()> {
         if !self.try_start_config_update() {
-            anyhow::bail!("configuration update is already running");
+            return Err(CoreStartRefusal::held_error());
         }
         defer! {
             self.finish_config_update();
@@ -417,7 +476,7 @@ impl CoreManager {
     #[tracing::instrument(skip_all, level = "info")]
     pub async fn restart_core(&self) -> Result<()> {
         if !self.try_start_config_update() {
-            anyhow::bail!("configuration update is already running");
+            return Err(CoreStartRefusal::held_error());
         }
         defer! {
             self.finish_config_update();
@@ -507,6 +566,25 @@ impl CoreManager {
             crate::core::runstate::RUN_STATE.state().pending.is_none(),
         ) && SERVICE_MANAGER.require_install_for_session().is_err()
         {
+            // Say so. `Wait` is a start that starts nothing, and the caller turns
+            // it into `Ok(())` — so without this line the whole path looks like a
+            // successful start to everything downstream. What a student saw was a
+            // connect that sat for the full 30 s readiness budget and then reported
+            // "taking longer than usual", with nothing anywhere naming the reason:
+            // the Service install was requested and could not be raised, most often
+            // because an elevation prompt was denied or a macOS "remember" rule
+            // auto-cancelled it.
+            //
+            // This is the macOS half of the "it just fails and cancels with no
+            // error message" report. `warn` rather than `error` on purpose: on a
+            // machine where the student has not yet answered the install prompt
+            // this is the expected path, not a fault.
+            logging!(
+                warn,
+                Type::Core,
+                "[locus] core start deferred: the Locus service is not installed and the install \
+                 request could not be raised (elevation refused, cancelled, or already pending)"
+            );
             return StartupDecision::Wait;
         }
 
@@ -541,7 +619,7 @@ impl CoreManager {
 #[cfg(test)]
 mod tests {
     use super::{
-        CoreManager, ProxyRestoreExpectation, StartupDecision, run_controlled_stop_transition,
+        CoreManager, CoreStartRefusal, ProxyRestoreExpectation, StartupDecision, run_controlled_stop_transition,
         run_core_replacement_transition, run_core_start_transition, run_ready_core_start_transition,
         run_service_config_replacement_transition, should_request_install_for_absent_service, should_wait_for_service,
         startup_decision,
@@ -991,5 +1069,38 @@ mod tests {
         manager.core_started(RunningMode::Service);
         manager.rollback_failed_start().await;
         assert_eq!(*manager.get_running_mode(), RunningMode::NotRunning);
+    }
+
+    /// The guard's refusal must be recognisable as `Held` *without* matching text
+    /// at the call site.
+    ///
+    /// This can fail: it asserts the type the raise produces, so a raise that
+    /// reverts to a bare `anyhow!` with different wording turns the caller's
+    /// "wait for the other start" into a hard refusal, and this test says so.
+    #[test]
+    fn the_guard_refusal_is_held_not_a_refusal() {
+        let error = CoreStartRefusal::held_error();
+        assert_eq!(
+            CoreStartRefusal::classify(&error),
+            CoreStartRefusal::Held,
+            "start_core's guard refusal must classify as Held, or the caller reports a \
+             scheduler collision to the student as their tunnel failing"
+        );
+    }
+
+    /// Anything else is a refusal, including an error that merely *mentions* the
+    /// same words in a different sentence.
+    ///
+    /// The previous mechanism was a substring match on the rendered message, so a
+    /// wrapped error ("could not start core: configuration update is already
+    /// running") satisfied it. Classifying by chain is deliberate: the guard is
+    /// identified by the message it *is*, not by one it *contains*.
+    #[test]
+    fn an_unrelated_error_is_a_refusal() {
+        let wrapped = anyhow::anyhow!("the engine refused the config: invalid rule");
+        assert_eq!(CoreStartRefusal::classify(&wrapped), CoreStartRefusal::Refused);
+
+        let other = anyhow::anyhow!("could not launch the core: no such file or directory");
+        assert_eq!(CoreStartRefusal::classify(&other), CoreStartRefusal::Refused);
     }
 }

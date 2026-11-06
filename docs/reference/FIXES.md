@@ -24,7 +24,175 @@ commercial gaps, [`../business/17-not-built.md`](../business/17-not-built.md).
 
 ---
 
-## THE EGRESS PROBE SENT MILLISECONDS AS SECONDS, AND COULD NEVER REPORT EGRESS (2026-11-04, unreleased)
+## A CONNECT THAT COULD NOT START WAS INDISTINGUISHABLE FROM ONE THAT FAILED SILENTLY (2026-11-05, unreleased)
+
+Field report: *"it tries to connect, then just fails and cancels with no error
+message"*, on macOS arm. Three separate defects shared that one sentence, and the
+sentence is why it stayed unfixed — none of them produced an `error` to log.
+
+- **What broke, 1 of 3 — a refusal travelled as text.** `apply_tier_waiting_for_the_guard`
+  decided whether the engine's start had been *deferred* (another caller holds the
+  config-update guard) or *refused* with
+  `message.contains("already running")`. That is a string match across a module
+  boundary against a sentence raised two modules away. Any rewording moved a
+  scheduler collision into a hard `LOCUS_CONNECT_FAILED`, or a genuine refusal
+  into a 30 s wait. Neither direction fails a test.
+  **Fix:** `CoreStartRefusal::{Held, Refused}`, raised by `start_core` and
+  classified by the caller. The text is still what a log shows; nothing *decides*
+  on it. `the_guard_refusal_is_held_not_a_refusal` was observed failing against the
+  old substring mechanism before it was kept.
+
+- **What broke, 2 of 3 — a cancellation leaked into the next attempt.** The
+  `ApplyWait::Cancelled` branch returned with the comment *"consume the flag the
+  way the readiness loop does"* — but that branch returns **before** the readiness
+  loop, so nothing consumed it. `CANCEL_CONNECT` stayed set, the command ended, and
+  the student's **next** connect cancelled itself on its first pass and reported
+  `"Cancelled"` for a press they had not made on that attempt. On screen: a connect
+  that starts and immediately aborts, with no error.
+  **Fix:** `cancelled_outcome()` consumes the flag, and the real branch calls it.
+  The first version of the guard test open-coded the consume and therefore **passed
+  while the shipped code leaked** — a check that cannot fail. Extracting the body
+  is what made the test able to fail, and it was then observed failing with the
+  consume removed.
+
+- **What broke, 3 of 3 — a start that started nothing looked successful.** On macOS
+  `prepare_startup` returns `StartupDecision::Wait` when the Service is absent and
+  `require_install_for_session()` errors — a denied elevation, or a macOS "remember"
+  rule auto-cancelling the prompt. `start_core_inner` turns `Wait` into `Ok(())`,
+  so every layer above treated it as a start in progress. The student waited out
+  the whole 30 s readiness budget and was told the tunnel was "taking longer than
+  usual", which is not what happened. Nothing was logged and nothing was on screen.
+  **Fix:** the `Wait` path now logs a warning naming the cause, and `locus_status`
+  carries `connect_blocker` — computed from **the same run-state snapshot the
+  connect gate reads**, so the screen and the gate cannot disagree. The Connection
+  screen renders it with the OS prompt as the next step, because "try again in the
+  app" is the wrong instruction when the app already asked.
+  **Still unverified:** that this is *the* macOS-arm path. The link from a denied
+  prompt to `require_install_for_session()` returning `Err` is inferred from the
+  code, not observed on a machine. One log line from an arm host closes it.
+
+- **The rule.** A failure that never happened — because the thing it would have
+  failed at was never started — has no error to report. That is not a missing
+  message to be added at the top; it is a state the backend must name, or every
+  layer above reports the absence of a fault as progress.
+
+## THE EGRESS UNIT GUARD COULD NOT FAIL, AND ITS RED MESSAGE NAMED THE WRONG CAUSE (2026-11-05, unreleased)
+
+- **What broke.** `egress_probe_engine::the_delay_timeout_field_is_milliseconds`
+  returned `404 {"message":"Resource not found"}` instead of the `400` it asserts,
+  and its failure message claimed *"the field's parsing has changed and every unit
+  assumption in probe.rs needs re-deriving"*. **That was false.** The parsing had
+  not changed; the test had asked too early.
+- **The mechanism, from the engine's own log.** `RESTful API listening at …` is
+  logged **29 ms before** `Start initial compatible provider "Locus Auto"`.
+  `wait_for_controller` polls `/version`, which is served at the first line, so a
+  test that runs before the proxy table exists gets a `404` for
+  `/proxies/<name>/delay` — the route is real, the outbound is not registered yet.
+  It reproduces under load and not in isolation, which is why the same file passed
+  on a quiet machine and in a single-test run.
+- **Why the guard did not catch its own uselessness.** The first assertion was
+  `assert_ne!(at_max, 400)`. A `404` is not a `400`, so it **passed** — the
+  assertion written to prove "the engine parses `i16::MAX`" proved nothing. Only
+  then did the second assertion fire, and its message borrowed the authority of the
+  one that never ran.
+- **Fix.** Wait for `/proxies` to answer before asking, and assert the route
+  actually responded (`200`/`503`/`504`) before making any claim about the field.
+- **The rule, restated because this is its third appearance.** A red check must
+  name the mechanism it observed, not the one it expected. And a "not equal" guard
+  is satisfied by every wrong answer except one — assert the *shape of a real
+  answer* first, then the property you care about.
+
+---
+
+## THE SUPPORT ROUTE EXISTED ON ONE SCREEN, AND THE SCREEN THAT NEEDED IT HAD NONE (2026-11-04, unreleased)
+
+- **What broke.** The support address lived in exactly one place: a one-line
+  caption under the Connect button, with no instruction attached. The **activation
+  gate** — the screen a student is stuck on by definition, and the only screen a
+  person who has not activated will ever see — rendered nothing at all, and did so
+  **on purpose**: a comment there argued that the card is the support route
+  ("the code is printed on it, beside whatever contact details the reseller puts
+  there"), so a placeholder address would only move the problem.
+- **Why the argument was wrong.** Its premise is that the student still has the
+  card, and the student who reaches that screen is exactly the one who may not: a
+  code that was refused, a card lost, a device handed over without it, or a
+  middleman they no longer have a number for. The comment also silently mixed two
+  claims — that the *hub hostname* must not be shown (correct, and still enforced)
+  and that *nothing* should be shown (which left the funnel's last step as a dead
+  end). Nobody could act on it, and the resulting support conversations start with
+  a student who had no stated way to reach anyone.
+- **The fix.** One component (`components/shared/support-block.tsx`) rendered by
+  three screens: the gate (always), Connection (only when something is wrong —
+  refused, lapsed, an error, or `!canConnect`), and Account (always, beside the
+  Device ID a report needs). It names the middleman first, gives the address as a
+  `mailto:` action, says what to include, and states the reply promise.
+- **Guards, each observed failing.** `check-consistency.sh` §41 — the address is
+  duplicated in source (reported), a screen stops rendering the block (reported
+  for each of the three), the promise loses its stated window (reported), and a
+  `supportBlock` key is emptied (reported). Its first version was
+  `grep -q SupportBlock`, which the **import line** satisfied: it passed with the
+  component deleted from the page body, and was rewritten to match the JSX tag
+  after being observed failing only on a hunk that kept the import.
+  `connectionNeedsSupport` is a pure rule with tests in
+  `pages/connect-notice.test.ts`, proven to fail when forced to `true` (a working
+  session must not show the block) and to `false` (a stuck one must).
+- **The rule.** A support route is part of the product, not a footnote on the
+  screen where the operator happened to think of it. If a surface can leave
+  someone unable to proceed, the way out of it belongs on that surface — and the
+  sentence promising a response time is a **world claim** about the operator, so
+  it is registered in `operate/CLAIMS.md` (A18) rather than asserted as a
+  property of the tree.
+
+---
+
+## A SIGN-OUT WOULD HAVE UNDONE ITSELF, AND THE OBVIOUS FIX WOULD HAVE LET STUDENTS RESET THEIR OWN TERM (2026-11-04, unreleased)
+
+- **What broke.** There was no sign-out at all. A student moving to a new computer
+  had no way to say so, and the operator's only lever was a reinstall — which did
+  not even work: `credential.rs` deliberately mirrors the code to a
+  machine-scoped path that **survives an uninstall**, so a reinstall kept the
+  old code and the "few key issues" reports had no self-service answer.
+- **The two bugs hidden in the obvious implementation.**
+  1. **Clearing `verge.yaml` alone is undone by the mirror.** The next launch
+     re-adopts the code from the machine-scoped copy. `sign_out` therefore calls
+     `store::clear_entitlement` — the one function that also removes the mirror —
+     and `store.rs` keeps a **counter-example test**
+     (`clearing_only_the_config_would_be_undone_by_the_mirror`) proving the partial
+     clear really is undone, so the claim is falsifiable rather than prose.
+  2. **A deletion is not enough while a beat is in flight.** `runtime::stop()` asks
+     the loop to stop; it does not prove the task has. A beat already inside
+     `read_code_rehydrating` could re-read the mirror and rewrite it a moment
+     after the sign-out reported success. A `signed-out` marker is now written
+     **before** the deletion and makes `credential::write_code` refuse, and the
+     next successful activation clears it.
+- **What the hub half must not do.** The obvious server-side "release the key" is
+  `admin_unbind.pb.js`, which clears `codes.activated_at`. Doing that from the
+  client would (a) reset the base a re-activation derives the term from, letting a
+  student restart their own clock, and (b) be reachable by anyone holding a code —
+  which is printed on every card and sits in middleman stock — so one student
+  could release another's. `POST /api/release-entitlement` therefore records an
+  audit fact (`released_at`, `release_count`, a `code_events` row) and touches no
+  entitlement field. **Re-activation of a redeemed code was already allowed**, so
+  the student's next device does not depend on the call succeeding — which is why
+  a hub failure reports `notConfirmed` instead of failing the sign-out.
+- **The order is asserted, not just documented.** `signout.rs` keeps the sequence
+  as data (`ORDER`) **and** reads its own source to compare the call sites' byte
+  offsets, because a test over the enum alone passed with `clear_entitlement`
+  moved above the release. Observed failing against exactly that reordering.
+  A hub notification sent after the code is forgotten can never be made, and the
+  local sign-out still looks like it succeeded.
+- **The generator was lower-casing enum variants.** `gen-ts-contract.py` emitted
+  `v["rust"].lower()` under `rename_all = "camelCase"`, so `NotConfirmed` became
+  `'notconfirmed'` while serde sent `notConfirmed`. Every unit variant until
+  `HubOutcome` happened to be one word, which is why it survived: `Active` →
+  `active` is right by accident. Fixed to camel-case, with a Rust test pinning the
+  serde side and `--check` proven to fail on a hand-edited generated file.
+- **The rule.** A "forget this" feature is only as complete as its most durable
+  copy of the secret, and an operation authenticated by a bearer credential must
+  never be able to destroy someone else's entitlement. Both halves are stated as
+  tests, not as comments.
+
+---
 
 - **What broke.** The readiness probe's through-tunnel check called mihomo's delay
   route with `EGRESS_ATTEMPT_TIMEOUT.as_secs()` — the integer `5`. mihomo parses

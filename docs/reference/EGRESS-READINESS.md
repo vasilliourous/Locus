@@ -527,6 +527,15 @@ for the current list. The load-bearing gaps, as of the last edit:
   against a local sidecar; it has never been exercised through a real Locus tunnel
   on a school link. See `STILL-OPEN.md`.
 - **No run on a real school network.** The budget is a judgement, not a measurement.
+- **The unit guard's wait is load-dependent, and that is the honest word for it.**
+  `the_delay_timeout_field_is_milliseconds` now waits for `/proxies` to answer
+  before asking `/proxies/<name>/delay`, because the engine logs
+  `RESTful API listening` **29 ms before** the proxy table exists and a request in
+  that window gets `404 Resource not found`. With the wait removed the test still
+  **passes** on an idle machine — so the guard is proven to address the mechanism,
+  not proven to catch every recurrence. Both assertions it now makes
+  (`the route answered`, then `the field's range`) were observed to be reached,
+  which the previous `assert_ne!(at_max, 400)` could not say: a `404` satisfied it.
 
 **If you change any constant in this chain** (`EGRESS_ATTEMPT_TIMEOUT`,
 `EGRESS_DEADLINE`, `EGRESS_ATTEMPTS`, `EGRESS_RETRY_GAP`, `PROBE_TIMEOUT`,

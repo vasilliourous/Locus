@@ -105,6 +105,18 @@ pub fn write_code(code: &str) -> bool {
     let Some(dir) = credential_store_dir() else {
         return false;
     };
+    // A signed-out device must not mirror a code again. See `SIGNED_OUT_MARKER`:
+    // the deletion alone leaves a window in which a heartbeat already in flight
+    // can put the code back, undoing a sign-out the student has already been told
+    // succeeded.
+    //
+    // This refuses silently rather than reporting success. The caller's contract is
+    // "report whether the mirror was written", and returning `true` here would tell
+    // `store` that a durable copy exists when one deliberately does not — which is
+    // the state that survives an uninstall, i.e. exactly what the student removed.
+    if signed_out_marker_in(&dir).exists() {
+        return false;
+    }
     write_code_file(&dir, code)
 }
 
@@ -141,6 +153,65 @@ pub fn remove_code() {
         return;
     };
     let _ = std::fs::remove_file(credential_path_in(&dir));
+}
+
+/// The file that tells a *running* copy of Locus that this device was signed out.
+///
+/// # Why a deletion alone is not enough
+///
+/// [`remove_code`] deletes the mirror, and that is enough to stop the NEXT launch
+/// from adopting it. It is not enough to stop a **live** write from putting it
+/// back: [`crate::locus::store::read_code_rehydrating`] runs on the heartbeat
+/// path, and a beat already in flight when the student signs out can reach it a
+/// moment later, re-read a code from a mirror that has not been deleted yet, and
+/// faithfully mirror it again — so the sign-out is undone by the very loop it just
+/// stopped, from the other side of a race.
+///
+/// This marker closes that: while it exists, writes to the mirror are refused.
+/// It is removed by the next successful activation, which is the only event that
+/// means "this computer is signed in again".
+///
+/// It lives beside the credential because it is a property of the same store and
+/// dies with the same directory.
+const SIGNED_OUT_MARKER: &str = "signed-out";
+
+/// The marker's path inside a store directory.
+#[must_use]
+pub fn signed_out_marker_in(dir: &Path) -> PathBuf {
+    dir.join(SIGNED_OUT_MARKER)
+}
+
+/// Whether this device has been signed out and has not been re-activated since.
+///
+/// `false` on any error — an unreadable directory is not evidence of a sign-out,
+/// and treating it as one would refuse to persist a legitimate activation.
+#[must_use]
+pub fn is_signed_out() -> bool {
+    credential_store_dir()
+        .map(|dir| signed_out_marker_in(&dir).exists())
+        .unwrap_or(false)
+}
+
+/// Records that this device was signed out, refusing future mirror writes.
+///
+/// Best-effort in the same sense as [`remove_code`]: if the marker cannot be
+/// written, the deletion has still happened and the NEXT launch is still clean.
+/// The marker only matters for the in-flight race described above, so failing to
+/// write it narrows a window rather than leaving the device signed in.
+pub fn mark_signed_out() {
+    let Some(dir) = credential_store_dir() else {
+        return;
+    };
+    let _ = std::fs::create_dir_all(&dir);
+    let _ = std::fs::write(signed_out_marker_in(&dir), "1\n");
+}
+
+/// Clears the signed-out marker. Called on a successful activation.
+pub fn clear_signed_out() {
+    let Some(dir) = credential_store_dir() else {
+        return;
+    };
+    let _ = std::fs::remove_file(signed_out_marker_in(&dir));
 }
 
 /// Pulls the `code` field out of the small JSON object this module writes.
@@ -211,7 +282,43 @@ mod tests {
         std::env::temp_dir().join(format!("locus-credential-{}-{}", name, std::process::id()))
     }
 
-    /// The point of the module: a written code reads back byte-for-byte.
+    /// The `write_code_file`/`write_code` split only matters because of the
+    /// marker, so the rule is stated over a scratch directory and the same
+    /// predicate `write_code` uses.
+    ///
+    /// `write_code` itself cannot be exercised here: it resolves the real
+    /// machine-scoped directory (`/var/lib/locus` on Linux), and a unit test must
+    /// not write there — on CI that path is either unprivileged or shared, and a
+    /// test that needs root silently stops testing anything.
+    fn marker_blocks(dir: &Path) -> bool {
+        signed_out_marker_in(dir).exists()
+    }
+
+    /// A signed-out device must refuse to mirror a code again.
+    ///
+    /// This is the assertion behind the in-flight race: deleting the file is not
+    /// enough when a heartbeat already inside `read_code_rehydrating` can rewrite
+    /// it a moment later. If `write_code` stopped consulting the marker, this
+    /// passes only by accident — hence the explicit precondition below.
+    #[test]
+    fn the_signed_out_marker_blocks_a_rewrite_of_the_mirror() {
+        let dir = scratch("signed-out");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("mkdir");
+
+        assert!(!marker_blocks(&dir), "precondition: not signed out yet");
+
+        std::fs::write(signed_out_marker_in(&dir), "1\n").expect("marker");
+        assert!(
+            marker_blocks(&dir),
+            "a written marker must be what `write_code` consults — otherwise the guard is dead"
+        );
+
+        let _ = std::fs::remove_file(signed_out_marker_in(&dir));
+        assert!(!marker_blocks(&dir), "removing the marker must re-enable the mirror");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     #[test]
     fn a_written_code_reads_back() {
         let dir = scratch("roundtrip");

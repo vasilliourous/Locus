@@ -22,9 +22,14 @@ import { TrafficGraph } from '@/components/connection/traffic-graph'
 import { UsageBar } from '@/components/connection/usage-bar'
 import { useConnection } from '@/components/connection/use-connection'
 import { useTrafficSummary } from '@/components/connection/use-traffic-summary'
+import { SupportBlock } from '@/components/shared/support-block'
 import { useSubscription } from '@/hooks/use-subscription'
 import { accentCardSx, cardSx } from '@/pages/_surfaces'
-import { connectNotice } from '@/pages/connect-notice'
+import {
+  blockerNotice,
+  connectNotice,
+  connectionNeedsSupport,
+} from '@/pages/connect-notice'
 import { shouldToggleFromKey } from '@/pages/connection-keys'
 import { formatSpeed } from '@/utils/format-speed'
 
@@ -55,6 +60,27 @@ const ConnectionPage = () => {
   // between "the hub refused you" and "you have not activated yet" is the thing
   // that was wrong, and it is worth a test that can fail.
   const notice = connectNotice(phase, error !== null, subscription)
+
+  // Why a connect cannot start at all, when the backend knows. This is the
+  // sentence that was missing from "it tries to connect, then just fails and
+  // cancels with no error message": that path has no `error` because nothing
+  // failed — the core was never started.
+  //
+  // Rendered only when the backend reports a blocker AND the attempt produced no
+  // error of its own: an error is about the attempt that just happened, and it is
+  // more specific than a standing machine state.
+  const blocker = error === null ? blockerNotice(status?.connectBlocker ?? null) : null
+
+  // Whether this screen owes the student a route to a human. The rule lives in
+  // `connect-notice.ts` beside `connectNotice` so it can be tested; the states it
+  // covers, and why a permanently-present block would be worse, are documented
+  // there.
+  const needsSupport = connectionNeedsSupport(
+    phase,
+    error !== null,
+    subscription,
+    canConnect,
+  )
 
   const busy = phase === 'connecting' || phase === 'disconnecting'
   const connected = phase === 'connected'
@@ -255,6 +281,25 @@ const ConnectionPage = () => {
             sx={{ textAlign: 'center', maxWidth: 420, lineHeight: 1.5 }}
           >
             {t('home.components.connection.takingLonger')}
+          </Typography>
+        )}
+
+        {/* A known reason the machine cannot start a tunnel. Shown with the same
+            weight as an error, because that is what it is — it just cannot arrive
+            as one, since no command failed. The copy names the cause and the
+            action, in that order: "it can't connect" without a next step is the
+            report this exists to stop. */}
+        {blocker && (
+          <Typography
+            variant="body2"
+            sx={{
+              color: 'warning.main',
+              textAlign: 'center',
+              maxWidth: 420,
+              lineHeight: 1.5,
+            }}
+          >
+            {t(blocker.key, blocker.values)}
           </Typography>
         )}
 
@@ -513,38 +558,26 @@ const ConnectionPage = () => {
 
       {/* The support route, at the foot of the page.
           //
-          // The activation screen deliberately sends a student to the card they
-          // were sold ("the code is printed on it, beside who to ask"), but this
-          // is the screen a student sits on for the whole session — and when
-          // something is wrong with the tunnel there is nothing on it that says
-          // who to tell. Everything else a student might report (the device id,
-          // the tier, the subscription state) is on Account; this is the one
-          // piece that has to be reachable from where the problem is felt.
+          // The activation screen sends a student to the card they were sold and
+          // then to the operator's address; this is the screen a student sits on
+          // for the whole session — and when something is wrong with the tunnel
+          // there is nothing on it that says who to tell. Everything else a
+          // student might report (the device id, the tier, the subscription
+          // state) is on Account; this is the one piece that has to be reachable
+          // from where the problem is felt.
           //
-          // A `mailto:` link rather than plain text: the address is the action,
-          // and "copy this out of a rendered label" is a step that produces
-          // mistyped addresses and support tickets that never arrive. It is a
-          // caption in secondary text, centred, so it reads as a footnote rather
-          // than as another control competing with Connect. */}
-      <Typography
-        variant="caption"
-        color="text.secondary"
-        sx={{ display: 'block', textAlign: 'center', mt: 0.5 }}
-      >
-        {t('home.components.connection.support')}{' '}
-        <Box
-          component="a"
-          href={`mailto:${t('home.components.connection.supportEmail')}`}
-          sx={{
-            color: 'text.secondary',
-            textDecoration: 'underline',
-            textUnderlineOffset: '2px',
-            '&:hover': { color: 'text.primary' },
-          }}
-        >
-          {t('home.components.connection.supportEmail')}
-        </Box>
-      </Typography>
+          // SHOWN ONLY WHEN SOMETHING IS WRONG. It was a permanent one-line
+          // footer, which made it the same weight as the traffic figures and
+          // taught the eye to skip it. The moment it matters is a refusal, a
+          // lapse, a connect error, or a device that cannot connect at all — and
+          // those are exactly the four states below. A healthy session says
+          // nothing, which is also what makes it noticeable when it does appear.
+          //
+          // `showMiddleman` stays on: on this screen the student still has a
+          // working relationship with whoever sold them the code, and most of
+          // what lands here ("it connects but nothing loads") is a question that
+          // middleman can answer. */}
+      {needsSupport && <SupportBlock sx={{ mt: 0.5 }} />}
     </Box>
   )
 }

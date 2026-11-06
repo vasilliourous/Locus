@@ -392,8 +392,11 @@ ssh locus-hub 'uptime'
 
 `deploy.sh` probes for the `locus-hub` alias and falls back to
 `root@<domain>` if it is absent. A password fallback exists
-(`server/scripts/vps-test/sshp.py`, reading `VPS_HOST`/`VPS_USER`/`VPS_PW` from
+(`scripts/vps-test/sshp.py`, reading `VPS_HOST`/`VPS_USER`/`VPS_PW` from
 the environment, never the command line) for when the key is unavailable.
+It has **no default host**: `VPS_HOST` is required (it falls back to `DOMAIN`,
+then to the decrypted secrets bundle), because a hardcoded literal here once sent
+the script at a stale address. With a bundle present, both are taken from it:
 
 ### Working on the live hub — techniques that work
 

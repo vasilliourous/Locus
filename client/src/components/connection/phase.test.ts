@@ -50,6 +50,11 @@ const status = (
   // that cannot be mistaken for "configured", so a helper that forgets to set it
   // cannot accidentally assert UDP behaviour.
   udp: { kind: 'none' },
+  // Not read by `phaseFromStatus` either, and `null` is the honest default: it
+  // means "no blocker is known", which is exactly the state every case in this
+  // file is describing. A test that set a blocker here would be asserting about
+  // the message rule, not about the phase.
+  connectBlocker: null,
 })
 
 describe('connection phase from backend status', () => {

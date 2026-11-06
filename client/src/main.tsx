@@ -22,6 +22,7 @@ import { router } from './pages/_routers'
 import ActivationScreen from './pages/activation'
 import { AppDataProvider } from './providers/app-data-provider'
 import { WindowProvider } from './providers/window'
+import { subscribeEntitlementRefresh } from './services/entitlement-refresh'
 import { FALLBACK_LANGUAGE, initializeLanguage } from './services/i18n'
 import { locusStatus } from './services/locus'
 import {
@@ -104,9 +105,20 @@ const initializeApp = (initialThemeMode: 'light' | 'dark') => {
       // The same interval the subscription query uses, so the gate and the
       // sidebar indicator cannot disagree about the same device.
       const timer = window.setInterval(() => void read(), ENTITLEMENT_POLL_MS)
+
+      // ...and re-read IMMEDIATELY when something on this device changes the
+      // fact. The five-minute poll is the right cadence for a change the hub
+      // makes (it arrives on a heartbeat); it is the wrong cadence for a sign-out
+      // the student just performed, where the gate would otherwise keep rendering
+      // a live Connect button for a device that no longer holds a key. See
+      // `services/entitlement-refresh.ts` for why this is a module signal rather
+      // than a prop.
+      const unsubscribe = subscribeEntitlementRefresh(() => void read())
+
       return () => {
         cancelled = true
         window.clearInterval(timer)
+        unsubscribe()
       }
     }, [])
 

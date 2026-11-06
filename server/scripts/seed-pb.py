@@ -267,6 +267,20 @@ collections = [
         # of them. `term_days` is the number.
         {"name":"term_days","type":"number"},
         {"name":"term_kind","type":"text"},
+        # ── The student-initiated sign-out record ──
+        #
+        # Set by `POST /api/release-entitlement` when a student signs out of a
+        # code on a device. It is an AUDIT timestamp, not an entitlement change:
+        # `expires_at` and `activated_at` are deliberately untouched, so signing
+        # out can neither shorten a student's term nor restart it, and cannot be
+        # used by one student against another's code. See `device_release.pb.js`.
+        #
+        # It exists because the operator could not otherwise tell "this student
+        # moved to a new computer" apart from "this key is being shared" — the
+        # two reports look identical from the console and need different
+        # answers. `code_events` carries the full history; this is the latest.
+        {"name":"released_at","type":"date"},
+        {"name":"release_count","type":"number"},
     ]),
     # ── device_bindings / device_identities — REMOVED ──
     #
