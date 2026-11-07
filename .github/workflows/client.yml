@@ -284,6 +284,112 @@ jobs:
           fi
           echo "LOCUS_UPDATE_KEY is present (value not printed; length ${#LOCUS_UPDATE_KEY} bytes)"
 
+      # ── Preflight: can this repository actually CLAIM each matrix runner? ──
+      #
+      # WHY THIS EXISTS (2026-11-07). On 2026-11-07 both macOS build jobs were
+      # rejected about two seconds after starting, with ZERO steps run:
+      #
+      #   The configuration 'macos-14-arm64-us-default' is not supported
+      #
+      # Nothing said so in a place anyone would look. The run reported
+      # `Build (macos-arm): cancelled`, which is the same word a person reads as
+      # "I cancelled it" — and the other two platforms went green, so the run
+      # looked healthy while no release could possibly be published. It took
+      # reading the job's annotations over the API to find the sentence above.
+      #
+      # The failure is NOT diagnosable from inside the affected job: a job whose
+      # runner is refused never runs a step, so no step can report it. The only
+      # place it can be named is a job on a runner that DOES start — this one.
+      #
+      # WHAT THIS CAN AND CANNOT DO. It cannot fix an entitlement; that is on the
+      # account side. GitHub exposes no "may I claim this runner?" endpoint, so
+      # the only evidence available is HISTORY: what happened the last time this
+      # repository asked for each label. This reads that, and fails on a TAG when
+      # a label's most recent run ended with ZERO STEPS — which is precisely the
+      # signature of a refused runner, and can only be seen from outside the
+      # affected job.
+      #
+      # A branch push gets the same report as a warning, not an error. Failing
+      # every unrelated commit on a broken macOS entitlement would add noise to
+      # the failure rather than remove it.
+      #
+      # It guards the exact thing that made 2026-11-07 expensive: `release` needs
+      # all four platforms (fetch-release.py is all-or-nothing), so a tag that
+      # silently cannot produce one of them must stop HERE, in seconds, instead
+      # of after 39 minutes of Linux build.
+      - name: Probe the matrix runners against recent history
+        working-directory: .
+        if: github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          # Labels come from the workflow file: a hardcoded copy would be one
+          # more thing able to disagree with what actually builds. Read from the
+          # `include:` list under the build matrix — NOT a `matrix:`..`steps:`
+          # range, because `steps:` appears BEFORE the matrix in this file and
+          # that range can never close (it silently produced zero labels the
+          # first time this was written).
+          labels=$(grep -A200 '^      matrix:' .github/workflows/client.yml \
+                   | sed -n 's/^[[:space:]]*-[[:space:]]*os:[[:space:]]*\([^[:space:]]*\).*/\1/p' \
+                   | sort -u)
+          [ -n "$labels" ] || { echo "::error::could not read any matrix labels"; exit 1; }
+          echo "checking: $(echo $labels)"
+
+          dead=""
+          runs=$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs?per_page=8" \
+                 --jq '.workflow_runs[].id' 2>/dev/null || true)
+          # Written WITHOUT a `... | head -1` inside the loop. Under `pipefail`, a
+          # `head` that exits after one line kills the writer's pipe and the
+          # command substitution reports failure — which silently produced an
+          # EMPTY verdict for every label the first time this was written, so the
+          # guard passed while macOS was demonstrably dead. Collect the first
+          # match per label explicitly instead.
+          for label in $labels; do
+            verdict=""
+            for rid in $runs; do
+              # `gh api` has no `--arg`: it passes `--jq` straight through and
+              # rejects jq's own flags ("accepts 1 arg(s), received 4"). The
+              # label is therefore substituted into the filter, and it comes from
+              # the workflow file — not from a user or an event — so there is
+              # nothing here to inject.
+              line=$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${rid}/jobs?per_page=30" \
+                       --jq ".jobs[] | select(.labels | index(\"${label}\")) | select(.conclusion != null) | \"\\(.conclusion)\\t\\(.steps | length)\\t\\(.name)\"" \
+                       2>/dev/null | sed -n '1p')
+              if [ -n "$line" ]; then
+                verdict="$line"
+                break
+              fi
+            done
+            if [ -z "$verdict" ]; then
+              echo "  $label: no completed history found (first run on this label?)"
+              continue
+            fi
+            conclusion=$(printf '%s' "$verdict" | cut -f1)
+            steps=$(printf '%s' "$verdict" | cut -f2)
+            echo "  $label: last completed job concluded '$conclusion' after $steps step(s)"
+            # Zero steps + cancelled is a REFUSED RUNNER, not a build failure.
+            # A job that ran and then failed is a real build failure and is
+            # allowed to proceed -- it will fail again with a useful log.
+            if [ "$steps" = "0" ] && [ "$conclusion" = "cancelled" ]; then
+              dead="$dead $label"
+            fi
+          done
+
+          if [ -n "$dead" ]; then
+            echo "::error::these runner labels were REFUSED on their last attempt:$dead"
+            echo "::error::A tag cannot publish without every platform: fetch-release.py"
+            echo "::error::requires all four payloads and their .sig files, and fails the"
+            echo "::error::whole publish if one is missing."
+            echo "::error::Do not change build steps. Read the refused job's annotations:"
+            echo "::error::  gh api repos/${GITHUB_REPOSITORY}/actions/runs/<run>/jobs --jq '.jobs[]|select(.name|test(\"Build\"))'"
+            echo "::error::  A zero-step cancel names the runner configuration, e.g."
+            echo "::error::  'The configuration macos-14-arm64-us-default is not supported'."
+            echo "::error::That is an account entitlement. See docs/operate/CI-CD.md."
+            exit 1
+          fi
+          echo "No label in recent history was refused with zero steps."
+
       # ── Report whether the activation tunnel's key is configured ──
       #
       # A WARNING, not an error, and the difference is the whole point: a build
@@ -647,11 +753,31 @@ jobs:
           # The Cargo workspace root is client/, not client/src-tauri/ — the
           # cache would key on the wrong directory otherwise.
           workspaces: client
-          # Per-platform cache keys. The ARM macOS slice is a CROSS-compile
-          # (aarch64 target on an x64 runner) and the cache keys on the target
-          # triple, so `macos-intel` and `macos-arm` can never share an entry —
-          # each is an independent compile of all 916 packages. Naming the key
-          # per label at least keeps them from evicting each other.
+          # ── THE KEY MUST BE STABLE ACROSS RUNS, AND IT WAS NOT ──
+          #
+          # `add-job-id-key` defaults to TRUE, and it puts the GitHub **job id**
+          # into the cache key. A job id is unique per run, so the key a run
+          # SAVES under can never be the key the next run LOOKS UP. The action
+          # still reports `Cache restored successfully ... full match: true`,
+          # because it falls back to an older entry with the same prefix — and
+          # Rust then ignores that restored `target/` entirely, since the
+          # fingerprints inside it do not match this build.
+          #
+          # The symptom, measured on run 42346173855 rather than guessed:
+          # `Build (linux)` took **1744 s and compiled 1302 crates from
+          # scratch**, against a 174 MB cache, while `Build (windows)` — same
+          # action, same settings — took **267 s** against 1337 MB. A cache that
+          # is restored but never reused is worse than no cache: it silently
+          # spends a download and buys nothing.
+          #
+          # So the job id is REMOVED from the key (the default is wrong for a
+          # workflow whose whole point is reuse) and a `shared-key` names the
+          # entry explicitly. It is still per-platform: `macos-intel` and
+          # `macos-arm` are independent compiles at different triples and would
+          # evict each other.
+          add-job-id-key: false
+          shared-key: locus-${{ matrix.triple }}
+          # Kept as an extra discriminator alongside the automatic keys.
           key: ${{ matrix.label }}
           # On a push to `main` all four runners would race to write the cache;
           # the first writer wins and the rest waste minutes uploading. Saving
@@ -1107,8 +1233,25 @@ jobs:
       #
       # These commands used to run on a fifth runner, compiling the whole
       # workspace with `--all-features` and producing a cache entry the builds
-      # could not use. Running them HERE reuses the target directory `tauri
-      # build` just populated, so the compile is largely already done.
+      # could not use. Running them HERE at least shares one runner and one
+      # source tree.
+      #
+      # ── CORRECTED 2026-11-07: THEY DO NOT SHARE THE BUILD'S ARTIFACTS ──
+      #
+      # This comment used to claim the tests "reuse the target directory `tauri
+      # build` just populated, so the compile is largely already done". That was
+      # false, and run 42346173855 shows it in the log rather than in argument:
+      # `Build` compiled ~630 crates between 06:17 and 06:21 into
+      # `target/<triple>/fast-release`, then `cargo test` compiled ~660 MORE
+      # between 06:46 and 06:51 into `target/debug`. Two disjoint profiles, two
+      # complete compiles of the same dependency tree, and the second one was
+      # never counted when this job was called "one runner instead of four".
+      #
+      # The tests now pass the SAME `--profile` the build used, so the
+      # dependency tree is compiled once and the test binary links against it.
+      # `fast-release` already sets `debug = true` and `opt-level = 0`, so test
+      # assertions, backtraces and `debug_assert!` keep working; it is not an
+      # optimised profile being asked to behave like a debug one.
       #
       # Linux only, so the gate costs one runner instead of four — the code under
       # test is the same on every platform. They run AFTER `tauri build` so a
@@ -1230,8 +1373,24 @@ jobs:
         run: |
           set -o pipefail
           delay=5
+          # SAME PROFILE AS `Build` ABOVE, so the dependency tree it just compiled
+          # is reused instead of being rebuilt from scratch in `target/debug`.
+          # See the note above this step: the two profiles share no artifacts,
+          # and testing in `debug` while building in `fast-release` cost a second
+          # full compile of ~660 crates on every run.
+          #
+          # `--profile` goes AFTER `test`: it is a position-independent cargo
+          # flag, but keeping it next to the subcommand is what `cargo test
+          # --help` documents and what a reader will check.
+          if [ "${{ github.ref_type }}" = "tag" ]; then
+            profile_args=""
+          else
+            profile_args="--profile fast-release"
+          fi
+          echo "cargo test profile args: ${profile_args:-<default release>}"
           for attempt in 1 2 3; do
-            if cargo test --all-targets 2>&1 | tee /tmp/cargo-test.log; then
+            # shellcheck disable=SC2086  # word splitting of $profile_args is intended
+            if cargo test --all-targets $profile_args 2>&1 | tee /tmp/cargo-test.log; then
               exit 0
             fi
             if ! grep -qE "Couldn't resolve host name|failed to download|unable to update registry|failed to load source for dependency|network failure|Connection reset by peer" /tmp/cargo-test.log; then

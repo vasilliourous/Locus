@@ -700,6 +700,37 @@ const fn timeout_seconds(timeout: crate::locus::hub::Timeout) -> Duration {
 mod tests {
     use super::*;
 
+    /// Serialises the tests that touch the process-wide warm-engine slot.
+    ///
+    /// WHY THIS EXISTS. `tunnel_slot()` is a single static, and three tests
+    /// arrange and assert on it: `a_warm_engine_is_reused_…`,
+    /// `a_stale_engine_is_not_reused`, and anything that lets `endpoint()` fail
+    /// (which calls `drop_warm_engine()`). `cargo test` runs them CONCURRENTLY by
+    /// default, so one test's `drop_warm_engine()` can clear the slot between the
+    /// next test's setup and its assertion.
+    ///
+    /// That was not theoretical. Measured on this machine before the guard: 1
+    /// failure in 5 runs of `cargo test --lib --package locus`, in `debug`, with
+    /// the message "a warm engine must be handed back" — plus a second sighting
+    /// in `--profile fast-release`. The same suite passed on the other runs, which
+    /// is exactly how a flake reaches CI and gets called a broken build.
+    ///
+    /// A mutex rather than `--test-threads=1`: serialising the whole binary would
+    /// slow every run to fix two tests, and the setting lives in CI rather than
+    /// here, where the reason would be lost.
+    ///
+    /// `tokio::sync::Mutex`, not `std::sync::Mutex`. Both tests are async and hold
+    /// the guard across `.await` points (they call `endpoint().await` while
+    /// serialised), which is a deadlock hazard with a blocking guard — and clippy
+    /// rejects it outright under `await_holding_lock`, which this crate enables.
+    /// The async mutex suspends instead of blocking the executor thread.
+    async fn slot_guard() -> tokio::sync::MutexGuard<'static, ()> {
+        static GUARD: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+        // No poisoning: a panic in one guarded test must not turn the other into a
+        // confusing secondary failure. The panic is already reported on its own.
+        GUARD.lock().await
+    }
+
     #[test]
     fn the_config_carries_exactly_one_proxy_and_one_catch_all_rule() {
         let yaml = render_config(17999, "hub.example.org", "AAAA").expect("render");
@@ -842,6 +873,10 @@ mod tests {
     /// "an answer is not a failure" assertion.
     #[tokio::test]
     async fn a_warm_engine_is_reused_so_two_requests_cost_one_start() {
+        // Serialised against the other tests that arrange the same static slot;
+        // see `slot_guard`. Without this, a concurrent `drop_warm_engine()` clears
+        // the entry between the setup below and the assertion.
+        let _serialised = slot_guard().await;
         // The slot starts empty in a fresh test process; force the state a second
         // call would see, without spawning anything.
         {
@@ -877,6 +912,8 @@ mod tests {
     /// the flag's value: a fresh engine is the ONLY thing a retry may reuse.
     #[tokio::test]
     async fn a_stale_engine_is_not_reused() {
+        // Same static slot as the reuse test; see `slot_guard`.
+        let _serialised = slot_guard().await;
         {
             let mut slot = tunnel_slot().lock().await;
             *slot = Some((
