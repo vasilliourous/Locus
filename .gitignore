@@ -212,3 +212,23 @@ secrets-passphrase*
 secrets-pass*
 .passphrase
 passphrase.txt
+
+# Added 2026-11-07: `decryptionkeyforsecretsdeleteafteruse.txt` sat at the repo
+# ROOT, untracked and UNIGNORED, for the whole school-network fix — a fourth
+# instance of the same shape as vpspassword.txt, temp-ghp-token* and
+# encryption-password*. None of the patterns above matched it: `secrets-pass*`
+# requires the word "secrets" to start the name, and this one starts with
+# "decryptionkey". `git check-ignore` confirmed the gap before this line was
+# added. Wildcarded so a suffixed or numbered copy is covered too.
+decryptionkey*
+decryption-key*
+
+# Added 2026-11-07: the live incident runbook for the school-network fix. It is
+# an OPERATOR document and this repository is PUBLIC. It names the hub, the port
+# layout, the deploying commands and — in the fail2ban blocker — a live
+# workstation IP address, which AGENTS.md rule 2 forbids outright. It arrived
+# untracked at the repo root, one `git add -A` from publication.
+# The durable record of anything fixed from it belongs in docs/reference/FIXES.md
+# and STILL-OPEN.md, which are written to be publishable; this file is not.
+URGENT-FIX-NOW.md
+URGENT-*.md

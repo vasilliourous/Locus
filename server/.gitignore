@@ -23,6 +23,12 @@ secrets-pass*
 .passphrase
 passphrase.txt
 
+# Added 2026-11-07, mirroring the root file: `decryptionkey*` was uncovered by
+# every pattern above. Kept here as well so the pattern is not lost by an
+# operator working inside server/ with this subtree's .gitignore in view.
+decryptionkey*
+decryption-key*
+
 # NOTE: the age KEYPAIR files are gone. `age-key.txt` was gitignored here until
 # 2026-10-16; the secrets file is now encrypted to a passphrase, so no key file
 # exists to ignore. If you still have an old checkout with one, delete it — it
