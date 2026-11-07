@@ -564,39 +564,52 @@ jobs:
           # x86_64 added as a cross-compile target — the supported way to produce
           # an Intel binary without an Intel machine.
           #
-          # ── 2026-11-07: THE BARE LABEL'S MEANING MOVED UNDER US ──
+          # ── 2026-11-07: `macos-14` IS NOW REFUSED, AND THE LABEL IS NOT THE CAUSE ──
           #
-          # This is the exact failure the note above predicted, and it happened.
-          # From 2026-11-07 every run's two macOS jobs were rejected in ~2 s with
-          # ZERO steps run:
+          # Every macOS job was rejected in ~2 s with ZERO steps run:
           #
           #   The configuration 'macos-14-arm64-us-default' is not supported
           #
-          # The bare `macos-14` label stopped resolving to the Intel image and
-          # started resolving to `macos-14-arm64` — the ARM image, which GitHub
-          # keeps as a SEPARATE image (`images/macos/macos-14-Readme.md` vs
-          # `macos-14-arm64-Readme.md`) and which this account is not entitled to.
-          # The billing history is the corroboration: every macOS minute this
-          # account has ever been billed is the `Actions macOS 3-core` SKU (the
-          # x64 image). No ARM macOS SKU appears. macOS was green on v3.3.5
-          # (run 41746038397, 2026-11-04) and cancelled on every run after it,
-          # with no change to this file — the workflow went red without a commit,
-          # which is what a MOVING TAG is for and why the pin below exists.
+          # WHAT WAS RULED OUT, so nobody re-checks it:
           #
-          # `macos-14-x64` pins the ARCHITECTURE, not just the major version, so
-          # the label cannot drift to the other image again. The two slices now
-          # build the other way round from before: `macos-arm` is the CROSS
-          # (aarch64 on an x64 host) and `macos-intel` is native. Both triples are
-          # installed by `targets: ${{ matrix.triple }}`, so that swap needs no
-          # other change here.
+          #   * NOT a label change in this file. The last green macOS run
+          #     (41746038397, v3.3.5, 2026-11-04) used `macos-14` too; nothing here
+          #     changed between that run and the first rejection.
+          #   * NOT a macOS minutes quota. This account billed `Actions macOS
+          #     3-core` in every month on record, 281 minutes in 2026-11, and the
+          #     repository is public.
+          #   * NOT a missing image. `actions/runner-images` carries both
+          #     `images/macos/macos-14-Readme.md` (x64) and
+          #     `macos-14-arm64-Readme.md` (arm64), so both exist on GitHub's side.
           #
-          # WHEN PINNING: update these labels AND the note in docs/operate/CI-CD.md,
-          # and check the arch suffix still names an image that exists.
-          - os: macos-14-x64
+          # What changed is that `macos-14` now resolves to the ARM configuration
+          # `macos-14-arm64-us-default`, and THAT configuration is refused for
+          # this repository. Earlier billing shows only the `Actions macOS 3-core`
+          # (x64) SKU, so whatever entitlement decides this is not what it was on
+          # 2026-11-04.
+          #
+          # NOT FIXED BY A LABEL EDIT. `macos-14-x64` was tried on 2026-11-07
+          # (run 42342311491) and is not an image name — the jobs sat QUEUED with
+          # no runner instead of being rejected, which burns the 50-minute timeout
+          # instead of failing fast. Do not use it. The labels below are the two
+          # that exist.
+          #
+          # The fix is on the account side (Settings → Billing, or GitHub support):
+          # ask which hosted macOS configurations this repository may claim. Until
+          # that is answered, the macOS jobs will keep failing this way, and NO
+          # release can be published — the hub's fetcher needs both darwin
+          # artifacts.
+          #
+          # DIAGNOSTIC WORTH KEEPING: a macOS job cancelled after ~2 s with zero
+          # steps is this. A job that starts and then fails is a build failure.
+          # Read the annotations before touching a build step.
+          #
+          # WHEN PINNING: update these labels AND the note in docs/operate/CI-CD.md.
+          - os: macos-14
             label: macos-intel
             triple: x86_64-apple-darwin
             artifact: locus-darwin-amd64
-          - os: macos-14-x64
+          - os: macos-14
             label: macos-arm
             triple: aarch64-apple-darwin
             artifact: locus-darwin-arm64

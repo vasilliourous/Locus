@@ -136,29 +136,50 @@ preview independently.
 
 ### Runner images are pinned, on purpose
 
-The build matrix uses `ubuntu-24.04`, `windows-2022` and `macos-14-x64` — **not**
+The build matrix uses `ubuntu-24.04`, `windows-2022` and `macos-14` — **not**
 `*-latest`. A moving label is a world claim nobody re-checks: this project already
 lost every Intel macOS run to the retirement of `macos-13` ("Waiting for a runner
 to pick up this job", for every run, while the other three platforms finished, and
 nothing automated noticed). Pinning means a retirement fails loudly. **When you bump
 a label, update this note and the comment in `client.yml`.**
 
-**Pin the architecture, not only the major version.** `macos-14` alone was not
-enough. On 2026-11-07 the bare `macos-14` label stopped resolving to the Intel
-image and began resolving to `macos-14-arm64`, which this account is not entitled
-to; every macOS job was rejected in about two seconds with zero steps run:
+### macOS runners are refused by the account, and a label change does not fix it
+
+**Open, as of 2026-11-07.** Every macOS job is rejected in about two seconds with
+zero steps run:
 
 ```
 The configuration 'macos-14-arm64-us-default' is not supported
 ```
 
-The tell is the billing SKU. Every macOS minute this account has ever been billed
-is `Actions macOS 3-core` (the x64 image), and no ARM macOS SKU appears — so the
-label changed meaning, not the account's rights. macOS was green on v3.3.5
-(run 41746038397, 2026-11-04) and cancelled on every run after it, **with no
-change to the workflow**: the build went red without a commit. `macos-14-x64`
-names the image, so the two macOS slices are now the other way round — `macos-arm`
-is the cross-compile and `macos-intel` is native.
+What has been **ruled out**:
+
+- **Not a change to this repository.** The last green macOS run (`41746038397`,
+v3.3.5, 2026-11-04) used `macos-14` as well, and nothing in the workflow changed
+between that run and the first rejection. The build went red without a commit.
+- **Not a minutes quota.** This account billed `Actions macOS 3-core` in every
+month on record — 281 minutes in 2026-11, 1628 in 2026-10 — and the repository is
+public.
+- **Not a missing image.** `actions/runner-images` carries both
+`images/macos/macos-14-Readme.md` (x64) and `macos-14-arm64-Readme.md` (arm64).
+- **Not fixable by a label edit.** `macos-14-x64` was tried on 2026-11-07 (run
+`42342311491`). It is not an image name: the jobs sat **queued with no runner**
+rather than being rejected, which burns the job timeout instead of failing fast.
+
+The label `macos-14` currently resolves to the ARM configuration
+`macos-14-arm64-us-default`, and that configuration is refused for this
+repository. Billing shows only the `Actions macOS 3-core` (x64) SKU, so whatever
+grants the ARM configuration is not what it was on 2026-11-04. **The fix is on the
+account side** — Settings → Billing, or GitHub support: ask which hosted macOS
+configurations this repository may claim.
+
+**This blocks releasing.** The hub's fetcher requires both darwin artifacts, so a
+run without them produces nothing publishable.
+
+A macOS job cancelled after roughly two seconds with **zero steps** is this, not a
+build failure. A job that starts and then fails is a build failure. A macOS job
+that sits **queued indefinitely** is a label that names no image. Read the job's
+annotations before touching any build step.
 
 A cancelled macOS job that ran **zero steps** is this, not a build failure. A job
 that starts and then fails is a build failure. Read the annotations before
