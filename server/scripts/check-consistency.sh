@@ -5615,6 +5615,78 @@ NODE
     fi
 fi
 
+# ─────────────────────────────────────────────────────────────
+# 43. setup.sh lets an explicit DOMAIN override the secrets bundle
+#
+# Measured 2026-11-07, during the school-network deploy: `DOMAIN=x setup.sh`
+# with a bundle containing `DOMAIN=y` deployed `y`, silently. `set -a` + source
+# turns every bundle line into an assignment, and an assignment overwrites the
+# caller. The committed bundle still names the LEGACY duckdns host while
+# contract::HUB_URL — what every current client dials — is the jadedns one, so
+# the deploy would have built a correct hub at a name nobody dials, with no
+# error anywhere and a green tree.
+#
+# ASSERTED BEHAVIOURALLY, not by grepping for a variable name. A grep would be
+# satisfied by the comment explaining the fix (the §26 lesson). This runs the
+# precedence logic against a synthetic bundle and checks the ANSWER.
+# ─────────────────────────────────────────────────────────────
+echo
+echo "════════════════════════════════════════════════════════════"
+echo "43. setup.sh honours an explicit DOMAIN over the secrets bundle"
+SETUP_SH="$REPO/server/setup.sh"
+if [ ! -f "$SETUP_SH" ]; then
+    bad "server/setup.sh is missing"
+elif ! command -v bash >/dev/null 2>&1; then
+    warn "bash unavailable — cannot evaluate setup.sh's DOMAIN precedence"
+else
+    # Lift the real block out of setup.sh and run it, rather than restating it.
+    #
+    # RUN FROM A FILE, NOT `bash - <<HEREDOC`. The stdin form collides: the
+    # heredoc IS the script, so the first `cat "$1"` or `source` consumes the
+    # rest of the harness and the extraction silently returns nothing — which
+    # is how this check first reported BAD against correct code. A guard that
+    # misreports correct code is worse than no guard, so the harness is
+    # materialised on disk and deleted.
+    PREC_HARNESS=$(mktemp /tmp/.cc-prec-XXXXXX.sh)
+    cat > "$PREC_HARNESS" <<'PREC'
+src=$(cat "$1")
+start=$(printf '%s' "$src" | grep -n 'DOMAIN_EXPLICIT="${DOMAIN:-}"' | head -1 | cut -d: -f1)
+end=$(printf '%s' "$src" | grep -n 'unset DOMAIN_EXPLICIT' | head -1 | cut -d: -f1)
+if [ -z "$start" ] || [ -z "$end" ]; then echo "MISSING"; exit 0; fi
+block=$(printf '%s' "$src" | sed -n "${start},${end}p")
+SECRETS_TMP="$2"
+printf 'DOMAIN=networkingguides.duckdns.org\n' > "$SECRETS_TMP"
+log() { :; }
+fail() { echo "HARNESS_FAIL"; }
+# (i) an explicit DOMAIN must survive sourcing the bundle
+DOMAIN=networkingguides.jadedns.uk
+eval "$block"
+printf 'EXPLICIT|%s\n' "$DOMAIN"
+# (ii) with nothing explicit, the bundle's value must still apply
+#      Re-create it: the block deletes SECRETS_TMP after sourcing, so the
+#      second run needs its own copy. (The first version reused one file and
+#      got HARNESS_FAIL — the guard caught its own harness, which is the point.)
+printf 'DOMAIN=networkingguides.duckdns.org\n' > "$SECRETS_TMP"
+unset DOMAIN
+eval "$block"
+printf 'NONE|%s\n' "$DOMAIN"
+PREC
+    PREC_OUT=$(bash "$PREC_HARNESS" "$SETUP_SH" "/tmp/.cc-prec-$$.env" 2>/dev/null)
+    rm -f "$PREC_HARNESS" "/tmp/.cc-prec-$$.env"
+    case "$PREC_OUT" in
+        MISSING*)
+            bad "setup.sh no longer has the DOMAIN_EXPLICIT precedence block"
+            bad "  Without it an explicit DOMAIN=... is silently overwritten by"
+            bad "  secrets.env.age, and the hub deploys at the bundle's hostname." ;;
+        *"EXPLICIT|networkingguides.jadedns.uk"*"NONE|networkingguides.duckdns.org"*)
+            ok "an explicit DOMAIN overrides the bundle, and the bundle still supplies the default" ;;
+        *)
+            bad "setup.sh's DOMAIN precedence is not what it claims"
+            bad "  expected explicit to win and the bundle to supply the default; got:"
+            bad "  $(printf '%s' "$PREC_OUT" | tr '\n' ' ') " ;;
+    esac
+fi
+
 echo
 echo "════════════════════════════════════════════════════════════"
 if [ "$FAIL" -eq 0 ]; then

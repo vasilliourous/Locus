@@ -103,10 +103,38 @@ KEYERR
     unset PASSPHRASE_FEED
 
     # Source from temp file (reliable in all shell environments)
+    #
+    # DOMAIN PRECEDENCE — the explicit one wins.
+    #
+    # `set -a` + `source` makes every line in the bundle an ASSIGNMENT, and a
+    # plain assignment OVERWRITES whatever the caller passed. Measured
+    # 2026-11-07: `DOMAIN=x /root/server/setup.sh` with a bundle containing
+    # `DOMAIN=y` deployed `y` silently — no warning, no prompt, and the only
+    # symptom is a hub on a hostname the client does not dial. That bit during
+    # the school-network deploy: the committed bundle said
+    # `networkingguides.duckdns.org` (the LEGACY name, which pre-3.3.2 builds
+    # dial) while `contract::HUB_URL` — what every current client dials — is
+    # `networkingguides.jadedns.uk`. Deploying the bundle verbatim would have
+    # built a correct hub at a name nobody dials.
+    #
+    # So DOMAIN is captured first and restored after sourcing: an inline
+    # `DOMAIN=...` overrides the bundle, and the bundle supplies the default
+    # when the caller says nothing. The other variables keep last-writer-wins,
+    # which is what a secrets file is for.
+    DOMAIN_EXPLICIT="${DOMAIN:-}"
     set -a
     source "$SECRETS_TMP" || { rm -f "$SECRETS_TMP"; fail "Failed to source decrypted secrets."; }
     set +a
     rm -f "$SECRETS_TMP"
+
+    if [ -n "$DOMAIN_EXPLICIT" ]; then
+        if [ -n "${DOMAIN:-}" ] && [ "$DOMAIN_EXPLICIT" != "$DOMAIN" ]; then
+            log "  DOMAIN: using the explicit '${DOMAIN_EXPLICIT}' (secrets.env.age says '${DOMAIN}')"
+        fi
+        DOMAIN="$DOMAIN_EXPLICIT"
+        export DOMAIN
+    fi
+    unset DOMAIN_EXPLICIT
 
     # ── VPS_PW is root SSH and must NOT ride along in every child process ──
     # It lives in the bundle deliberately (an agent deploying needs it to reach
