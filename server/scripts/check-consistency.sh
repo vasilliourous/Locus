@@ -1325,6 +1325,31 @@ def version_sites():
             found.add(rel)
     return sorted(found) or None
 
+def activation_tunnel_port(kind):
+    """The bootstrap listener and path-filter ports, from BOTH ends.
+
+    Two values that must agree across a language boundary: the server module sets
+    `ACTIVATION_TUNNEL_PORT` / `ACTIVATION_FORWARD_PORT`, and the client names the
+    same two as `TUNNEL_PORT` / `FILTER_PORT` (the client names the FILTER as its
+    destination, because `ssserver` dials whatever the client asks for). This
+    returns the pair only when both sides exist and agree, so a one-sided edit
+    fails here rather than at a school.
+    """
+    srv = read("server/modules/09-activation-tunnel.sh")
+    cli = read("client/src-tauri/src/locus/activation_tunnel.rs")
+    if kind == "bootstrap":
+        m1 = re.search(r'TUNNEL_PORT="\$\{ACTIVATION_TUNNEL_PORT:-([0-9]+)\}?"', srv) or \
+             re.search(r'ACTIVATION_TUNNEL_PORT="?([0-9]+)"?', srv)
+        m2 = re.search(r'pub const TUNNEL_PORT: u16 = ([0-9]+);', cli)
+    else:
+        m1 = re.search(r'FORWARD_PORT="\$\{ACTIVATION_FORWARD_PORT:-([0-9]+)\}?"', srv) or \
+             re.search(r'ACTIVATION_FORWARD_PORT="?([0-9]+)"?', srv)
+        m2 = re.search(r'pub const FILTER_PORT: u16 = ([0-9]+);', cli)
+    if not m1 or not m2:
+        return None
+    server_side, client_side = int(m1.group(1)), int(m2.group(1))
+    return server_side if server_side == client_side else None
+
 # Map fact -> callable returning the recomputed value, or None if not checkable.
 CHECKERS = {
     "client.version":       manifest_version,
@@ -1342,6 +1367,8 @@ CHECKERS = {
     "site.domain":           landing_domain,
     "site.document_root":    landing_docroot,
     "site.download_path":    landing_download_path,
+    "activation_tunnel.bootstrap_port": lambda: activation_tunnel_port("bootstrap"),
+    "activation_tunnel.filter_port":    lambda: activation_tunnel_port("filter"),
 }
 
 for path, entry in sorted(facts.items()):
@@ -4335,6 +4362,18 @@ echo "32. The hub alias and the client's hub override agree"
 # that redirects somewhere other than the canonical domain would send a stranded
 # fleet to a name that does not serve the API. Anchored on the redirect target,
 # which is the only value that has to be right.
+#
+# 2026-11-07 — THE ALIAS NOW SERVES ONE HANDLE, `/updates/*`, ON PURPOSE.
+# This section previously asserted the alias served NO handles at all, and that
+# assertion was right for the API and wrong for downloads. The alias is used by
+# a device on a network where the CANONICAL NAME IS BLOCKED, so redirecting its
+# download sent the file to a name that does not resolve: the API worked and the
+# update — the only route off that network — did not. URGENT-FIX-NOW.md 1.6.
+#
+# The rule is therefore narrowed, not dropped: the alias may serve downloads and
+# nothing else. What the old check was actually protecting — that the API
+# surface, its rate-limit zones and the admin check exist in exactly one place —
+# is still enforced below, by rejecting any handle other than /updates/*.
 # ─────────────────────────────────────────────────────────────
 CADDY_MODULE="$REPO/server/modules/05-caddy.sh"
 if [ ! -f "$CADDY_MODULE" ]; then
@@ -4356,6 +4395,36 @@ else
         bad "  A hardcoded host here would drift from DOMAIN; a self-redirect loops."
     fi
 
+    # The redirect must be in a CATCH-ALL `handle {` , not a sibling top-level
+    # `redir`. A bare `redir` and a `handle_path` in the same site block do not
+    # compose: Caddy evaluates the handle chain first, and a top-level directive
+    # runs as its own route, so the redirect could win for /updates/ too and
+    # silently restore the 308 — the exact bug, with the /updates/ handle still
+    # present and this section's first check still green.
+    if awk '/^__HUB_ALIAS_DOMAIN__ \{/,/^\}/' "$CADDY_MODULE" | grep -qE '^[[:space:]]*handle \{'; then
+        ok "the alias's redirect is a catch-all handle, so /updates/* is matched first"
+    else
+        bad "the alias's redirect is not inside a catch-all 'handle {' block"
+        bad "  A top-level 'redir' is a separate route and may still catch /updates/,"
+        bad "  restoring the 308 while the /updates/ handle sits there looking correct."
+    fi
+
+    # ...and that catch-all must REDIRECT, not proxy. Found by mutating this
+    # guard's own subject: replacing the catch-all's `redir` with a
+    # `reverse_proxy` to PocketBase left all three checks above green while the
+    # alias became a second, unrated API surface — the duplication this section
+    # exists to prevent, wearing the shape it was told to expect. The `redir`
+    # check higher up greps the WHOLE file, so the canonical block's own
+    # redirect satisfied it.
+    if awk '/^__HUB_ALIAS_DOMAIN__ \{/,/^\}/' "$CADDY_MODULE" \
+        | grep -qE '^[[:space:]]*reverse_proxy'; then
+        bad "the hub alias block contains a reverse_proxy — it proxies instead of redirecting"
+        bad "  That is a second API surface with no rate limit and no admin check."
+        bad "  Only /updates/* is served here; everything else must redirect."
+    else
+        ok "the hub alias proxies nothing — the API stays in one place"
+    fi
+
     # The alias must not be enabled by default: a deployment that has not been
     # given a second name must serve exactly what it served before.
     if grep -q 'HUB_ALIAS_DOMAIN="\${HUB_ALIAS_DOMAIN:-}"' "$CADDY_MODULE"; then
@@ -4366,12 +4435,40 @@ else
 
     # The alias carries the API, so it must NOT silently extend the landing block,
     # whose whole design reason is to be starved of handles (§26 pins that).
-    if awk '/^__HUB_ALIAS_DOMAIN__ \{/,/^\}/' "$CADDY_MODULE" | grep -qE '^\s*(handle|reverse_proxy)'; then
-        bad "the hub alias block serves handles directly instead of redirecting"
-        bad "  That duplicates the rate-limit zones and the admin check. If the"
-        bad "  alias ever must serve directly, extract a Caddy snippet instead."
+    #
+    # EXTRACT THE BLOCK ONCE and assert on it. The previous version piped awk
+    # through grep, so "no handle found" and "awk matched nothing at all" were
+    # the same answer — a deleted or renamed alias block passed. Both checks now
+    # read one extracted block and can tell those apart.
+    ALIAS_BLOCK=$(awk '/^__HUB_ALIAS_DOMAIN__ \{/,/^\}/' "$CADDY_MODULE")
+    if [ -z "$ALIAS_BLOCK" ]; then
+        bad "no hub alias block found — anchored on the line '__HUB_ALIAS_DOMAIN__ {'"
+        bad "  Either it was deleted (the school-network escape is gone) or its"
+        bad "  opening line changed, which this guard cannot follow."
     else
-        ok "the hub alias redirects rather than duplicating the API handles"
+        # (a) Downloads must be SERVED here, not redirected. This is the 1.6 fix.
+        if printf '%s\n' "$ALIAS_BLOCK" | grep -q 'handle_path /updates/\*'; then
+            ok "the hub alias SERVES /updates/* itself (downloads escape the block)"
+        else
+            bad "the hub alias does not serve /updates/* — every download on the"
+            bad "  alias would 308 to the canonical name, which is the name a filter"
+            bad "  on that network blocks. The device could activate and not update."
+            bad "  Fix: a handle_path /updates/* in the alias block before its redirect."
+        fi
+
+        # (b) ...and nothing else. The API, its rate-limit zones and the admin
+        #     check stay in exactly one place. Checked by listing every handle
+        #     in the block and requiring the set to be exactly {/updates/*}.
+        OTHER_HANDLES=$(printf '%s\n' "$ALIAS_BLOCK" \
+            | grep -oE '^[[:space:]]*handle(_path)?([[:space:]]+[^ {]+)?' \
+            | awk '{print $2}' | grep -v '^$' | grep -vx '/updates/\*' | sort -u | tr '\n' ' ')
+        if [ -z "$OTHER_HANDLES" ]; then
+            ok "the hub alias serves no API handle — no duplicated rate limit or admin check"
+        else
+            bad "the hub alias serves handle(s) beyond /updates/*: ${OTHER_HANDLES}"
+            bad "  That duplicates the rate-limit zones and the admin check. Only"
+            bad "  downloads may be served here; extract a Caddy snippet for more."
+        fi
     fi
 fi
 
@@ -5416,6 +5513,105 @@ else
                 ok "pages/${page}.tsx renders the support block"
             fi
         done
+    fi
+fi
+
+# ─────────────────────────────────────────────────────────────
+# 42. The update offer names a host the CLIENT can actually reach
+#
+# Field-measured 2026-11-06, on a school network that blocks the hub's canonical
+# name by reputation:
+#
+#   * `/api/update` and `/api/release` both returned
+#     `https://…duckdns.org/updates/3.3.5/…` — the LEGACY name — while the client
+#     dialled the canonical one, so the client's own origin check would have
+#     refused the artifact even on an uncensored network.
+#   * and on the filtered network, NEITHER name is reachable, so ANY absolute URL
+#     built from the hub's own hostname is unfetchable there. The escape hatch is
+#     the alias the operator points devices at, which means the hook must answer
+#     with the host the request actually arrived on.
+#
+# This guard pins the three values that have to agree for that to work, because
+# each is a separate file and two of them were wrong at once.
+# ─────────────────────────────────────────────────────────────
+UPDATE_HOOK="$REPO/server/pb_hooks/update.pb.js"
+if [ ! -f "$UPDATE_HOOK" ]; then
+    bad "server/pb_hooks/update.pb.js is missing — /api/update cannot answer"
+else
+    # (a) The hook must rewrite the offer's origin to the request's host.
+    #
+    #     EXECUTED, not grepped. The first version of this check searched for
+    #     `offerHost` and `url.substring(cutoff)` — tokens that both survive a
+    #     `if (false) {` in front of the block, so it reported OK against a hook
+    #     that rewrote nothing. A check that cannot fail reads exactly like one
+    #     that passed (AGENTS.md rule 3). So the block is lifted out of the file
+    #     and run against a stand-in `e` and `$apis`, and the ANSWER is asserted.
+    if ! command -v node >/dev/null 2>&1; then
+        warn "node is unavailable — cannot evaluate the /api/update origin rewrite"
+    else
+        rewrite_out=$(node - "$UPDATE_HOOK" <<'NODE' 2>/dev/null
+const fs = require("fs");
+const src = fs.readFileSync(process.argv[2], "utf8");
+const start = src.indexOf('        var offerHost = "";');
+const endMark = "url = scheme + offerHost + url.substring(cutoff);\n        }";
+const endIdx = src.indexOf(endMark);
+if (start === -1 || endIdx === -1) { console.log("MISSING"); process.exit(0); }
+const block = src.slice(start, endIdx + endMark.length);
+try {
+  const run = (url, headers) => {
+    const e = {};
+    const $apis = { requestInfo: () => ({ headers }) };
+    eval(block);
+    return url;
+  };
+  const moved = run("https://networkingguides.duckdns.org/updates/3.3.5/x", { host: "vpn.example.org" });
+  const kept  = run("https://cdn.example/other/path", { host: "vpn.example.org" });
+  const none  = run("https://networkingguides.jadedns.uk/updates/3.3.5/x", {});
+  console.log(moved === "https://vpn.example.org/updates/3.3.5/x" &&
+              kept === "https://cdn.example/other/path" &&
+              none === "https://networkingguides.jadedns.uk/updates/3.3.5/x" ? "OK" : "WRONG");
+} catch (err) { console.log("ERROR"); }
+NODE
+)
+        case "$rewrite_out" in
+            OK)
+                ok "/api/update rewrites the artifact origin to the host the request arrived on (executed)" ;;
+            WRONG|MISSING|ERROR|"")
+                bad "/api/update does NOT rewrite the offer's origin to the request host"
+                bad "  (evaluating the block gave '${rewrite_out:-no output}'). On a network"
+                bad "  that blocks the hub's canonical name the device is offered a URL it"
+                bad "  cannot fetch, and the update path is the only route out of that state"
+                ;;
+        esac
+    fi
+
+    # (b) It must read the Host header through the accessor that actually works.
+    #     `e.request().host` is the Go field and is invisible through the goja
+    #     bridge; `$apis.requestInfo(e).headers` keys have `-` replaced by `_`.
+    #     Asserted here because the wrong spelling fails SILENTLY: the rewrite
+    #     simply never fires, and the response still looks well formed.
+    if grep -q 'requestInfo(e).headers' "$UPDATE_HOOK" && grep -q 'reqHeaders\["host"\]' "$UPDATE_HOOK"; then
+        ok "/api/update reads the Host header through requestInfo(e).headers"
+    else
+        bad "/api/update reads the request host through something other than"
+        bad "  \$apis.requestInfo(e).headers — e.request().host is the Go struct field"
+        bad "  and does not reach goja, so the origin rewrite would never fire"
+    fi
+
+    # (c) The client's allowlist must accept BOTH the dialled hub and the legacy
+    #     name, because the published record points at the legacy one. A single
+    #     string here refuses the artifact the hub is offering.
+    # Matched on the ALLOWLIST ENTRY, not the constant's name: the first version
+    # of this check grepped for `LEGACY_HUB_URL` anywhere in the file and was
+    # satisfied by a doc comment that mentions it, so deleting the array entry
+    # still reported OK. The pattern below requires the `crate::…::LEGACY_HUB_URL`
+    # form that only an expression can produce.
+    if grep -qE '^[^/]*crate::locus::contract::LEGACY_HUB_URL,' "$REPO/client/src-tauri/src/locus/update/signal.rs"; then
+        ok "the client's artifact allowlist accepts the legacy hub name"
+    else
+        bad "client update/signal.rs no longer LISTS crate::locus::contract::LEGACY_HUB_URL"
+        bad "  in the artifact allowlist — the published download URLs point at that"
+        bad "  name, so every update download would be refused"
     fi
 fi
 

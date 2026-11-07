@@ -108,12 +108,42 @@ same domain family is still blocked, the problem is the family, not the name.
 **Verify it from the network that was failing**, not from anywhere else:
 
 ```sh
-curl -sS https://vpn.<your-domain>/api/release | head -c 120
+# 1. the API answers on the alias
+curl -sS -o /dev/null -w '%{http_code}\n' https://vpn.<your-domain>/api/health
+# 2. an ARTIFACT downloads from the alias, without following a redirect.
+#    This is the one that matters: the update is the only route out of a
+#    network that blocks the hub, so an alias that redirects is not enough.
+curl -sS -o /dev/null -w '%{http_code} %{redirect_url}\n' \
+  https://vpn.<your-domain>/updates/<version>/locus-linux-amd64
 ```
 
-A redirect to the canonical hub is what success looks like. See
-[`../reference/STILL-OPEN.md`](../reference/STILL-OPEN.md) — "the hub hostname is
-blocked on a school network" — for why this is a world claim and not a code fact.
+Two things to know about the second command, both measured on 2026-11-06:
+
+- **`200` is required; a `308` is a failure here.** The alias block used to `308`
+  every request to the canonical name, and on a censored network the canonical
+  name is the blocked one — so a redirect the client follows is a request that
+  fails *after* passing every check. The client now refuses to follow it and says
+  so.
+  **Fixed in code 2026-11-07; deployed by whichever `setup.sh` run writes the
+  Caddyfile.** The alias block in `modules/05-caddy.sh` now carries a
+  `handle_path /updates/*` pointing at the same document root, and a catch-all
+  `handle { redir … 308 }` after it, so downloads are served and everything else
+  still redirects. Pinned by `check-consistency.sh` §32, which fails if the
+  `/updates/*` handle is removed, if any *other* handle appears in the alias
+  block, or if the redirect stops being a catch-all. **Proving it on the box is
+  still a `200`, not a `308`** — the deployed Caddyfile is what counts, and a
+  repo fix is inert until it is redeployed.
+- **`/api/update` already rewrites its offer to the host the request arrived on**
+  (`update.pb.js`), so a device that reaches the hub through the alias is offered
+  an alias URL. Before 2026-11-06 it was offered the *legacy* name on every
+  network, which the client refused outright — see
+  [`../reference/FIXES.md`](../reference/FIXES.md).
+
+**What this does not fix.** The classification itself — and it is now **confirmed
+unfixable from the client's side on this network**: the operator reports
+`networkingguides.jadedns.uk` blocked outright (Class A claim A21 in
+[`CLAIMS.md`](CLAIMS.md) §5), so a second name under the same domain family is a
+hypothesis, not a plan. What the operator can change is *which name* is offered.
 
 ---
 

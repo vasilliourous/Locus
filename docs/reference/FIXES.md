@@ -24,6 +24,359 @@ commercial gaps, [`../business/17-not-built.md`](../business/17-not-built.md).
 
 ---
 
+## THE ALIAS SERVED THE API AND COULD NOT DELIVER THE UPDATE (2026-11-07, unreleased)
+
+The hub alias (`HUB_ALIAS_DOMAIN`) exists for one network: N4L, which blocks the
+canonical name outright (`CLAIMS.md` §5 A21). Its block was a single
+`redir https://<canonical>{uri} 308`, and that was reasoned about correctly for
+the *API* — one implementation, one rate-limit zone, one admin check.
+
+It was wrong for **downloads**, and downloads are the only thing keeping the
+device there alive. The redirect sends the client to the canonical name, which on
+that network is the name the filter blocks. So a device could activate, heart
+beat, and then be permanently unable to fetch the release that would relieve it.
+The client now refuses to follow the redirect and reports it, but that is a
+diagnostic — it turns a silent stall into a named failure, not into an update.
+
+**Fix:** the alias block serves `handle_path /updates/*` from the same document
+root (`/var/www/updates`) and keeps a catch-all `handle { redir … 308 }` after it
+for everything else. Caddy evaluates mutually exclusive `handle` blocks in order,
+so the downloads handle wins and the API still exists in exactly one place.
+
+**The rule it produced — a redirect is only neutral when the target is reachable
+from the network doing the redirecting.** That is the question to ask before
+reusing one, and it is network-dependent, which is why this survived a review
+that was looking at the API. Deliberately narrowed, not dropped: `FIXES.md`'s
+neighbour entry above is about a check that could not fail, and the alias guard
+had the same shape — `awk … | grep -q 'handle'` returned "no handle" both when
+the block held none and when the awk matched nothing at all.
+
+**Guards, each shown failing first:**
+`check-consistency.sh` §32 now extracts the alias block once and asserts (a) it
+serves `/updates/*`, (b) it serves *no* handle other than `/updates/*`, (c) its
+redirect is a catch-all `handle {`, and (d) it proxies nothing. Proven against
+four mutations of the real block: the pre-fix bare-`redir` block fails (a) and
+(c); adding a duplicate `/api/*` handle fails (b); deleting the block fails on the
+empty extraction; and replacing the catch-all `redir` with `reverse_proxy` —
+which passed all three original checks — fails (d), and is why (d) exists.
+On the box the assertion is an artifact fetch that must be **`200`, not `308`**;
+`modules/05-caddy.sh` also probes it after reload and warns on a 3xx.
+
+**Not verified:** no Caddy instance has parsed the new block. `caddy validate`
+was not run — Caddy is not installed on the workstation this was written on, and
+the block has only been rendered and read. The first `setup.sh` run on the hub is
+where it is either accepted or refused.
+
+---
+
+## A HOOK FILE WAS ON THE HUB AND ITS ROUTE WAS NOT, AND EVERY CHECK PASSED (2026-11-06, unreleased)
+
+`POST /api/release-entitlement` — the student sign-out record — answered
+`404 {"code":404,"message":"Not Found.","data":{}}` on the live hub. That is
+**PocketBase's own router**, not the hook: `device_release.pb.js` answers its own
+404 with `{"code":404,"message":"Nothing to release","released":false}`. A route
+that is not registered looks exactly like a code that does not exist, so the
+symptom was "sign-out silently fails to be recorded" with no error anywhere.
+
+`hooks-sync.sh` was **green** throughout. Its checks were: is the service running,
+do the files on disk match the repo, and does `GET /api/release` answer. The
+sign-out hook is not `/api/release`, and no check ever asked a route that this
+hook owns. A corroborating measurement: eleven consecutive POSTs to the route
+returned `404` and never `429`, while the same hammer against `/api/activate`
+produced `429` on the fifth — so Caddy's `release` rate-limit zone is not loaded
+either, which a redeploy of `05-caddy.sh` provides.
+
+**Guard:** `hooks-sync.sh` now probes every route a hook owns and reports
+"answered by PocketBase (not a hook)" when the router — not the hook — replied. It
+was **shown firing against the live hub for exactly this route** while passing the
+three that work.
+
+**A guard that could not fail, caught the same hour.** The first version keyed on
+"the body carries no `message`" — and PocketBase's not-found *does* carry one, so
+it passed the broken hub. It now keys on `"data": {}`, which the router's 404
+always has and no hook in this directory produces. Measured, not assumed.
+
+---
+
+## THE UPDATE PATH NAMED A HOST THE CLIENT COULD NOT FETCH, ON THE ONE NETWORK THAT NEEDS IT (2026-11-06, unreleased)
+
+Found while tracing why a school device could not recover. The update path is the
+**only** way out of a network that blocks the hub's name — a device that cannot
+reach the hub cannot fetch the build that would fix it — and it was broken in
+three independent ways, all measured against the live hub with `curl`.
+
+1. **The offer named a different host from the one the client dials.**
+   `/api/update` and `/api/release` both returned
+   `https://networkingguides.duckdns.org/updates/3.3.5/…` (the *legacy* name)
+   while the client dialled `networkingguides.jadedns.uk`. The client's own origin
+   check would have refused the artifact — **on an uncensored network too**.
+   Fixed on both sides: the hub rewrites the offer's origin to the host the
+   request actually arrived on (`update.pb.js`), so a device moved to an alias is
+   offered a URL on that alias; and `signal::OfferHosts` accepts the dialled hub
+   *plus* the compiled-in and legacy names, so the published record still works.
+
+2. **But an absolute URL built from ANY hub hostname is unfetchable on that
+   network**, because both names are blocked. So the alias had to become usable
+   for downloads, which it was not: `apply::download` ignored `hub_url()` and
+   fetched the offer verbatim. Now the hub-side rewrite and the client-side
+   allowlist meet, and a redirect is **refused rather than followed** — the alias
+   block `308`s to the canonical name, and following it would move the request to
+   a host the allowlist never checked, turning an explainable refusal into an
+   unexplained timeout.
+
+3. **The update CHECK bypassed every hub-client rule.** `updater_builder()` gave
+   the plugin a plain `reqwest` client: OS certificate store only, the
+   environment's proxy, redirects followed. That is the exact client `locus::hub`
+   exists to replace (an unpatched Windows store cannot verify the hub's chain and
+   reports it as `Expired`), and the update path is where that trap bites hardest.
+   `install::check` now overrides it with `configure_client` — no proxy, no
+   redirects, and the same ceiling as an activation call. The artifact fetch also
+   goes through `locus::hub::client_refusing_redirects`, and the consistency
+   checker's "no hub-facing module builds its own client" rule refused the
+   hand-built one I first reached for, which is the guard doing its job.
+
+**Guards.** `an_artefact_may_come_from_the_dialled_hub_or_the_compiled_one` and
+`refuses_everything_else` (observed failing when the allowlist was reduced to one
+name, and when it was relaxed to accept any `https` host — including a
+`contains`-style look-alike `vpn.example.org.evil.example`), plus three executed
+assertions in `check-consistency.sh` §42.
+
+**A guard that could not fail, caught and fixed the same day.** The first version
+of §42(a) grepped the hook for `offerHost` and `url.substring(cutoff)` — tokens
+that survive a `if (false) {` in front of the block, so it reported OK against a
+hook that rewrote nothing. It now lifts the block out and **evaluates it** with
+`node` against four shapes. §42(c) had the same flaw in a different form: it
+grepped for `LEGACY_HUB_URL` anywhere in the file and was satisfied by a doc
+comment. Both were observed failing only after the rewrite.
+
+> The hub half is inert until `hooks-sync.sh` runs against the hub — the deployed
+> copy is what serves `/api/update`. Measured 2026-11-06: the live hook served the
+> legacy origin, so that deploy had not happened.
+
+---
+
+## THE ACTIVATION TUNNEL COULD NOT HAVE WORKED, AND A GREEN TREE SAID "BUILT" (2026-11-06, unreleased)
+
+Reported: *"on the school network a tunnel cannot form at all — fine if you
+connect on a hotspot and switch, fine if you bring it from home, but it cannot
+connect at school, and you cannot get past the sign-in page."* The operator also
+confirmed the hub's canonical name is blocked there outright.
+
+Everything needed for this existed and was documented as built, tested and
+guarded. Three defects, each independently sufficient, made it inert. Each was
+found by **running against the live hub**, not by reading the source.
+
+### 1. THE FALLBACK NEVER FIRED ON A `Refused`
+
+`Failure::retryable_over_tunnel()` returned true for `ResetDuringHandshake` only.
+A filtering appliance that proxies the ClientHello and tears the flow down reaches
+the client as a reset *or* as a refusal, depending on how far it got — so on the
+day it answered with a refusal, the one transport built for that network was never
+attempted. The exclusion's reasoning ("a different transport to the same address
+will be refused too") holds only when the same party answers on both, and on this
+network the party that answers is the filter. `Refused` is now in the set; the
+cost of being wrong is one refused SOCKS dial, reported in the same sentence as
+the original failure.
+
+**Guard:** `a_refusal_must_reach_the_activation_tunnel` — observed failing when
+the set was reverted to `ResetDuringHandshake` alone.
+
+### 2. THE OUTBOUND DIALLED THE STUDENT'S OWN LOOPBACK
+
+`render_config` wrote `server: 127.0.0.1` into the Shadowsocks outbound, under a
+comment claiming mihomo rewrote it to the SS server's host. It does not: the
+outbound connects to exactly the value it is given. So the bootstrap engine tried
+to reach a listener on the student's own machine, on every platform, and could
+only ever have worked against a local one. Now `contract::ss_hub()` — the host of
+the resolved hub URL, so a device moved to an alias moves its bootstrap dial too.
+
+**Guard:** `the_config_dials_the_hub_and_not_the_local_machine` — observed failing
+against the old `127.0.0.1` value.
+
+### 3. THE KEY WAS ABSENT FROM EVERY SHIPPED BUILD, SILENTLY
+
+`option_env!("LOCUS_ACTIVATION_TUNNEL_KEY")` was read directly in
+`activation_tunnel.rs`, and `build.rs` did not re-emit it. Cargo does not reliably
+rebuild a crate for an `option_env!` that was absent last time, so a key that
+appeared after a cached build could leave the constant stale; and CI reported a
+missing secret as a **warning**, so a tagged release shipped keyless. Three did.
+Nothing in the artifact said so, and the student's only evidence was "the tunnel
+never helps".
+
+`build.rs` now re-emits the value as a `rustc-env` with an explicit
+`cargo:rerun-if-env-changed`, and stamps presence so the binary can report it.
+`activation_tunnel::build_stamp()` is logged at startup (a warning when absent),
+and CI **fails a tagged build** without the key.
+
+**Guard:** the CI step itself, plus `build_stamp`'s consistency check. The
+consistency checker cannot test a release's environment; the startup line can, and
+that is the one a support log carries.
+
+### 4. THE ENGINE WAS SPAWNED PER CALL, SO THE ADVISORY LOOKUP DISABLED ACTIVATION
+
+Enrolment is two requests — the advisory `/api/code-lookup`, then `/api/activate`.
+The failure flag is session-scoped, so a transport failure on the lookup refused
+the activation *before* attempting it; and each call paid a full start of a 60 MB
+sidecar. The engine now lives in one slot, reused while warm and killed on a
+transport failure.
+
+**Guard:** `a_warm_engine_is_reused_so_two_requests_cost_one_start` — observed
+failing when the slot is not reused.
+
+### What this says about the tree, kept because it recurs
+
+Every one of these read as "built" from the repository: the module exists, its
+tests pass, `check-consistency.sh` §40 is green, and the docs describe the
+mechanism accurately. What none of them covered was whether the assembled artifact
+could reach the hub. **A guard on each half does not guard the join**, and the join
+is where all four defects were.
+
+---
+
+## FIVE FIELD REPORTED DEFECTS, ONE OF WHICH HAD NO SENTENCE AT ALL (2026-11-06, unreleased)
+
+Five reports arrived together from an operator running the client on a school
+network and on an unofficial Windows install. Four of them turned out to be
+defects this repository could see; the fifth is a world claim about a third
+party's DNS and does not live here. Recorded together because they share a
+cause: **a failure the backend could not name was reported as one the student
+could not act on.**
+
+### 1. A MISSING PRIVILEGED HELPER WAS REPORTED AS "FAILED TO INSTALL THE SERVICE"
+
+Field report: *"it was an unofficial Windows installation, and when trying to
+install the service a pop-up message with the exact same phrase was there, and
+did not go away until I tried installing after installing the Microsoft VC
+package."*
+
+- **What broke.** The elevated installer is **not linked into the app** — it is a
+  file inside the bundle (`clash-verge-service-install.exe`, from the pinned
+  `clash-verge-service-ipc` v2.7.4 release) spawned by
+  `clash_verge_service_ipc::management::install`. When it cannot be loaded, the
+  Windows loader shows `VCRUNTIME140.dll was not found` **before any of our code
+  runs**, so the dialog is unattributable by our own instruments: the spawn
+  returns an `io::Error`, `install_service`'s `?` discarded it, and the student
+  saw `settings.feedback.errors.clashService.installFailed` — *"Failed to
+  install the service"* — which names a service fault that does not exist and
+  tells them nothing they can do.
+  **Fix.** Two halves, in order of what a student needs first:
+  `require_packaged_tool` checks the helper exists **before** spawning it and
+  raises a typed `MissingServiceTool` naming the file and its path; and a spawn
+  that fails with `ERROR_MOD_NOT_FOUND` (126 — the missing-DLL code) is
+  re-wrapped with `MISSING_RUNTIME_CONTEXT` and logged at `Type::Service` with
+  the path that failed. `cmd::service::classify_privileged_failure` downcasts the
+  type first and matches the constant second, so the student gets
+  `SERVICE_HELPER_MISSING` with a sentence naming the file, the reinstall, and
+  the C++ runtime as the second possibility. It is deliberately **not** reported
+  as an elevation failure: "approve the prompt" is the wrong instruction when
+  there is nothing to launch.
+  **Guards, each observed failing** against the pre-fix classifier: three of five
+  `cmd::service` tests (missing-helper naming, ordering against an elevation
+  sentence in the same chain, the runtime sentence) fail when
+  `missing_helper_failure` is removed from the chain.
+- **Still unverified.** That `VCRUNTIME140.dll` is what the reported machine
+  lacked is the operator's report plus the loader-behaviour argument — **not** a
+  measurement of the binary. The service release archive could not be inspected
+  from this checkout (the download was refused by policy), so the PE import table
+  was never read. See [`STILL-OPEN.md`](STILL-OPEN.md).
+
+### 2. A HUB HOSTNAME THAT DID NOT RESOLVE HAD NO REMEDY
+
+- **What broke.** `hub::Failure::classify` folded DNS failures into `Transport`,
+  and `Transport::remedy()` returns **`None`**. A student on a school network
+  therefore got `could not reach the Locus hub at …: error sending request for
+  url (…)` and nothing else — a sentence that reads as "the hub is down" when the
+  true state is "your network did not translate the name, so nothing was
+  dialled". The remedy needed to exist and could not be written for a bucket that
+  also contained timeouts and drops.
+  **Fix.** `Failure::Dns` and `Failure::Refused`, classified from
+  `io::ErrorKind` in the error chain (`NotFound`/`HostUnreachable` for naming;
+  `ConnectionRefused` separately) — the same walk `reset_in_chain` already does,
+  and ordered **after** the reset and certificate checks so neither becomes
+  unreachable. `retryable_over_tunnel()` stays `ResetDuringHandshake` only: the
+  tunnel is dialled by name, so a resolver that answers nothing answers nothing
+  for it. Both are now appended to the activation error (`post_json`) and to the
+  heartbeat's `Unreachable { reason }`, so the two reported modes — "cannot reach
+  the hub" and "forcibly closed (os error 10054)" — are two different sentences
+  instead of one.
+  **Guards.** `io_kinds_in_the_chain_decide_between_dns_and_refusal` was observed
+  failing when `is_name_resolution` was pointed at `ConnectionRefused`; the
+  remedy tests assert the DNS sentence names the network, does **not** promise
+  the tunnel, and differs from the refusal sentence. Removing the `Dns` arm from
+  `remedy()` does not compile (non-exhaustive match), which is a stronger guard
+  than a test.
+- **Still a world claim.** Whether the school's DNS is the cause is about a third
+  party and lives in [`../operate/CLAIMS.md`](../operate/CLAIMS.md) §5. No client
+  change can settle it.
+
+### 3. A DAMAGED STORED CODE WAS NEVER VALIDATED, AND BLOCKED ITS OWN REMOVAL
+
+Field report, macOS arm: *an invalid code stored on the client did not sign out
+the client; the client then connected with it and failed silently; the only
+recovery was uninstalling and wiping app data.*
+
+- **What broke, in two places.** `validate_code` ran **only on a code the
+  student typed** — nothing checked the value read back from `verge.yaml` or the
+  machine mirror, so a damaged one was sent to the hub and its refusal surfaced
+  as a connection problem. And `store::read_code_rehydrating` **adopted the
+  mirror value back into the config** with no check at all. Worst of all,
+  `signout::sign_out` calls `activation::release` first (the documented order),
+  and `release` validates locally — so with a damaged code the whole sign-out
+  errored before a single byte was deleted. That is why uninstall was the only
+  exit: the recovery path required the very credential that was broken.
+  **Fix, three parts.** `store::read_valid_code` and
+  `store::stored_code_is_damaged` apply the local checksum to what is stored;
+  `read_code_rehydrating` no longer adopts a value that is not a code. `sign_out`
+  now validates the code itself and, on failure, skips the hub request and
+  completes the **local half** — the destructive statements were already outside
+  the hub arm, and a guard now pins that. `locus_connect` refuses with its own
+  `LOCUS_STORED_CODE_DAMAGED` rather than `LOCUS_NOT_ACTIVATED`, because the
+  student *did* activate; `locus_status` carries `storedCodeDamaged` and the
+  Account page says the sign-in is damaged instead of showing a fresh-device
+  screen.
+  **Guards, each observed failing.** Removing the `validate_code` call from
+  `read_valid_code` fails
+  `a_damaged_stored_code_is_not_offered_as_a_credential`; the companions
+  (`a_valid_stored_code_is_still_offered`,
+  `a_device_with_nothing_stored_is_not_reported_as_damaged`) stop that guard
+  passing for a function that refuses everything, and
+  `a_damaged_stored_code_does_not_block_the_local_half_of_a_sign_out` pins the
+  ordering property.
+- **Verified vs unverified.** The behaviour is proven at the unit level on Linux.
+  **Nobody has run it on a Mac**, which is where it was reported.
+
+### 4. A DEFERRED START WAS REPORTED AS A BROKEN CORE
+
+Field report: *the configuration failed to apply with `core did not become ready
+after restart`; disconnecting and reconnecting fixed it, but only an admin knew
+to try.*
+
+- **What broke.** `restart_core_during_config_update` tested
+  `mode == NotRunning || no readiness generation` and `bail!`ed one sentence for
+  both. But the two facts mean different things: `start_core_inner` legitimately
+  returns `Ok(())` having started nothing when the start was **deferred**
+  (`StartupDecision::Wait` — the Service is absent and the install could not be
+  raised) or the app was quitting. A deferred start left `NotRunning`, so it
+  produced *"core did not become ready"* — false, since nothing was wrong with
+  the Core — and named no cause. "Disconnect and reconnect" worked because a full
+  stop/start cycle clears the deferred state, which is precisely why an admin
+  found the workaround and a student could not.
+  **Fix.** `restart_readiness_failure` splits the two: still `NotRunning` after a
+  start is reported as a start that did not happen, naming the Service and the
+  permission prompt or the Repair control; running without a readiness generation
+  gets its own sentence. The mode is read into a local so the two tests cannot
+  race. A `warn` at `Type::Core` records the mode the start actually settled in,
+  which is the line a support log will need.
+  **Guards, observed failing** against the single `bail!`: the deferred-start
+  test and the own-sentence test both fail, and the healthy-restart test stops
+  the two arms being unconditional.
+
+- **The rule all four produced.** A failure state the backend can name is
+  worth more than a message added at the top: `NotRunning`-after-a-start, a
+  damaged credential, a name that did not resolve, and a helper that never
+  launched are four different facts, and collapsing any two of them into one
+  sentence hands the student a remedy for a fault they do not have.
+
 ## A CONNECT THAT COULD NOT START WAS INDISTINGUISHABLE FROM ONE THAT FAILED SILENTLY (2026-11-05, unreleased)
 
 Field report: *"it tries to connect, then just fails and cancels with no error

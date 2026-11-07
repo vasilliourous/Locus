@@ -118,7 +118,61 @@ shadowsocks units by hand.
 
 ## Open, and blocked in this environment
 
+### Four fixes from the 2026-11-06 field reports: proven in the tree, none observed on the machine that reported them
+
+**Added 2026-11-06.** Four defects were fixed from five reports (see
+[`FIXES.md`](FIXES.md) for each one's mechanism and guards). Every guard was
+observed failing against its pre-fix code, so the *tree* claim is strong. The
+**field** claim is not made: none of the four was reproduced, and three of them
+can only be closed on a specific machine.
+
+**Verified in the tree (Linux, unit tests only):**
+
+- A damaged stored code is not offered as a credential, does not get adopted from
+  the mirror, and cannot block the local half of a sign-out.
+- `Failure::Dns` and `Failure::Refused` classify from `io::ErrorKind` and carry
+  remedies; `Dns` is not retried over the tunnel.
+- A missing privileged helper raises `SERVICE_HELPER_MISSING` naming the file,
+  ahead of the elevation classifier.
+- A deferred start after a restart is reported as a deferred start, not as a
+  broken Core.
+- `bash server/scripts/check-consistency.sh` exits 0; `cargo clippy-all` is clean;
+  659 Rust and 110 frontend tests pass.
+
+**NOT verified — each needs a machine, and each is a different claim:**
+
+- **That the reported Windows machine lacked `VCRUNTIME140.dll`, and that the
+  service installer was the binary that needed it.** This is the operator's
+  report plus a loader-behaviour argument: a binary that cannot load cannot draw
+  its own dialog, so Windows' loader drew it. **The PE import table of
+  `clash-verge-service-install.exe` was never read** — the v2.7.4 release archive
+  could not be downloaded from this checkout (refused by policy, not retried).
+  Read it on a Windows host: `dumpbin /dependents clash-verge-service-install.exe`
+  beside `VCRUNTIME140.dll`, or `strings` it for the DLL name. Until then the
+  fix is correct regardless — it names whatever file or runtime is missing — but
+  *which* prerequisite the report hit is unconfirmed.
+- **That a student on that school network now sees the DNS sentence.** The fix
+  guarantees a school-DNS failure is classified as `Dns` and carries a remedy;
+  it does **not** make the hub reachable. Closing this needs one support log line
+  from that network, or a status dump showing the new sentence.
+- **That a damaged-code sign-out completes on macOS.** Reported on macOS arm,
+  proven on Linux. The code is platform-independent; the *observation* is not.
+- **That a deferred-start restart is what the `core did not become ready after
+  restart` report actually was.** The mechanism is located and the branches are
+  now reported apart, but nobody has reproduced the confused state. What would
+  close it: a log line `the restart did not produce a usable core (mode after
+  start: …)` from a machine that hit it, which the new `warn` now emits.
+
 ### The activation tunnel: both halves built, nothing run on a school network
+
+**Updated 2026-11-06 — three of the four "built" claims below were not true of the
+shipped code.** A school device never used the tunnel, and the reason was not that
+the mechanism is wrong: the fallback did not fire on a `Refused`, the outbound
+dialled the client's own loopback, and the bootstrap key was absent from every
+release. All three are fixed and guarded; see §"the three defects" below and
+[`ACTIVATION-TUNNEL.md`](ACTIVATION-TUNNEL.md) §6.1–6.1b. **A green tree said
+"built" for all three, which is the lesson worth keeping** — "built" was true of
+the intent and false of the artifact.
 
 **Added 2026-10-29.** A student on a school network could not activate at all.
 Measured from that network: 443 resets the TLS handshake after the ClientHello
@@ -142,6 +196,15 @@ rate limit that mirrors Caddy's.
   the port was never open, so the network was never asked.
 - **That the appliance tolerates an opaque stream on that port.** Reachability is
   not tolerance.
+- **That a device could have used it at all, before 2026-11-06.** Three defects
+  each independently made the tunnel inert: `Failure::Refused` did not trigger the
+  fallback (and a filtering appliance answers either way depending on how far it
+  gets); the generated outbound dialled `127.0.0.1`, i.e. the student's own
+  machine; and `LOCUS_ACTIVATION_TUNNEL_KEY` was absent from every shipped build,
+  with nothing in the artifact saying so. All three are fixed, each with a guard
+  shown failing first. **Not verified on hardware** — see the re-verification
+  lines above.
+
 - ~~**That a real activation completes over it, because no client code uses the
   tunnel yet.**~~ **CLOSED 2026-11-01: the client half now exists.** The fallback
   lives in `locus/activation_tunnel.rs` and is wired at `activation.rs::post_json`
@@ -154,6 +217,26 @@ rate limit that mirrors Caddy's.
   shown to fail against a broken outbound and against an open allowlist. What it
   does not cover is the deployed hub's own Python filter, or a real machine on a
   school network.
+- **That the three defects found on 2026-11-06 are gone ON HARDWARE.** Each is
+  fixed with a guard that was shown failing, and each fix is *structural* — but
+  no machine has run the result:
+
+  | Defect | What it made impossible | Fixed by |
+  |---|---|---|
+  | `Refused` was not in `retryable_over_tunnel` | the fallback never fired when the filter answered with a refusal instead of a reset | `Failure::retryable_over_tunnel` now covers both; `a_refusal_must_reach_the_activation_tunnel` |
+  | the SS outbound dialled `127.0.0.1` | the tunnel dialled the student's own machine, so it could only work against a local listener | `contract::ss_hub()`; `the_config_dials_the_hub_and_not_the_local_machine` |
+  | the bootstrap key was absent from every shipped build | nothing could have used the tunnel however well it worked | `build.rs` re-emit + `rerun-if-env-changed`, a startup stamp, and a CI failure on a tag |
+
+  **Re-verify with** a device on the school network, one support log: the startup
+  line `activation tunnel: available …` (not `NOT COMPILED IN`), then a line
+  naming the direct failure as `Refused` or `ResetDuringHandshake` followed by
+  `retrying … through the activation tunnel`. Two lines, both required — the first
+  proves the build can, the second proves it tried.
+- **That `hub:8453` is even listening.** Measured from an uncensored network on
+  2026-11-06, it **timed out** while 8443 connected in milliseconds. That is about
+  the hub, not the school: either the module has never run there or `ufw` still
+  drops the port, and both are one `setup.sh` re-run. Do not read it as a school
+  finding.
 - **That any of it reaches a deployed device** until `setup.sh` re-runs on the
   hub from `/root/server/`.
 
@@ -207,7 +290,9 @@ platform signed):
   `/root/.tier_passwords` when it is not deploying from those values.
 - A stored hub override, delivered through the heartbeat, plus a Caddy alias
   block, so a fleet behind a filtered hostname can be repointed without a release
-  (§32).
+  (§32). Since 2026-11-07 the alias also **serves** `/updates/*` rather than
+  redirecting it — without that it could reach the API and not download a
+  release. Pinned by §32, which also forbids any *other* handle appearing there.
 
 > **What 3.3.1 does NOT prove.** `Build (macos-intel)` succeeded, which means the
   bundle compiles, gets ad-hoc signed and packages — **not** that the reported
@@ -255,6 +340,17 @@ reclassification, and it can differ per school.
 **Fixable here:** which hostname the client dials. `locus::contract::resolve_hub_url`
 now honours a validated stored override (absolute https, no path), so a hub move is
 one operator-set value plus a Caddy site block — no release.
+
+**Update 2026-11-07 — the alias was half a fix, and the missing half is now in
+code.** A Caddy alias that `308`'d everything to the canonical name made the API
+reachable from a network that blocks the canonical name, but sent the *download*
+to that same blocked name. A device could therefore activate and never update —
+and updating is its only route out. The alias block in `modules/05-caddy.sh` now
+serves `/updates/*` directly and redirects the rest; `FIXES.md` carries the entry
+and the four mutations its guard is proven against. **Still not done:** no
+`setup.sh` run has written that Caddyfile to a hub, and no artifact has been
+fetched from the alias from any network. The assertion is `200`, not `308`, and it
+is unrun.
 
 **Not fixable here:** the categorisation itself. A dynamic-DNS subdomain
 (`*.duckdns.org`) is structurally likely to be classified as uncategorised or

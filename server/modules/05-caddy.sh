@@ -92,7 +92,7 @@ LANDING_DOMAIN="${LANDING_DOMAIN:-locusvpn.jadedns.uk}"
 # name is a mistake; that reason applies to a *public page*, not to a second API
 # name that is never linked or advertised.
 #
-# WHY IT REDIRECTS RATHER THAN REPEATING THE HANDLERS
+# WHY IT REDIRECTS RATHER THAN REPEATING THE HANDLERS — EXCEPT FOR /updates/
 #
 # The hub block is ~140 lines of handles, rate-limit zones and headers, and a
 # second copy would drift — this repository has already paid for duplicated
@@ -104,9 +104,20 @@ LANDING_DOMAIN="${LANDING_DOMAIN:-locusvpn.jadedns.uk}"
 # trip per request and requires the client to follow redirects (it does — every
 # call site uses a reqwest client with defaults, which follow). What it buys is
 # that the rate-limit zones, the admin token check and the update path cannot
-# disagree between the two names. If a future change ever needs the alias to
-# serve directly, that is the moment to extract the handles into a shared snippet
-# (Caddy `(snippet)`), not to paste them.
+# disagree between the two names.
+#
+# THE ONE EXCEPTION IS `/updates/`, and it is load-bearing. The alias exists for
+# a network where ${DOMAIN} is blocked outright. Redirecting a download to the
+# blocked name makes the alias able to reach the API and unable to update
+# itself — and updating is the only route off that network. So the alias SERVES
+# /updates/* from the same root and redirects everything else. That is a
+# deliberate reversal of the "redirect everything" rule, recorded in
+# URGENT-FIX-NOW.md 1.6: the client can follow a redirect, an unreachable name
+# cannot be followed. Guarded by check-consistency.sh §"hub alias serves
+# downloads" and, on the box, by an artifact fetch that must be 200, not 308.
+#
+# If another path ever needs the same treatment, that is the moment to extract
+# the handles into a shared snippet (Caddy `(snippet)`), not to paste them.
 #
 # Empty by default: a deployment that has not been given a second name serves
 # exactly what it served before.
@@ -535,16 +546,43 @@ CADDY
 
 # ── Hub alias ──
 # A second name for the SAME API surface, for networks that filter the primary
-# hostname. Every request is redirected to the same path on the primary name, so
-# there is one implementation of the API, one set of rate-limit zones and one
-# admin check. See modules/05-caddy.sh for why this redirects instead of
-# repeating the handles.
+# hostname. See modules/05-caddy.sh for why only /updates/ is served here and
+# everything else redirects.
 __HUB_ALIAS_DOMAIN__ {
     tls {
         protocols tls1.2 tls1.3
         curves x25519 secp384r1
     }
-    redir https://__HUB_CANONICAL_DOMAIN__{uri} 308
+
+    # ── Downloads are SERVED, not redirected ──
+    # A 308 here is the whole bug this handle exists to fix: the alias is used
+    # by a device that cannot reach the canonical name, so redirecting a
+    # download to the canonical name sends it to the name that is blocked. The
+    # API can follow a redirect (and does, one extra round trip); the download
+    # cannot, because the target is unreachable, and downloading is the only
+    # route off that network. Verified with an artifact fetch, not a health
+    # check: 200 = fixed, 308 = still broken.
+    #
+    # Kept in step with the canonical block's /updates/* handler above by hand —
+    # three lines, and duplicating them is cheaper than a shared snippet for a
+    # single static root. If that handler ever grows policy, extract a snippet
+    # instead of copying it.
+    handle_path /updates/* {
+        root * /var/www/updates
+        header {
+            Cache-Control "public, max-age=300"
+            X-Content-Type-Options "nosniff"
+        }
+        file_server
+    }
+
+    # ── Everything else still redirects ──
+    # One implementation of the API, one set of rate-limit zones and one admin
+    # check. handle blocks are mutually exclusive and evaluated in order, so
+    # the /updates/ handle above wins and this catches the rest.
+    handle {
+        redir https://__HUB_CANONICAL_DOMAIN__{uri} 308
+    }
 }
 CADDY
 
@@ -969,6 +1007,34 @@ if [ -n "${LANDING_DOMAIN}" ]; then
         warn "  If the hub is already live, check that DNS points ${LANDING_DOMAIN}"
         warn "  at this host and that Cloudflare's SSL mode is Full (strict)."
     fi
+fi
+
+# ── Hub alias download check ──
+#
+# The alias must SERVE /updates/, not redirect it. A 308 here is the exact bug
+# URGENT-FIX-NOW.md 1.6 records: the alias is used by a device on a network
+# where the canonical name is blocked, so a redirect sends the download to the
+# name that does not resolve. Probed as a bare /updates/ path, which needs no
+# artifact present: the property under test is "answered here" vs "sent
+# elsewhere", not "this build exists". 404 is a pass (no releases staged yet);
+# 200 is a pass; 308/301/302 is the failure.
+if [ -n "${HUB_ALIAS_DOMAIN}" ]; then
+    probe=$(curl -s -o /dev/null -w '%{http_code} %{redirect_url}' --max-time 10 \
+        "https://${HUB_ALIAS_DOMAIN}/updates/" || echo '000 ')
+    acode=${probe%% *}
+    case "$acode" in
+        200|404)
+            log "✓ Hub alias serves /updates/ itself (${acode}, no redirect)" ;;
+        301|302|307|308)
+            warn "https://${HUB_ALIAS_DOMAIN}/updates/ returned ${acode} — it REDIRECTS."
+            warn "  This is the school-network bug: the alias's download would land on"
+            warn "  ${DOMAIN}, which is the blocked name. The alias block must serve"
+            warn "  /updates/* with a handle_path before its catch-all redirect." ;;
+        *)
+            warn "https://${HUB_ALIAS_DOMAIN}/updates/ returned ${acode}."
+            warn "  EXPECTED on a fresh host before the certificate is issued."
+            warn "  Re-check once DNS and the certificate are in place." ;;
+    esac
 fi
 
 log "✓ Caddy setup complete"
