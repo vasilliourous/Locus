@@ -122,9 +122,42 @@ KEYERR
     # when the caller says nothing. The other variables keep last-writer-wins,
     # which is what a secrets file is for.
     DOMAIN_EXPLICIT="${DOMAIN:-}"
-    set -a
-    source "$SECRETS_TMP" || { rm -f "$SECRETS_TMP"; fail "Failed to source decrypted secrets."; }
-    set +a
+    # READ THE BUNDLE LITERALLY, NOT WITH `source`.
+    #
+    # `source` PARSES each line as shell, so a value containing `$` is expanded.
+    # VPS_PW contains a literal `$`, and under `set -u` the deploy died with
+    # "/tmp/.secrets-3709.env: line 49: Zy6N: unbound variable" — measured on a
+    # real deploy 2026-11-07. A generated password is allowed to contain any
+    # printable character; the secrets file format does not get to forbid it.
+    #
+    # This reads KEY=value honestly: split on the FIRST `=`, take the rest
+    # verbatim (no quoting, no expansion, no comment interpretation inside a
+    # value), skip blanks and `#` lines, and export each pair. Verified to
+    # reproduce a 16-byte VPS_PW byte-for-byte where `source` fails outright.
+    #
+    # Anything that is neither a comment nor KEY=value is REPORTED rather than
+    # silently ignored, so a malformed bundle fails loudly here instead of
+    # producing a half-populated environment that installs and then breaks.
+    if [ ! -r "$SECRETS_TMP" ]; then
+        fail "decrypted secrets file is unreadable: ${SECRETS_TMP}"
+    fi
+    while IFS= read -r _line || [ -n "$_line" ]; do
+        case "$_line" in
+            ''|'#'*) continue ;;
+        esac
+        case "$_line" in
+            [A-Za-z_][A-Za-z0-9_]*=*)
+                _k="${_line%%=*}"
+                _v="${_line#*=}"
+                export "$_k=$_v"
+                ;;
+            *)
+                rm -f "$SECRETS_TMP"
+                fail "malformed line in secrets (expected KEY=value): ${_line%%=*}"
+                ;;
+        esac
+    done < "$SECRETS_TMP"
+    unset _line _k _v
     rm -f "$SECRETS_TMP"
 
     if [ -n "$DOMAIN_EXPLICIT" ]; then

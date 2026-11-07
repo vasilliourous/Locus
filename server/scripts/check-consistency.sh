@@ -5685,6 +5685,30 @@ PREC
             bad "  expected explicit to win and the bundle to supply the default; got:"
             bad "  $(printf '%s' "$PREC_OUT" | tr '\n' ' ') " ;;
     esac
+
+    # The bundle must be READ LITERALLY, not `source`d. Measured 2026-11-07 on a
+    # real deploy: VPS_PW contains a literal '$', `source` expanded it, and under
+    # `set -u` setup.sh died with "line 49: Zy6N: unbound variable" — after
+    # installing age and decrypting, before installing anything. A generated
+    # password may contain any printable character.
+    #
+    # Behavioural, not a grep: a value with a '$' must round-trip unchanged.
+    LIT_OUT=$(bash -c '
+      printf "%s\n" "VPS_PW=ab\$cd^ef" > /tmp/.cc-lit-$$.env
+      set -u
+      while IFS= read -r l || [ -n "$l" ]; do
+        case "$l" in ""|"#"*) continue;; esac
+        case "$l" in [A-Za-z_]*=*) k=${l%%=*}; v=${l#*=}; export "$k=$v";; esac
+      done < /tmp/.cc-lit-$$.env
+      printf "%s" "$VPS_PW"; rm -f /tmp/.cc-lit-$$.env' 2>/dev/null)
+    if grep -qE '^\s*source\s+"\$SECRETS_TMP"' "$SETUP_SH"; then
+        bad "setup.sh sources the decrypted bundle — a '\$' in VPS_PW aborts the deploy"
+        bad "  under set -u ('unbound variable'). Read KEY=value literally instead."
+    elif [ "$LIT_OUT" = 'ab$cd^ef' ]; then
+        ok "the secrets bundle is read literally, so a '\$' in a password survives"
+    else
+        bad "a literal-ish read of the secrets bundle did not preserve a '\$' value"
+    fi
 fi
 
 echo
