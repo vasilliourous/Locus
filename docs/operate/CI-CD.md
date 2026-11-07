@@ -136,54 +136,87 @@ preview independently.
 
 ### Runner images are pinned, on purpose
 
-The build matrix uses `ubuntu-24.04`, `windows-2022` and `macos-14` — **not**
-`*-latest`. A moving label is a world claim nobody re-checks: this project already
-lost every Intel macOS run to the retirement of `macos-13` ("Waiting for a runner
-to pick up this job", for every run, while the other three platforms finished, and
-nothing automated noticed). Pinning means a retirement fails loudly. **When you bump
-a label, update this note and the comment in `client.yml`.**
+The build matrix uses `ubuntu-24.04`, `windows-2022`, `macos-15-intel` and
+`macos-15` — **not** `*-latest`. A moving label is a world claim nobody
+re-checks: this project already lost every Intel macOS run to the retirement of
+`macos-13` ("Waiting for a runner to pick up this job", for every run, while the
+other three platforms finished, and nothing automated noticed), and then lost
+both macOS slices to the retirement of `macos-14` (§ below). Pinning means a
+retirement at least names itself. **When you bump a label, update this note, the
+comment in `client.yml`, and run `check-consistency.sh` §45**, which fails if the
+two slices land on different images or on the wrong architecture.
 
-### macOS runners are refused by the account, and a label change does not fix it
+### One macOS label per architecture, and the arch is not optional
 
-**Open, as of 2026-11-07.** Every macOS job is rejected in about two seconds with
-zero steps run:
+GitHub hands out **two** macOS labels per OS version and they are not
+interchangeable:
+
+| Image | Arch | Label |
+|---|---|---|
+| macOS 15 | arm64 | `macos-15` |
+| macOS 15 | x64 | `macos-15-intel` |
+| macOS 26 | arm64 | `macos-26` |
+| macOS 26 | x64 | `macos-26-intel` |
+
+A **bare label is the arm64 machine.** The Intel slice must ask for the `-intel`
+image; `macos-intel` still produces `locus-darwin-amd64`, by building natively on
+an Intel runner. Invented suffixes do not work — `macos-14-x64` (tried
+2026-11-07, run `42342311491`) is not an image name, so the jobs sat **queued with
+no runner** instead of failing fast.
+
+**Why 15 and not 26.** `client/src-tauri/tauri.macos.conf.json` declares
+`minimumSystemVersion: "11.0"`, and the SDK a binary links against writes its own
+minimum into the artifact. The macOS 26 image carries only the 26 SDKs, so a
+bundle built there refuses to launch below 26. The macOS 15 image carries the
+15.x **and** 26 SDKs, which is what keeps the `.app` openable on an older Mac.
+This is an argument from the toolchain, not a measurement — see A22's re-verify
+step.
+
+**The Intel image has an end date.** `macos-15-intel` was introduced in
+2025-09-19 (`actions/runner-images` #13045) as the **last** x86_64 image Actions
+will provide, available "until August 2027". Nothing in this repository enforces
+that date; when it passes, `locus-darwin-amd64` needs a decision (larger runner,
+self-hosted Mac, or dropping the slice).
+
+### A zero-step rejection is a retired image, not an account problem
+
+**Resolved 2026-11-07 → 2026-11-08.** Every macOS job was rejected in about two
+seconds with zero steps run:
 
 ```
 The configuration 'macos-14-arm64-us-default' is not supported
 ```
 
-What has been **ruled out**:
+This was recorded as an account entitlement. It was not: GitHub **retired every
+macOS 14 image from Actions on 2026-11-02** (`actions/runner-images` #13518 for
+the announcement, #15226 for the Azure DevOps extension), and macOS 14 is flagged
+deprecated in that repository's image table. The bare label resolved to a
+configuration that no longer exists, and the matrix was moved to the macOS 15
+images.
 
-- **Not a change to this repository.** The last green macOS run (`41746038397`,
-v3.3.5, 2026-11-04) used `macos-14` as well, and nothing in the workflow changed
-between that run and the first rejection. The build went red without a commit.
+What had been **ruled out**, kept because the reasoning is what identified the
+cause:
+
+- **Not a change to this repository, on its own.** The last green macOS run
+  (`41746038397`, v3.3.5, 2026-11-04) used `macos-14` as well — two days *before*
+  the retirement date. The build went red without a commit because the image went
+  away, not because the workflow moved.
 - **Not a minutes quota.** This account billed `Actions macOS 3-core` in every
-month on record — 281 minutes in 2026-11, 1628 in 2026-10 — and the repository is
-public.
-- **Not a missing image.** `actions/runner-images` carries both
-`images/macos/macos-14-Readme.md` (x64) and `macos-14-arm64-Readme.md` (arm64).
-- **Not fixable by a label edit.** `macos-14-x64` was tried on 2026-11-07 (run
-`42342311491`). It is not an image name: the jobs sat **queued with no runner**
-rather than being rejected, which burns the job timeout instead of failing fast.
+  month on record — 281 minutes in 2026-11, 1628 in 2026-10 — and the repository is
+  public.
 
-The label `macos-14` currently resolves to the ARM configuration
-`macos-14-arm64-us-default`, and that configuration is refused for this
-repository. Billing shows only the `Actions macOS 3-core` (x64) SKU, so whatever
-grants the ARM configuration is not what it was on 2026-11-04. **The fix is on the
-account side** — Settings → Billing, or GitHub support: ask which hosted macOS
-configurations this repository may claim.
+**Diagnostics, in order.** A macOS job cancelled after roughly two seconds with
+**zero steps** is a retired or refused image — read its annotations, they name
+the configuration. A macOS job that sits **queued indefinitely** is a label that
+is not an image name. A job that starts and then fails is a build failure. The
+tag-only pre-flight (`Probe the matrix runners against recent history`) reads job
+history and fails a tag in seconds for the first case.
 
-**This blocks releasing.** The hub's fetcher requires both darwin artifacts, so a
-run without them produces nothing publishable.
+**This blocks releasing while it is true.** The hub's fetcher requires both darwin
+artifacts, so a run without them produces nothing publishable.
 
-A macOS job cancelled after roughly two seconds with **zero steps** is this, not a
-build failure. A macOS job that sits **queued indefinitely** is a label that names
-a configuration GitHub will not hand out for that label — `macos-14-x64`, tried on
-2026-11-07, is exactly that: not an image name, so the job waits instead of
-failing. A job that starts and then fails is a build failure. Read the job's
-annotations before touching any build step.
-
-The register entry is A22 in [`CLAIMS.md`](CLAIMS.md) §5.
+The register entry is A22 in [`CLAIMS.md`](CLAIMS.md) §5 — **falsified** until a
+dispatched run shows both macOS jobs running steps.
 
 ### Which job runs which suite
 

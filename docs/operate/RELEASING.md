@@ -17,19 +17,27 @@ verified-against: client/scripts/release-version.mjs, server/scripts/publish-rel
 >   `client/src-tauri/tests/version_consistency.rs`). There is no root `VERSION`.
 >
 
-> ⚠️ **STEP 0, AS LAST VERIFIED 2026-11-07: the macOS jobs are refused, so a tag
-> cannot publish.** Both macOS build jobs are rejected with zero steps run
-> (`The configuration 'macos-14-arm64-us-default' is not supported`), so the two
-> darwin payloads are never produced and `fetch-release.py` — which is
-> all-or-nothing by design — refuses the publish. **This is a claim about GitHub's
-> account provisioning, not about the tree**, and it is recorded once as **A22**
-> in [`CLAIMS.md`](CLAIMS.md) §5 with the ruled-out list. Do not tag until a
-> dispatched run shows both macOS jobs actually running steps.
+> ⚠️ **STEP 0: the macOS labels were moved and have NOT yet been proved on a
+> runner.** GitHub retired every macOS 14 image on 2026-11-02, so from 2026-11-07
+> both macOS build jobs were rejected with zero steps run
+> (`The configuration 'macos-14-arm64-us-default' is not supported`) and no
+> release could publish. The matrix now asks for `macos-15-intel` (x64) and
+> `macos-15` (arm64). **The cause and the fix are in the tree; the runner is
+> not.** That distinction is **A22** in [`CLAIMS.md`](CLAIMS.md) §5, which is
+> still **falsified** until a dispatched run shows both macOS jobs actually
+> running steps.
 >
-> The tag-only pre-flight now catches this in seconds rather than after a full
-> Linux build: if a matrix label was refused on its last attempt, the step
+> **Do not tag until it does.** Read the run, not the tick: the macOS jobs'
+> **step count** must be non-zero, and both darwin `.app` bundles must report a
+> minimum OS no higher than the `minimumSystemVersion: "11.0"` the bundle
+> declares. `fetch-release.py` is all-or-nothing, so a tag that cannot build
+> macOS publishes nothing.
+>
+> The tag-only pre-flight catches a refused label in seconds rather than after a
+> full Linux build: if a matrix label's last job ran zero steps, the step
 > `Probe the matrix runners against recent history` fails the run before any
-> artifact is built. If you see that error, the fix is on the account side.
+> artifact is built. **A zero-step cancel names a retired or non-existent image —
+> bump the label; a job queued forever means the label is not an image name.**
 
 > **A bump is one command.** `pnpm release-version X` (from `client/`) writes
 > every site listed in `[client.version_sites]` — including `docs/state.toml`,

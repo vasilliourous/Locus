@@ -17,42 +17,52 @@ re-argued; the evidence for each is a world claim in
 
 ---
 
-## Blocking: no release can be published until GitHub provisions a macOS runner
+## Blocking: no release can be published until a macOS runner is proved to start
 
-**Added 2026-11-07.** Evidence and the ruled-out list are world claim
-**A22** in [`../operate/CLAIMS.md`](../operate/CLAIMS.md) §5 — do not restate the
-findings here, they would drift. What a successor needs is the consequence and the
-next action.
+**Added 2026-11-07; cause found 2026-11-08, fix in the tree, unproved.** Evidence
+is world claim **A22** in [`../operate/CLAIMS.md`](../operate/CLAIMS.md) §5 — do not
+restate the findings here, they would drift. What a successor needs is the
+consequence and the next action.
 
-**The consequence.** Both macOS jobs are refused, so `locus-darwin-amd64` and
-`locus-darwin-arm64` are never produced. `server/scripts/fetch-release.py`
-requires all four payloads plus their `.sig` files and **refuses a partial
-publish deliberately** — an update nobody can install looks like it worked from
-the operator's seat. So Linux and Windows going green produces nothing
-publishable. **Do not tag until this closes**; a tag today builds three platforms
-and publishes none.
+**The cause was a retirement, not an account problem.** GitHub retired every
+macOS 14 image from Actions on **2026-11-02** (`actions/runner-images` #13518,
+#15226). The bare `macos-14` label resolved to a configuration that no longer
+exists, which is why both jobs were cancelled with zero steps. The matrix now
+names one image per architecture — `macos-15-intel` for the x64 slice and
+`macos-15` for arm64 — because **a bare macOS label is the arm64 machine**.
 
-**The next action is not in this repository.** It is a question for the account
-holder: open Settings → Billing, or a GitHub support ticket, and ask *which hosted
-macOS runner configurations this repository is entitled to claim, and why
-`macos-14` resolves to `macos-14-arm64-us-default` for it*. Nothing in the tree can
-answer it.
+**The consequence while this is open.** Both macOS jobs are refused, so
+`locus-darwin-amd64` and `locus-darwin-arm64` are never produced.
+`server/scripts/fetch-release.py` requires all four payloads plus their `.sig`
+files and **refuses a partial publish deliberately** — an update nobody can
+install looks like it worked from the operator's seat. **Do not tag until a
+dispatched run shows both macOS jobs running steps**; a tag today builds three
+platforms and publishes none.
+
+**The next action is one dispatch, and then reading two numbers.** Dispatch the
+workflow and read the macOS jobs' **step counts** — non-zero means the label is
+alive. Then read each darwin `.app`'s minimum OS (`vtool -show-build`), which must
+not exceed the `minimumSystemVersion: "11.0"` the bundle declares; the macOS 26
+image was avoided for exactly this reason, but the SDK can still lift it.
 
 **Do not spend effort re-deriving this.** These have already been tried and are
 recorded so they are not tried again:
 
-- Changing the label. The same label `macos-14` succeeded on 2026-11-04 and fails
-  now, so the label is not the variable.
+- Asking GitHub support or Billing which macOS configurations are entitled. That
+  was the recommendation for a day, and it was wrong — the images were retired.
 - `macos-14-x64`. **It is not an image name.** The jobs sat *queued with no
   runner* — a worse failure than the rejection, because it burns the timeout
-  instead of failing fast.
+  instead of failing fast. Only `-intel` is a real x64 suffix.
 - Attributing it to the build steps. A refused runner never runs a step, so no
   step's change can affect it. Read the job **annotations**, not the conclusion.
 
-**What is already true when this closes.** The pipeline is green on the other two
-platforms, a whole run is ~21 minutes rather than 39, and a tag-only pre-flight
-(`Probe the matrix runners against recent history` in `client.yml`) now fails a
-tag in seconds with the named cause instead of after a full Linux build.
+**What is true regardless of this closing.** The pipeline is green on the other
+two platforms, a whole run is ~21 minutes rather than 39, a tag-only pre-flight
+(`Probe the matrix runners against recent history` in `client.yml`) fails a tag in
+seconds with the named cause, and `check-consistency.sh` §45 fails before that if
+the two slices ever name mismatched images. **`macos-15-intel` is the last x86_64
+image Actions will provide, available until August 2027** — after that
+`locus-darwin-amd64` needs a decision, and nothing in the tree enforces the date.
 
 ---
 

@@ -286,8 +286,8 @@ jobs:
 
       # ── Preflight: can this repository actually CLAIM each matrix runner? ──
       #
-      # WHY THIS EXISTS (2026-11-07). On 2026-11-07 both macOS build jobs were
-      # rejected about two seconds after starting, with ZERO steps run:
+      # WHY THIS EXISTS (2026-11-07). Both macOS build jobs were rejected about
+      # two seconds after starting, with ZERO steps run:
       #
       #   The configuration 'macos-14-arm64-us-default' is not supported
       #
@@ -301,17 +301,27 @@ jobs:
       # runner is refused never runs a step, so no step can report it. The only
       # place it can be named is a job on a runner that DOES start — this one.
       #
-      # WHAT THIS CAN AND CANNOT DO. It cannot fix an entitlement; that is on the
-      # account side. GitHub exposes no "may I claim this runner?" endpoint, so
-      # the only evidence available is HISTORY: what happened the last time this
-      # repository asked for each label. This reads that, and fails on a TAG when
-      # a label's most recent run ended with ZERO STEPS — which is precisely the
-      # signature of a refused runner, and can only be seen from outside the
-      # affected job.
+      # WHAT THIS CAN AND CANNOT DO. It cannot fix a retirement; that is on
+      # GitHub's side (the 2026-11-07 rejection was macOS 14 being retired on
+      # 2026-11-02, not an entitlement — see the matrix comment). GitHub exposes
+      # no "is this label alive?" endpoint, so the only evidence available is
+      # HISTORY: what happened the last time this repository asked for each
+      # label. This reads that, and fails on a TAG when a label's most recent run
+      # ended with ZERO STEPS — which is precisely the signature of a refused or
+      # retired runner, and can only be seen from outside the affected job.
       #
       # A branch push gets the same report as a warning, not an error. Failing
-      # every unrelated commit on a broken macOS entitlement would add noise to
-      # the failure rather than remove it.
+      # every unrelated commit on a broken macOS label would add noise to the
+      # failure rather than remove it.
+      #
+      # ── WHY IT WATCHES THE JOB'S `labels`, NOT THE MATRIX ENTRY ──
+      #
+      # Jobs carry a `labels` array exactly as the workflow asked for them, so a
+      # label the matrix has ALREADY stopped using keeps its own (bad) history
+      # and cannot mask the one that matters. That is what makes the first tag
+      # after a bump honest: `macos-14`'s recorded refusals are no longer
+      # consulted, and a NEW label with no history reports "no completed history
+      # found" rather than borrowing another label's verdict.
       #
       # It guards the exact thing that made 2026-11-07 expensive: `release` needs
       # all four platforms (fetch-release.py is all-or-nothing), so a tag that
@@ -385,7 +395,8 @@ jobs:
             echo "::error::  gh api repos/${GITHUB_REPOSITORY}/actions/runs/<run>/jobs --jq '.jobs[]|select(.name|test(\"Build\"))'"
             echo "::error::  A zero-step cancel names the runner configuration, e.g."
             echo "::error::  'The configuration macos-14-arm64-us-default is not supported'."
-            echo "::error::That is an account entitlement. See docs/operate/CI-CD.md."
+            echo "::error::That is a RETIRED or non-existent image (macOS 14 was retired"
+            echo "::error::2026-11-02), not a quota. Bump the label. See docs/operate/CI-CD.md."
             exit 1
           fi
           echo "No label in recent history was refused with zero steps."
@@ -633,10 +644,10 @@ jobs:
       fail-fast: false
       # ── THE RUNNER LABELS ARE PINNED, AND THAT IS A DELIBERATE COST ──
       #
-      # `ubuntu-latest` / `windows-latest` / `macos-14` are MOVING TAGS. GitHub
+      # `ubuntu-latest` / `windows-latest` / `macos-latest` are MOVING TAGS. GitHub
       # re-points them when it retires an image, and a runner image that changes
       # under a green workflow is a world claim nobody re-checks: the workflow
-      # says it builds on macOS 14, and one day it does not, with no commit and
+      # says it builds on one macOS, and one day it does not, with no commit and
       # no failing check to mark the change.
       #
       # This project has already paid for that exact failure once. The Intel
@@ -661,61 +672,66 @@ jobs:
             label: windows
             triple: x86_64-pc-windows-msvc
             artifact: locus-windows-amd64.exe
-          # BOTH macOS SLICES BUILD ON THE x64 IMAGE, AND THE ARCH IS PINNED.
+          # ── ONE LABEL PER ARCHITECTURE. THE `-intel` SUFFIX IS LOAD-BEARING ──
           #
-          # `macos-13` was used for the Intel slice and never once started: every
-          # run sat at "Waiting for a runner to pick up this job" while the other
-          # three platforms finished, because GitHub is retiring the Intel macOS
-          # images. Both slices then moved to the bare `macos-14` label, with
-          # x86_64 added as a cross-compile target — the supported way to produce
-          # an Intel binary without an Intel machine.
+          # A BARE macOS LABEL IS ARM64. `macos-15` / `macos-26` resolve to the
+          # arm64 configuration; the x64 machine behind them is a SEPARATE label
+          # with an `-intel` suffix. That is the rule in `actions/runner-images`
+          # ("Available Images"), and it is why `macos-14-x64` (tried 2026-11-07,
+          # run 42342311491) sat QUEUED with no runner — it is not an image name,
+          # so the job burns the timeout instead of failing fast. Do not invent
+          # suffixes; the two labels below are the ones GitHub hands out.
           #
-          # ── 2026-11-07: `macos-14` IS NOW REFUSED, AND THE LABEL IS NOT THE CAUSE ──
+          # ── WHY 15 AND NOT 26: the bundle's own minimum, not the runner's age ──
           #
-          # Every macOS job was rejected in ~2 s with ZERO steps run:
+          # `client/src-tauri/tauri.macos.conf.json` declares
+          # `minimumSystemVersion: "11.0"`, and the SDK a binary links against
+          # writes its own minimum back into the artifact's `LC_BUILD_VERSION`.
+          # Building on the macOS 26 image (Xcode 26, macOS 26 SDK only — the 15
+          # SDK is not in that image) makes the shipped `.app` refuse to launch on
+          # anything below 26, which is most of the machines this client exists
+          # for. The macOS 15 image carries the 15.x SDKs AND the 26 ones, so it
+          # can keep building something that starts on an older Mac; 26 cannot.
+          # `macos-15` is also what the last green release (v3.3.5, 2026-11-04)
+          # was built on, so this move changes the label, not the toolchain.
+          #
+          # ── 2026-11-07 → THE `macos-14` REFUSAL WAS A RETIREMENT, NOT AN ACCOUNT ──
+          #
+          # Both macOS jobs were rejected in ~2 s with ZERO steps run:
           #
           #   The configuration 'macos-14-arm64-us-default' is not supported
           #
-          # WHAT WAS RULED OUT, so nobody re-checks it:
+          # That was read at the time as an account entitlement, and it is not:
+          # GitHub retired every macOS 14 image from Actions on 2026-11-02
+          # (`actions/runner-images` #13518, #15226), and macOS 14 is flagged
+          # deprecated in that repository's image table. The bare label therefore
+          # resolved to a configuration that no longer exists. Recorded so the
+          # next person does not re-open a billing ticket: **a zero-step rejection
+          # that names a configuration is a retired or non-existent image, not a
+          # quota and not a missing secret.**
           #
-          #   * NOT a label change in this file. The last green macOS run
-          #     (41746038397, v3.3.5, 2026-11-04) used `macos-14` too; nothing here
-          #     changed between that run and the first rejection.
-          #   * NOT a macOS minutes quota. This account billed `Actions macOS
-          #     3-core` in every month on record, 281 minutes in 2026-11, and the
-          #     repository is public.
-          #   * NOT a missing image. `actions/runner-images` carries both
-          #     `images/macos/macos-14-Readme.md` (x64) and
-          #     `macos-14-arm64-Readme.md` (arm64), so both exist on GitHub's side.
+          # ── THE INTEL IMAGE HAS AN END DATE, AND IT IS SOONER THAN IT FEELS ──
           #
-          # What changed is that `macos-14` now resolves to the ARM configuration
-          # `macos-14-arm64-us-default`, and THAT configuration is refused for
-          # this repository. Earlier billing shows only the `Actions macOS 3-core`
-          # (x64) SKU, so whatever entitlement decides this is not what it was on
-          # 2026-11-04.
-          #
-          # NOT FIXED BY A LABEL EDIT. `macos-14-x64` was tried on 2026-11-07
-          # (run 42342311491) and is not an image name — the jobs sat QUEUED with
-          # no runner instead of being rejected, which burns the 50-minute timeout
-          # instead of failing fast. Do not use it. The labels below are the two
-          # that exist.
-          #
-          # The fix is on the account side (Settings → Billing, or GitHub support):
-          # ask which hosted macOS configurations this repository may claim. Until
-          # that is answered, the macOS jobs will keep failing this way, and NO
-          # release can be published — the hub's fetcher needs both darwin
-          # artifacts.
+          # `macos-15-intel` was introduced (2025-09-19, `actions/runner-images`
+          # #13045) as the LAST x86_64 image Actions will ever provide, available
+          # "until August 2027". After that there is no hosted Intel macOS runner
+          # at all, so `locus-darwin-amd64` needs a decision — a larger runner, a
+          # self-hosted Mac, or dropping the slice — before this file is silently
+          # the blocker again. Nothing in the tree enforces that date.
           #
           # DIAGNOSTIC WORTH KEEPING: a macOS job cancelled after ~2 s with zero
-          # steps is this. A job that starts and then fails is a build failure.
-          # Read the annotations before touching a build step.
+          # steps is a retired image or a refusal. A job that sits QUEUED forever
+          # is a label that is not an image name. A job that starts and then fails
+          # is a build failure. Read the annotations before touching a build step.
           #
-          # WHEN PINNING: update these labels AND the note in docs/operate/CI-CD.md.
-          - os: macos-14
+          # WHEN PINNING: update these labels, the note in docs/operate/CI-CD.md,
+          # and `check-consistency.sh` §45 — which fails if the two entries drift
+          # onto different macOS families or the arm slice stops being the arm image.
+          - os: macos-15-intel
             label: macos-intel
             triple: x86_64-apple-darwin
             artifact: locus-darwin-amd64
-          - os: macos-14
+          - os: macos-15
             label: macos-arm
             triple: aarch64-apple-darwin
             artifact: locus-darwin-arm64
@@ -2124,8 +2140,8 @@ jobs:
         # Every other platform gate in this job uses `matrix.label`; this one
         # was the outlier. Prefer `label` over `os`: `label` is a name this file
         # chooses (linux/windows/macos-intel/macos-arm), while `os` is a runner
-        # image that gets bumped (macos-13 -> macos-14) and silently detaches
-        # every condition written against the old value.
+        # image that gets bumped (macos-14 -> macos-15-intel) and silently
+        # detaches every condition written against the old value.
         if: matrix.label == 'windows'
         shell: bash
         env:
