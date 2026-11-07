@@ -277,6 +277,46 @@ HOOKS=("${HOOKS_SRC}"/*.pb.js)
 shopt -u nullglob
 [ "${#HOOKS[@]}" -gt 0 ] || fail "no *.pb.js files in ${HOOKS_SRC}"
 
+# Probes one hook-owned route and reports whether a HOOK answered it.
+#
+# Returns non-zero when the route is missing (`data: {}` and no `message`), which
+# is the signature of a hook file that is on disk but never registered — the exact
+# state a restart-only deploy leaves behind.
+probe_hook_route() {
+    local method="$1" path="$2" out body code
+    if [ "$method" = "POST" ]; then
+        out="$(curl -s -m 15 -X POST -H 'Content-Type: application/json' -d '{}' \
+            -o - -w '\n%{http_code}' "${PB_API}${path}" 2>/dev/null || printf '\n000')"
+    else
+        out="$(curl -s -m 15 -o - -w '\n%{http_code}' "${PB_API}${path}" 2>/dev/null || printf '\n000')"
+    fi
+    code="$(printf '%s' "$out" | tail -1)"
+    body="$(printf '%s' "$out" | sed '$d')"
+
+    # PocketBase's own not-found shape, which is what a hook that never
+    # registered produces:
+    #
+    #     {"code":404,"message":"Not Found.","data":{}}
+    #
+    # `data` is the discriminator, and it took a measurement to find: PocketBase
+    # DOES emit a `message`, so "body carries a message" would have passed the
+    # broken hub. Every hook in this directory builds its own JSON object and
+    # PocketBase does not append `data` to it; the router's 404 always has it.
+    if printf '%s' "$body" | grep -q '"data"[[:space:]]*:[[:space:]]*{}'; then
+        warn "  ✗ ${method} ${path} -> HTTP ${code}, answered by PocketBase (not a hook)"
+        warn "    The hook file is on disk but its route is not registered — the"
+        warn "    running process has not loaded it. Re-run this script (it restarts"
+        warn "    PocketBase) and check the service log for a parse error."
+        return 1
+    fi
+    if [ "$code" = "000" ]; then
+        warn "  ✗ ${method} ${path} -> no answer (hub unreachable from here)"
+        return 1
+    fi
+    log "  ✓ ${method} ${path} -> ${code} (answered by a hook)"
+    return 0
+}
+
 # ── Verification (also used standalone with --check) ───────────────────────
 verify() {
     local rc=0
@@ -332,12 +372,32 @@ verify() {
             rc=4 ;;
     esac
 
+    # 4. Every route a hook OWNS must answer for itself.
+    #
+    #    Step 3 alone is not enough, and the gap cost a real defect: the checks
+    #    above were green on 2026-11-06 while `POST /api/release-entitlement`
+    #    answered `404 {"code":404,"message":"Not Found.","data":{}}` — PocketBase's
+    #    own not-found, not the hook's `{"message":"Nothing to release"}`. A
+    #    present-and-parsing `device_release.pb.js` therefore served nothing, and
+    #    the only symptom was a sign-out that silently failed to be recorded.
+    #
+    #    So each route is probed with an EMPTY body, and the answer must be the
+    #    hook's: a JSON object carrying `message`. PocketBase's router answers an
+    #    unknown path with `data: {}` and no `message`, which is what makes the
+    #    two distinguishable without credentials.
+    #
+    #    Not a `200` check on purpose: without a valid code these routes
+    #    legitimately answer 4xx, and requiring 200 would fail a correctly
+    #    deployed hub.
+    probe_hook_route "POST" "/api/release-entitlement" || rc=4
+    probe_hook_route "POST" "/api/code-lookup" || rc=4
+    probe_hook_route "GET" "/api/update?version=0.0.0&platform=linux" || rc=4
+
     if [ "$drift" = "1" ]; then
         warn "  Hook drift detected — re-run without --check to deploy."
     fi
     return "$rc"
 }
-
 if [ "$CHECK_ONLY" = "1" ]; then
     verify || exit $?
     log "✓ Hooks are in sync and the hub is serving"

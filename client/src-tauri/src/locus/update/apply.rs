@@ -162,14 +162,76 @@ pub async fn download(
     // problem: the update is how such a machine gets fixed, so a client that
     // cannot verify the hub here traps it. See `locus::hub`.
     let hub = crate::locus::contract::hub_url().await;
-    let hub_client = crate::locus::hub::client(&hub, crate::locus::hub::Timeout::Download).await;
 
-    let response = hub_client
-        .client()
+    // ── Which host this artifact may come from ──
+    //
+    // The offer's URL is built by the hub at publish time from its canonical
+    // name, and the hub rewrites it to whichever name the request arrived on
+    // (`update.pb.js`). This is the client half of that: accept the hub the
+    // session dials, and the compiled-in name, and nothing else.
+    //
+    // WITHOUT THIS the whole update path fails on exactly the network it exists
+    // for. Measured 2026-11-06: the offer was
+    // `https://networkingguides.duckdns.org/updates/3.3.5/locus-linux-amd64`
+    // while the session dialled `networkingguides.jadedns.uk`, and a strict
+    // origin comparison refused it — so a device on a blocking network could not
+    // fetch the build that would fix it, which is the dead end the update path is
+    // supposed to be the way out of.
+    let hosts = crate::locus::update::signal::OfferHosts::for_hub(&hub);
+    if !hosts.permits(&offer.url) {
+        bail!(
+            "refusing to download an update from a host that is not the Locus hub ({}): the \
+             hub offered {}. This is either a stale hub record or a tampered response; \
+             neither may be fetched.",
+            hosts.describe(),
+            offer.url
+        );
+    }
+
+    // The shared hub client with redirects REFUSED.
+    //
+    // Same root-store selection and same cache as every other hub call — that is
+    // the whole point of going through this module: a bare `reqwest::Client` here
+    // would trust only the OS store, and the download is the call that repairs a
+    // machine whose OS store cannot verify the hub.
+    //
+    // Redirects are refused rather than followed because the hub's alias block
+    // `308`s to the canonical name, and on a network that filters the hub by name
+    // the redirect target is usually the blocked one. Following it would move the
+    // request to a host the allowlist above never checked, and turn an explainable
+    // refusal into an unexplained timeout.
+    let hub_client = crate::locus::hub::client_refusing_redirects(&hub, crate::locus::hub::Timeout::Download).await;
+    if hub_client.diagnosis().is_some() {
+        tracing::warn!(target: "locus::hub", "{}", hub_client.describe());
+    }
+    let download_client = hub_client.client();
+
+    let response = download_client
         .get(&offer.url)
         .send()
         .await
         .with_context(|| format!("could not reach {}", offer.url))?;
+
+    // A redirect is reported as the destination it names, because that
+    // destination is the answer to "why did this not download" on a filtered
+    // network: the alias sent us to a name we may not be able to reach.
+    if response.status().is_redirection() {
+        let location = response
+            .headers()
+            .get(reqwest::header::LOCATION)
+            .and_then(|value| value.to_str().ok())
+            .unwrap_or("<no Location header>")
+            .to_owned();
+        bail!(
+            "the hub answered {} for {} with a redirect to {location}. This download does not \
+             follow redirects: on a network that filters the hub by name, the redirect target \
+             is usually the name this device was moved away from. Set the hub alias so it \
+             serves /updates directly (docs/operate/DEPLOY.md), or point the device at the \
+             name the redirect uses.",
+            response.status(),
+            offer.url
+        );
+    }
 
     if !response.status().is_success() {
         bail!("the download returned HTTP {}", response.status());

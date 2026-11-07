@@ -373,6 +373,23 @@ pub fn run() -> std::process::ExitCode {
                 }
 
                 logging!(debug, Type::Setup, "开始应用初始化...");
+
+                // Report the capability this build shipped WITHOUT, once, before
+                // anything else can fail.
+                //
+                // A release built with no bootstrap key cannot use the activation
+                // tunnel — the one transport that works on a network blocking the
+                // hub by name — and nothing else in the product said so. Three
+                // releases went out keyless while every check stayed green, and
+                // the student's only evidence was "the tunnel never triggers".
+                // This line is the evidence, in the file a support report carries.
+                let stamp = crate::locus::activation_tunnel::build_stamp();
+                if crate::locus::activation_tunnel::activation_tunnel_available() {
+                    logging!(info, Type::Setup, "[locus] {stamp}");
+                } else {
+                    logging!(warn, Type::Setup, "[locus] {stamp}");
+                }
+
                 if let Err(e) = app_init::setup_autostart(app) {
                     logging!(error, Type::Setup, "Failed to setup autostart: {}", e);
                 }

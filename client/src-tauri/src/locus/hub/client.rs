@@ -40,20 +40,60 @@ impl Timeout {
             Self::Download => 600,
         }
     }
+
+    /// The same ceiling, for a caller that must build its OWN client.
+    ///
+    /// The update download is the one case: it needs redirects disabled, and a
+    /// `reqwest::Client` cannot be cloned into a client with different redirect
+    /// policy. Exposing the number rather than duplicating it means a change to
+    /// the download ceiling reaches both clients.
+    #[must_use]
+    pub const fn seconds_public(self) -> std::time::Duration {
+        std::time::Duration::from_secs(self.seconds())
+    }
+}
+
+/// Whether a hub client follows redirects.
+///
+/// A first-class part of the client policy rather than a per-call tweak, because
+/// the two answers are a decision about this network, not a style choice:
+///
+///   * [`Self::Follow`] — the default for API calls. The hub's alias block `308`s
+///     to the canonical name, and an API call must keep working when it lands
+///     there.
+///   * [`Self::Refuse`] — for an **artifact** download. On a network that filters
+///     the hub by name, the redirect target is usually the blocked name: following
+///     it turns a refusal that can be explained into a timeout that cannot. The
+///     download also checks the host it was offered against
+///     [`crate::locus::update::signal::OfferHosts`] first, and following a redirect
+///     would quietly move the request to a host that check never saw.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Redirects {
+    Follow,
+    Refuse,
+}
+
+impl Redirects {
+    fn policy(self) -> reqwest::redirect::Policy {
+        match self {
+            Self::Follow => reqwest::redirect::Policy::limited(5),
+            Self::Refuse => reqwest::redirect::Policy::none(),
+        }
+    }
 }
 
 /// Build each client once and reuse it.
 ///
 /// Constructing a client re-reads the OS certificate store on Windows, which is
-/// measurable and pointless for a heartbeat loop. Two caches because the two
-/// clients differ in exactly one way — which roots verify the peer — and that
-/// difference must not be able to leak.
-fn cached(
-    cache: &'static OnceLock<std::sync::Mutex<std::collections::HashMap<u64, &'static reqwest::Client>>>,
+/// measurable and pointless for a heartbeat loop. Cached per (timeout, redirect
+/// policy, roots) — every axis on which these clients differ.
+fn cached_policy(
+    cache: &'static OnceLock<std::sync::Mutex<std::collections::HashMap<(u64, Redirects), &'static reqwest::Client>>>,
     timeout: Timeout,
+    redirects: Redirects,
     build: impl FnOnce(u64) -> Result<reqwest::Client>,
 ) -> Result<&'static reqwest::Client> {
-    let key = timeout.seconds();
+    let key = (timeout.seconds(), redirects);
     let map = cache.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()));
 
     // Scoped so the guard is dropped before anything else in this function can
@@ -69,7 +109,7 @@ fn cached(
         }
     }
 
-    let client: &'static reqwest::Client = Box::leak(Box::new(build(key)?));
+    let client: &'static reqwest::Client = Box::leak(Box::new(build(key.0)?));
     map.lock()
         .map_err(|_| anyhow::anyhow!("the hub client cache was poisoned"))?
         .insert(key, client);
@@ -83,15 +123,15 @@ fn cached(
 /// update download all depend on the Core that the entitlement is supposed to
 /// start, so a device could not activate to fix a broken tunnel, nor download the
 /// update that repairs it. `utils::network` sets the same for its own clients.
-fn platform_client(timeout: Timeout) -> Result<&'static reqwest::Client> {
-    type Cache = OnceLock<std::sync::Mutex<std::collections::HashMap<u64, &'static reqwest::Client>>>;
+fn platform_client(timeout: Timeout, redirects: Redirects) -> Result<&'static reqwest::Client> {
+    type Cache = OnceLock<std::sync::Mutex<std::collections::HashMap<(u64, Redirects), &'static reqwest::Client>>>;
     static CACHE: Cache = OnceLock::new();
-
-    cached(&CACHE, timeout, |seconds| {
+    cached_policy(&CACHE, timeout, redirects, |seconds| {
         reqwest::Client::builder()
             .timeout(std::time::Duration::from_secs(seconds))
             .pool_idle_timeout(HUB_POOL_IDLE)
             .user_agent(concat!("Locus-Client/", env!("CARGO_PKG_VERSION")))
+            .redirect(redirects.policy())
             .no_proxy()
             .build()
             .context("could not build the hub HTTP client")
@@ -103,11 +143,11 @@ fn platform_client(timeout: Timeout) -> Result<&'static reqwest::Client> {
 /// `tls_backend_preconfigured` takes a full rustls config, so the platform
 /// verifier is never constructed — there is no second chance for the OS store to
 /// be consulted.
-fn bundled_roots_client(timeout: Timeout) -> Result<&'static reqwest::Client> {
-    type Cache = OnceLock<std::sync::Mutex<std::collections::HashMap<u64, &'static reqwest::Client>>>;
+fn bundled_roots_client(timeout: Timeout, redirects: Redirects) -> Result<&'static reqwest::Client> {
+    type Cache = OnceLock<std::sync::Mutex<std::collections::HashMap<(u64, Redirects), &'static reqwest::Client>>>;
     static CACHE: Cache = OnceLock::new();
 
-    cached(&CACHE, timeout, |seconds| {
+    cached_policy(&CACHE, timeout, redirects, |seconds| {
         let roots = rustls::RootCertStore::from_iter(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
         // `builder()` panics unless exactly one crypto provider feature is
         // enabled: this crate enables `ring` only, and rustls refuses to guess.
@@ -126,6 +166,7 @@ fn bundled_roots_client(timeout: Timeout) -> Result<&'static reqwest::Client> {
             .pool_idle_timeout(HUB_POOL_IDLE)
             .user_agent(concat!("Locus-Client/", env!("CARGO_PKG_VERSION")))
             .tls_backend_preconfigured(config)
+            .redirect(redirects.policy())
             .no_proxy()
             .build()
             .context("could not build the bundled-roots hub client")
@@ -147,23 +188,58 @@ pub enum Failure {
     ///
     /// This is separate from [`Self::Transport`] for one reason: it is the
     /// signature of a middlebox that read the destination (the TLS ClientHello
-    /// carries the SNI in the clear) and killed the flow. It is the *only*
-    /// failure the activation tunnel can fix, and the only one that may trigger
-    /// the fallback. See [`crate::locus::activation_tunnel`].
+    /// carries the SNI in the clear) and killed the flow. One of the failures the
+    /// activation tunnel can fix — see [`Self::retryable_over_tunnel`] for the
+    /// closed set.
     ///
     /// Deliberately **not** the same as:
-    ///   * a refused connection — nothing is listening, and a different transport
-    ///     to the same address will be refused too;
-    ///   * a DNS failure — the tunnel is dialled by address, but the caller still
-    ///     has to resolve *something*, and a name that does not resolve is a
-    ///     configuration fault, not censorship;
+    ///   * a DNS failure — nothing was dialled, so nothing was reset;
     ///   * a certificate error — the hub was reached; different roots fix it.
     ///
     /// Classified from the `io::ErrorKind`, not from the message, for the reason
     /// given on [`Self::classify`].
     ResetDuringHandshake,
-    /// The TLS session itself was fine but the remote name did not resolve, the
-    /// connection was refused, or the network dropped it.
+    /// The hub's **name did not resolve**.
+    ///
+    /// Split out of [`Self::Transport`] because it is the one transport failure
+    /// with a specific, actionable cause: the network's DNS refused to answer, so
+    /// nothing was dialled and nothing was blocked — which is exactly what a
+    /// school filter that resolves nothing it has not categorised looks like. It
+    /// used to arrive as a bare "error sending request for url (…)" with no remedy,
+    /// and a student on a school network was left with a sentence naming no cause.
+    ///
+    /// Still **not** retried over the activation tunnel, for a reason that is
+    /// about the resolver rather than the block: the tunnel's own engine must
+    /// resolve `SS_HUB` before it can dial anything, and a resolver that answers
+    /// nothing answers nothing for it too. A school filter that returns a
+    /// *portal or bogus address* instead does not produce this variant — it
+    /// produces a reset or a refusal, and both of those do trigger the tunnel.
+    Dns,
+    /// The name resolved and the host **refused** the connection — nothing was
+    /// listening on that port.
+    ///
+    /// Distinct from a reset: a refusal means the packet reached a machine, so the
+    /// network is not blocking this destination *by packet filter*. And distinct
+    /// from DNS: the name is fine.
+    ///
+    /// # Why this now triggers the activation tunnel
+    ///
+    /// It used to be excluded, on the reasoning that "a different transport to the
+    /// same address will be refused too". **That is only true when the same party
+    /// answers on both.** Measured on 2026-11-06: on N4L a request for a blocked
+    /// hostname is answered by the filtering appliance — the TLS ClientHello is
+    /// proxied and torn down, which the client sees as a reset *or* as a refusal,
+    /// depending on how far the appliance got. The school block is a
+    /// **name-reputation** decision, so the second dial (the bootstrap port, which
+    /// presents no name) is a different question and must be asked.
+    ///
+    /// The cost of being wrong is one refused SOCKS dial for a hub that is
+    /// genuinely down, reported as "the activation tunnel was tried as well and
+    /// also failed" — which is exactly what happened. The cost of *not* trying is
+    /// a student who cannot enrol at all.
+    Refused,
+    /// The TLS session itself was fine but the network dropped the connection, the
+    /// host was unreachable, or the request timed out.
     Transport,
     /// A protocol version mismatch — TLS 1.0/1.1 on the other end. Retrying with
     /// different roots cannot help.
@@ -215,6 +291,23 @@ impl Failure {
             source = current.source();
         }
 
+        // DNS and refusal are separated from the catch-all below, and only after
+        // the reset and certificate checks have had their say. Ordering is the
+        // whole mechanism: a resolver failure and a drop both arrive as
+        // `is_connect()`, so testing for `Transport` first would make these two
+        // unreachable — a variant that can never be returned reads exactly like
+        // one that is classified correctly.
+        if error.is_connect() {
+            // Which resolver error the OS chose is not something a student can act
+            // on, so only the fact of a naming failure is kept.
+            if io_kinds_in_chain(error).any(is_name_resolution) {
+                return Self::Dns;
+            }
+            if io_kinds_in_chain(error).any(|kind| kind == std::io::ErrorKind::ConnectionRefused) {
+                return Self::Refused;
+            }
+        }
+
         if error.is_connect() || error.is_timeout() || error.is_request() {
             Self::Transport
         } else {
@@ -244,12 +337,30 @@ impl Failure {
     ///   * `Certificate` — the hub WAS reached; different roots fix it, and the
     ///     tunnel would present the same certificate.
     ///   * `Protocol` — the hub was reached and refused a TLS version.
-    ///   * `Transport` — includes DNS. A name that does not resolve cannot be
-    ///     fixed by a transport to the same name.
+    ///   * `Dns` — the name did not resolve, and the tunnel's engine is dialled
+    ///     by name too. A resolver does not become less broken for a second
+    ///     connection.
+    ///   * `Transport` — the connection was dropped or timed out, which has no
+    ///     signature of a name-based block.
     ///   * `Response` — an answer arrived; the problem is above the transport.
+    ///
+    /// **`Refused` is IN the set**, and that was a correction (2026-11-06). The
+    /// old reasoning was "a machine answered and said no; another port to the
+    /// same machine would be asked differently, but nothing observed suggests it
+    /// would help". On the network this exists for, the machine that answers is
+    /// the *filter*, not the hub: it proxies the ClientHello and tears the flow
+    /// down, which reaches this process as a reset or as a refusal depending on
+    /// how far it got. Both are one decision — the destination's **name** is
+    /// blocked — and the bootstrap port presents no name. Excluding `Refused`
+    /// meant that on the day the appliance answered with a refusal instead of a
+    /// reset, the one transport built for this case was never attempted.
+    ///
+    /// A hub that is genuinely down now costs one extra refused SOCKS dial,
+    /// reported in the same sentence as the original failure. That is the
+    /// cheaper of the two mistakes by a wide margin.
     #[must_use]
     pub const fn retryable_over_tunnel(self) -> bool {
-        matches!(self, Self::ResetDuringHandshake)
+        matches!(self, Self::ResetDuringHandshake | Self::Refused)
     }
 
     /// A sentence a student can act on, or `None` when the cause is not theirs to
@@ -268,9 +379,59 @@ impl Failure {
                  or work filter is blocking it. Locus will try the activation tunnel \
                  instead when one is available.",
             ),
+            // The sentence a school-network student needed and did not get. It says
+            // what actually happened — nothing was dialled, because the name did not
+            // resolve — instead of "could not reach the hub", which sounds like the
+            // hub is down. It deliberately does not promise the tunnel: that would
+            // be untrue for exactly this failure.
+            Self::Dns => Some(
+                "This computer could not look up the hub's address, so the connection was \
+                 never attempted. That is usually this network filtering DNS — common on \
+                 school and work networks. Try a different network or a phone hotspot; if \
+                 it works there, the network is the cause, not this computer.",
+            ),
+            Self::Refused => Some(
+                "The hub's address was found, but nothing there accepted the connection. \
+                 That is either a temporary outage at the hub or this network quietly \
+                 redirecting the address — common on school and work networks. Locus \
+                 will try the activation tunnel instead when one is available; if that \
+                 fails too, try a phone hotspot to tell the two apart.",
+            ),
             Self::Transport | Self::Protocol | Self::Response => None,
         }
     }
+}
+
+/// Every `io::ErrorKind` in the chain, one pass.
+///
+/// The chain, not the top error, because hyper wraps the socket error before it
+/// reaches `reqwest`: the kind that names the cause sits under the wrapper. The
+/// alternative — matching words in the messages — is the thing
+/// [`Failure::classify`] exists to avoid.
+fn io_kinds_in_chain(error: &reqwest::Error) -> impl Iterator<Item = std::io::ErrorKind> + '_ {
+    let mut cursor: Option<&(dyn std::error::Error + 'static)> = Some(error);
+    std::iter::from_fn(move || {
+        while let Some(current) = cursor {
+            cursor = current.source();
+            if let Some(io_error) = current.downcast_ref::<std::io::Error>() {
+                return Some(io_error.kind());
+            }
+        }
+        None
+    })
+}
+
+/// Whether this kind means "the name could not be resolved".
+///
+/// `NotFound` is what `getaddrinfo`'s `EAI_NONAME`/`EAI_NODATA` map to on Linux
+/// and macOS (`Name or service not known`, `nodename nor servname provided`) and
+/// what Windows' `WSAHOST_NOT_FOUND` maps to. `HostUnreachable` is included
+/// because some resolvers report a filtered name that way rather than as an
+/// absence — and because on a school network the distinction between "this name
+/// does not exist" and "this name is not reachable for you" is one the student
+/// cannot see and should not have to.
+const fn is_name_resolution(kind: std::io::ErrorKind) -> bool {
+    matches!(kind, std::io::ErrorKind::NotFound | std::io::ErrorKind::HostUnreachable)
 }
 
 /// Whether an `io::Error` in this chain is a **reset**, as opposed to a refusal,
@@ -364,10 +525,10 @@ fn probe_cache() -> &'static std::sync::Mutex<std::collections::HashMap<String, 
 }
 
 /// The client for `store`, or the emergency client if it cannot be built.
-fn client_for(store: RootStore, timeout: Timeout) -> Result<&'static reqwest::Client> {
+fn client_for(store: RootStore, timeout: Timeout, redirects: Redirects) -> Result<&'static reqwest::Client> {
     match store {
-        RootStore::Platform => platform_client(timeout),
-        RootStore::Bundled => bundled_roots_client(timeout),
+        RootStore::Platform => platform_client(timeout, redirects),
+        RootStore::Bundled => bundled_roots_client(timeout, redirects),
     }
 }
 
@@ -384,8 +545,23 @@ fn client_for(store: RootStore, timeout: Timeout) -> Result<&'static reqwest::Cl
 /// a refused connection or a TLS version mismatch is not fixed by different roots,
 /// and retrying it would only delay the answer the caller needs.
 pub async fn client(hub: &str, timeout: Timeout) -> HubClient {
+    client_with(hub, timeout, Redirects::Follow).await
+}
+
+/// [`client`] with an explicit redirect policy, for the artifact download.
+///
+/// Same store selection, same probe, same cache — only the redirect answer differs
+/// (see [`Redirects`]). This exists so the download does not hand-build a client:
+/// that is precisely what the consistency checker forbids, because a bare client
+/// trusts only the OS store and the download is the call that repairs a machine
+/// whose OS store cannot verify the hub.
+pub async fn client_refusing_redirects(hub: &str, timeout: Timeout) -> HubClient {
+    client_with(hub, timeout, Redirects::Refuse).await
+}
+
+async fn client_with(hub: &str, timeout: Timeout, redirects: Redirects) -> HubClient {
     let primary = RootStore::primary();
-    let primary_client = match client_for(primary, timeout) {
+    let primary_client = match client_for(primary, timeout, redirects) {
         Ok(client) => client,
         Err(error) => {
             // A client that will not build is not a certificate problem.
@@ -401,24 +577,62 @@ pub async fn client(hub: &str, timeout: Timeout) -> HubClient {
     // minute. `Some(None)` means "the primary store worked"; a missing key means
     // "not probed yet".
     let remembered = probe_cache().lock().ok().and_then(|cache| cache.get(hub).cloned());
-    if let Some(verdict) = remembered {
-        return match verdict {
-            None => HubClient {
-                client: primary_client,
-                diagnosis: None,
-            },
-            Some(diagnosis) => HubClient {
-                client: bundled_or_empty(diagnosis.used_store, timeout),
-                diagnosis: Some(diagnosis),
-            },
-        };
+    match remembered {
+        Some(None) => HubClient {
+            client: primary_client,
+            diagnosis: None,
+        },
+        Some(Some(diagnosis)) => HubClient {
+            client: bundled_or_empty(diagnosis.used_store, timeout, redirects),
+            diagnosis: Some(diagnosis),
+        },
+        // Nothing remembered for THIS name. A verdict belongs to the name it was
+        // formed against, so a device moved to an alias starts here — which is
+        // exactly what must happen on the network this fallback exists for.
+        None => probe_and_choose(hub, primary, primary_client, timeout, redirects).await,
     }
+}
 
+/// Runs the store probe for a hub nobody has asked about yet in this process.
+///
+/// Split out of [`client_with`] because the decision tree there was over the
+/// complexity budget, and because this half is the part with a rule in it:
+///
+/// **A probe that fails for a reason other than certificates must not be reported
+/// as success.** It used to ignore the response status entirely, so a `404` — a
+/// filter answering in the hub's place, or a hub whose route is absent — read as
+/// "this store works", and the *next* call then failed with a message about
+/// whatever the proxy returned. Only 2xx is success; a redirect or a 5xx from an
+/// appliance is an answer from something that is not this hub.
+async fn probe_and_choose(
+    hub: &str,
+    primary: RootStore,
+    primary_client: &'static reqwest::Client,
+    timeout: Timeout,
+    redirects: Redirects,
+) -> HubClient {
     let probe = format!("{hub}/api/health");
-    match primary_client.get(&probe).send().await {
-        Ok(_) => {
+    let outcome = primary_client.get(&probe).send().await;
+
+    match outcome {
+        Ok(response) if response.status().is_success() => {
             // A success is worth remembering: it means this store works here.
             remember(hub, None);
+            HubClient {
+                client: primary_client,
+                diagnosis: None,
+            }
+        }
+        Ok(response) => {
+            // Reachable, and answered by something that is not the hub's health
+            // route. Reported here rather than left for the caller to discover as
+            // an unexplained 4xx.
+            tracing::warn!(
+                target: "locus::hub",
+                status = %response.status(),
+                "the hub probe for {hub} was answered by something other than the hub's health \
+                 route — a filter or a misrouted request is the usual cause"
+            );
             HubClient {
                 client: primary_client,
                 diagnosis: None,
@@ -452,7 +666,7 @@ pub async fn client(hub: &str, timeout: Timeout) -> HubClient {
             };
             remember(hub, Some(diagnosis.clone()));
             HubClient {
-                client: bundled_or_empty(secondary, timeout),
+                client: bundled_or_empty(secondary, timeout, redirects),
                 diagnosis: Some(diagnosis),
             }
         }
@@ -469,8 +683,8 @@ fn remember(hub: &str, verdict: Option<Diagnosis>) {
 ///
 /// Returning *something* matters: a hub call that panics on a builder failure
 /// takes the activation screen down with it.
-fn bundled_or_empty(store: RootStore, timeout: Timeout) -> &'static reqwest::Client {
-    client_for(store, timeout).unwrap_or_else(|error| {
+fn bundled_or_empty(store: RootStore, timeout: Timeout, redirects: Redirects) -> &'static reqwest::Client {
+    client_for(store, timeout, redirects).unwrap_or_else(|error| {
         tracing::error!("locus hub client ({store:?}): {error:#}; falling back to a bare client");
         emergency_client()
     })
@@ -497,7 +711,7 @@ pub async fn diagnose(hub: &str) -> Result<Diagnosis> {
     let probe = format!("{hub}/api/health");
 
     let primary = RootStore::primary();
-    let client = client_for(primary, Timeout::Activation)?;
+    let client = client_for(primary, Timeout::Activation, Redirects::Follow)?;
     match client.get(&probe).send().await {
         Ok(_) => anyhow::bail!(
             "{} verified the hub at {hub}, so a certificate failure there is not a root-store problem",
@@ -541,7 +755,13 @@ mod tests {
     #[test]
     fn only_a_certificate_failure_swaps_the_root_store() {
         assert!(Failure::Certificate.retryable_with_other_roots());
-        for failure in [Failure::Transport, Failure::Protocol, Failure::Response] {
+        for failure in [
+            Failure::Dns,
+            Failure::Refused,
+            Failure::Transport,
+            Failure::Protocol,
+            Failure::Response,
+        ] {
             assert!(
                 !failure.retryable_with_other_roots(),
                 "{failure:?} must not be retried with different roots: the roots cannot change it"
@@ -553,6 +773,129 @@ mod tests {
     fn a_certificate_failure_offers_a_remedy_and_a_transport_one_does_not() {
         assert!(Failure::Certificate.remedy().is_some());
         assert!(Failure::Transport.remedy().is_none());
+    }
+
+    /// A name that does not resolve is its own outcome, and it has a remedy.
+    ///
+    /// This is the defect the school-network report named. `Dns` used to be
+    /// folded into `Transport`, whose remedy is `None` — so the student saw
+    /// "could not reach the Locus hub at …: error sending request for url (…)"
+    /// and nothing else, with no way to learn that the name had not resolved.
+    ///
+    /// FALSIFIED before keeping: removing the `Dns` arm from `remedy()` makes the
+    /// first assertion fail, and removing the `is_name_resolution` check from
+    /// `classify` makes the last one fail.
+    #[test]
+    fn a_name_that_does_not_resolve_is_named_and_has_a_remedy() {
+        let remedy = Failure::Dns.remedy().expect("a DNS failure must have a remedy");
+        let lowered = remedy.to_lowercase();
+        assert!(
+            lowered.contains("look up") || lowered.contains("dns"),
+            "must say the name did not resolve, got {remedy:?}"
+        );
+        assert!(
+            lowered.contains("network"),
+            "must name the network as the usual cause, got {remedy:?}"
+        );
+        assert!(
+            !lowered.contains("activation tunnel"),
+            "must not promise the tunnel: the tunnel is dialled by the same name, got {remedy:?}"
+        );
+        assert!(
+            !Failure::Dns.retryable_over_tunnel(),
+            "a resolver that answers nothing answers nothing for the tunnel either"
+        );
+    }
+
+    /// A refusal is distinct from a drop, and from DNS.
+    #[test]
+    fn a_refusal_is_its_own_outcome_with_its_own_sentence() {
+        let remedy = Failure::Refused.remedy().expect("a refusal must have a remedy");
+        assert!(
+            remedy.to_lowercase().contains("nothing there accepted"),
+            "must say the address was found and refused, got {remedy:?}"
+        );
+        assert_ne!(
+            Failure::Refused.remedy(),
+            Failure::Dns.remedy(),
+            "the two causes need different sentences: one is the network, one is the hub"
+        );
+    }
+
+    /// **The 2026-11-06 field report, as a rule.**
+    ///
+    /// A school network blocked the hub by name-reputation, and the client's one
+    /// transport for that case was attempted only on a reset. The appliance can
+    /// equally answer by refusing (it terminated the flow before the hub did), and
+    /// on that day it did — so the bootstrap tunnel, which was reachable, was never
+    /// dialled and the student could not enrol.
+    ///
+    /// FALSIFIED before keeping: reverting `retryable_over_tunnel` to
+    /// `matches!(self, Self::ResetDuringHandshake)` fails on the first assertion,
+    /// and so does removing `Refused` from the set while leaving the sentence in
+    /// place. The sentence is asserted too, because a remediation path nobody is
+    /// told about is the same bug wearing a different hat.
+    #[test]
+    fn a_refusal_must_reach_the_activation_tunnel() {
+        assert!(
+            Failure::Refused.retryable_over_tunnel(),
+            "a filter that tears the flow down reaches the client as a reset OR a \
+             refusal depending on how far it got; excluding either strands the student"
+        );
+        assert!(
+            Failure::ResetDuringHandshake.retryable_over_tunnel(),
+            "the reset case must stay — it is the one that was measured"
+        );
+        for not_retryable in [
+            Failure::Dns,
+            Failure::Certificate,
+            Failure::Protocol,
+            Failure::Transport,
+            Failure::Response,
+        ] {
+            assert!(
+                !not_retryable.retryable_over_tunnel(),
+                "{not_retryable:?} must not spawn an engine: a different transport cannot \
+                 change it, and on a heartbeat loop that would be one spawn per beat"
+            );
+        }
+
+        let remedy = Failure::Refused
+            .remedy()
+            .expect("a refusal a filter caused must have a remedy")
+            .to_lowercase();
+        assert!(
+            remedy.contains("activation tunnel"),
+            "the refusal sentence must name the retry, or the student is told nothing \
+             happened when one did: {remedy:?}"
+        );
+    }
+
+    /// The classification is walked from the chain, so these build real ones.
+    ///
+    /// `io::ErrorKind` is what the code reads, so the test injects kinds — not
+    /// message strings — exactly as `is_name_resolution` and the reset check do.
+    /// A test that matched text here would pass while the shipped classifier read
+    /// kinds, which is the failure mode this repository has paid for before.
+    #[test]
+    fn io_kinds_in_the_chain_decide_between_dns_and_refusal() {
+        use std::io::ErrorKind;
+
+        for kind in [ErrorKind::NotFound, ErrorKind::HostUnreachable] {
+            assert!(is_name_resolution(kind), "{kind:?} must be read as a naming failure");
+        }
+        for kind in [
+            ErrorKind::ConnectionRefused,
+            ErrorKind::ConnectionReset,
+            ErrorKind::TimedOut,
+            ErrorKind::Other,
+        ] {
+            assert!(
+                !is_name_resolution(kind),
+                "{kind:?} must NOT be read as a naming failure: it would tell a student \
+                 their DNS is filtering when the hub refused or the link dropped"
+            );
+        }
     }
 
     #[test]
@@ -609,11 +952,11 @@ mod tests {
         // fallback exists to fix: it takes the activation screen down. Building
         // both clients is the cheap, network-free proof it cannot recur.
         assert!(
-            platform_client(Timeout::Activation).is_ok(),
+            platform_client(Timeout::Activation, Redirects::Follow).is_ok(),
             "the platform client must build"
         );
         assert!(
-            bundled_roots_client(Timeout::Activation).is_ok(),
+            bundled_roots_client(Timeout::Activation, Redirects::Follow).is_ok(),
             "the bundled-roots fallback must build, not panic"
         );
     }
@@ -634,7 +977,8 @@ mod live_tests {
     #[tokio::test]
     #[ignore = "needs network access to the live hub"]
     async fn the_bundled_roots_verify_the_live_hub() {
-        let client = bundled_roots_client(Timeout::Activation).expect("the bundled-roots client must build");
+        let client =
+            bundled_roots_client(Timeout::Activation, Redirects::Follow).expect("the bundled-roots client must build");
         let response = client
             .get("https://networkingguides.jadedns.uk/api/health")
             .send()
@@ -647,7 +991,7 @@ mod live_tests {
     #[tokio::test]
     #[ignore = "needs network access to the live hub"]
     async fn the_platform_store_also_verifies_the_live_hub() {
-        let client = platform_client(Timeout::Activation).expect("the platform client must build");
+        let client = platform_client(Timeout::Activation, Redirects::Follow).expect("the platform client must build");
         let response = client
             .get("https://networkingguides.jadedns.uk/api/health")
             .send()

@@ -176,6 +176,48 @@ routerAdd("GET", "/api/update", function(e) {
             return noUpdate();
         }
 
+        // ── Serve the artifact from the name THIS client can reach ──
+        //
+        // The stored `download_<platform>` is an absolute URL built at publish
+        // time from the hub's canonical name (`releases.publish` → `base_url`).
+        // On a network that blocks that name by reputation, that URL is exactly
+        // what the client CANNOT fetch — so advertising it makes the update path
+        // fail at the one moment it is the only way out, and the device cannot
+        // fetch the build that would fix it.
+        //
+        // A device already on an alias beat this endpoint on that alias's host
+        // (see `record_hub_override`), so rewriting the origin to the host the
+        // request actually arrived on turns the offer into a fetchable one without
+        // touching the stored row or the canonical name other clients still use.
+        //
+        // Narrow on purpose: only the ORIGIN is replaced, and only when the path
+        // is the stored `/updates/<version>/<file>` shape. Anything else (a
+        // foreign host in the row, a hand-edited path) is left alone and would
+        // still be refused by the client's own check.
+        // READ IT THE WAY EVERY OTHER HOOK READS A HEADER. `e.request().host` is
+        // the Go struct's field and is NOT visible through the goja bridge: the
+        // documented (and probed) accessor is `$apis.requestInfo(e).headers`, where
+        // each name has its `-` replaced by `_` and is lower-cased — so `Host`
+        // arrives as `host`. `admin_console.pb.js` records the same trap for
+        // `X-Admin-Token` and paid for it with a path that had never authenticated.
+        // Checked here by evaluating this block against both shapes.
+        var offerHost = "";
+        try {
+            var reqHeaders = $apis.requestInfo(e).headers || {};
+            var rawHost = reqHeaders["host"] || reqHeaders["Host"] || reqHeaders["HOST"] || "";
+            // A `Host` may carry a port (`name:8443`); the artifact URL is built
+            // from the origin, and the hub serves /updates on 443.
+            offerHost = String(rawHost).trim().split(":")[0];
+        } catch (hErr) {
+            offerHost = "";
+        }
+        if (offerHost && url.indexOf("/updates/") !== -1) {
+            // Keep the scheme the row already documents; only the authority moves.
+            var scheme = url.substring(0, url.indexOf("://") + 3) || "https://";
+            var cutoff = url.indexOf("/updates/");
+            url = scheme + offerHost + url.substring(cutoff);
+        }
+
         // The shape the plugin's `check()` parses: a dynamic release object.
         //
         // `portable`/`notes` are omitted: the plugin does not require them, and

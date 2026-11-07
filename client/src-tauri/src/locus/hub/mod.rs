@@ -51,5 +51,7 @@
 mod client;
 mod roots;
 
-pub use client::{Diagnosis, Failure, HubClient, Timeout, client, diagnose, ensure_hub_url};
+pub use client::{
+    Diagnosis, Failure, HubClient, Redirects, Timeout, client, client_refusing_redirects, diagnose, ensure_hub_url,
+};
 pub use roots::RootStore;

@@ -108,12 +108,34 @@ impl PendingInstall {
         let url = url::Url::parse(&endpoint)
             .with_context(|| format!("the update endpoint is not a valid URL: {endpoint}"))?;
 
+        // ── The check must obey the same rules as every other hub call ──
+        //
+        // `updater_builder()` hands the plugin a plain `reqwest` client: the OS
+        // certificate store only, the environment's proxy, and no bound on which
+        // host it will follow. That is precisely the client `locus::hub` exists
+        // to replace — on an unpatched Windows machine the OS store cannot verify
+        // the hub's chain, so the update check fails for a certificate that is
+        // valid for months, and the update path is the one route a stranded
+        // device has.
+        //
+        // So the builder is overridden: no proxy (the hub is dialled directly —
+        // routing it through the tunnel would make the update depend on the thing
+        // it repairs), and a 2xx-with-JSON is the only acceptable answer. A
+        // redirect is NOT followed: on a network that filters the hub by name the
+        // redirect target is usually the blocked name, and following it turns a
+        // refusal we could report into an opaque timeout.
         let updater = app
             .updater_builder()
             // Replace the configured endpoint list entirely: nothing should ever
             // consult a static manifest.
             .endpoints(vec![url])
             .context("the update endpoint was rejected")?
+            .configure_client(|builder| {
+                builder
+                    .no_proxy()
+                    .redirect(reqwest::redirect::Policy::none())
+                    .timeout(crate::locus::hub::Timeout::Activation.seconds_public())
+            })
             .build()
             .context("could not build the updater")?;
 
@@ -132,6 +154,20 @@ impl PendingInstall {
         // catching it here turns an opaque installer error into a clear state.
         if update.signature.trim().is_empty() {
             logging_rejection("the hub offered an update with no signature");
+            return Ok(None);
+        }
+
+        // The offer's own URL is what `download_to_file` will fetch, and it must
+        // be a Locus hub — see `signal::OfferHosts` for why the set is the dialled
+        // hub plus the compiled-in name rather than one string.
+        let hosts = crate::locus::update::signal::OfferHosts::for_hub(hub_url);
+        if !hosts.permits(update.download_url.as_str()) {
+            logging_rejection(&format!(
+                "the hub offered an artifact from a host that is not the Locus hub \
+                 ({}): {}",
+                hosts.describe(),
+                update.download_url
+            ));
             return Ok(None);
         }
 

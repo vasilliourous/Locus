@@ -336,6 +336,104 @@ pub fn decode_public_manifest(manifest: &serde_json::Value, platform: Platform) 
 /// The tier config's server, exposed so callers do not need a second import.
 pub type Tier = TierConfig;
 
+/// Which offer URLs this device is willing to download from.
+///
+/// # Why an allowlist rather than "trust the hub"
+///
+/// The offer's `url` is fetched by the updater, and the artifact it returns is
+/// then **verified by signature** — so a hostile URL cannot install bad code.
+/// It can still make the device download 60 MB from an attacker's host, so the
+/// set is bounded anyway.
+///
+/// # The bug this closes
+///
+/// The bound used to be "the host the offer names must match `hub_url()`". On a
+/// network that blocks the hub's canonical name, that is unsatisfiable: the
+/// stored `download_*` URLs are built from the canonical name at publish time,
+/// so the one time the update path matters most, every offer was refused. The
+/// alias the operator sets to escape that block could not fix downloads, which
+/// is the whole reason this exists.
+///
+/// So the set is: the hub this run dials, **and** the one compiled-in hub name if
+/// they differ. A device moved by an alias accepts artifacts from either — which
+/// is what makes the move usable — and from nowhere else.
+#[derive(Debug, Clone)]
+pub struct OfferHosts {
+    /// Hosts an artifact may be downloaded from, lower-cased.
+    allowed: Vec<String>,
+}
+
+impl OfferHosts {
+    /// Build from the hub this run dials.
+    ///
+    /// `hub` is `contract::hub_url()`, so a stored override is already resolved
+    /// into it. [`crate::locus::contract::HUB_URL`] is added as well — a hub that
+    /// advertises its canonical name is not an attack. [`LEGACY_HUB_URL`] is also
+    /// added, and that is not tidiness: the update record's `download_*` columns
+    /// were published pointing at the legacy name (measured 2026-11-06:
+    /// `/api/release` and `/api/update` both returned
+    /// `…duckdns.org/updates/3.3.5/…` while the client dialled the canonical
+    /// `…jadedns.uk`). Without the legacy name in the set, a device on the
+    /// canonical name refuses the very artifact the hub is offering it — the
+    /// update path failing on an uncensored network too.
+    ///
+    /// [`LEGACY_HUB_URL`]: crate::locus::contract::LEGACY_HUB_URL
+    #[must_use]
+    pub fn for_hub(hub: &str) -> Self {
+        let mut allowed = Vec::with_capacity(3);
+        for candidate in [
+            hub,
+            crate::locus::contract::HUB_URL,
+            crate::locus::contract::LEGACY_HUB_URL,
+        ] {
+            if let Some(host) = host_of(candidate) {
+                let lowered = host.to_ascii_lowercase();
+                if !allowed.contains(&lowered) {
+                    allowed.push(lowered);
+                }
+            }
+        }
+        Self { allowed }
+    }
+
+    /// Whether an offer URL may be fetched.
+    ///
+    /// Absolute `https` only, and only from an allowed host. A `http://` offer is
+    /// refused rather than upgraded: the signature still protects the bytes, but
+    /// a plaintext channel to fetch them from is a downgrade nobody asked for.
+    #[must_use]
+    pub fn permits(&self, url: &str) -> bool {
+        let Some(rest) = url.strip_prefix("https://") else {
+            return false;
+        };
+        let authority = rest.split(['/', '?', '#']).next().unwrap_or_default();
+        let host = authority.rsplit('@').next().unwrap_or(authority);
+        let host = match host.rfind(':') {
+            // A port is fine; the scheme and host are what is being checked.
+            Some(index) if !host[index + 1..].is_empty() && host[index + 1..].bytes().all(|b| b.is_ascii_digit()) => {
+                &host[..index]
+            }
+            _ => host,
+        };
+        let host = host.trim_end_matches('.').to_ascii_lowercase();
+        !host.is_empty() && self.allowed.contains(&host)
+    }
+
+    /// The allowed hosts, for a log line that names what was refused against.
+    #[must_use]
+    pub fn describe(&self) -> String {
+        self.allowed.join(" or ")
+    }
+}
+
+/// The host of an absolute URL, if it has one.
+fn host_of(url: &str) -> Option<String> {
+    let (_, rest) = url.split_once("://")?;
+    let authority = rest.split(['/', '?', '#']).next()?;
+    let host = authority.rsplit('@').next()?.split(':').next()?;
+    (!host.is_empty()).then(|| host.to_owned())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -628,6 +726,65 @@ mod tests {
         for rejection in rejections {
             let text = rejection.describe();
             assert!(!text.is_empty(), "{rejection:?} produced an empty description");
+        }
+    }
+
+    /// **The 2026-11-06 field report, as a rule.** The update the hub offers is
+    /// published against the canonical name; the device that needs it is dialling
+    /// an alias because the canonical name is blocked. An origin comparison
+    /// against ONE string refuses exactly the offer that matters, and the student
+    /// cannot fetch the build that would fix them.
+    ///
+    /// FALSIFIED before keeping: making `for_hub` record only its `hub` argument
+    /// (dropping `HUB_URL`) fails the first case; relaxing `permits` to accept any
+    /// `https` host fails `refuses_everything_else`.
+    #[test]
+    fn an_artefact_may_come_from_the_dialled_hub_or_the_compiled_one() {
+        let alias = "https://vpn.example.org";
+        let hosts = OfferHosts::for_hub(alias);
+
+        assert!(
+            hosts.permits("https://vpn.example.org/updates/3.3.5/locus-linux-amd64"),
+            "the name this session dials must be accepted, or a device moved to an \
+             alias could never download"
+        );
+        assert!(
+            hosts.permits("https://networkingguides.duckdns.org/updates/3.3.5/locus-linux-amd64"),
+            "the legacy hub name must be accepted: the published update record points at it, \
+             so refusing it fails the update path on every network, not just a blocked one"
+        );
+        assert!(
+            hosts.permits(&format!(
+                "{}/updates/3.3.5/locus-linux-amd64",
+                crate::locus::contract::HUB_URL
+            )),
+            "the compiled-in hub must always be acceptable"
+        );
+
+        // Case and a port are not a different hub.
+        assert!(hosts.permits("https://VPN.example.org:443/updates/3.3.5/x"));
+    }
+
+    /// The bound must still be a bound. Anything else — another scheme, another
+    /// host, a look-alike suffix — is refused.
+    #[test]
+    fn refuses_everything_else() {
+        let hosts = OfferHosts::for_hub("https://vpn.example.org");
+
+        for refused in [
+            // Plaintext for an artifact is a downgrade nobody asked for.
+            "http://vpn.example.org/updates/3.3.5/x",
+            // A different host entirely.
+            "https://evil.example/updates/3.3.5/x",
+            // A look-alike that a `contains`/`ends_with` check would have allowed.
+            "https://vpn.example.org.evil.example/updates/3.3.5/x",
+            "https://evilvpn.example.org/updates/3.3.5/x",
+            // Userinfo games: the host is what follows the `@`.
+            "https://vpn.example.org@evil.example/updates/3.3.5/x",
+            // Not absolute.
+            "/updates/3.3.5/x",
+        ] {
+            assert!(!hosts.permits(refused), "{refused} must be refused");
         }
     }
 }
