@@ -136,12 +136,33 @@ preview independently.
 
 ### Runner images are pinned, on purpose
 
-The build matrix uses `ubuntu-24.04`, `windows-2022` and `macos-14` — **not**
+The build matrix uses `ubuntu-24.04`, `windows-2022` and `macos-14-x64` — **not**
 `*-latest`. A moving label is a world claim nobody re-checks: this project already
 lost every Intel macOS run to the retirement of `macos-13` ("Waiting for a runner
 to pick up this job", for every run, while the other three platforms finished, and
 nothing automated noticed). Pinning means a retirement fails loudly. **When you bump
 a label, update this note and the comment in `client.yml`.**
+
+**Pin the architecture, not only the major version.** `macos-14` alone was not
+enough. On 2026-11-07 the bare `macos-14` label stopped resolving to the Intel
+image and began resolving to `macos-14-arm64`, which this account is not entitled
+to; every macOS job was rejected in about two seconds with zero steps run:
+
+```
+The configuration 'macos-14-arm64-us-default' is not supported
+```
+
+The tell is the billing SKU. Every macOS minute this account has ever been billed
+is `Actions macOS 3-core` (the x64 image), and no ARM macOS SKU appears — so the
+label changed meaning, not the account's rights. macOS was green on v3.3.5
+(run 41746038397, 2026-11-04) and cancelled on every run after it, **with no
+change to the workflow**: the build went red without a commit. `macos-14-x64`
+names the image, so the two macOS slices are now the other way round — `macos-arm`
+is the cross-compile and `macos-intel` is native.
+
+A cancelled macOS job that ran **zero steps** is this, not a build failure. A job
+that starts and then fails is a build failure. Read the annotations before
+changing any build step.
 
 ### Which job runs which suite
 

@@ -555,23 +555,48 @@ jobs:
             label: windows
             triple: x86_64-pc-windows-msvc
             artifact: locus-windows-amd64.exe
-          # BOTH macOS architectures build on the same ARM image.
+          # BOTH macOS SLICES BUILD ON THE x64 IMAGE, AND THE ARCH IS PINNED.
           #
           # `macos-13` was used for the Intel slice and never once started: every
           # run sat at "Waiting for a runner to pick up this job" while the other
           # three platforms finished, because GitHub is retiring the Intel macOS
-          # images. Both slices now build on the ARM image, with x86_64 added as
-          # a cross-compile target — the supported way to produce an Intel binary
-          # without an Intel machine.
+          # images. Both slices then moved to the bare `macos-14` label, with
+          # x86_64 added as a cross-compile target — the supported way to produce
+          # an Intel binary without an Intel machine.
           #
-          # `macos-14` is pinned to its major version on purpose (see above): the
-          # ARM images are the ones GitHub is actively rolling forward, so this
-          # is the label most likely to change meaning under us.
-          - os: macos-14
+          # ── 2026-11-07: THE BARE LABEL'S MEANING MOVED UNDER US ──
+          #
+          # This is the exact failure the note above predicted, and it happened.
+          # From 2026-11-07 every run's two macOS jobs were rejected in ~2 s with
+          # ZERO steps run:
+          #
+          #   The configuration 'macos-14-arm64-us-default' is not supported
+          #
+          # The bare `macos-14` label stopped resolving to the Intel image and
+          # started resolving to `macos-14-arm64` — the ARM image, which GitHub
+          # keeps as a SEPARATE image (`images/macos/macos-14-Readme.md` vs
+          # `macos-14-arm64-Readme.md`) and which this account is not entitled to.
+          # The billing history is the corroboration: every macOS minute this
+          # account has ever been billed is the `Actions macOS 3-core` SKU (the
+          # x64 image). No ARM macOS SKU appears. macOS was green on v3.3.5
+          # (run 41746038397, 2026-11-04) and cancelled on every run after it,
+          # with no change to this file — the workflow went red without a commit,
+          # which is what a MOVING TAG is for and why the pin below exists.
+          #
+          # `macos-14-x64` pins the ARCHITECTURE, not just the major version, so
+          # the label cannot drift to the other image again. The two slices now
+          # build the other way round from before: `macos-arm` is the CROSS
+          # (aarch64 on an x64 host) and `macos-intel` is native. Both triples are
+          # installed by `targets: ${{ matrix.triple }}`, so that swap needs no
+          # other change here.
+          #
+          # WHEN PINNING: update these labels AND the note in docs/operate/CI-CD.md,
+          # and check the arch suffix still names an image that exists.
+          - os: macos-14-x64
             label: macos-intel
             triple: x86_64-apple-darwin
             artifact: locus-darwin-amd64
-          - os: macos-14
+          - os: macos-14-x64
             label: macos-arm
             triple: aarch64-apple-darwin
             artifact: locus-darwin-arm64
@@ -609,8 +634,8 @@ jobs:
           # The Cargo workspace root is client/, not client/src-tauri/ — the
           # cache would key on the wrong directory otherwise.
           workspaces: client
-          # Per-platform cache keys. The Intel macOS slice is a CROSS-compile
-          # (x86_64 target on an arm64 runner) and the cache keys on the target
+          # Per-platform cache keys. The ARM macOS slice is a CROSS-compile
+          # (aarch64 target on an x64 runner) and the cache keys on the target
           # triple, so `macos-intel` and `macos-arm` can never share an entry —
           # each is an independent compile of all 916 packages. Naming the key
           # per label at least keeps them from evicting each other.
@@ -637,8 +662,9 @@ jobs:
           # and is the cheapest thing to drop.
           cache-targets: true
           # FOUR caches is the problem, one per platform — and macos-intel /
-          # macos-arm are independent cross/target compiles, so `key` per label is
-          # what stops them evicting each other. That is also why the total is
+          # macos-arm are independent compiles at different triples (arm64 is the
+          # cross, since 2026-11-07), so `key` per label is what stops them
+          # evicting each other. That is also why the total is
           # ~4x a single platform's cache.
           cache-on-failure: true
 
