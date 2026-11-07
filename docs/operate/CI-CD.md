@@ -177,13 +177,13 @@ configurations this repository may claim.
 run without them produces nothing publishable.
 
 A macOS job cancelled after roughly two seconds with **zero steps** is this, not a
-build failure. A job that starts and then fails is a build failure. A macOS job
-that sits **queued indefinitely** is a label that names no image. Read the job's
+build failure. A macOS job that sits **queued indefinitely** is a label that names
+a configuration GitHub will not hand out for that label — `macos-14-x64`, tried on
+2026-11-07, is exactly that: not an image name, so the job waits instead of
+failing. A job that starts and then fails is a build failure. Read the job's
 annotations before touching any build step.
 
-A cancelled macOS job that ran **zero steps** is this, not a build failure. A job
-that starts and then fails is a build failure. Read the annotations before
-changing any build step.
+The register entry is A22 in [`CLAIMS.md`](CLAIMS.md) §5.
 
 ### Which job runs which suite
 
@@ -192,7 +192,7 @@ Two jobs, two suites, and they are not interchangeable:
 | Job | Runs | Notes |
 |---|---|---|
 | `verify` | `check-consistency.sh`, the tag/version check, `pnpm run web:build`, `pnpm run lint`, `pnpm test`, `test-contract-guard.sh` | **Frontend and docs only.** No Rust is compiled here. |
-| `build` (linux only) | installs `sing-box`, then `cargo test --all-targets`, `cargo clippy --all-targets --features clippy -- -D warnings` | See "The Rust suite cannot skip" below |
+| `build` (linux only) | installs `sing-box` and `shadowsocks-rust`, then `cargo test --all-targets --profile fast-release` on a branch (no `--profile` on a tag), `cargo clippy`, doc-tests, `cargo fmt --check` | See "The Rust suite cannot skip" and "The same profile, or two full compiles" below |
 | `build` (all four) | the platform build, signing and packaging | |
 
 The Rust half was added 2026-09-29 because it existed and passed locally while
@@ -257,6 +257,60 @@ executables the updater consumes. The workflow copies the compiled binary
 **Why a partial release is impossible:** `manifest.json` generation fails if any
 binary or signature is missing, and a second check verifies every
 `locus-*` artifact has a `.sig` before the release is created.
+
+### The same profile, or two full compiles — and a cache key that was never reusable
+
+**Added 2026-11-07.** A run took 39 minutes and the Linux job was 29 of them.
+Both causes were in the log rather than in argument; the numbers below are from
+runs `42346173855` (before) and `42416704701` (after).
+
+**Cause 1 — `cargo test` ran in a different profile from `cargo build`.** The
+comment above the test step used to claim the tests "reuse the target directory
+`tauri build` just populated, so the compile is largely already done". They did
+not, and never had. The `Build` step compiles into
+`target/<triple>/fast-release`; `cargo test` with no `--profile` compiles into
+`target/debug`. Those two share no artifacts, so the whole dependency tree was
+compiled **twice**: ~630 crates on `Build`, ~660 more on the tests.
+
+The tests now pass `--profile fast-release` on a branch build — the same profile
+`Build` used — so the tree is compiled once. That profile is not an optimised one
+being asked to behave like a debug one: `Cargo.toml` sets `debug = true` and
+`opt-level = 0` for it, so assertions, backtraces and `debug_assert!` still work.
+A **tag** build uses `release`, so the tests there run without `--profile` and
+compile their own; that path is unchanged and deliberately so.
+
+**Cause 2 — the cache was keyed on the GitHub job id.**
+`Swatinem/rust-cache` has `add-job-id-key` defaulting to **true**, and a job id is
+unique per run. So the key a run *saves* under can never be the key the next run
+*looks up*. The action still logs `Cache restored successfully … full match:
+true`, because it falls back to an older entry with the same prefix — and Rust
+then **ignores that restored `target/`**, since the fingerprints inside it do not
+match this build. A cache that is restored but never reused is worse than no
+cache: it spends the download and buys nothing.
+
+The workflow now sets `add-job-id-key: false` with an explicit
+`shared-key: locus-${{ matrix.triple }}`. It stays per-triple because
+`macos-intel` and `macos-arm` are independent compiles and would evict each other.
+
+**Measured effect.** The first run after the change is cold — a new key has
+nothing to restore — so the second run is the measurement:
+
+| Step | Before | After (warm) |
+|---|---|---|
+| Whole run | 39 min | **21 min** |
+| `Build` (linux step) | 29 m 07 s | **16 m 28 s** |
+| `Rust tests` | 304 s | **67 s** |
+| `Rust lints` | 96 s | 11 s |
+| Linux Rust cache | 174 MB | **3,108 MB** |
+
+180 MB of that before-figure was the *entire* Linux cache, against 1337 MB for
+Windows on the same action and settings — the size difference alone was the
+tell that one platform's cache was never holding a usable tree.
+
+**The trap to remember.** A restored-but-unused cache and a genuinely warm cache
+are indistinguishable from the action's own log line; both say the restore
+succeeded. The difference is visible only in how many crates compile. If a run is
+slow, count `Compiling` lines before blaming the build.
 
 ### The Rust suite cannot skip, and that is enforced from outside the tests
 

@@ -24,6 +24,61 @@ commercial gaps, [`../business/17-not-built.md`](../business/17-not-built.md).
 
 ---
 
+## THREE THINGS THAT MADE CI SLOW, FLAKY, OR SILENT (2026-11-07, unreleased)
+
+Found while getting the pipeline green before a release. None of these is a
+product defect; all three made CI lie about the code, which is the same thing
+from the seat of whoever reads a red run.
+
+**1. The Rust cache was keyed on the GitHub job id, so it was never reused.**
+`Swatinem/rust-cache`'s `add-job-id-key` defaults to **true**. A job id is unique
+per run, so the key a run *saved* under could never be the key the next run
+*looked up*. The action still reported `Cache restored successfully … full match:
+true` by falling back to an older entry, and Rust then ignored the restored
+`target/` because the fingerprints did not match. **Restored-but-unused is worse
+than no cache**: it spends the download and buys nothing. Every run compiled the
+dependency tree from scratch. Fixed with `add-job-id-key: false` and an explicit
+`shared-key` per triple; the Linux cache went from 174 MB to 3,108 MB.
+
+*The rule:* a cache's own success line does not mean the artifacts were used.
+Count `Compiling` lines. See [`../operate/CI-CD.md`](../operate/CI-CD.md).
+
+**2. The tests compiled in a different profile from the build.**
+The comment above the test step claimed they "reuse the target directory `tauri
+build` just populated, so the compile is largely already done." False, and
+always had been: `Build` writes `target/<triple>/fast-release`, bare
+`cargo test` writes `target/debug`, and those share nothing. ~660 crates were
+compiled a second time on every run. The tests now pass the same `--profile` the
+build used. **Combined with (1), the whole run went from 39 minutes to 21**, and
+the Linux `Build` step from 29 m 07 s to 16 m 28 s.
+
+*The rule:* a comment that explains why something is cheap is a claim about
+timing, and timing is measurable. Measure it before repeating it.
+
+**3. `a_warm_engine_is_reused_…` was flaky, and had been.**
+It arranged the process-wide `tunnel_slot()` and asserted on it, while
+`a_stale_engine_is_not_reused` called `drop_warm_engine()` on the same static.
+Cargo runs tests in parallel by default, so one test could clear the slot between
+another's setup and its assertion — `a warm engine must be handed back`. Measured
+at **9 failures in 15 runs** without a guard. Both tests now take an async mutex
+(`tokio::sync::Mutex`, because the guard is held across `.await`; a blocking
+guard is rejected by `await_holding_lock`). **0 failures in 15 runs** with it.
+
+*The rule:* a test that mutates a process-wide static and a test that clears it
+must be serialised, or the suite is a coin toss. Found only because an unrelated
+profile change made it fail more often — a flake is not evidence the *change*
+broke something until it is reproduced on the old code.
+
+**Also closed here — a port reservation that reserved nothing.** `free_port()` in
+`tunnel_end_to_end.rs` bound port 0, read the number, and dropped the listener,
+leaving the port free but *unreserved*. Three consecutive calls returned the same
+port twice in about 1 of 1000 triples (measured), and another starting test could
+take the port in the gap. It surfaced as `connect to the mixed port: Connection
+refused`, which reads as a broken tunnel. Each port is now held until the process
+that binds it starts.
+
+---
+
 ## FOUR DEFECTS THAT MADE THE DEPLOY EITHER LIE OR DIE (2026-11-07, unreleased)
 
 A hub was rebuilt from a blank slate to deploy the school-network fix. All four
