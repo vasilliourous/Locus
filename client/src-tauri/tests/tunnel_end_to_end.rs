@@ -205,12 +205,39 @@ impl Drop for Guard {
     }
 }
 
-fn free_port() -> u16 {
-    TcpListener::bind("127.0.0.1:0")
-        .expect("bind probe")
-        .local_addr()
-        .expect("local addr")
-        .port()
+/// A port, and the listener that is still holding it.
+///
+/// `free_port()` used to bind port 0, read the number and drop the listener, so
+/// the port was free but *unreserved* — nothing stopped it being handed out
+/// again. It was the same defect that made the shared scratch directory fail:
+/// fine alone, racy in parallel. Three calls in a row could return the same port
+/// twice (about 1 in 1000 triples, measured), and another concurrently starting
+/// test could take it in the gap before `sing-box` bound it. The visible symptom
+/// is `connect to the mixed port: Connection refused`, which reads as a broken
+/// tunnel and is really a test that never got its own port.
+///
+/// The listener is kept, so the port cannot be reissued, and released by
+/// [`ReservedPort::release`] immediately before the child that needs it starts.
+struct ReservedPort {
+    listener: Option<TcpListener>,
+    port: u16,
+}
+
+impl ReservedPort {
+    fn new() -> Self {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind probe");
+        let port = listener.local_addr().expect("local addr").port();
+        Self {
+            listener: Some(listener),
+            port,
+        }
+    }
+
+    /// Give the port up, so the engine or listener can bind it. Dropping the
+    /// holder is the only way to free it, so this is `&mut self` and idempotent.
+    fn release(&mut self) {
+        self.listener = None;
+    }
 }
 
 fn wait_for<F: Fn() -> bool>(what: &str, within: Duration, ready: F) {
@@ -347,14 +374,24 @@ fn start(label: &str, engine: &Path, sing: &Path) -> Harness {
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).expect("create the harness directory");
 
-    let ss_port = free_port();
-    let controller_port = free_port();
-    let mixed_port = free_port();
+    let mut ss_reserved = ReservedPort::new();
+    let mut controller_reserved = ReservedPort::new();
+    let mut mixed_reserved = ReservedPort::new();
+    let ss_port = ss_reserved.port;
+    let controller_port = controller_reserved.port;
+    let mixed_port = mixed_reserved.port;
 
     let server_path = dir.join("server.json");
     std::fs::write(&server_path, server_json(ss_port)).expect("write server config");
     let client_path = dir.join("client.yaml");
     std::fs::write(&client_path, client_yaml(ss_port, controller_port, mixed_port)).expect("write client config");
+
+    // Released one at a time, each immediately before the process that binds it.
+    // Every port above was held while the harness was being written, so no other
+    // concurrently starting test could take one in the gap. Releasing all three
+    // here instead would widen the window for the two mihomo binds below to a
+    // whole sing-box startup.
+    ss_reserved.release();
 
     // sing-box first: its listener must exist before the client dials it.
     let server_log_path = dir.join("server.log");
@@ -378,6 +415,9 @@ fn start(label: &str, engine: &Path, sing: &Path) -> Harness {
     let client_log = dir.join("client.log");
     let out = std::fs::File::create(&client_log).expect("create client log");
     let err = out.try_clone().expect("clone client log");
+    // mihomo binds these two, so they are given up here and not a moment sooner.
+    controller_reserved.release();
+    mixed_reserved.release();
     let _mihomo = Guard(
         Command::new(engine)
             .arg("-d")
