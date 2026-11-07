@@ -150,6 +150,39 @@ pub async fn hub_url() -> String {
     resolve_hub_url(stored.as_deref())
 }
 
+/// The host the **bootstrap** Shadowsocks listener is dialled at.
+///
+/// The activation tunnel's outbound needs a `server` to connect to, and it is a
+/// name rather than an address on purpose: a Shadowsocks stream carries no
+/// hostname to the filter, and resolving this one is the only step a filtering
+/// network still gets a say in. The bootstrap port is exactly the case where that
+/// say does not matter — the block is a name-reputation decision about the
+/// **hub's** name, made on a handshake this outbound never performs.
+///
+/// It is NOT a constant: a device the operator has moved to an alias must dial the
+/// bootstrap listener at the name it can reach, or the escape hatch is only half a
+/// hatch. A port may be embedded in an alias (`https://name:8443`) and is dropped
+/// here — the bootstrap listener has its own port, and `server` takes a host.
+///
+/// The host of [`HUB_URL`] when nothing is overridden, so a default build keeps
+/// the value every deployed client has always used.
+#[must_use]
+pub async fn ss_hub() -> String {
+    let hub = hub_url().await;
+    url::Url::parse(&hub)
+        .ok()
+        .and_then(|parsed| parsed.host_str().map(str::to_owned))
+        // Unreachable for a value that came through `resolve_hub_url`, which
+        // refuses anything without a host. Falling back to the compiled default
+        // rather than panicking, because this must never be fatal.
+        .or_else(|| {
+            url::Url::parse(HUB_URL)
+                .ok()
+                .and_then(|parsed| parsed.host_str().map(str::to_owned))
+        })
+        .unwrap_or_default()
+}
+
 /// Request body for `/api/activate` and `/api/code-lookup`.
 ///
 /// `verifier`, `device_id` and `store` are the device's **durable identity**,

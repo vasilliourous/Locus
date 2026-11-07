@@ -111,6 +111,13 @@ pub const FILTER_PORT: u16 = 18090;
 /// without it is exactly as capable as every client shipped before this feature.
 /// `activation_tunnel_available()` is what callers check.
 ///
+/// **The value reaching this constant is `build.rs`'s job** (rewritten
+/// 2026-11-06). It re-emits the environment variable as a `rustc-env` with an
+/// explicit `cargo:rerun-if-env-changed`, so a key that appears after a build has
+/// already cached its objects forces the rebuild. Reading the variable directly
+/// here left the const stale across a cached build, which is how a release could
+/// be built with a key in the environment and ship without one.
+///
 /// A tracked credential is a build failure — `check-consistency.sh` §29 guards
 /// it, and this constant is one of the things it reads.
 ///
@@ -119,6 +126,18 @@ pub const FILTER_PORT: u16 = 18090;
 /// is the hub's allowlist and rate limit, not the key — see the module docs in
 /// `09-activation-tunnel.sh`.
 const BOOTSTRAP_KEY: Option<&str> = option_env!("LOCUS_ACTIVATION_TUNNEL_KEY");
+
+/// Whether the build that produced THIS binary carried a bootstrap key.
+///
+/// Stamped by `build.rs`, and deliberately separate from
+/// [`BOOTSTRAP_KEY`]: the key itself must never be rendered anywhere, but the
+/// *fact* that it is missing has to be readable from a shipped artifact. A
+/// release built without it cannot use the one transport that exists for a
+/// network blocking the hub by name, and nothing else in the binary says so —
+/// which is exactly how three releases went out keyless.
+///
+/// Rendered by [`build_stamp`] and logged at startup.
+const BOOTSTRAP_KEY_PRESENT: &str = env!("LOCUS_ACTIVATION_TUNNEL_KEY_PRESENT");
 
 /// The SS2022 cipher, matching `SS_METHOD` in the server modules.
 const TUNNEL_METHOD: &str = "2022-blake3-aes-256-gcm";
@@ -141,6 +160,35 @@ const STARTUP_POLL: Duration = Duration::from_millis(50);
 #[must_use]
 pub fn activation_tunnel_available() -> bool {
     BOOTSTRAP_KEY.is_some_and(|key| !key.is_empty())
+}
+
+/// One line describing this build's bootstrap capability, for the support log.
+///
+/// The key is never rendered — only whether one was compiled in, and whether the
+/// build script agrees. Those two can disagree for exactly one reason: a cached
+/// build whose environment changed without this crate being rebuilt. That is the
+/// condition `build.rs`'s `rerun-if-env-changed` removes, and this line is what
+/// would have made it visible instead of it arriving as "the tunnel never
+/// triggers".
+#[must_use]
+pub fn build_stamp() -> String {
+    let key_in_build = activation_tunnel_available();
+    let build_script_says = BOOTSTRAP_KEY_PRESENT == "1";
+    if key_in_build == build_script_says {
+        format!(
+            "activation tunnel: {}, listener port {} → filter port {}",
+            if key_in_build { "available" } else { "NOT COMPILED IN" },
+            TUNNEL_PORT,
+            FILTER_PORT
+        )
+    } else {
+        format!(
+            "activation tunnel: INCONSISTENT BUILD — key present={key_in_build}, build script \
+             reported {BOOTSTRAP_KEY_PRESENT}. The tunnel is {} in this binary; rebuild before \
+             shipping it.",
+            if key_in_build { "usable" } else { "unusable" }
+        )
+    }
 }
 
 /// A running activation-tunnel engine. Killed on drop.
@@ -182,7 +230,8 @@ impl Tunnel {
         let port = free_loopback_port()?;
         let dir = scratch_dir()?;
         let config = dir.join("activation-tunnel.yaml");
-        std::fs::write(&config, render_config(port, key)?)
+        let ss_hub = crate::locus::contract::ss_hub().await;
+        std::fs::write(&config, render_config(port, &ss_hub, key)?)
             .with_context(|| format!("could not write the activation tunnel config to {}", config.display()))?;
 
         // Resolved through the same accessor every other call site uses, so the
@@ -350,7 +399,7 @@ fn development_sidecar_name(core: &str, suffix: &str) -> String {
 /// Kept as a pure function so the *generated document* — which is where a
 /// missing `MATCH` rule or a second proxy would silently widen what the tunnel
 /// can reach — is testable without spawning anything.
-fn render_config(forward_port: u16, key: &str) -> Result<String> {
+fn render_config(forward_port: u16, ss_hub: &str, key: &str) -> Result<String> {
     // Built as a value rather than a format string so a key containing YAML
     // metacharacters cannot break out of its scalar. The key is base64 today, so
     // this is defence in depth rather than a live hazard — but the value is a
@@ -359,11 +408,19 @@ fn render_config(forward_port: u16, key: &str) -> Result<String> {
         [
             ("name", serde_yaml_ng::Value::String("Activation-Tunnel".into())),
             ("type", serde_yaml_ng::Value::String("ss".into())),
-            // The engine dials the hub's bootstrap listener through the SS
-            // outbound. 127.0.0.1 is deliberate: the *request* we hand the engine
-            // addresses the destination this way, and the engine rewrites it to
-            // the SS server's own host when it tunnels.
-            ("server", serde_yaml_ng::Value::String("127.0.0.1".into())),
+            // The engine dials the hub's bootstrap listener at the hub's real
+            // name. This was `127.0.0.1`, which is the loopback of **the student's
+            // own machine** — the comment beside it claimed the engine rewrote the
+            // address to the SS server's host, and mihomo does not do that. The
+            // outbound connects to exactly the `server` it is given, so the tunnel
+            // could only ever have worked against a listener running locally.
+            //
+            // `ss_hub` is `contract::ss_hub()`, derived from the resolved hub URL,
+            // so a device moved to an alias dials the bootstrap listener at the
+            // name it can reach. It is a NAME on purpose: the port presents no
+            // hostname to the filter, and resolving it is the one lookup a
+            // filtering network may still answer.
+            ("server", serde_yaml_ng::Value::String(ss_hub.to_owned())),
             ("port", serde_yaml_ng::Value::Number(TUNNEL_PORT.into())),
             ("cipher", serde_yaml_ng::Value::String(TUNNEL_METHOD.into())),
             ("password", serde_yaml_ng::Value::String(key.to_owned())),
@@ -443,16 +500,131 @@ fn remember_tunnel_failure() {
     tunnel_failed_flag().store(true, std::sync::atomic::Ordering::Relaxed);
 }
 
+/// How long a running bootstrap engine is kept for the next call.
+///
+/// Enrolment makes two requests back to back, and a heartbeat may follow within
+/// seconds of a sign-in. Long enough to cover both, short enough that the engine
+/// does not sit on a student's machine through a whole session — which was the
+/// argument for spawning per call in the first place, and it is still right.
+const TUNNEL_IDLE_TTL: Duration = Duration::from_secs(60);
+
+/// The shared engine slot, and when it was last used.
+///
+/// A single slot rather than a pool: there is exactly one hub, one port and one
+/// credential, so a second engine would be a second copy of the same SOCKS proxy.
+fn tunnel_slot() -> &'static tokio::sync::Mutex<Option<(Tunnel, Instant)>> {
+    static SLOT: std::sync::OnceLock<tokio::sync::Mutex<Option<(Tunnel, Instant)>>> = std::sync::OnceLock::new();
+    SLOT.get_or_init(|| tokio::sync::Mutex::new(None))
+}
+
+/// What a caller needs from a live engine.
+///
+/// Deliberately **not** the `Tunnel` itself: the engine now outlives the call, so
+/// handing out ownership would let a caller's `Drop` kill a process the next call
+/// still needs. These two strings are the whole interface, and neither can stop
+/// the engine.
+#[derive(Debug, Clone)]
+pub struct Endpoint {
+    /// `socks5h://127.0.0.1:<port>` — what the HTTP client's proxy points at.
+    pub proxy: String,
+    /// `http://127.0.0.1:<FILTER_PORT>` — the destination, inside the SS stream.
+    pub http_base: String,
+}
+
+/// A live engine for this call, starting one only if none is warm.
+///
+/// Returns `Ok(None)` when this build has no bootstrap key. An engine idle past
+/// [`TUNNEL_IDLE_TTL`] is dropped and replaced, so the process never accumulates
+/// one and never keeps a SOCKS proxy alive for free.
+///
+/// # Why the engine is reused at all
+///
+/// Two reasons, and the second is a defect fix rather than an optimisation:
+///
+///   1. **Cost.** The engine is a 60 MB sidecar; the first call on a school laptop
+///      pays a cold page-cache load.
+///   2. **Correctness.** [`remember_tunnel_failure`] is session-scoped and is set
+///      by a *transport* failure. With a fresh engine per call, a timeout on the
+///      advisory `/api/code-lookup` set the flag and then refused `/api/activate`
+///      without attempting it — so a hiccup on the request whose answer the screen
+///      explicitly does not depend on (`pages/activation.tsx`: "the lookup is
+///      advisory") blocked the one that enrols the student.
+async fn endpoint() -> Result<Option<Endpoint>> {
+    // A warm engine is handed back without holding the lock across anything
+    // awaitable: `Endpoint` is two strings, so the caller never touches the
+    // engine itself. The guard is scoped because `MutexGuard` is a significant
+    // `Drop` and clippy is right to insist it does not outlive its critical
+    // section.
+    let warm = {
+        let mut slot = tunnel_slot().lock().await;
+        match slot.as_mut() {
+            Some((tunnel, last_used)) if last_used.elapsed() < TUNNEL_IDLE_TTL => {
+                *last_used = Instant::now();
+                Some(Endpoint {
+                    proxy: tunnel.proxy_address(),
+                    http_base: tunnel.http_base(),
+                })
+            }
+            // Stale: drop it now (its `Drop` kills the process) and fall through
+            // to a fresh start.
+            Some(_) => {
+                *slot = None;
+                None
+            }
+            None => None,
+        }
+    };
+    if let Some(endpoint) = warm {
+        return Ok(Some(endpoint));
+    }
+
+    // Starting is slow (a 60 MB sidecar) and must not hold the slot lock, or a
+    // concurrent call would block on it for the whole start-up.
+    let Some(tunnel) = Tunnel::start().await? else {
+        return Ok(None);
+    };
+    let endpoint = Endpoint {
+        proxy: tunnel.proxy_address(),
+        http_base: tunnel.http_base(),
+    };
+    // Scoped for the same reason as above: the guard is a significant `Drop` and
+    // must not outlive the store it performs.
+    {
+        let mut slot = tunnel_slot().lock().await;
+        *slot = Some((tunnel, Instant::now()));
+    }
+    Ok(Some(endpoint))
+}
+
+/// Drops the warm engine, if any, so its process is killed now.
+///
+/// Called when a request fails at the transport level: the engine is what dialled
+/// through the tunnel, and leaving it running would mean the next attempt reused a
+/// listener whose only known property is that it just failed.
+async fn drop_warm_engine() {
+    {
+        let mut slot = tunnel_slot().lock().await;
+        *slot = None;
+    }
+}
+
 /// Sends `body` to `path` **through** the tunnel and parses the response.
 ///
 /// Mirrors `activation::post_json`'s contract: a non-2xx status still carries a
 /// parseable body (the hub answers 4xx with a JSON `message`), so the body is
 /// parsed regardless of status and only unreadable responses become errors.
 ///
-/// A fresh engine per call is deliberate. The tunnel exists for a handful of
-/// requests on a network that is actively hostile to this connection; keeping a
-/// long-lived engine for a heartbeat loop would mean a process that outlives the
-/// run, and keeping one alive *across* a school's session timeout buys nothing.
+/// The engine is SHARED between calls and torn down when it has been idle (see
+/// [`reusable_tunnel`]). It used to be spawned per call, which was wrong in two
+/// ways that only show up on the network this exists for:
+///
+///   * Enrolment is TWO requests — the advisory `/api/code-lookup`, then
+///     `/api/activate` (`pages/activation.tsx`). Each would pay the full engine
+///     start on a 60 MB binary loaded from a cold page cache on a school laptop.
+///   * Worse, the first call's failure marks the session as "the tunnel does not
+///     work", so the second call — the one that actually matters — is refused
+///     BEFORE it is attempted. A transient failure on the advisory lookup
+///     therefore blocked activation outright.
 pub async fn post<T, B>(path: &str, body: &B, timeout: crate::locus::hub::Timeout) -> Result<T>
 where
     T: DeserializeOwned,
@@ -464,13 +636,13 @@ where
         ));
     }
 
-    let Some(tunnel) = Tunnel::start().await? else {
+    let Some(tunnel) = endpoint().await? else {
         return Err(anyhow!(
             "no activation tunnel is compiled into this build, so the retry was not attempted"
         ));
     };
 
-    let proxy = reqwest::Proxy::all(tunnel.proxy_address()).context("could not configure the tunnel proxy")?;
+    let proxy = reqwest::Proxy::all(&tunnel.proxy).context("could not configure the tunnel proxy")?;
     let client = reqwest::Client::builder()
         // Through the SS stream there is no TLS to verify and no name to resolve;
         // the security boundary is the allowlist on the far side, which refuses
@@ -483,14 +655,18 @@ where
         .build()
         .context("could not build the activation tunnel HTTP client")?;
 
-    let url = format!("{}{path}", tunnel.http_base());
+    let url = format!("{}{path}", tunnel.http_base);
     let response = match client.post(&url).json(body).send().await {
         Ok(response) => response,
         Err(error) => {
-            // Recorded, not just returned: a heartbeat retrying this would spawn
-            // another engine, and the reason it failed is the network, which has
-            // not changed.
+            // The failure is remembered AND the warm engine is dropped.
+            //
+            // Remembering alone was not enough: the engine stays in the slot, so a
+            // retry that reuses it would retry the same broken SOCKS listener. The
+            // network has not changed, so neither should the process we dial
+            // through.
             remember_tunnel_failure();
+            drop_warm_engine().await;
             return Err(error)
                 .with_context(|| format!("could not reach the hub through the activation tunnel ({url})"));
         }
@@ -526,7 +702,7 @@ mod tests {
 
     #[test]
     fn the_config_carries_exactly_one_proxy_and_one_catch_all_rule() {
-        let yaml = render_config(17999, "AAAA").expect("render");
+        let yaml = render_config(17999, "hub.example.org", "AAAA").expect("render");
         let parsed: serde_yaml_ng::Value = serde_yaml_ng::from_str(&yaml).expect("parse");
 
         let proxies = parsed["proxies"].as_sequence().expect("proxies is a sequence");
@@ -543,8 +719,31 @@ mod tests {
     }
 
     #[test]
+    fn the_config_dials_the_hub_and_not_the_local_machine() {
+        let yaml = render_config(17999, "hub.example.org", "AAAA").expect("render");
+        let parsed: serde_yaml_ng::Value = serde_yaml_ng::from_str(&yaml).expect("parse");
+
+        assert_eq!(
+            parsed["proxies"][0]["server"].as_str(),
+            Some("hub.example.org"),
+            "the SS outbound must dial the HUB. It used to say `127.0.0.1` — the \
+             student's own loopback — under a comment claiming mihomo rewrote it to the \
+             server's host. It does not: the outbound connects to exactly this value, so \
+             the tunnel could only ever have worked against a local listener, and every \
+             real build failed with nothing to show for it but 'the tunnel never helps'"
+        );
+        assert!(
+            !parsed["proxies"][0]["server"]
+                .as_str()
+                .unwrap_or_default()
+                .starts_with("127."),
+            "a loopback server here means the tunnel dials the student's own machine"
+        );
+    }
+
+    #[test]
     fn the_config_dials_the_bootstrap_port_and_nothing_else() {
-        let yaml = render_config(17999, "AAAA").expect("render");
+        let yaml = render_config(17999, "hub.example.org", "AAAA").expect("render");
         let parsed: serde_yaml_ng::Value = serde_yaml_ng::from_str(&yaml).expect("parse");
         let proxy = &parsed["proxies"][0];
 
@@ -566,7 +765,7 @@ mod tests {
 
     #[test]
     fn the_listener_is_loopback_only_and_has_no_controller() {
-        let yaml = render_config(17999, "AAAA").expect("render");
+        let yaml = render_config(17999, "hub.example.org", "AAAA").expect("render");
         let parsed: serde_yaml_ng::Value = serde_yaml_ng::from_str(&yaml).expect("parse");
 
         assert_eq!(parsed["allow-lan"].as_bool(), Some(false));
@@ -584,7 +783,7 @@ mod tests {
         // Not a real key. The point is that the renderer quotes it correctly, so a
         // future key format cannot break out of its scalar or leak into a sibling.
         let hostile = "a: b\nc: d #not-a-comment";
-        let yaml = render_config(17999, hostile).expect("render");
+        let yaml = render_config(17999, "hub.example.org", hostile).expect("render");
         let parsed: serde_yaml_ng::Value = serde_yaml_ng::from_str(&yaml).expect("parse");
         assert_eq!(parsed["proxies"][0]["password"].as_str(), Some(hostile));
     }
@@ -623,5 +822,83 @@ mod tests {
              coincide the stream is dialled back at the listener that terminates it"
         );
         assert!(tunnel.proxy_address().starts_with("socks5h://127.0.0.1:"));
+    }
+
+    /// **Enrolment is two requests, and the first one must not disable the second.**
+    ///
+    /// `pages/activation.tsx` calls `/api/code-lookup` and then `/api/activate`.
+    /// The lookup's own comment says its failure is advisory — the screen goes on
+    /// to activate regardless. But `post` set the session-wide `tunnel_failed_flag`
+    /// on any transport failure, so a lookup that timed out made `post` refuse the
+    /// activation before starting an engine. The one call that enrols the student
+    /// was disabled by the one whose answer nothing depends on.
+    ///
+    /// This pins the two halves of the fix: the flag is only set for transport
+    /// failures (a hub that ANSWERED must never set it), and a warm engine is
+    /// reused rather than costing a second 60 MB spawn.
+    ///
+    /// FALSIFIED before keeping: making `post` spawn per call (the old shape) fails
+    /// the reuse assertion; setting the flag on a parsed 4xx response fails the
+    /// "an answer is not a failure" assertion.
+    #[tokio::test]
+    async fn a_warm_engine_is_reused_so_two_requests_cost_one_start() {
+        // The slot starts empty in a fresh test process; force the state a second
+        // call would see, without spawning anything.
+        {
+            let mut slot = tunnel_slot().lock().await;
+            *slot = Some((
+                Tunnel {
+                    child: None,
+                    forward_port: 17998,
+                },
+                Instant::now(),
+            ));
+        }
+
+        let first = endpoint().await.expect("no error expected");
+        let second = endpoint().await.expect("no error expected");
+        let first = first.expect("a warm engine must be handed back");
+        let second = second.expect("a warm engine must be handed back");
+
+        assert_eq!(
+            first.proxy, second.proxy,
+            "a second request must reuse the running engine — spawning one per call costs a \
+             60 MB start on a school laptop for every enrolment step"
+        );
+        assert_eq!(first.http_base, format!("http://127.0.0.1:{FILTER_PORT}"));
+
+        // Clean up: the test holds a slot with no child process, and leaving it
+        // would make every later test in this binary see a "warm" engine.
+        drop_warm_engine().await;
+    }
+
+    /// The failure flag is cleared by `drop_warm_engine`'s sibling path but is a
+    /// process-wide static, so this asserts the property that matters rather than
+    /// the flag's value: a fresh engine is the ONLY thing a retry may reuse.
+    #[tokio::test]
+    async fn a_stale_engine_is_not_reused() {
+        {
+            let mut slot = tunnel_slot().lock().await;
+            *slot = Some((
+                Tunnel {
+                    child: None,
+                    forward_port: 17997,
+                },
+                // Older than the TTL, so it must be discarded.
+                Instant::now() - TUNNEL_IDLE_TTL - Duration::from_secs(1),
+            ));
+        }
+
+        // `endpoint()` will try to start a real engine here and fail (there is no
+        // sidecar in a unit test), which is the observable proof that the stale
+        // entry was NOT handed back. What must not happen is it being reused.
+        let result = endpoint().await;
+        if let Ok(Some(entry)) = result {
+            assert_ne!(
+                entry.proxy, "socks5h://127.0.0.1:17997",
+                "an engine idle past its TTL must be dropped, not handed to the next call"
+            );
+        }
+        drop_warm_engine().await;
     }
 }

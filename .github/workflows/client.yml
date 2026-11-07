@@ -305,8 +305,21 @@ jobs:
           if [ -n "${LOCUS_ACTIVATION_TUNNEL_KEY:-}" ]; then
             echo "LOCUS_ACTIVATION_TUNNEL_KEY is present (value not printed; length ${#LOCUS_ACTIVATION_TUNNEL_KEY} bytes)"
           elif [ "${{ github.ref_type }}" = "tag" ]; then
-            echo "::warning::LOCUS_ACTIVATION_TUNNEL_KEY is not set. This RELEASE will ship without the activation tunnel, so no device on a network that blocks the hub by name can activate with it."
-            echo "::warning::Set it with: gh secret set LOCUS_ACTIVATION_TUNNEL_KEY --repo ${GITHUB_REPOSITORY:-<owner>/<repo>}"
+            # AN ERROR on a tag, since 2026-11-06. It used to be a warning, and
+            # three releases went out keyless while this step printed one line
+            # nobody reads: 3.3.1, 3.3.4 and 3.3.5 all shipped without the only
+            # transport that works on a network blocking the hub by name. The
+            # artifact says nothing about it, so the students it exists for simply
+            # see "the tunnel never helps".
+            #
+            # A branch build without it is still fine and still builds: the point
+            # of failing HERE, before any artifact is produced, is that a tagged
+            # release is a promise to a deployment.
+            echo "::error::LOCUS_ACTIVATION_TUNNEL_KEY is not set, so this RELEASE would ship without the activation tunnel."
+            echo "::error::No device on a network that blocks the hub by name could activate with it, and nothing in the artifact would say so."
+            echo "::error::Set it with: gh secret set LOCUS_ACTIVATION_TUNNEL_KEY --repo ${GITHUB_REPOSITORY:-<owner>/<repo>}"
+            echo "::error::The value is the hub's ACTIVATION_TUNNEL_KEY (server/secrets.env.age). See docs/operate/SECRETS-MANAGEMENT.md."
+            exit 1
           else
             echo "LOCUS_ACTIVATION_TUNNEL_KEY is not set — this build has no activation tunnel. Fine for a branch build; see docs/reference/ACTIVATION-TUNNEL.md before tagging."
           fi
@@ -1022,12 +1035,19 @@ jobs:
           # `option_env!("LOCUS_ACTIVATION_TUNNEL_KEY")` in
           # `locus/activation_tunnel.rs`.
           #
-          # DELIBERATELY NOT PRESENCE-CHECKED, unlike LOCUS_UPDATE_KEY. Its
-          # absence degrades a capability — a device on a school network cannot
-          # use the bootstrap tunnel — but the build is still complete and every
-          # other path works. Failing the pipeline on it would make a fresh clone
-          # unbuildable for a feature most builds do not need. What absence must
-          # NOT do is go unnoticed in a release, and `verify` reports it there.
+          # NOT presence-checked HERE, unlike LOCUS_UPDATE_KEY: on a branch build
+          # its absence degrades a capability (a device on a school network cannot
+          # use the bootstrap tunnel) but the artifact is complete and every other
+          # path works. Failing every branch build on it would make a fresh clone
+          # unbuildable for a feature most builds do not need.
+          #
+          # A TAG is different, and `verify` is where that difference lives: it
+          # fails the run when this key is absent on a tag. Three releases shipped
+          # keyless before that line existed, and nothing in the artifact said so.
+          #
+          # `build.rs` also re-emits this as a rustc-env with an explicit
+          # `rerun-if-env-changed`, so a key that appears after a cached build does
+          # not silently leave the const stale.
           #
           # The value is not a normal secret: it ships in the binary, so it must
           # be assumed public. The hub's allowlist and rate limit are what bound

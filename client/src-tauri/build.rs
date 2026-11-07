@@ -8,6 +8,37 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         std::env::var("TARGET").unwrap_or_default()
     );
 
+    // ── The pre-activation bootstrap key ──
+    //
+    // REWRITTEN 2026-11-06. This used to rely on cargo's automatic tracking of
+    // `option_env!`: the value was read straight from the environment in
+    // `activation_tunnel.rs`. Cargo only rebuilds a crate whose *tracked inputs*
+    // changed, and an `option_env!` that was absent last time and present now is
+    // not reliably one of them — so introducing the secret could leave every
+    // already-compiled object untouched. CI masks the other half of the same
+    // problem: a secret that a fork or a fresh clone does not carry is reported
+    // as a warning and the release ships **keyless**, silently.
+    //
+    // Emitting it as a `rustc-env` here makes the dependency an explicit
+    // `cargo:rerun-if-env-changed`, so a value that appears or changes forces a
+    // rebuild of this crate and everything that reads the constant.
+    //
+    // Still not `env!`: a missing key must make the TUNNEL unavailable, never
+    // break the BUILD. The failure it prevents is the quiet one — a shipped
+    // binary that cannot reach the one transport built for a blocked network, with
+    // nothing in the artifact saying so. `activation_tunnel.rs` therefore also
+    // stamps the compiled-in state into the binary so support can read it back.
+    match std::env::var("LOCUS_ACTIVATION_TUNNEL_KEY") {
+        Ok(key) if !key.is_empty() => {
+            println!("cargo:rustc-env=LOCUS_ACTIVATION_TUNNEL_KEY={key}");
+            println!("cargo:rustc-env=LOCUS_ACTIVATION_TUNNEL_KEY_PRESENT=1");
+        }
+        _ => {
+            println!("cargo:rustc-env=LOCUS_ACTIVATION_TUNNEL_KEY_PRESENT=0");
+        }
+    }
+    println!("cargo:rerun-if-env-changed=LOCUS_ACTIVATION_TUNNEL_KEY");
+
     if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows")
         && std::env::var("CARGO_CFG_TARGET_ENV").as_deref() == Ok("msvc")
         && std::env::var_os("CARGO_FEATURE_CLIPPY").is_some()

@@ -9,6 +9,10 @@ verified-against: server/modules/09-activation-tunnel.sh, server/modules/05-cadd
 
 > **Status of this work: both halves built and guarded in the tree; the mechanism
 > is proven on loopback, and nothing here has been tested from a school network.**
+> **Re-read §6.1–6.1b on 2026-11-06:** three defects made the tunnel inert even
+> where it was reachable — the fallback never fired on a `Refused`, the outbound
+> dialled the student's own loopback, and the bootstrap key was absent from every
+> shipped build. All three are fixed with guards; none is verified on hardware.
 > Read "What is verified" (§4) and §6.6 before treating any of it as working.
 >
 > *Updated 2026-11-01: the client half now exists (`locus/activation_tunnel.rs`,
@@ -296,30 +300,86 @@ and the fallback is wired at the two call sites that resolve the hub through
 - `locus/heartbeat.rs::beat` — `/api/heartbeat`
 
 Scope stays **activation and heartbeat**. Tunnelling the update path is a separate
-decision with its own signature surface and is still not part of this work.
+decision with its own signature surface and is still not part of this work — the
+update path's own escape (following the host the request arrived on) is
+`DEPLOY.md`'s alias section and `update.pb.js`, not this tunnel.
 
 ### 6.1 How it decides to fall back
 
 A direct hub call that fails is classified (`hub::Failure::classify`). The tunnel
-is attempted **only** when the class is `ResetDuringHandshake` and a bootstrap key
-was compiled into the build (`activation_tunnel_available()`). Everything else —
-DNS, refusal, certificate, protocol, an answered-but-unreadable response — is
-reported as before. That rule is `Failure::retryable_over_tunnel()`, and §5.3
-records why the other cases must not trigger it.
+is attempted when the class is `ResetDuringHandshake` **or `Refused`**, and a
+bootstrap key was compiled into the build (`activation_tunnel_available()`).
+Everything else — DNS, certificate, protocol, an answered-but-unreadable response
+— is reported as before. That rule is `Failure::retryable_over_tunnel()`.
+
+> **Corrected 2026-11-06: `Refused` is in the set, and it was the defect.**
+> The set used to be `ResetDuringHandshake` alone, on the reasoning that "a
+> different transport to the same address will be refused too" — true only when
+> the **same party** answers on both. On the network this exists for, the machine
+> that answers is the filter: it proxies the ClientHello and tears the flow down,
+> which reaches the process as a reset *or* a refusal depending on how far it got.
+> With only the reset case in the set, the day the appliance answered with a
+> refusal, the one transport built for that situation was never attempted. A hub
+> that is genuinely down now costs one extra refused SOCKS dial, reported in the
+> same sentence as the original failure.
+
+### 6.1a The two other defects that made the tunnel inert regardless
+
+Both were found on 2026-11-06 while checking why a school device never used it.
+Neither is visible in a test that only covers the fallback decision.
+
+- **The outbound dialled `127.0.0.1`.** The generated engine config named the SS
+  server as `127.0.0.1` — the *student's own loopback* — under a comment claiming
+  mihomo rewrote it to the server's host. It does not: the outbound connects to
+  exactly the `server` it is given. The tunnel could therefore only ever have
+  worked against a listener running on the client machine. It now dials
+  `contract::ss_hub()`, the host of the resolved hub URL, so a device moved to an
+  alias also moves its bootstrap dial. Pinned by
+  `the_config_dials_the_hub_and_not_the_local_machine`, which was shown failing
+  against the old value.
+- **The key was not reliably compiled in, and nothing said so.** `build.rs` now
+  re-emits `LOCUS_ACTIVATION_TUNNEL_KEY` as a `rustc-env` with an explicit
+  `cargo:rerun-if-env-changed` (cargo does not reliably rebuild a crate for an
+  `option_env!` that was absent last time), and stamps whether one was present so
+  the binary can report it. `activation_tunnel::build_stamp()` is logged at
+  startup, warning when absent. CI now **fails a tagged build** without the key;
+  before that line existed, three releases shipped keyless.
+
+### 6.1b The engine is shared across the two enrolment calls
+
+Enrolment is two requests — the advisory `/api/code-lookup`, then `/api/activate`
+(`pages/activation.tsx`). With a fresh engine per call, two things went wrong on
+exactly the network this exists for:
+
+- each call paid a full start of a 60 MB sidecar on a school laptop; and
+- the failure flag is session-scoped, so a transport failure on the *advisory*
+  lookup made `post` refuse the *activation* without attempting it — a request
+  whose answer nothing depends on disabled the one that enrols the student.
+
+The engine now lives in a single slot, reused while it has been idle for less
+than `TUNNEL_IDLE_TTL` (60 s) and killed on a transport failure, so a retry never
+reuses the listener that just failed. Pinned by
+`a_warm_engine_is_reused_so_two_requests_cost_one_start`, shown failing when the
+slot is not reused.
 
 ### 6.2 How a request actually gets through
 
-The engine is the vendored mihomo sidecar, started as a **separate, ephemeral
-instance**: loopback only, one Shadowsocks outbound, one `MATCH` rule, no
-external controller, killed on drop. Not the Core — before activation the Core
-does not exist, which is the whole problem.
+The engine is the vendored mihomo sidecar, started as a **separate instance**:
+loopback only, one Shadowsocks outbound, one `MATCH` rule, no external
+controller, torn down after `TUNNEL_IDLE_TTL` of disuse (§6.1b). Not the Core —
+before activation the Core does not exist, which is the whole problem.
 
 ```text
 post_json / beat
-  └─ engine (SOCKS 127.0.0.1:<ephemeral>) ──SS──▶ hub:8453
+  └─ engine (SOCKS 127.0.0.1:<ephemeral>) ──SS──▶ <ss_hub>:8453
        └─ HTTP POST http://127.0.0.1:18090<path>
             └─ path filter (allowlist + rate limit) ──▶ PocketBase:8090
 ```
+
+`<ss_hub>` is a NAME (`contract::ss_hub()`, derived from the resolved hub URL),
+not an address. The stream presents no hostname to the filter; resolving it is
+the one step the network still gets a say in, and the bootstrap port is precisely
+where that say does not matter.
 
 ### 6.3 The correction that mattered: the destination is the FILTER
 
@@ -383,6 +443,20 @@ still an operator action nobody has taken.
 - That the deployed hub is running this module at all — `setup.sh` deploys from
   `/root/server/` and has not re-run.
 
+> **Measured from an uncensored network on 2026-11-06, and it is a warning, not a
+> verdict.** `curl http://<hub>:8453/` **timed out**, while 8443 and 8445 accepted
+> a connection in single-digit milliseconds on the same address within the same
+> second. So the port is not open to the internet *from here*. That is consistent
+> with three different causes and this register cannot tell them apart:
+> (a) the module never ran on the hub, (b) `ufw` still drops the port, or
+> (c) this network filters non-standard ports. **Only (a) and (b) are fixable from
+> this repository, and both are the same operator step: re-run `setup.sh` from
+> `/root/server/` and confirm the module logs its listener line.** Establish which
+> one it is before concluding anything about the school — an earlier timeout on
+> this port was misread as censorship when the cause was `ufw default deny
+> incoming` with no rule behind it (§1.4), and that mistake is one repetition away
+> from being made again.
+
 ---
 
 ## 7. The durable answer, which is not code
@@ -391,6 +465,18 @@ The appliance blocked the hub by **category**, stated in its own response. That 
 a policy decision held by a third party, and a hostname visible on any port will
 be blocked on that decision. Recategorisation is the only fix that does not
 depend on the filter's behaviour, and it cannot be performed from this repository.
+
+> **Confirmed by the operator, 2026-11-06: `networkingguides.jadedns.uk` is
+> unreachable and blocked on the censored network — not intermittent, not
+> ambiguous.** This is a Class A claim in
+> [`../operate/CLAIMS.md`](../operate/CLAIMS.md) §5 (A21) and it is the reason the
+> work above is not optional: on that network there is no direct path to the hub
+> for a device that has never enrolled, so anything that depends on the hub's name
+> is dead and only a transport that presents no name can carry enrolment. It also
+> **rules out one repair that used to look plausible:** moving the fleet to a
+> second name under the same domain family buys nothing, because the block is not
+> a property of one hostname's spelling. What the operator can still change is
+> *which* name is offered; see `DEPLOY.md` → "a second hub hostname".
 
 Until it is resolved, every device on that network depends on a bootstrap channel
 that exists to work around a classification nobody here controls — which is
