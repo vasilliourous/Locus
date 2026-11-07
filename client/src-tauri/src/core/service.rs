@@ -481,6 +481,94 @@ fn shell_single_quote(value: &str) -> String {
     format!("'{}'", value.replace('\'', r"'\''"))
 }
 
+/// A privileged helper that is not on disk, so it could never have been spawned.
+///
+/// This is its own type because it is **not** an install failure, and reporting it
+/// as one is a defect that cost a student a whole evening. The installer and the
+/// uninstaller are shipped *inside* the app bundle rather than linked into it
+/// ([`packaged_service_tool_path`]), and on Windows they are prebuilt MSVC
+/// binaries fetched from a pinned upstream release. When one of them is absent the
+/// only thing a spawn can report is an OS error with no explanation in it —
+/// `The system cannot find the file specified. (os error 2)` — which the student
+/// sees as the generic "Failed to install the service".
+///
+/// Downcasting is what lets the command layer say *which* prerequisite is missing
+/// instead of guessing, so this stays a type all the way to `cmd::service`.
+#[derive(Debug)]
+pub(crate) struct MissingServiceTool {
+    pub(crate) tool: String,
+    pub(crate) path: PathBuf,
+}
+
+impl std::fmt::Display for MissingServiceTool {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            formatter,
+            "the privileged helper {} is missing from {:?}",
+            self.tool, self.path
+        )
+    }
+}
+
+impl std::error::Error for MissingServiceTool {}
+
+/// Fails when `path` names a file that is not there.
+///
+/// Split out from the spawn so the check can be tested on one platform with a
+/// path that was never packaged. The existence test is deliberate and *not* an
+/// attempt to pre-validate the binary: a file can exist and still fail to load
+/// (a missing runtime beside it), and that failure is handled separately, for the
+/// reason given in [`install_launch_failure`].
+fn require_packaged_tool(path: &Path, tool: &str) -> Result<()> {
+    if path.is_file() {
+        return Ok(());
+    }
+    Err(anyhow::Error::new(MissingServiceTool {
+        tool: tool.to_owned(),
+        path: path.to_path_buf(),
+    }))
+}
+
+/// Recognises a spawn that never launched the helper, and reports the missing file.
+///
+/// The distinction matters because the two failures need different sentences. A
+/// helper that failed to *load* exited and said so (the upstream crate reports it
+/// through `InstallationVerificationError`); a helper that never got to run has
+/// only a bare `io::Error` behind `failed to launch the service installer`. On
+/// Windows the loader shows `VCRUNTIME140.dll was not found` for a binary whose C
+/// runtime is absent — `ERROR_MOD_NOT_FOUND`, 126 — so that number is worth
+/// naming: it is the one cause a student can fix by installing a runtime, and it
+/// is otherwise invisible from here.
+const ERROR_MOD_NOT_FOUND: i32 = 126;
+
+#[cfg(windows)]
+const WINDOWS_MISSING_RUNTIME_ESSENTIAL: &str = "On a Windows machine behind an unofficial \
+     installation this usually means the Microsoft Visual C++ runtime (the Visual C++ \
+     Redistributable) is missing from this PC.";
+
+#[cfg(not(windows))]
+const WINDOWS_MISSING_RUNTIME_ESSENTIAL: &str = "";
+
+/// Describes an `os error 126` — the helper's dependent DLL was not found.
+pub(crate) fn helper_runtime_missing(error: &anyhow::Error) -> bool {
+    let mut source: Option<&(dyn std::error::Error + 'static)> = error.source();
+    while let Some(current) = source {
+        if let Some(io_error) = current.downcast_ref::<std::io::Error>()
+            && io_error.raw_os_error() == Some(ERROR_MOD_NOT_FOUND)
+        {
+            return true;
+        }
+        source = current.source();
+    }
+    false
+}
+
+/// The Windows-only sentence that names the runtime prerequisite.
+#[must_use]
+pub(crate) const fn missing_runtime_sentence() -> &'static str {
+    WINDOWS_MISSING_RUNTIME_ESSENTIAL
+}
+
 fn packaged_service_tool_path(file_name: &str, packaged_path: impl FnOnce() -> Result<PathBuf>) -> Result<PathBuf> {
     #[cfg(feature = "verge-dev")]
     {
@@ -512,9 +600,7 @@ fn uninstall_service() -> Result<()> {
         Ok(dirs::service_path()?.with_file_name("clash-verge-service-uninstall.exe"))
     })?;
 
-    if !uninstall_path.exists() {
-        bail!(format!("uninstaller not found: {uninstall_path:?}"));
-    }
+    require_packaged_tool(&uninstall_path, "clash-verge-service-uninstall.exe")?;
 
     // Route through the shared probe, not `deelevate::privilege_level()`.
     //
@@ -550,9 +636,7 @@ fn uninstall_service() -> Result<()> {
         Ok(tauri::utils::platform::current_exe()?.with_file_name("clash-verge-service-uninstall"))
     })?;
 
-    if !uninstall_path.exists() {
-        bail!(format!("uninstaller not found: {uninstall_path:?}"));
-    }
+    require_packaged_tool(&uninstall_path, "clash-verge-service-uninstall")?;
 
     let elevator = crate::utils::help::linux_elevator();
     let status = if linux_running_as_root() {
@@ -614,9 +698,7 @@ fn uninstall_service() -> Result<()> {
         Ok(dirs::service_path()?.with_file_name("clash-verge-service-uninstall"))
     })?;
 
-    if !uninstall_path.exists() {
-        bail!(format!("uninstaller not found: {uninstall_path:?}"));
-    }
+    require_packaged_tool(&uninstall_path, "clash-verge-service-uninstall")?;
 
     let uninstall_path = macos_service_tool_path(&uninstall_path)?;
     let uninstall_shell: String = uninstall_path.to_string_lossy().into_owned();
@@ -671,6 +753,14 @@ fn invoke_service_install(cores: &[clash_verge_service_ipc::management::CoreSour
     let gid = Some(tauri_plugin_clash_verge_sysinfo::current_gid());
     #[cfg(windows)]
     let gid = None;
+
+    // Check the helper is here BEFORE spawning it. The spawn is the only step
+    // whose failure carries no explanation: upstream reports it as
+    // `failed to launch the service installer`, and everything a student can act
+    // on lives in the OS error underneath. Naming the absent file is the sentence
+    // this defect needed.
+    require_packaged_tool(&installer, &name)?;
+
     clash_verge_service_ipc::management::install(
         &installer,
         cores,
@@ -678,7 +768,30 @@ fn invoke_service_install(cores: &[clash_verge_service_ipc::management::CoreSour
         gid,
         &clash_verge_i18n::t!("service.adminInstallPrompt"),
     )
+    .map_err(|error| match helper_runtime_missing(&error) {
+        // The helper exists but its loader could not start it. On Windows this is
+        // the `VCRUNTIME140.dll was not found` dialog, which the OS shows before
+        // any of our code runs — so the only trace our side can ever keep is this
+        // one: os error 126, logged with the path that failed.
+        true => {
+            logging!(
+                error,
+                Type::Service,
+                "the service installer at {installer:?} could not start because a system library is missing (os error 126)"
+            );
+            error.context(MISSING_RUNTIME_CONTEXT)
+        }
+        false => error,
+    })
 }
+
+/// The context attached to an installer that failed to start for want of a DLL.
+///
+/// A constant rather than a formatted string so the classifier in `cmd::service`
+/// recognises it without depending on this module's wording — and so the test
+/// that asserts it is attached fails if someone rewords it.
+pub(crate) const MISSING_RUNTIME_CONTEXT: &str =
+    "the elevated service installer could not be started because a system library is missing";
 
 fn reinstall_service() -> Result<()> {
     logging!(info, Type::Service, "reinstall service");

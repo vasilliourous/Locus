@@ -216,6 +216,44 @@ where
     Ok(())
 }
 
+/// The restart path's readiness check, and what to say when it fails.
+///
+/// # The two checks ask different questions, and only one of them is a fault
+///
+/// `start_core_inner` may legitimately return `Ok(())` having started nothing:
+/// `StartupDecision::Wait` is a deferred start (the Service is absent and the
+/// install could not be raised), and `Handle::global().is_exiting()` is a start
+/// abandoned because the app is quitting. Neither leaves a readiness generation
+/// behind, so a generation check fails in both cases — correctly, because a proxy
+/// must not be restored for a Core that is not running.
+///
+/// But it failed with the same sentence either way: *core did not become ready
+/// after restart*. For the deferred case that sentence is false — nothing was
+/// wrong with the Core — and it is what a student saw after changing a setting,
+/// with no way to learn that the remedy was to answer an install prompt. That is
+/// the "configuration became confused" report, and "disconnect and reconnect"
+/// recovered it because a full stop/start clears the deferred state — which is
+/// exactly why an admin found the workaround and a student could not.
+///
+/// So the mode is checked first. Still `NotRunning` after a start means the start
+/// was deferred or abandoned, and that has its own cause and its own remedy.
+fn restart_readiness_failure(running_mode: &RunningMode, has_readiness_generation: bool) -> Option<anyhow::Error> {
+    if matches!(running_mode, RunningMode::NotRunning) {
+        return Some(anyhow::anyhow!(
+            "the tunnel engine did not start, so the new configuration could not be applied. This \
+             usually means Locus needs permission to install or repair its background service: \
+             approve the prompt if one is showing, or use Repair in Settings, then try again."
+        ));
+    }
+    if !has_readiness_generation {
+        return Some(anyhow::anyhow!(
+            "the tunnel engine started but did not report that it is running, so the new \
+             configuration was not applied. Try again; if it keeps happening, restart Locus."
+        ));
+    }
+    None
+}
+
 async fn run_ready_core_start_transition<Start, StartFuture, Ready, Apply, ApplyFuture>(
     start_core: Start,
     core_is_ready: Ready,
@@ -490,12 +528,22 @@ impl CoreManager {
             || self.controlled_stop_core_inner(),
             || async {
                 self.start_core_inner().await?;
-                if matches!(*self.get_running_mode(), RunningMode::NotRunning)
-                    || self.current_core_readiness_generation().is_none()
-                {
-                    anyhow::bail!("core did not become ready after restart");
+                // The two facts were one condition and one sentence; they are
+                // reported apart now for the reason given on
+                // `restart_readiness_failure`. Read the mode into a local so the
+                // check cannot race its own snapshot between the two tests.
+                let running_mode = *self.get_running_mode();
+                match restart_readiness_failure(&running_mode, self.current_core_readiness_generation().is_some()) {
+                    Some(error) => {
+                        logging!(
+                            warn,
+                            Type::Core,
+                            "the restart did not produce a usable core (mode after start: {running_mode:?})"
+                        );
+                        Err(error)
+                    }
+                    None => Ok(()),
                 }
-                Ok(())
             },
             || self.apply_proxy_after_start(),
         )
@@ -619,10 +667,10 @@ impl CoreManager {
 #[cfg(test)]
 mod tests {
     use super::{
-        CoreManager, CoreStartRefusal, ProxyRestoreExpectation, StartupDecision, run_controlled_stop_transition,
-        run_core_replacement_transition, run_core_start_transition, run_ready_core_start_transition,
-        run_service_config_replacement_transition, should_request_install_for_absent_service, should_wait_for_service,
-        startup_decision,
+        CoreManager, CoreStartRefusal, ProxyRestoreExpectation, StartupDecision, restart_readiness_failure,
+        run_controlled_stop_transition, run_core_replacement_transition, run_core_start_transition,
+        run_ready_core_start_transition, run_service_config_replacement_transition,
+        should_request_install_for_absent_service, should_wait_for_service, startup_decision,
     };
     use crate::core::{manager::RunningMode, service::ServiceStatus};
     use parking_lot::Mutex;
@@ -870,6 +918,63 @@ mod tests {
 
         assert!(result.is_ok());
         assert_eq!(&*calls.lock(), &["core_start"]);
+    }
+
+    /// A deferred start is reported as a deferred start, not as a broken Core.
+    ///
+    /// This is the report behind the change: after a configuration change the
+    /// student was told "core did not become ready after restart", which names no
+    /// cause and suggests the app is broken, when the actual state was a Service
+    /// install waiting on a permission prompt. "Disconnect and reconnect" fixed it
+    /// because a full cycle clears that state — a workaround only an admin would
+    /// find.
+    ///
+    /// FALSIFIED before keeping: restoring the old single `bail!` makes the first
+    /// assertion fail, because the message no longer mentions the service.
+    #[test]
+    fn a_deferred_start_is_reported_as_a_service_problem_not_a_broken_core() {
+        let error = restart_readiness_failure(&RunningMode::NotRunning, false)
+            .expect("a Core left NotRunning after a start must be an error");
+        let lowered = error.to_string().to_lowercase();
+
+        assert!(lowered.contains("service"), "must name the thing to fix, got {error}");
+        assert!(
+            lowered.contains("permission") || lowered.contains("approve"),
+            "must say what the student can do, got {error}"
+        );
+        assert!(
+            !error.to_string().contains("core did not become ready"),
+            "the internal wording must not reach the student, got {error}"
+        );
+    }
+
+    /// A Core that is running without a readiness generation is a different fault.
+    ///
+    /// Distinct from the deferred case because the remedy differs: there is no
+    /// prompt to approve, so telling the student to look for one would send them
+    /// nowhere. Both must still refuse to restore the proxy.
+    #[test]
+    fn a_running_core_without_readiness_gets_its_own_sentence() {
+        let error = restart_readiness_failure(&RunningMode::Service, false)
+            .expect("a running Core with no readiness generation must be an error");
+        assert!(
+            !error.to_string().to_lowercase().contains("permission"),
+            "there is no prompt to approve in this case, got {error}"
+        );
+        assert_ne!(
+            Some(error.to_string()),
+            restart_readiness_failure(&RunningMode::NotRunning, false).map(|error| error.to_string()),
+            "the two failures need different sentences: one has a prompt, one does not"
+        );
+    }
+
+    /// A healthy restart is not an error, and nothing is reported.
+    ///
+    /// Without this, every arm above could be unconditional and a successful
+    /// restart would fail.
+    #[test]
+    fn a_ready_core_after_a_restart_is_not_a_failure() {
+        assert!(restart_readiness_failure(&RunningMode::Service, true).is_none());
     }
 
     #[tokio::test]

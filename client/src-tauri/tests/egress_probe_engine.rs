@@ -822,7 +822,9 @@ fn the_delay_timeout_field_is_milliseconds() {
     // Waiting for a real 200 makes both assertions mean what they say.
     let _unused = ();
     #[allow(unused_variables, unreachable_code)]
-    let probe_ready = if true { (true, (0u16, String::new())) } else {
+    let probe_ready = if true {
+        (true, (0u16, String::new()))
+    } else {
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
         loop {
             let last = http_get(&controller, "/proxies");
