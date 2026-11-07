@@ -52,8 +52,31 @@ warn() { echo "[09-activation-tunnel][WARN] $*"; }
 fail() { echo "[09-activation-tunnel][FAIL] $*"; exit 1; }
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# shellcheck source=/dev/null
-. "${SCRIPT_DIR}/00-env.sh" 2>/dev/null || true
+
+# ── RUN 00-env, DO NOT SOURCE IT ──
+#
+# 00-env.sh ends with `exit 0` (it is written to be RUN as setup.sh's first
+# module). Sourcing a file that calls `exit` terminates the CALLING shell — the
+# `|| true` here could not catch it, because `exit` is not a failed command, it
+# is the end of this process. Measured 2026-11-07 on the first real deploy of
+# the school-network fix: module 09 printed 00-env's validation, then exited 0
+# having installed nothing — no unit, no listener, no key. setup.sh reported
+# "✓ Module 09-activation-tunnel completed successfully", so the deploy was
+# green while the one transport built for the censored network was absent.
+#
+# This is a FOURTH defect of the same kind as the three in URGENT-FIX-NOW.md,
+# and it survived because the tree is green: nothing in a test suite can see a
+# module that exits before it starts.
+#
+# So the validation still runs (it is a real safety check) but as a CHILD
+# process, whose exit status is inspected here rather than ending this shell.
+# Its log lines still reach the deploy log.
+if [ -f "${SCRIPT_DIR}/00-env.sh" ]; then
+    if ! bash "${SCRIPT_DIR}/00-env.sh"; then
+        fail "00-env.sh environment validation failed — refusing to configure the activation tunnel"
+    fi
+fi
+
 
 SS_BINARY="/usr/local/bin/ssserver"
 SS_METHOD="${SS_METHOD:-2022-blake3-aes-256-gcm}"
