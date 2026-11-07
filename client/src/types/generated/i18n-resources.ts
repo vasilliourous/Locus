@@ -98,6 +98,7 @@ export interface TranslationResources {
             refreshBusy: string
             refreshed: string
             refreshFailed: string
+            storedCodeDamaged: string
             subscription: string
             theme: string
             themeContrast: string

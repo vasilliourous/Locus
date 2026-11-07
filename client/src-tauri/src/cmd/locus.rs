@@ -89,6 +89,13 @@ fn cancelled_outcome() -> ConnectionResult {
 pub struct LocusStatus {
     /// Whether this device has a code bound and accepted.
     pub activated: bool,
+    /// A code is stored but could not be a Locus code, so it was not used.
+    ///
+    /// Reported so the Account screen can say *why* it is offering activation
+    /// again. Without it, a damaged sign-in is indistinguishable from a fresh
+    /// device, and a student who re-enters their code cannot tell whether the
+    /// first attempt ever registered.
+    pub stored_code_damaged: bool,
     /// The tier name as the hub sent it (`free`/`eco`, or `strike`), when known.
     /// This is the WIRE name, not the label the student reads — the frontend
     /// maps it in `tier-badge.tsx`, which is the single place that mapping
@@ -476,6 +483,10 @@ pub async fn locus_status() -> LocusStatus {
     // the hardware changes, which is fine for a support screenshot.
     let fingerprint = crate::locus::device::fingerprint();
     let activation = store::read(&verge_data);
+    // A code that is stored but is not a code. Teaches apart "this device was
+    // never activated" from "this device's sign-in is damaged", which are the
+    // same screen without this flag — and the second one used to be silent.
+    let stored_code_damaged = store::stored_code_is_damaged(&verge_data);
 
     let subscription = classify_subscription(
         activation.is_some(),
@@ -526,6 +537,7 @@ pub async fn locus_status() -> LocusStatus {
 
     LocusStatus {
         activated: activation.is_some(),
+        stored_code_damaged,
         tier: activation.as_ref().map(|a| a.tier.clone()),
         device_id: store::redact(&fingerprint),
         platform: contract::current_platform().map(str::to_owned),
@@ -563,9 +575,7 @@ fn classify_connect_blocker(run: &crate::core::runstate::RunState) -> Option<Con
     match &run.health {
         ServiceHealth::Ready => None,
         ServiceHealth::NotInstalled => Some(ConnectBlocker::InstallRequired),
-        ServiceHealth::Unavailable(reason) => {
-            Some(ConnectBlocker::Unavailable { reason: reason.clone() })
-        }
+        ServiceHealth::Unavailable(reason) => Some(ConnectBlocker::Unavailable { reason: reason.clone() }),
         // `VersionMismatch` is actionable and the migration dialog owns it, so it
         // is reported as unavailable rather than as a missing service.
         ServiceHealth::VersionMismatch => Some(ConnectBlocker::Unavailable {
@@ -1030,8 +1040,34 @@ fn subscription_allows_connect(raw_expiry: Option<&str>) -> bool {
 #[tauri::command]
 pub async fn locus_connect() -> CmdResult<ConnectionResult> {
     let verge = Config::verge().await;
-    let activation = store::read(&verge.latest_arc())
-        .ok_or_else(|| super::coded_error("LOCUS_NOT_ACTIVATED", "This device is not activated yet."))?;
+    let stored = store::read(&verge.latest_arc());
+
+    // A code that is stored but unusable is its OWN refusal, and it is reported
+    // before anything else runs.
+    //
+    // This device used to take that code, fail the hub's check, and surface the
+    // result as a connect that silently did nothing — with no sign-out reachable,
+    // because sign-out also needs a code the local validator accepts. Reporting
+    // it as `LOCUS_NOT_ACTIVATED` would be worse in a different way: the student
+    // is told they never activated, which is false and sends them looking for a
+    // code they do not remember buying. The sentence names what happened and the
+    // one action that repairs it.
+    if store::stored_code_is_damaged(&verge.latest_arc()) {
+        logging!(
+            warn,
+            Type::Cmd,
+            "[locus] refusing to connect: the stored activation code is not a valid Locus code"
+        );
+        return Err(super::coded_error(
+            "LOCUS_STORED_CODE_DAMAGED",
+            "The sign-in saved on this computer is damaged, so it cannot be used. Sign in again \
+             with your Locus code — your existing plan is not affected and you will not be charged \
+             twice.",
+        ));
+    }
+
+    let activation =
+        stored.ok_or_else(|| super::coded_error("LOCUS_NOT_ACTIVATED", "This device is not activated yet."))?;
 
     // Refuse a lapsed subscription BEFORE anything else, and before writing
     // anything.
@@ -1352,10 +1388,7 @@ async fn apply_tier_waiting_for_the_guard(
                 // module boundary, where any rewording of the manager's own bail
                 // silently turned "wait for the caller that holds the guard" into
                 // a hard refusal (or the reverse). Neither direction fails a test.
-                let held = matches!(
-                    CoreStartRefusal::classify(&error),
-                    CoreStartRefusal::Held
-                );
+                let held = matches!(CoreStartRefusal::classify(&error), CoreStartRefusal::Held);
 
                 if held && started.elapsed() < CONNECT_READY_BUDGET {
                     if !waiting_logged {
@@ -1996,7 +2029,10 @@ mod tests {
         use crate::core::runstate::ServiceHealth;
 
         let ready = run_state(ServiceHealth::Ready, false, false);
-        assert!(classify_connect_blocker(&ready).is_none(), "a ready service is not a blocker");
+        assert!(
+            classify_connect_blocker(&ready).is_none(),
+            "a ready service is not a blocker"
+        );
 
         let absent = run_state(ServiceHealth::NotInstalled, false, false);
         assert_eq!(
@@ -2664,10 +2700,7 @@ mod tests {
             Some(true),
             "the frontend reads `signedOut`; got {value}"
         );
-        assert!(
-            value.get("hub").is_some(),
-            "the frontend reads `hub`; got {value}"
-        );
+        assert!(value.get("hub").is_some(), "the frontend reads `hub`; got {value}");
         assert!(
             value.get("signed_out").is_none(),
             "snake_case must not reach the wire; got {value}"

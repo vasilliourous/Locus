@@ -175,6 +175,7 @@ export const translationKeys = [
   'home.components.connection.account.refreshBusy',
   'home.components.connection.account.refreshFailed',
   'home.components.connection.account.notActivated',
+  'home.components.connection.account.storedCodeDamaged',
   'home.components.connection.account.checkStatus',
   'home.components.connection.account.lastChecked',
   'home.components.connection.account.confirmedJustNow',

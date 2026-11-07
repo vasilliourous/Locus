@@ -443,22 +443,23 @@ pub async fn beat(credential: &Credential, fingerprint: &str) -> BeatOutcome {
     {
         Ok(response) => response,
         Err(error) => {
-            // A reset during the handshake means the network is blocking the hub
-            // by NAME. The tunnel presents none, so it is worth one attempt —
-            // and only that failure, because a DNS failure, a refused connection
-            // or a certificate error is not fixed by a different transport.
+            // A reset during the handshake — or a refusal — means the network is
+            // blocking the hub by NAME. The tunnel presents none, so it is worth
+            // one attempt; and only those failures, because a DNS failure, a
+            // certificate error or a timeout is not fixed by a different transport.
             //
             // A heartbeat is the one call that runs on a loop, so this must not
             // become a per-beat engine spawn on a network where the tunnel is
             // also blocked: the spawned engine exits immediately when the hub
             // refuses, and `Backoff` already spaces attempts out. The spawn only
-            // happens on the reset path, which cannot happen on a network that
-            // permits the hub at all.
+            // happens on the reset/refused path, which cannot happen on a network
+            // that permits the hub at all.
             let failure = crate::locus::hub::Failure::classify(&error);
             if failure.retryable_over_tunnel() && crate::locus::activation_tunnel::activation_tunnel_available() {
                 tracing::warn!(
                     target: "locus::activation_tunnel",
-                    "the direct heartbeat was reset; retrying through the activation tunnel"
+                    "the direct heartbeat failed as {failure:?} (the signature of a name-based \
+                     block); retrying through the activation tunnel"
                 );
                 match crate::locus::activation_tunnel::post(
                     "/api/heartbeat",
@@ -480,8 +481,14 @@ pub async fn beat(credential: &Credential, fingerprint: &str) -> BeatOutcome {
                 }
             }
 
+            // The remedy is appended, not replaced: `describe_beat_chain` is the
+            // evidence and the remedy is the instruction, and the Account screen
+            // shows this string to a student who is deciding whether their network
+            // is the problem. A DNS failure used to arrive here with no remedy at
+            // all, because `Failure::Transport` had none.
+            let remedy = failure.remedy().map(|remedy| format!(" {remedy}")).unwrap_or_default();
             return BeatOutcome::Unreachable {
-                reason: format!("could not reach the hub: {}", describe_beat_chain(&error)),
+                reason: format!("could not reach the hub: {}.{remedy}", describe_beat_chain(&error)),
             };
         }
     };

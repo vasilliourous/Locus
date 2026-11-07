@@ -145,17 +145,37 @@ pub async fn sign_out() -> Result<SignOutResult> {
     // 1. Tell the hub while the code still exists. Best-effort by design: a
     //    network failure must not strand a student on a machine they are giving
     //    away.
-    let hub = match activation::release(&code, &device::fingerprint()).await {
-        Ok(ReleaseOutcome::Recorded) => HubOutcome::Released,
-        Ok(ReleaseOutcome::NothingToRelease) => HubOutcome::NothingToRelease,
+    //
+    //    A stored code that is not a code at all is skipped WITHOUT a request, and
+    //    that distinction is the whole point. `activation::release` validates
+    //    locally first, so calling it with a damaged code errors before any
+    //    network call and lands in the same `NotConfirmed` arm — but logging it as
+    //    "the hub was not told" would be false, and a caller reading that line
+    //    would go looking for a network fault. More important, this used to be
+    //    unreachable at all: the damaged-code path never got this far, so the
+    //    local half below never ran and the student's only exit was uninstalling
+    //    the app.
+    let hub = match activation::validate_code(&code) {
         Err(error) => {
             logging!(
                 warn,
                 Type::Config,
-                "[locus] the hub was not told about a sign-out: {error:#}"
+                "[locus] signing out a damaged stored code; the hub was not asked: {error}"
             );
             HubOutcome::NotConfirmed
         }
+        Ok(_) => match activation::release(&code, &device::fingerprint()).await {
+            Ok(ReleaseOutcome::Recorded) => HubOutcome::Released,
+            Ok(ReleaseOutcome::NothingToRelease) => HubOutcome::NothingToRelease,
+            Err(error) => {
+                logging!(
+                    warn,
+                    Type::Config,
+                    "[locus] the hub was not told about a sign-out: {error:#}"
+                );
+                HubOutcome::NotConfirmed
+            }
+        },
     };
 
     // 2. Stop beating before anything is cleared. A loop still running here would
@@ -326,10 +346,7 @@ mod tests {
         let forget = position("clear_entitlement()");
 
         assert!(
-            notify < stop_beat
-                && stop_beat < stop_tunnel
-                && stop_tunnel < remove_profile
-                && remove_profile < forget,
+            notify < stop_beat && stop_beat < stop_tunnel && stop_tunnel < remove_profile && remove_profile < forget,
             "sign_out's calls are out of order: release={notify} stop_heartbeat={stop_beat} \
              stop_tunnel={stop_tunnel} remove_profile={remove_profile} forget={forget} — the hub \
              must be told while the code still exists, and the entitlement must be cleared last"
@@ -347,5 +364,52 @@ mod tests {
         assert_ne!(HubOutcome::Released, HubOutcome::NothingToRelease);
         assert_ne!(HubOutcome::Released, HubOutcome::NotConfirmed);
         assert_ne!(HubOutcome::NothingToRelease, HubOutcome::NotConfirmed);
+    }
+
+    /// A damaged stored code must not stop the LOCAL half of a sign-out.
+    ///
+    /// The field report behind this: an invalid code stored on a macOS machine
+    /// was never signed out, the client kept connecting with it and failed
+    /// silently, and the student's only recovery was to uninstall the app and wipe
+    /// its data. The reason sign-out could not help was here — `release()` is
+    /// called first (the order above requires it) and it validates locally, so a
+    /// damaged code errored out of the whole function before anything was deleted.
+    ///
+    /// This asserts the property, not the mechanism: every statement that
+    /// *destroys* state must be reachable without the hub call having succeeded.
+    /// The hub arm is guarded by `validate_code`, and the destructive statements
+    /// sit after it rather than inside it.
+    #[test]
+    fn a_damaged_stored_code_does_not_block_the_local_half_of_a_sign_out() {
+        let source = include_str!("signout.rs");
+        let body_start = source
+            .find("pub async fn sign_out()")
+            .expect("sign_out must exist; this test reads its body");
+        let body = &source[body_start..];
+        let body_end = body.find("#[cfg(test)]").unwrap_or(body.len());
+        let body = &body[..body_end];
+
+        assert!(
+            body.contains("activation::validate_code(&code)"),
+            "sign_out must check the code itself before handing it to the hub, so a damaged one \
+             does not surface as 'the hub was not told'"
+        );
+
+        let hub_arm_start = body.find("activation::validate_code(&code)").expect("checked above");
+        let hub_arm = &body[hub_arm_start..];
+        let arm_end = hub_arm.find("runtime::stop()").unwrap_or(hub_arm.len());
+        let hub_arm = &hub_arm[..arm_end];
+
+        for destructive in [
+            "clear_entitlement()",
+            "remove_tier_profile()",
+            "credential::mark_signed_out()",
+        ] {
+            assert!(
+                !hub_arm.contains(destructive),
+                "{destructive} sits inside the hub arm: a damaged code would skip it and the \
+                 student would have to uninstall to sign out"
+            );
+        }
     }
 }

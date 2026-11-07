@@ -372,10 +372,13 @@ where
         Ok(response) => response,
         Err(error) => {
             // Before giving up, consider that the network may be blocking the hub
-            // BY NAME. A reset during the handshake is the signature of exactly
-            // that, and the activation tunnel is the one transport that presents no
-            // name. Only that failure is retried — see `Failure::retryable_over_tunnel`
-            // for why a DNS failure, a refusal or a certificate error must not be.
+            // BY NAME. A reset during the handshake or a refusal are the two
+            // signatures of exactly that — a filtering appliance tears the flow
+            // down after reading the name, and which of the two the client sees
+            // depends on how far the appliance got. The activation tunnel is the
+            // one transport that presents no name. Only those failures are
+            // retried — see `Failure::retryable_over_tunnel` for why a DNS
+            // failure, a certificate error or a timeout must not be.
             let failure = crate::locus::hub::Failure::classify(&error);
             if failure.retryable_over_tunnel() && crate::locus::activation_tunnel::activation_tunnel_available() {
                 tracing::warn!(
@@ -581,9 +584,11 @@ pub async fn release(code: &str, fingerprint: &str) -> Result<ReleaseOutcome> {
         bail!("refusing to release with a device fingerprint that is too short");
     }
 
-    let body = crate::locus::contract::ReleaseRequest { code: &canonical, fingerprint };
-    let response: crate::locus::contract::ReleaseResponse =
-        post_json("/api/release-entitlement", &body).await?;
+    let body = crate::locus::contract::ReleaseRequest {
+        code: &canonical,
+        fingerprint,
+    };
+    let response: crate::locus::contract::ReleaseResponse = post_json("/api/release-entitlement", &body).await?;
 
     // Switched on the hub's own code, not the HTTP status — see
     // `ReleaseResponse`. 200 means it recorded something; 404 means "not
@@ -595,7 +600,11 @@ pub async fn release(code: &str, fingerprint: &str) -> Result<ReleaseOutcome> {
         other => bail!(
             "the Locus hub refused the sign-out ({}): {}",
             other,
-            if response.message.is_empty() { "no reason given" } else { &response.message }
+            if response.message.is_empty() {
+                "no reason given"
+            } else {
+                &response.message
+            }
         ),
     }
 }

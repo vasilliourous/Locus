@@ -50,6 +50,15 @@ export interface SubscriptionState {
   subscription: SubscriptionStatus
   /** Whether the device has an entitlement at all — gates the whole indicator. */
   activated: boolean
+  /**
+   * A code is stored but is not a Locus code, so it was not used.
+   *
+   * False whenever {@link activated} is true. Reported separately so a damaged
+   * sign-in is never described as "not activated": the student did activate, and
+   * that sentence sends them looking for a card they already have instead of
+   * simply entering the code again.
+   */
+  storedCodeDamaged: boolean
   /** The tier, for context in the indicator. `null` before activation. */
   tier: string | null
   /** Force a re-read, e.g. right after activation or a renewal. */
@@ -98,6 +107,11 @@ export const useSubscription = (): SubscriptionState => {
     // `undefined` (never read) is treated as not-activated, so the indicator
     // renders nothing rather than flashing an empty badge before the first read.
     activated: data?.activated ?? false,
+    // A code that is stored but is not a code. Distinct from `!activated`: the
+    // device HAS a sign-in, it just cannot be used, and the two need different
+    // sentences — "enter the code from your card" is the wrong instruction for
+    // someone who already did.
+    storedCodeDamaged: data?.storedCodeDamaged ?? false,
     tier: data?.tier ?? null,
     refresh: () => mutate(),
     checkNow: async () => {

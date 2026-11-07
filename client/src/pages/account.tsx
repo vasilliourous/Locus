@@ -721,7 +721,14 @@ const AccountPage = () => {
               sx={{ color: theme.palette.warning.main, mt: 0.25 }}
             />
             <Typography variant="body2" sx={{ lineHeight: 1.5 }}>
-              {t('home.components.connection.account.notActivated')}
+              {/* A damaged stored sign-in gets its own sentence. "This device is
+                  not activated" is true but misleading here: the student did
+                  activate, and saying otherwise sends them looking for a code
+                  they already own — while the failure that produced it used to
+                  be silently swallowed. */}
+              {status.storedCodeDamaged
+                ? t('home.components.connection.account.storedCodeDamaged')
+                : t('home.components.connection.account.notActivated')}
             </Typography>
           </Box>
         </Paper>

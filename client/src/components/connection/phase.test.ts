@@ -23,6 +23,10 @@ const status = (
   ready: boolean,
 ): LocusStatus => ({
   activated,
+  // `phaseFromStatus` never reads this: a damaged sign-in is an Account-screen
+  // fact, not a connection phase. Set to the value it always has when
+  // `activated` is true — false — so the fixture stays a possible status.
+  storedCodeDamaged: false,
   connected,
   ready,
   // The core is "up" precisely when it is running (`connected`) — the backend

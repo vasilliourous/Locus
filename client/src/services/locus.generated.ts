@@ -30,6 +30,15 @@ export interface LocusStatus {
    */
   activated: boolean
   /**
+   * A code is stored but could not be a Locus code, so it was not used.
+   *
+   * Reported so the Account screen can say *why* it is offering activation
+   * again. Without it, a damaged sign-in is indistinguishable from a fresh
+   * device, and a student who re-enters their code cannot tell whether the
+   * first attempt ever registered.
+   */
+  storedCodeDamaged: boolean
+  /**
    * The tier name as the hub sent it (`free`/`eco`, or `strike`), when known.
    * This is the WIRE name, not the label the student reads — the frontend
    * maps it in `tier-badge.tsx`, which is the single place that mapping

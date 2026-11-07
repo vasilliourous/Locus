@@ -101,7 +101,14 @@ fn activation_from(verge: &IVerge, mirrored_code: Option<String>) -> Option<Acti
 /// into the config so the launch is not a one-off.
 ///
 /// Returns `None` when neither holds anything, which is the genuine first-run
-/// state.
+/// state — **and also when what is held there is not a code**, which is a
+/// different state and must be told apart by [`stored_code_is_damaged`].
+///
+/// Note the asymmetry with the config path: a code already in the config is
+/// returned unexamined here. This read answers "what is stored", and callers that
+/// need "what can be authenticated with" ask [`read_valid_code`]. Validating here
+/// would be worse than useless for sign-out, which is the one caller that must
+/// reach a damaged code in order to delete it.
 pub async fn read_code_rehydrating() -> Option<String> {
     let verge = Config::verge().await;
     if let Some(code) = config_code(&verge.latest_arc()) {
@@ -111,6 +118,13 @@ pub async fn read_code_rehydrating() -> Option<String> {
     // The config lost it. A mirror is the only thing that can recover the
     // student's entitlement, so adopt it and write it back to the config too.
     let code = crate::locus::credential::read_code()?;
+    // Adopt only something that could be a code at all. A mirror holding a
+    // mangled value is worse than an empty one: it is written back into the
+    // config below, and every later read would treat it as an entitlement.
+    if let Err(error) = crate::locus::activation::validate_code(&code) {
+        logging::warn_stored_code_is_unusable(&error.to_string());
+        return None;
+    }
     logging::info_recovered_code();
     // Best-effort: the caller has the code either way, and failing the launch
     // over a config write would trade a recovering device for a clean file.
@@ -118,6 +132,43 @@ pub async fn read_code_rehydrating() -> Option<String> {
         logging::warn_could_not_write_back(&error);
     }
     Some(code)
+}
+
+/// The locally-valid stored code, or `None` when what is stored is not a code.
+///
+/// The one thing this client can check with no network, applied to the value it is
+/// about to authenticate with — which is the check that was missing. A stored code
+/// was only ever validated when a student *typed* one, so a corrupted config or a
+/// stale mirror was handed straight to the hub, refused, and shown to the student
+/// as a connection failure they could not act on.
+///
+/// Returning `None` rather than an error is deliberate: "this device is not
+/// activated" is the true state of a device whose stored code is unusable, and that
+/// is a state the UI already knows how to show. It is also what makes a corrupt
+/// code *recoverable* — once the read stops pretending there is a credential,
+/// re-activation and sign-out are both reachable.
+#[must_use]
+pub fn read_valid_code(verge: &IVerge) -> Option<String> {
+    let activation = read(verge)?;
+    match crate::locus::activation::validate_code(&activation.code) {
+        Ok(_) => Some(activation.code),
+        Err(error) => {
+            logging::warn_stored_code_is_unusable(&error.to_string());
+            None
+        }
+    }
+}
+
+/// Whether a stored code is present but could not be a code.
+///
+/// The difference from [`read_valid_code`] returning `None` is what lets the
+/// Account screen say "your saved sign-in is damaged, sign in again" instead of
+/// silently showing the activation screen as though this were a new device — a
+/// student who sees that screen with no explanation cannot tell whether their data
+/// was cleared or whether re-entering the code will work.
+#[must_use]
+pub fn stored_code_is_damaged(verge: &IVerge) -> bool {
+    read(verge).is_some_and(|activation| crate::locus::activation::validate_code(&activation.code).is_err())
 }
 
 /// The code held in the config alone, without consulting the mirror.
@@ -651,6 +702,22 @@ mod logging {
         );
     }
 
+    /// A stored code could not be parsed as a code at all.
+    ///
+    /// Never carries the value: the code is a credential, and a log is the one
+    /// place this app promises it will not appear. The reason is safe — it is
+    /// about the shape, not the value — and it is the difference between "this
+    /// device is corrupt" and "the student never activated", which is the whole
+    /// reason a support log needs a line here.
+    pub fn warn_stored_code_is_unusable(reason: &str) {
+        clash_verge_logging::logging!(
+            warn,
+            clash_verge_logging::Type::Config,
+            "[locus] the stored activation code is not a valid Locus code and will not be used \
+             ({reason}); this device must be activated again"
+        );
+    }
+
     /// The code could not be mirrored to the machine store.
     pub fn warn_could_not_mirror() {
         clash_verge_logging::logging!(
@@ -743,6 +810,80 @@ mod tests {
         let activation = activation_from(&verge, None).expect("a complete record must read");
         assert_eq!(activation.tier, "strike");
         assert!(is_usable(&activation));
+    }
+
+    /// A code built the way the hub builds one, for the tests that need a code
+    /// that will survive `validate_code`.
+    ///
+    /// Generated rather than pasted because a hard-coded code would have to be a
+    /// real one from the deployed hub, and the checksum is the whole property
+    /// under test — a pasted code whose checksum drifted would make these tests
+    /// pass for the wrong reason.
+    fn a_valid_code() -> String {
+        // A code the deployed hub's own validator accepts — the same one
+        // `activation::tests::accepts_known_good_codes` asserts on. Built by hand
+        // rather than generated: `make_code` checksums the body it is given, so a
+        // body of the wrong length yields a string `validate_code` then rejects,
+        // and this helper would be asserting against its own mistake.
+        "RQ-VYG7-VL6U-CMM9-Q".to_owned()
+    }
+
+    /// A stored code that cannot be a code is not a credential.
+    ///
+    /// The field report: an invalid code stored on the client never signed it
+    /// out, the client kept trying to connect with it and failed silently, and
+    /// the only recovery was uninstalling and wiping app data. The reason it
+    /// failed silently is here — nothing validated the stored value, so it was
+    /// handed to the hub and the refusal was reported as a connection problem.
+    ///
+    /// FALSIFIED before keeping: with the `validate_code` call removed from
+    /// `read_valid_code`, this reads `Some` and the test fails.
+    #[test]
+    fn a_damaged_stored_code_is_not_offered_as_a_credential() {
+        let verge = verge_with(
+            Some("RQ-ABCD-EFGH-JKMN-X"), // right shape, wrong checksum
+            Some("strike"),
+            Some("a".repeat(64).as_str()),
+        );
+
+        assert!(
+            activation_from(&verge, None).is_some(),
+            "the raw read still reports what is stored — sign-out needs it to"
+        );
+        assert_eq!(
+            read_valid_code(&verge),
+            None,
+            "a code failing the local checksum must not be used to authenticate"
+        );
+        assert!(
+            stored_code_is_damaged(&verge),
+            "the UI must be able to say the sign-in is damaged rather than show a new device"
+        );
+    }
+
+    /// A good stored code still reads, so the check is not simply refusing all.
+    ///
+    /// Without this, the test above passes for a `read_valid_code` that always
+    /// returns `None` — a check that cannot fail in the other direction.
+    #[test]
+    fn a_valid_stored_code_is_still_offered() {
+        let code = a_valid_code();
+        let verge = verge_with(Some(&code), Some("strike"), Some("a".repeat(64).as_str()));
+
+        assert!(!stored_code_is_damaged(&verge));
+        assert_eq!(read_valid_code(&verge).as_deref(), Some(code.as_str()));
+    }
+
+    /// A device that was never activated is not reported as damaged.
+    ///
+    /// The two states share a screen, and telling a first-run student their
+    /// sign-in is damaged would send them to support for a problem they do not
+    /// have.
+    #[test]
+    fn a_device_with_nothing_stored_is_not_reported_as_damaged() {
+        let verge = verge_with(None, Some("strike"), Some("a".repeat(64).as_str()));
+        assert!(!stored_code_is_damaged(&verge));
+        assert_eq!(read_valid_code(&verge), None);
     }
 
     /// A hub-offered address is adopted only when it is usable; otherwise the
@@ -880,7 +1021,10 @@ mod tests {
         // This is the state `clear_entitlement` leaves behind, and it must read
         // as "not activated".
         let activation = activation_from(&cleared, None);
-        assert!(activation.is_none(), "a leftover mirror must not restore an empty config");
+        assert!(
+            activation.is_none(),
+            "a leftover mirror must not restore an empty config"
+        );
     }
 
     /// Clearing ONLY the config would be undone by the mirror — so this pins the
