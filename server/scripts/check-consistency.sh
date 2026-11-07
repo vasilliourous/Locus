@@ -5711,6 +5711,55 @@ PREC
     fi
 fi
 
+# ─────────────────────────────────────────────────────────────
+# 44. The backup timer must not be life-coupled to PocketBase
+#
+# Measured 2026-11-07 on the live hub: pocketbase-backup.timer was `enabled`
+# but `inactive (dead)`, "0 timers listed", deactivated at the exact second
+# PocketBase was stopped to restore the database. Its [Unit] had
+# `Requires=pocketbase.service`, and systemd's Requires= propagates STOP as
+# well as start: stopping the required unit stops the requiring one, and
+# nothing brings it back (`enabled` only re-arms at boot).
+#
+# So a single planned `systemctl stop pocketbase` — which restore.sh does on
+# EVERY restore, and any upgrade or DB swap does — silently disables backups.
+# The failure is invisible: is-enabled still says enabled, and the newest
+# backup in B2 just quietly ages. You find out when you need a backup.
+#
+# Two assertions, because there were two defects: the directive itself, and
+# the "already exists, leave it" early return that made the fix unreachable on
+# a host that had already run the module.
+# ─────────────────────────────────────────────────────────────
+echo
+echo "════════════════════════════════════════════════════════════"
+echo "44. The backup timer survives a planned PocketBase stop"
+BACKUP_MOD="$REPO/server/modules/07-backups.sh"
+if [ ! -f "$BACKUP_MOD" ]; then
+    bad "07-backups.sh is missing"
+else
+    # (a) No Requires= on the timer unit. Anchored to the TIMER heredoc so a
+    #     Requires= elsewhere (the service may legitimately want one) is not
+    #     mistaken for this one.
+    if awk "/<< 'TIMER'/,/^TIMER\$/" "$BACKUP_MOD" | grep -qE '^Requires='; then
+        bad "the backup TIMER carries a Requires= directive"
+        bad "  systemd propagates STOP through Requires=, so one planned"
+        bad "  'systemctl stop pocketbase' (every restore does this) disables"
+        bad "  backups permanently, invisible to is-enabled. Use After= instead."
+    else
+        ok "the backup timer does not Requires= PocketBase (a planned stop cannot kill it)"
+    fi
+
+    # (b) The timer file must still be REWRITTEN when it carries the old
+    #     directive, or the fix above never reaches an already-deployed host.
+    if grep -q "grep -q '\^Requires=pocketbase.service'" "$BACKUP_MOD"; then
+        ok "an already-deployed timer with the old Requires= is rewritten, not left alone"
+    else
+        bad "07-backups.sh leaves an existing timer file untouched"
+        bad "  A host that has already run this module keeps the broken unit and"
+        bad "  re-running setup.sh reports success while changing nothing."
+    fi
+fi
+
 echo
 echo "════════════════════════════════════════════════════════════"
 if [ "$FAIL" -eq 0 ]; then

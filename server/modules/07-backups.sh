@@ -164,16 +164,53 @@ SCRIPT
 }
 
 # ── Write systemd timer (hourly) ──
+#
+# THE TIMER MUST NOT `Requires=` POCKETBASE.
+#
+# Measured 2026-11-07 on the live hub: the timer was `enabled` but `inactive
+# (dead)`, with "0 timers listed". It had been deactivated at the exact second
+# PocketBase was stopped to restore the database. systemd's `Requires=` is a
+# stop-propagation relationship as well as a start one: stopping the required
+# unit ALSO stops everything that requires it, and nothing brings the timer
+# back — `enabled` only re-arms it at the next boot.
+#
+# So a single planned `systemctl stop pocketbase` — precisely what restore.sh
+# does on every restore, and what any upgrade or DB swap does — silently
+# disables backups. The failure is invisible: `systemctl is-enabled` still says
+# enabled, and the only symptom is that the newest backup in B2 quietly ages.
+# The way you find out is the way this was found, which is too late to help.
+#
+# `After=` gives the ordering that was actually wanted (do not back up before
+# PocketBase is up) with no lifecycle coupling: the timer keeps firing whether
+# or not PocketBase is running, and the backup script's own check for
+# pb_data/data.db is what handles "not running right now".
 write_timer() {
+    # REWRITE A TIMER THAT STILL CARRIES THE BROKEN `Requires=`.
+    #
+    # This used to be "if the file exists, leave it alone", which made the fix
+    # above unreachable on any host that had ever run this module: the bad unit
+    # was already on disk, so re-running setup.sh would report success and
+    # change nothing. That is the repository's recurring failure shape — a repo
+    # fix that is inert because the thing that runs it was never replaced.
+    #
+    # The narrow condition matters: a timer that is already correct is left
+    # untouched (no needless rewrites), and only the specific bad directive
+    # triggers a rewrite.
     if [ -f "$BACKUP_TIMER" ]; then
-        log "Backup timer already exists"
-        return 0
+        if grep -q '^Requires=pocketbase.service' "$BACKUP_TIMER" 2>/dev/null; then
+            log "Backup timer has the old Requires=pocketbase.service — rewriting"
+        else
+            log "Backup timer already exists (correct)"
+            return 0
+        fi
     fi
 
     cat > "$BACKUP_TIMER" << 'TIMER'
 [Unit]
 Description=Locus hourly PocketBase backup to B2
-Requires=pocketbase.service
+# After=, NOT Requires= — see the note below. Requires= here stopped the hourly
+# backup PERMANENTLY the first time PocketBase was stopped on purpose.
+After=pocketbase.service
 
 [Timer]
 OnCalendar=hourly
