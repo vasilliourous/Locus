@@ -549,11 +549,6 @@ CADDY
 # hostname. See modules/05-caddy.sh for why only /updates/ is served here and
 # everything else redirects.
 __HUB_ALIAS_DOMAIN__ {
-    tls {
-        protocols tls1.2 tls1.3
-        curves x25519 secp384r1
-    }
-
     # ── Downloads are SERVED, not redirected ──
     # A 308 here is the whole bug this handle exists to fix: the alias is used
     # by a device that cannot reach the canonical name, so redirecting a
@@ -582,6 +577,16 @@ __HUB_ALIAS_DOMAIN__ {
     # the /updates/ handle above wins and this catches the rest.
     handle {
         redir https://__HUB_CANONICAL_DOMAIN__{uri} 308
+    }
+
+    # tls LAST, matching every other site block in this file (the hub block and
+    # the landing block both close with it). Caddy accepts it in either place —
+    # it is consumed into the server's TLS config and is not an HTTP handler —
+    # but a block that orders things differently from its neighbours is how the
+    # next person copies the wrong shape into a block where ordering matters.
+    tls {
+        protocols tls1.2 tls1.3
+        curves x25519 secp384r1
     }
 }
 CADDY

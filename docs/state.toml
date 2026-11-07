@@ -32,7 +32,7 @@
 # Added 2026-09-29.
 
 [client.version]
-value      = "3.3.5"
+value      = "3.3.6"
 source     = "client/package.json, client/src-tauri/Cargo.toml, client/src-tauri/tauri.conf.json"
 provenance = "derived"
 
@@ -113,6 +113,23 @@ provenance = "derived"
 # activation gate with no path to the update that would fix it.
 value      = "networkingguides.duckdns.org"
 source     = "client/src-tauri/src/locus/contract.rs (LEGACY_HUB_URL); server/modules/05-caddy.sh (both names on one site block)"
+provenance = "derived"
+
+[activation_tunnel.bootstrap_port]
+# The pre-activation bootstrap listener's port on the hub. It is NOT a tier and
+# must never be one (`check-consistency.sh` §40 asserts this): it carries only
+# /api/activate, /api/code-lookup and /api/heartbeat through an allowlist and a
+# rate limit, because its credential ships in every client.
+value      = 8453
+source     = "server/modules/09-activation-tunnel.sh (ACTIVATION_TUNNEL_PORT); client/src-tauri/src/locus/activation_tunnel.rs (TUNNEL_PORT)"
+provenance = "derived"
+
+[activation_tunnel.filter_port]
+# The path filter the bootstrap listener hands decrypted requests to. The CLIENT
+# names this as the destination, because `ssserver` has no inbound forwarding —
+# it dials whatever the client asked for. Two values that must agree.
+value      = 18090
+source     = "server/modules/09-activation-tunnel.sh (ACTIVATION_FORWARD_PORT); client/src-tauri/src/locus/activation_tunnel.rs (FILTER_PORT)"
 provenance = "derived"
 
 [hub.api_base]
