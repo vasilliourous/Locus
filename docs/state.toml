@@ -190,8 +190,16 @@ provenance = "asserted"
 [hub.deployed_os]
 # A property of the box that is there now, not of this tree. Recorded so a
 # reader knows what was being aimed at; verify before trusting.
-value      = "Ubuntu 22.04.5, 1 vCPU / 454 MB RAM + 1 GB swap"
-source     = "operator observation"
+#
+# Re-measured 2026-11-07 on the rebuilt box. The previous value claimed
+# "1 vCPU / 454 MB RAM + 1 GB swap"; the box has 957 MB RAM and NO swap, so
+# both halves of that were wrong. The missing swap is not cosmetic: 00-env.sh
+# warns that 957 MB is tight for Caddy + PocketBase + 3x shadowsocks-rust, and
+# during this session a build step had to be swapped for a prebuilt download
+# rather than run on the box. Recorded as unverified because it is an
+# observation about one host, not a property of the repository.
+value      = "Ubuntu 22.04.5 LTS, 1 vCPU / 957 MB RAM / 0 MB swap"
+source     = "free -m and nproc on the live hub, 2026-11-07"
 provenance = "unverified"
 
 [client.theme_ids]

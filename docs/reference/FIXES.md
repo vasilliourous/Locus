@@ -24,6 +24,78 @@ commercial gaps, [`../business/17-not-built.md`](../business/17-not-built.md).
 
 ---
 
+## FOUR DEFECTS THAT MADE THE DEPLOY EITHER LIE OR DIE (2026-11-07, unreleased)
+
+A hub was rebuilt from a blank slate to deploy the school-network fix. All four
+defects below are in **deployment scripts**, and every one of them passed a green
+tree — `cargo test` 665, `clippy`, `check-consistency.sh` — because none of them
+is reachable from a test. This is the repository's oldest lesson, stated at the
+top of `URGENT-FIX-NOW.md` and now with four more instances: *a repo fix is inert
+until the piece that runs it is redeployed*, and a deploy script can be broken
+while every check that reads the tree is green.
+
+**1. `setup.sh` let the secrets bundle overrule an explicit `DOMAIN`.**
+`set -a; source "$SECRETS_TMP"` makes every bundle line an assignment, and an
+assignment overwrites what the caller passed. `DOMAIN=<canonical> setup.sh` with a
+bundle containing `DOMAIN=<legacy>` deployed the **legacy** name, silently. The
+committed bundle still names `networkingguides.duckdns.org` — the name only
+pre-3.3.2 builds dial — while `contract::HUB_URL`, which every current client
+dials, is `networkingguides.jadedns.uk`. The result would have been a correct hub
+at a hostname no client asks for: green deploy, zero users. Fixed by capturing
+`DOMAIN` before sourcing and restoring it after.
+
+**2. The same `source` expanded `$` inside `VPS_PW`.** The password contains a
+literal `$`; `source` parses it as a variable and, under `set -u`, the deploy died
+with `line 49: Zy6N: unbound variable` — after installing `age` and decrypting,
+before installing anything. A generated password may contain any printable
+character; the secrets format does not get to forbid it. Fixed by reading the
+bundle literally (`KEY=value`, split on the first `=`, no expansion) in **both**
+`setup.sh` and `restore.sh`, and reporting a malformed line instead of skipping
+it. Recorded in `state.toml`-style prose nowhere: the rule is *the secrets file is
+data, not shell*.
+
+**3. `modules/09-activation-tunnel.sh` sourced a script that calls `exit 0`.**
+`00-env.sh` is written to be **run** as `setup.sh`'s first module and ends with
+`exit 0`. Module 09 did `. 00-env.sh 2>/dev/null || true`. Sourcing a file that
+calls `exit` terminates the **calling** shell, and `|| true` cannot catch it —
+`exit` is not a failed command, it is the end of the process. So the module
+printed `00-env`'s validation and exited **0**, having installed nothing: no unit,
+no config, no key, no listener. `setup.sh` printed
+`✓ Module 09-activation-tunnel completed successfully`. That is a fourth
+independent reason the activation tunnel could never have worked, on top of the
+three recorded on 2026-11-06, and it is the only one that made the deploy lie
+rather than fail. Fixed by running `00-env.sh` as a **child process** and
+inspecting its status.
+
+**4. The hourly backup timer was life-coupled to PocketBase.**
+`pocketbase-backup.timer` carried `Requires=pocketbase.service`. systemd's
+`Requires=` propagates **stop** as well as start, so the first planned
+`systemctl stop pocketbase` — which `restore.sh` does on *every* restore, and any
+upgrade or DB swap does — deactivated the timer permanently. `systemctl
+is-enabled` still reported `enabled`, because that only re-arms it at boot. The
+only symptom is that the newest backup in B2 quietly ages, and you discover it
+when you need the backup. Found immediately after a data restore, which is exactly
+the operation that triggers it. Fixed with `After=` (the ordering that was
+actually wanted) and, separately, by rewriting an already-deployed timer that
+still carries the bad directive — the "file exists, leave it" early return would
+otherwise have made the fix unreachable on any host that had ever run the module.
+
+**The rule the set produces — a deploy script's failure mode is *silence*, so
+check the artefact, not the exit code.** Every one of these reported success or
+died somewhere unrelated to its cause. What caught them was reading the deployed
+system rather than the deploy log: `systemctl is-active` on every unit,
+`ss -lntp` for the listeners that should exist, the sha256 of the key the box
+actually runs, and one request against a real code through the live API.
+
+**Guards, each shown failing first:** `check-consistency.sh` §43 (DOMAIN
+precedence and a literal `$` round-trip, both by lifting the real block out of
+`setup.sh` and running it) and §44 (no `Requires=` on the timer unit, and an
+existing bad timer is rewritten). §43 was itself fixed after it misreported
+correct code: its harness ran via `bash - <<HEREDOC`, which collides with the
+heredoc being the script.
+
+---
+
 ## THE ALIAS SERVED THE API AND COULD NOT DELIVER THE UPDATE (2026-11-07, unreleased)
 
 The hub alias (`HUB_ALIAS_DOMAIN`) exists for one network: N4L, which blocks the

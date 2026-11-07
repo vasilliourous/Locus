@@ -188,6 +188,21 @@ opened by `08-firewall.sh`, guarded by `check-consistency.sh` §40): a Shadowsoc
 listener on 8453 forwarding three enrolment endpoints through an allowlist and a
 rate limit that mirrors Caddy's.
 
+> **Updated 2026-11-07 — the hub half is now actually deployed, finally.**
+> A fourth defect made the module impossible to run, and it is the worst of the
+> set because it made the deploy *lie*: `09-activation-tunnel.sh` sourced
+> `00-env.sh`, which ends in `exit 0`, and sourcing a file that calls `exit`
+> terminates the caller. The module exited 0 having installed nothing, while
+> `setup.sh` printed "✓ Module 09-activation-tunnel completed successfully". With
+> the three earlier defects and this one, the tunnel had **four** independent
+> reasons never to work (`FIXES.md`). All four are fixed and the module has now
+> run on a hub: `:8453` accepts a connection from an uncensored network where the
+> 2026-11-06 measurement timed out, `:18090` is loopback-only, both units are
+> active, and the key the box runs hashes to the same sha256 as the bundle's.
+> **This closes the hub-side blocker and nothing more** — the items below stand,
+> and one measurement from the school network is still the only evidence that
+> counts.
+
 **NOT verified, and not verifiable from a checkout:**
 
 - **That 8453 is reachable from the school network.** Nothing has run there since
