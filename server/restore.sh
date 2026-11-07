@@ -98,11 +98,46 @@ KEYERR
     fi
     unset PASSPHRASE_FEED
 
-    # Source from temp file (reliable in all shell environments)
-    set -a
-    source "$SECRETS_TMP" || { rm -f "$SECRETS_TMP"; fail "Failed to source decrypted secrets."; }
-    set +a
+    # READ THE BUNDLE LITERALLY, NOT WITH `source` — see setup.sh for the
+    # measurement. `source` parses each line as shell, so VPS_PW's literal '$'
+    # is expanded and, under `set -u`, this dies with "unbound variable". A
+    # restore is the worst possible time to discover that. Kept in step with
+    # setup.sh deliberately: the two read the same file.
+    #
+    # DOMAIN is captured first and restored after, so an explicit DOMAIN
+    # overrides the bundle (the committed bundle still names the LEGACY duckdns
+    # host; the canonical one is what current clients dial).
+    DOMAIN_EXPLICIT="${DOMAIN:-}"
+    if [ ! -r "$SECRETS_TMP" ]; then
+        fail "decrypted secrets file is unreadable: ${SECRETS_TMP}"
+    fi
+    while IFS= read -r _line || [ -n "$_line" ]; do
+        case "$_line" in
+            ''|'#'*) continue ;;
+        esac
+        case "$_line" in
+            [A-Za-z_][A-Za-z0-9_]*=*)
+                _k="${_line%%=*}"
+                _v="${_line#*=}"
+                export "$_k=$_v"
+                ;;
+            *)
+                rm -f "$SECRETS_TMP"
+                fail "malformed line in secrets (expected KEY=value): ${_line%%=*}"
+                ;;
+        esac
+    done < "$SECRETS_TMP"
+    unset _line _k _v
     rm -f "$SECRETS_TMP"
+
+    if [ -n "$DOMAIN_EXPLICIT" ]; then
+        if [ -n "${DOMAIN:-}" ] && [ "$DOMAIN_EXPLICIT" != "$DOMAIN" ]; then
+            log "  DOMAIN: using the explicit '${DOMAIN_EXPLICIT}' (secrets.env.age says '${DOMAIN}')"
+        fi
+        DOMAIN="$DOMAIN_EXPLICIT"
+        export DOMAIN
+    fi
+    unset DOMAIN_EXPLICIT
     log "✓ Secrets decrypted from ${SECRETS_FILE}"
 fi
 
