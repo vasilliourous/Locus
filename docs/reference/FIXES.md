@@ -24,6 +24,48 @@ commercial gaps, [`../business/17-not-built.md`](../business/17-not-built.md).
 
 ---
 
+## THE INTEL macOS SLICE COULD NOT RUN ITS OWN SIGNING TOOL (2026-11-08, unreleased)
+
+Found by the first release ever to run on a real Intel macOS machine (v3.3.7,
+run `42432058733`). `Build (macos-arm)` passed; `Build (macos-intel)` died:
+
+```
+Install minisign   .../minisign: Bad CPU type in executable
+```
+
+**What was wrong.** The step downloaded `minisign-0.12-macos.zip` from the
+upstream release. That archive contains exactly one executable and it is
+**arm64** — read from the asset (`Mach-O 64-bit arm64 executable`, cputype
+`0x0100000c`), not inferred from the failure. On an Intel runner the CPU cannot
+execute it, so `install -m 755` succeeds and the tool dies on first use.
+
+**Why it had never been seen.** Both macOS slices were on the *same* image, and
+since 2026-11-07 that image was arm64. The tool was always the right
+architecture for a machine it never needed to be right for. Splitting the matrix
+onto per-architecture images exposed it — and the arm slice passing on the *same
+run* is why "both macOS jobs are green" is two claims, not one.
+
+**What fixed it.** The macOS branch builds minisign **0.12 from the release's own
+source tarball**, with the image's `cmake`/`clang` and its libsodium, so it
+targets whatever CPU the job was scheduled on. Same version, same key format,
+one fewer prebuilt artifact to trust. Rosetta was rejected: its presence on the
+hosted Intel image is another unverified assumption, and the slice exists to run
+natively. The step then **runs** the tool and checks `minisign 0.12`, so a build
+that produced nothing fails there rather than at signing — after the compile.
+
+*The rule:* a downloaded prebuilt binary is an architecture claim. `install`
+proving it exists is not proving this CPU can run it. **Execute what you
+install, in the step that installs it.** `check-consistency.sh` §46 now fails if
+the macOS path returns to the prebuilt zip, drops the source build, or stops
+running the tool.
+
+*Not verified:* that the macOS 15 image carries `cmake`, `pkg-config` and
+`libsodium`. The step fails loudly and immediately if any is missing, which is
+why it sits at the start of the job — but a green run is the first evidence, and
+none has happened yet.
+
+---
+
 ## THREE THINGS THAT MADE CI SLOW, FLAKY, OR SILENT (2026-11-07, unreleased)
 
 Found while getting the pipeline green before a release. None of these is a

@@ -1580,6 +1580,34 @@ jobs:
       # installing and printing a version, so the error reads like a key
       # problem rather than a tool-version problem. Pinning the same version
       # everywhere removes that class of variance entirely.
+      #
+      # ── macOS: BUILT FROM THE PINNED SOURCE, BECAUSE THE ZIP IS arm64-ONLY ──
+      #
+      # 2026-11-08, the first run with a real Intel macOS machine (v3.3.7, run
+      # 42432058733):
+      #
+      #   Install minisign  .../minisign: Bad CPU type in executable
+      #
+      # `minisign-0.12-macos.zip` from the upstream release contains ONE
+      # executable and it is arm64 (`Mach-O 64-bit arm64 executable`, cputype
+      # 0x0100000c — read from the asset, not assumed). On the arm64 runner that
+      # works by accident. On the Intel runner it is a binary the CPU cannot
+      # execute, and under `-e -o pipefail` the job dies there — AFTER a
+      # 25-minute build, which is the expensive place to find out.
+      #
+      # It was invisible while both slices shared the arm64 image, and the arm64
+      # slice passing on the same run is why a per-slice green is not evidence
+      # for the other slice. Rosetta is not the answer: its presence on the
+      # hosted Intel image is another unverified assumption, and this slice's
+      # whole point is to run natively.
+      #
+      # So macOS builds minisign 0.12 from the release's own source tarball with
+      # the image's toolchain and libsodium — same version, native architecture,
+      # no new download trust. `-Wno-error` is deliberate: an upstream warning
+      # must not fail a release, and the version is pinned, so this is not a
+      # moving dependency. The build is then RUN (`-v`), so a toolchain that
+      # produced nothing fails here rather than at signing time — which is the
+      # defect above turned into a check.
       - name: Install minisign
         shell: bash
         run: |
@@ -1593,10 +1621,31 @@ jobs:
             tar -xzf "$RUNNER_TEMP/m.tar.gz" -C "$RUNNER_TEMP"
             install -m 755 "$RUNNER_TEMP/minisign-linux/x86_64/minisign" "$DEST/minisign"
           elif [ "${{ runner.os }}" = "macOS" ]; then
-            curl -sSL -o "$RUNNER_TEMP/m.zip" \
-              https://github.com/jedisct1/minisign/releases/download/0.12/minisign-0.12-macos.zip
-            unzip -o -q "$RUNNER_TEMP/m.zip" -d "$RUNNER_TEMP/mac"
-            install -m 755 "$RUNNER_TEMP/mac/minisign" "$DEST/minisign"
+            curl -sSL -o "$RUNNER_TEMP/m-src.tar.gz" \
+              https://github.com/jedisct1/minisign/releases/download/0.12/minisign-0.12.tar.gz
+            mkdir -p "$RUNNER_TEMP/msrc"
+            # The tarball carries AppleDouble `._*` members; they are harmless to
+            # cmake but make the source listing unreadable, so they are dropped.
+            tar -xzf "$RUNNER_TEMP/m-src.tar.gz" -C "$RUNNER_TEMP/msrc" \
+              --exclude '._*' 2>/dev/null || \
+              { tar -xzf "$RUNNER_TEMP/m-src.tar.gz" -C "$RUNNER_TEMP/msrc"; \
+                find "$RUNNER_TEMP/msrc" -name '._*' -delete; }
+            pkg-config --modversion libsodium \
+              || { echo "::error::libsodium is not on the macOS image, so the pinned" \
+                        "::error::minisign build cannot link. Check the image's package list."; \
+                   exit 1; }
+            cmake -S "$RUNNER_TEMP/msrc" -B "$RUNNER_TEMP/mbuild" \
+              -DCMAKE_BUILD_TYPE=Release \
+              -DCMAKE_C_FLAGS="-Wno-error" \
+              -DCMAKE_INSTALL_PREFIX="$RUNNER_TEMP/mout" >/dev/null
+            cmake --build "$RUNNER_TEMP/mbuild" --target install >/dev/null
+            install -m 755 "$RUNNER_TEMP/mout/bin/minisign" "$DEST/minisign"
+            # RUN it. An arm64 binary on the Intel runner dies here, not at
+            # signing time, and so does a build that produced nothing.
+            "$DEST/minisign" -v | grep -q '^minisign 0\.12' \
+              || { echo "::error::the built minisign does not run as 0.12 — wrong"; \
+                   echo "::error::architecture, or the pinned source moved."; exit 1; }
+            echo "minisign: $("$DEST/minisign" -v | head -1)"
           else
             curl -sSL -o "$RUNNER_TEMP/m.zip" \
               https://github.com/jedisct1/minisign/releases/download/0.12/minisign-0.12-win64.zip
