@@ -436,12 +436,84 @@ fn start(label: &str, engine: &Path, sing: &Path) -> Harness {
         TcpStream::connect(controller_addr.as_str()).is_ok()
     });
 
+    // The controller answering does NOT mean the mixed port is listening.
+    //
+    // Measured 2026-11-09: in 1 run in 45 the controller accepted connections
+    // while the inbound had not been bound yet, and mihomo's own debug log shows
+    // it binding the API and the mixed port ~76 ms apart. The harness spent its
+    // `wait_for` on the controller — a port no assertion reads — and then
+    // connected to the one that mattered without waiting at all. Seen as
+    // `connect to the mixed port: Connection refused`.
+    //
+    // Waiting on the right port still was not enough; see
+    // [`wait_for_socks_greeting`] for why listening is not serving.
+    wait_for_socks_greeting(mixed_port);
+
     Harness {
         _singbox,
         _mihomo,
         controller_addr,
         mixed_port,
         server_log: server_log_path,
+    }
+}
+
+/// Wait until the mixed port answers a SOCKS5 greeting, not merely until it
+/// accepts a TCP connection.
+///
+/// # Why listening is not serving
+///
+/// Calling `TcpStream::connect(..).is_ok()` asks the kernel, and the kernel says
+/// yes as soon as the listener has a backlog — before the proxy is serving. Under
+/// `cargo test`'s default parallelism three mihomo and three sing-box processes
+/// start at once, which widens that window. Measured 2026-11-09, the two the loop
+/// below demonstrably catches:
+///
+///   * `curl: (7) Failed to connect to <mixed> after 0 ms` from the TCP test, and
+///   * `greeting reply: Os { code: 104, kind: ConnectionReset }` from the UDP
+///     test, with mihomo's own log showing the listener bound and **no** SOCKS
+///     connection ever accepted — the client was never seen at all.
+///
+/// **Measured, back to back on the same machine:** the bare-connect wait failed
+/// **4 runs in 25** (at 1-minute load 4.33, 1.36 and 4.05 across the three
+/// windows). The greeting wait failed **0 in 25** (load 4.33 → 6.16). At
+/// ordinary load the bare-connect rate was 1–3 in 40.
+///
+/// This is the third instance of one rule in this file: **assert the thing you
+/// actually need, not a proxy for it.** The port reservation reserved a port, the
+/// scratch directory had to be per-test, and a listening socket is not a serving
+/// proxy.
+///
+/// **What this does NOT fix, and what is not claimed.**
+///
+///   * A `UDP-over-TCP` datagram still occasionally times out at the 10 s
+///     `recv_from` under heavy load (1–2 runs in 50 at load ≈ 1). It reproduced
+///     on the pre-fix harness too, so this change neither caused nor cures it.
+///     That is open in `docs/reference/STILL-OPEN.md`.
+///   * The `502` the `main` run failed on was **not** reproduced after this fix,
+///     in roughly 200 further runs. A `502` is mihomo accepting the request and
+///     failing to dial upstream — a failure *after* the handshake this function
+///     waits for — so it is not obviously the same defect, and this function is
+///     not offered as its cure. It is not proven gone either.
+fn wait_for_socks_greeting(port: u16) {
+    let deadline = Instant::now() + Duration::from_secs(15);
+    loop {
+        if let Ok(mut stream) = TcpStream::connect(("127.0.0.1", port)) {
+            let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
+            if stream.write_all(&[0x05, 0x01, 0x00]).is_ok() {
+                let mut reply = [0u8; 2];
+                if stream.read_exact(&mut reply).is_ok() && reply == [0x05, 0x00] {
+                    return;
+                }
+            }
+        }
+        if Instant::now() >= deadline {
+            panic!(
+                "the mihomo mixed port {port} never answered a SOCKS5 greeting within 15s; \
+                 a listening socket that never speaks is what this waits past"
+            );
+        }
+        std::thread::sleep(Duration::from_millis(20));
     }
 }
 

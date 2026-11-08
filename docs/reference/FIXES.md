@@ -66,6 +66,44 @@ none has happened yet.
 
 ---
 
+## THE E2E TUNNEL HARNESS WAITED FOR THE WRONG PORT, AND FOR TOO LITTLE (2026-11-09, unreleased)
+
+Found by chasing the one red job on `main` (run `42437559393`): `Build (linux)`
+failed on `tcp_crosses_a_real_shadowsocks_2022_listener` with `502` where `204`
+was expected. It looked like a product defect in the tunnel. It was the harness.
+
+**Defect 1 — it waited for a port no assertion reads.** `start()` waited for
+mihomo's **controller** to accept, then connected to the **mixed** port
+immediately. mihomo binds the two ~76 ms apart (its own debug log:
+`RESTful API listening at …` then `Mixed(http+socks) proxy listening at …`), so
+the controller answering says nothing about the inbound. Symptom:
+`connect to the mixed port: Connection refused`.
+
+**Defect 2 — listening is not serving.** Even waiting on the right port was not
+enough. `TcpStream::connect(..).is_ok()` is satisfied when the kernel accepts into
+the backlog, before the proxy is ready, and under `cargo test`'s default
+parallelism six processes (three mihomo, three sing-box) start at once. The
+request that followed was refused or reset — and in the worst case mihomo's log
+showed the listener bound with **no SOCKS connection ever accepted at all**.
+
+**The fix** is one function: wait until the mixed port answers a real SOCKS5
+`[0x05, 0x00]` greeting. **Measured back to back on one machine** — bare-connect
+wait: **4 failures in 25**; greeting wait: **0 in 25**. At ordinary load the old
+rate was 1–3 in 40.
+
+*The rule:* this is the third time this file has paid for it — the port
+reservation reserved a port, the scratch directory had to be per-test, and a
+listening socket is not a serving proxy. **Assert the thing you actually need, not
+a proxy for it.**
+
+*Not verified:* the `502` was **not reproduced again** in ~200 runs after the fix,
+but a `502` is mihomo failing to dial upstream — *after* the handshake the new wait
+covers — so it is not obviously the same defect and this entry does not claim to
+have cured it. A separate `UDP-over-TCP` datagram timeout (1–2 in 50 under load)
+reproduces on the pre-fix harness too and stays open. Both are in `STILL-OPEN.md`.
+
+---
+
 ## THE CI TUNNEL TEST VALIDATED THE CLIENT AGAINST A STRANGER (2026-11-08, unreleased)
 
 Found by reading the macOS job's log while confirming A22; it had cost no run yet

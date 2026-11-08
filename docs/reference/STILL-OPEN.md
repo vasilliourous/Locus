@@ -17,6 +17,56 @@ re-argued; the evidence for each is a world claim in
 
 ---
 
+## `main`'s red `Build (linux)`: a harness race, fixed — one symptom still unproven
+
+**Added 2026-11-08 from the failing run; diagnosed and fixed 2026-11-09.** The
+claim is **A4** in [`../operate/CLAIMS.md`](../operate/CLAIMS.md) §5, last verified
+for `v3.3.4` — read the register for what A4 is. This entry is the observation,
+the measured cause, and what is still not proven.
+
+Run `42437559393` (push of `4865855`) is `failure`. Not the macOS work: `Verify`,
+`Build (macos-arm)`, `Build (macos-intel)` and `Build (windows)` all passed.
+`Build (linux)` failed on one test:
+
+```
+test tcp_crosses_a_real_shadowsocks_2022_listener ... FAILED
+assertion `left == right` failed: a request through the tunnel must reach the target
+  left: "502"   right: "204"
+```
+
+**It was a test defect, and it was reproduced.** The harness waited for mihomo's
+**controller** port and then connected to the **mixed** port without waiting at
+all — two listeners mihomo opens ~76 ms apart, which its own debug log shows.
+Waiting for the right port was still not enough: `TcpStream::connect(..).is_ok()`
+is satisfied by the kernel accepting into a backlog, before the proxy serves, so
+under `cargo test`'s default parallelism the request after it was refused or reset.
+The harness now waits for a real SOCKS5 `[0x05, 0x00]` greeting.
+
+**Measured, back to back on one machine:** the bare-connect wait failed **4 runs
+in 25**; the greeting wait **0 in 25**. At ordinary load the old rate was 1–3 in
+40. The change and its numbers are in the docblock of
+`client/src-tauri/tests/tunnel_end_to_end.rs`.
+
+**What is NOT proven, and is stated so nobody reads this as closed:**
+
+- **The `502` itself was never reproduced again**, in roughly 200 further runs
+  after the fix. A `502` means mihomo accepted the request and failed to dial
+  upstream — a failure *after* the handshake the new wait covers — so it is not
+  obviously the same defect and the fix is not offered as its cure. One green run
+  is what would close it, and none has happened yet.
+- **A `UDP-over-TCP` datagram still times out at the 10 s `recv_from`** about 1–2
+  runs in 50 under load. It reproduced on the pre-fix harness as well, so it
+  predates this change and is a **separate open item** — the one piece of this
+  story that is still unexplained.
+- **The new wait is not proven under CI's conditions.** It has only run locally.
+
+**What would close the rest.** A green `Build (linux)` on a run with the same
+matrix shape. If the datagram timeout recurs there, sing-box's log line
+`sp.v2.udp-over-tcp.arpa` is the first thing to read: its absence means the
+negotiation never happened, its presence means the datagram was lost downstream.
+
+---
+
 ## CLOSED 2026-11-08 — the macOS runner. Both slices start and are publishable
 
 **Added 2026-11-07; closed 2026-11-08.** Kept because the entry below it was
