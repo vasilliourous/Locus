@@ -212,11 +212,14 @@ is not an image name. A job that starts and then fails is a build failure. The
 tag-only pre-flight (`Probe the matrix runners against recent history`) reads job
 history and fails a tag in seconds for the first case.
 
-**This blocks releasing while it is true.** The hub's fetcher requires both darwin
-artifacts, so a run without them produces nothing publishable.
+**This blocked releasing while it was true.** The hub's fetcher requires both
+darwin artifacts, so a run without them produces nothing publishable.
 
 The register entry is A22 in [`CLAIMS.md`](CLAIMS.md) §5 — **falsified** until a
-dispatched run shows both macOS jobs running steps.
+dispatched run shows both macOS jobs running steps. **That run has happened**
+(v3.3.7, 2026-11-08): all four slices built and published. The rule outlives it,
+because the failure it guards is silent — read the job **annotations** and step
+counts before trusting a tag.
 
 ### Which job runs which suite
 
@@ -430,6 +433,17 @@ client's outbound means anything — see
 [`../reference/EGRESS-READINESS.md`](../reference/EGRESS-READINESS.md). A failed
 download fails the step rather than skipping the test: the test is the reason the
 job claims to prove the tunnel.
+
+**The pin is read from the hub's module, not restated in this workflow.** The
+step takes `SING_BOX_VERSION` out of `server/modules/02-shadowsocks.sh` and
+asserts the installed binary reports that version. Until 2026-11-08 the step said
+`1.14.4` while the hub installed `v1.12.1`, so the e2e test validated the client
+against a peer two minor versions ahead of the deployed one — the same divergence
+the `shadowsocks-rust` pin below is written to avoid. `check-consistency.sh` §47
+fails if they disagree again. **This does not make the test peer equal to the
+deployed peer:** `install_singbox` returns early when a binary already exists at
+`/usr/local/bin/sing-box`, so a box that once had another version keeps it. That
+is a fact about a deploy, not about this workflow.
 
 > **The positive-egress case retries a second host before failing.** Setting
 > `LOCUS_REQUIRE_EGRESS` immediately produced `504 Timeout` against

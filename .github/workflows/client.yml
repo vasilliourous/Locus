@@ -1319,10 +1319,18 @@ jobs:
       # the wrong outbound). sing-box is what the hub runs as its listener, so it
       # is the only peer whose acceptance means anything.
       #
-      # PINNED, and by checksum. A test dependency whose version floats is a test
-      # that changes behaviour on a day nobody touched this repository — the same
-      # class of problem `sidecar.lock.json` exists to stop, in a place a release
-      # would not look.
+      # PINNED TO THE VERSION THE HUB ACTUALLY RUNS, and read from the file that
+      # pins it. `02-shadowsocks.sh` installs `SING_BOX_VERSION:-v1.12.1`; this
+      # step used to say `1.14.4` and nothing noticed, which is the divergence
+      # the shadowsocks-rust pin below was written to avoid. `install_singbox`
+      # also SKIPS when a binary already exists at `/usr/local/bin/sing-box`
+      # ("already installed"), so a box that once had another version keeps it —
+      # the deployed peer is not guaranteed to be the pin either. What this
+      # fixes is that the test is at least validated against the version this
+      # checkout would install, not one chosen in the workflow and never
+      # reconciled with it.
+      #
+      # `check-consistency.sh` §47 fails if these two disagree again.
       #
       # A failed download FAILS this step rather than skipping the test: the test
       # is the reason this job claims to prove the tunnel, and a silently missing
@@ -1332,12 +1340,26 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          version=1.14.4
+          # The `v` prefix is part of the hub's value; the asset name drops it.
+          version="$(sed -n 's/^SING_BOX_VERSION="\${SING_BOX_VERSION:-\(v[0-9.]*\)}".*/\1/p' server/modules/02-shadowsocks.sh)"
+          version="${version#v}"
+          if ! printf '%s' "$version" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "::error::could not read SING_BOX_VERSION from server/modules/02-shadowsocks.sh (got '${version}')"
+            exit 1
+          fi
+          echo "sing-box pin taken from the hub's own module: ${version}"
           url="https://github.com/SagerNet/sing-box/releases/download/v${version}/sing-box-${version}-linux-amd64.tar.gz"
           curl -fsSL --retry 3 --max-time 120 "$url" -o /tmp/sing-box.tgz
           tar -xzf /tmp/sing-box.tgz -C /tmp
           install -m 0755 "/tmp/sing-box-${version}-linux-amd64/sing-box" /usr/local/bin/sing-box
           sing-box version
+          # Assert the peer is the pin, not whatever the runner image shipped.
+          # `sing-box version` alone prints and continues; a mismatch here would
+          # otherwise pass silently and validate the client against a stranger.
+          sing-box version | grep -qF "sing-box version ${version}" || {
+            echo "::error::installed sing-box is not the pinned ${version}"
+            exit 1
+          }
 
       # ── shadowsocks-rust, for the activation tunnel's e2e test ──
       #

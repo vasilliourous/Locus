@@ -66,6 +66,50 @@ none has happened yet.
 
 ---
 
+## THE CI TUNNEL TEST VALIDATED THE CLIENT AGAINST A STRANGER (2026-11-08, unreleased)
+
+Found by reading the macOS job's log while confirming A22; it had cost no run yet
+and was on its way to costing one for the wrong reason.
+
+`tunnel_end_to_end.rs` runs a **real** `sing-box` as the student's tunnel peer, on
+the stated argument that sing-box is what the hub runs, "so it is the only peer
+whose acceptance means anything". The workflow installed `1.14.4`.
+`server/modules/02-shadowsocks.sh` pins `SING_BOX_VERSION="${SING_BOX_VERSION:-v1.12.1}"`
+and the box runs that.
+
+**So the assertion was true of a binary the product does not deploy.** Two minor
+versions is exactly the gap the `shadowsocks-rust` step beside it already had a
+comment about — *"a test peer on a different version can accept a config the
+deployed one rejects (or the reverse), which is precisely the divergence this
+suite exists to catch"* — with its own pin likewise unchecked.
+
+**What fixed it.** The workflow now reads the version **out of the hub's module**
+rather than naming one, and asserts the installed binary reports it. The literal
+cannot drift because it no longer exists. `check-consistency.sh` §47 extracts the
+`sed` expression **from the workflow itself** and runs it against the module, so
+the two cannot agree with each other while disagreeing with the pin.
+
+*The rule:* a test dependency asserting something about the deployed system must
+be pinned to the deployed version, from the file that deploys it. A pin restated
+in two places is a pin that is already wrong in one of them.
+
+*Not verified:* that the **deployed** box runs `v1.12.1`. `install_singbox`
+returns early when `/usr/local/bin/sing-box` exists — `"sing-box already
+installed"` — so a box that once had another version keeps it, and the pin is
+what a *fresh* install gets. Nothing on the box records which version is running.
+That is `STILL-OPEN.md`'s business and is recorded there.
+
+*And the §47 guard earned its own correction:* its first version asked
+`grep -q 'server/modules/02-shadowsocks.sh'` over the step body, which passed on a
+pre-fix workflow whose only mention of the path was in a **comment** — the second
+time in two days that a guard's own false pass was the interesting finding (see
+§46's empty-branch note). It is a positive assertion now, and all four failure
+modes were observed failing: the hardcoded version with the path in a comment, the
+module's line shape drifting, the extraction removed, and the run-and-check
+dropped.
+
+---
+
 ## THREE THINGS THAT MADE CI SLOW, FLAKY, OR SILENT (2026-11-07, unreleased)
 
 Found while getting the pipeline green before a release. None of these is a

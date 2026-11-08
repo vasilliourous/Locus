@@ -17,12 +17,16 @@ re-argued; the evidence for each is a world claim in
 
 ---
 
-## Blocking: no release can be published until a macOS runner is proved to start
+## CLOSED 2026-11-08 — the macOS runner. Both slices start and are publishable
 
-**Added 2026-11-07; cause found 2026-11-08, fix in the tree, unproved.** Evidence
-is world claim **A22** in [`../operate/CLAIMS.md`](../operate/CLAIMS.md) §5 — do not
-restate the findings here, they would drift. What a successor needs is the
-consequence and the next action.
+**Added 2026-11-07; closed 2026-11-08.** Kept because the entry below it was
+titled *"Blocking"* for a day and two documents then described a blocker that no
+longer existed. Evidence is world claim **A22** in
+[`../operate/CLAIMS.md`](../operate/CLAIMS.md) §5 — do not restate the findings
+here, they would drift. **What it means now:** v3.3.7 built and published on all
+four platforms from `macos-15-intel` / `macos-15`, with both darwin binaries at
+minOS 11.0.0. Nothing is blocking a release. Read the rest of this entry for the
+diagnosis, not for a status.
 
 **The cause was a retirement, not an account problem.** GitHub retired every
 macOS 14 image from Actions on **2026-11-02** (`actions/runner-images` #13518,
@@ -31,19 +35,21 @@ exists, which is why both jobs were cancelled with zero steps. The matrix now
 names one image per architecture — `macos-15-intel` for the x64 slice and
 `macos-15` for arm64 — because **a bare macOS label is the arm64 machine**.
 
-**The consequence while this is open.** Both macOS jobs are refused, so
-`locus-darwin-amd64` and `locus-darwin-arm64` are never produced.
+**What the consequence WAS, while it was open.** Both macOS jobs were refused,
+so `locus-darwin-amd64` and `locus-darwin-arm64` were never produced.
 `server/scripts/fetch-release.py` requires all four payloads plus their `.sig`
 files and **refuses a partial publish deliberately** — an update nobody can
-install looks like it worked from the operator's seat. **Do not tag until a
-dispatched run shows both macOS jobs running steps**; a tag today builds three
-platforms and publishes none.
+install looks like it worked from the operator's seat — so the rule was: do not
+tag until a dispatched run shows both macOS jobs running steps. **That rule has
+now been satisfied once** (v3.3.7); it is still the right pre-flight for any tag,
+because it costs one dispatch and the failure it prevents is silent.
 
-**The next action is one dispatch, and then reading two numbers.** Dispatch the
-workflow and read the macOS jobs' **step counts** — non-zero means the label is
-alive. Then read each darwin `.app`'s minimum OS (`vtool -show-build`), which must
-not exceed the `minimumSystemVersion: "11.0"` the bundle declares; the macOS 26
-image was avoided for exactly this reason, but the SDK can still lift it.
+**The two numbers that closed it**, kept because they are the ones to read again
+if the matrix ever moves: the macOS jobs' **step counts** (non-zero means the
+label is alive) and each darwin `.app`'s `LC_BUILD_VERSION` minOS, which must not
+exceed the `minimumSystemVersion: "11.0"` the bundle declares — the macOS 26
+image was avoided for exactly this reason, but a *newer* runner's SDK can still
+lift the floor. v3.3.7 read minOS 11.0.0 / SDK 15.5.0 on both slices.
 
 **Do not spend effort re-deriving this.** These have already been tried and are
 recorded so they are not tried again:
@@ -130,9 +136,16 @@ firewall opens 8447. Each assertion was observed failing first.
   first time. This test was **observed failing** against the 3.3.x shape (the UoT
   outbound without `udp-over-tcp`) and against the pre-SS2022 cipher, so it is not
   a check that cannot fail.
+  **Which sing-box, since 2026-11-08:** the peer is the version the hub installs
+  (`SING_BOX_VERSION` in `server/modules/02-shadowsocks.sh`), read from that file
+  by the workflow rather than restated in it — it used to say `1.14.4` against a
+  hub on `v1.12.1`, and that drift is now `check-consistency.sh` §47. Read as a
+  claim about *that binary*, not about every sing-box.
   **Still not proven:** that the *live hub's* listener is reachable, that the
   1 Mbps class shapes UDP as intended, or that anything is playable. Those need
-  the box and a real network.
+  the box and a real network. And because `install_singbox` skips when
+  `/usr/local/bin/sing-box` already exists, the running deployed peer is not
+  guaranteed to be the pin.
 - **Whether 1 Mbps is playable.** The user's premise is that Roblox/Minecraft
   work badly at 1 Mbps and that this is acceptable as a demo. Nobody has measured
   it. If it is *worse* than "badly" — unplayable — then the free plan's games are
