@@ -1,9 +1,0 @@
-/home/genki/Locus/.minisign-build/build/CMakeFiles/minisign.dir
-/home/genki/Locus/.minisign-build/build/CMakeFiles/package.dir
-/home/genki/Locus/.minisign-build/build/CMakeFiles/package_source.dir
-/home/genki/Locus/.minisign-build/build/CMakeFiles/edit_cache.dir
-/home/genki/Locus/.minisign-build/build/CMakeFiles/rebuild_cache.dir
-/home/genki/Locus/.minisign-build/build/CMakeFiles/list_install_components.dir
-/home/genki/Locus/.minisign-build/build/CMakeFiles/install.dir
-/home/genki/Locus/.minisign-build/build/CMakeFiles/install/local.dir
-/home/genki/Locus/.minisign-build/build/CMakeFiles/install/strip.dir

@@ -232,3 +232,10 @@ decryption-key*
 # and STILL-OPEN.md, which are written to be publishable; this file is not.
 URGENT-FIX-NOW.md
 URGENT-*.md
+
+# Local scratch: minisign source builds and guard-proof fixtures
+.minisign-build/
+.guard46/
+.guard-proof/
+.verify-arm/
+.verify-intel/

@@ -1,7 +1,0 @@
-{
-	"InstallScripts" : 
-	[
-		"/home/genki/Locus/.minisign-build/build/cmake_install.cmake"
-	],
-	"Parallel" : false
-}

@@ -1,2 +1,0 @@
-/home/genki/Locus/.minisign-build/out/bin/minisign
-/home/genki/Locus/.minisign-build/out/share/man/man1/minisign.1
