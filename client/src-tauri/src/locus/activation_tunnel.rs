@@ -231,8 +231,18 @@ impl Tunnel {
         let dir = scratch_dir()?;
         let config = dir.join("activation-tunnel.yaml");
         let ss_hub = crate::locus::contract::ss_hub().await;
-        std::fs::write(&config, render_config(port, &ss_hub, key)?)
+        let targets = bootstrap_targets(&ss_hub, crate::locus::contract::activation_tunnel_addr());
+        std::fs::write(&config, render_config(port, &targets, key)?)
             .with_context(|| format!("could not write the activation tunnel config to {}", config.display()))?;
+        tracing::debug!(
+            target: "locus::activation_tunnel",
+            targets = targets.len(),
+            // Names and addresses only — never the key. This is the line that
+            // makes "the fallback ran and both candidates failed" distinguishable
+            // in a support log from "the fallback only ever had a name".
+            first = %targets.first().map(|t| t.server.as_str()).unwrap_or(""),
+            "activation tunnel bootstrap candidates"
+        );
 
         // Resolved through the same accessor every other call site uses, so the
         // configured Core and this bootstrap engine cannot diverge.
@@ -394,50 +404,178 @@ fn development_sidecar_name(core: &str, suffix: &str) -> String {
     format!("{core}-{}{suffix}", env!("LOCUS_BUILD_TARGET"))
 }
 
+/// One place the bootstrap listener may be dialled.
+///
+/// # Why this is a list and not a hostname
+///
+/// The tunnel exists for a network that blocks the hub **by name**. Configuring
+/// its outbound with a hostname therefore leaves the fallback depending on the
+/// one thing the network controls: the engine must resolve `ss_hub` before it can
+/// dial anything, and a resolver that answers nothing answers nothing for the
+/// fallback either. That is the reasoning `Failure::Dns` was added for, and it is
+/// why that variant is deliberately not retryable over the tunnel today.
+///
+/// So the outbound is built from an **ordered** set of targets — the resolved
+/// name first (it is the one an operator moving the hub can change without a
+/// release), then the compiled address
+/// ([`crate::locus::contract::ACTIVATION_TUNNEL_ADDR`]) as the case that needs no
+/// resolver at all.
+///
+/// # Why more than one is not "a second proxy"
+///
+/// The security property of this engine is that it has exactly ONE possible
+/// destination: every member of the group dials the same hub listener with the
+/// same bootstrap key, and the path filter behind it is what bounds the key. An
+/// outbound added here that named anything else would widen what a public
+/// credential reaches, which is why `the_config_carries_exactly_one_destination`
+/// asserts that every member's `server` is in this candidate list and nothing
+/// else.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Target {
+    /// What the engine dials: a hostname or an IP literal.
+    pub server: String,
+    /// What the list calls it, and what mihomo shows in its own logs.
+    pub name: String,
+}
+
+impl Target {
+    fn new(name: &str, server: &str) -> Self {
+        Self {
+            server: server.to_owned(),
+            name: name.to_owned(),
+        }
+    }
+}
+
+/// The bootstrap targets, in the order they are tried.
+///
+/// Pure, and taking its inputs by value, so the ordering rule is testable without
+/// a network, a config directory or an engine.
+#[must_use]
+pub fn bootstrap_targets(ss_hub: &str, addr: &str) -> Vec<Target> {
+    let mut targets = vec![Target::new(TARGET_BY_NAME, ss_hub)];
+    // Only when it is actually a different value: a hostname duplicated under two
+    // names would make the engine retry the same failed lookup, which reads in a
+    // support log as "the fallback ran and also failed" when it never left the
+    // first candidate.
+    if !addr.trim().is_empty() && addr != ss_hub {
+        targets.push(Target::new(TARGET_BY_ADDRESS, addr));
+    }
+    targets
+}
+
+/// The proxy name of the first (named) bootstrap target.
+///
+/// Kept stable so the group's default member — and therefore the name an operator
+/// sees in the engine log — does not change when a second candidate is added.
+const TARGET_BY_NAME: &str = "Activation-Tunnel";
+
+/// The proxy name of the address fallback.
+const TARGET_BY_ADDRESS: &str = "Activation-Tunnel-Direct";
+
+/// The group every request is routed through.
+///
+/// **Must differ from every member name**, which is the loop trap this client has
+/// already paid for (`tier.rs::GROUP_NAME`): mihomo treats a group whose name
+/// equals a proxy inside it as a reference loop and refuses the whole config —
+/// which is valid YAML, so only running the engine catches it.
+const GROUP_NAME: &str = "Locus Activation";
+
+/// What the group's health check probes.
+///
+/// It is the PATH FILTER on the bootstrap port, not the listener and not the hub:
+/// the outbound under test is the one that dials the listener, and a probe that
+/// went anywhere else would measure a different link. The filter refuses this path
+/// with an empty 403 (it is not on the allowlist), and `url-test` treats any HTTP
+/// answer as alive — so the probe proves the whole chain carries bytes without
+/// depending on an endpoint a public bootstrap key may reach.
+const GROUP_TEST_URL: &str = "http://127.0.0.1:18090/api/health";
+
 /// Renders the engine document.
 ///
 /// Kept as a pure function so the *generated document* — which is where a
-/// missing `MATCH` rule or a second proxy would silently widen what the tunnel
-/// can reach — is testable without spawning anything.
-fn render_config(forward_port: u16, ss_hub: &str, key: &str) -> Result<String> {
+/// missing `MATCH` rule, a second destination or an unreachable group would
+/// silently break (or widen) what the tunnel can do — is testable without
+/// spawning anything.
+fn render_config(forward_port: u16, targets: &[Target], key: &str) -> Result<String> {
+    if targets.is_empty() {
+        anyhow::bail!("the activation tunnel needs at least one bootstrap target");
+    }
+
     // Built as a value rather than a format string so a key containing YAML
     // metacharacters cannot break out of its scalar. The key is base64 today, so
     // this is defence in depth rather than a live hazard — but the value is a
     // credential and a quoting bug here would leak it into the wrong place.
-    let proxies = serde_yaml_ng::Value::Sequence(vec![serde_yaml_ng::Value::Mapping(
-        [
-            ("name", serde_yaml_ng::Value::String("Activation-Tunnel".into())),
-            ("type", serde_yaml_ng::Value::String("ss".into())),
-            // The engine dials the hub's bootstrap listener at the hub's real
-            // name. This was `127.0.0.1`, which is the loopback of **the student's
-            // own machine** — the comment beside it claimed the engine rewrote the
-            // address to the SS server's host, and mihomo does not do that. The
-            // outbound connects to exactly the `server` it is given, so the tunnel
-            // could only ever have worked against a listener running locally.
-            //
-            // `ss_hub` is `contract::ss_hub()`, derived from the resolved hub URL,
-            // so a device moved to an alias dials the bootstrap listener at the
-            // name it can reach. It is a NAME on purpose: the port presents no
-            // hostname to the filter, and resolving it is the one lookup a
-            // filtering network may still answer.
-            ("server", serde_yaml_ng::Value::String(ss_hub.to_owned())),
-            ("port", serde_yaml_ng::Value::Number(TUNNEL_PORT.into())),
-            ("cipher", serde_yaml_ng::Value::String(TUNNEL_METHOD.into())),
-            ("password", serde_yaml_ng::Value::String(key.to_owned())),
-            // TCP only: every enrolment endpoint is a small request/response and
-            // the hub's listener is configured `tcp_only`.
-            ("udp", serde_yaml_ng::Value::Bool(false)),
-        ]
-        .into_iter()
-        .map(|(k, v)| (serde_yaml_ng::Value::String(k.into()), v))
-        .collect(),
-    )]);
+    let proxies = serde_yaml_ng::Value::Sequence(
+        targets
+            .iter()
+            .map(|target| {
+                serde_yaml_ng::Value::Mapping(
+                    [
+                        ("name", serde_yaml_ng::Value::String(target.name.clone())),
+                        ("type", serde_yaml_ng::Value::String("ss".into())),
+                        // The engine dials the hub's bootstrap listener at the hub's real
+                        // name. This was `127.0.0.1`, which is the loopback of **the student's
+                        // own machine** — the comment beside it claimed the engine rewrote the
+                        // address to the SS server's host, and mihomo does not do that. The
+                        // The engine dials the hub's bootstrap listener at one of the
+                        // candidates in `bootstrap_targets`, in order. This was `127.0.0.1`,
+                        // which is the loopback of **the student's own machine** — the comment
+                        // beside it claimed the engine rewrote the address to the SS server's
+                        // host, and mihomo does not do that. The outbound connects to exactly
+                        // the `server` it is given, so the tunnel could only ever have worked
+                        // against a listener running locally.
+                        //
+                        // The FIRST candidate is `contract::ss_hub()`, derived from the
+                        // resolved hub URL, so a device moved to an alias dials the bootstrap
+                        // listener at the name it can reach. The SECOND is the compiled
+                        // address, for the case the name cannot survive: a DNS-filtering
+                        // network. Both dial the same listener with the same key; see
+                        // `Target` for why an ordered list is not a widened surface.
+                        ("server", serde_yaml_ng::Value::String(target.server.clone())),
+                        ("port", serde_yaml_ng::Value::Number(TUNNEL_PORT.into())),
+                        ("cipher", serde_yaml_ng::Value::String(TUNNEL_METHOD.into())),
+                        ("password", serde_yaml_ng::Value::String(key.to_owned())),
+                        // TCP only: every enrolment endpoint is a small request/response and
+                        // the hub's listener is configured `tcp_only`.
+                        ("udp", serde_yaml_ng::Value::Bool(false)),
+                    ]
+                    .into_iter()
+                    .map(|(k, v)| (serde_yaml_ng::Value::String(k.into()), v))
+                    .collect(),
+                )
+            })
+            .collect(),
+    );
 
-    let group_members = serde_yaml_ng::Value::Sequence(vec![serde_yaml_ng::Value::String("Activation-Tunnel".into())]);
+    // The group lists EVERY candidate, in order, and its default is the first —
+    // so an ordinary network behaves exactly as it did when there was one member,
+    // and the address is only ever reached by a student whose name lookup failed.
+    //
+    // `url-test` rather than `select`: the engine is never driven by a UI, so a
+    // `select` group would stay on its first member forever and the address
+    // fallback would be dead weight in the document. `url-test` probes both and
+    // uses whichever answers. The probe target is the hub's own health endpoint on
+    // the bootstrap port, which the far side's allowlist refuses — deliberately:
+    // a refused probe still proves the outbound can carry traffic, and it keeps
+    // the check from depending on an endpoint the bootstrap key is allowed to
+    // reach.
+    let group_members = serde_yaml_ng::Value::Sequence(
+        targets
+            .iter()
+            .map(|target| serde_yaml_ng::Value::String(target.name.clone()))
+            .collect(),
+    );
     let groups = serde_yaml_ng::Value::Sequence(vec![serde_yaml_ng::Value::Mapping(
         [
-            ("name", serde_yaml_ng::Value::String("Locus Activation".into())),
-            ("type", serde_yaml_ng::Value::String("select".into())),
+            ("name", serde_yaml_ng::Value::String(GROUP_NAME.into())),
+            ("type", serde_yaml_ng::Value::String("url-test".into())),
+            ("url", serde_yaml_ng::Value::String(GROUP_TEST_URL.into())),
+            // Long enough that a healthy bootstrap listener is not replaced by a
+            // slower-but-working address every interval, short enough that a dead
+            // name does not cost every request its own timeout.
+            ("interval", serde_yaml_ng::Value::Number(300.into())),
+            ("timeout", serde_yaml_ng::Value::Number(2000.into())),
             ("proxies", group_members),
         ]
         .into_iter()
@@ -448,7 +586,7 @@ fn render_config(forward_port: u16, ss_hub: &str, key: &str) -> Result<String> {
     // A catch-all MATCH as the ONLY rule. There is no DIRECT outbound reachable
     // through it, so this engine cannot be used to reach anything except the
     // five-thousand-port listener, and the hub's allowlist bounds that further.
-    let rules = serde_yaml_ng::Value::Sequence(vec![serde_yaml_ng::Value::String("MATCH,Locus Activation".into())]);
+    let rules = serde_yaml_ng::Value::Sequence(vec![serde_yaml_ng::Value::String(format!("MATCH,{GROUP_NAME}"))]);
 
     let mut root = serde_yaml_ng::Mapping::new();
     let mut put = |key: &str, value: serde_yaml_ng::Value| {
@@ -731,9 +869,106 @@ mod tests {
         GUARD.lock().await
     }
 
+    /// The single-candidate shape most tests want, built through the real
+    /// builder rather than hand-constructed, so a change to how candidates are
+    /// produced cannot leave these tests asserting against a fossil.
+    fn named_only() -> Vec<Target> {
+        bootstrap_targets("hub.example.org", "")
+    }
+
+    /// **Every bootstrap candidate must dial the same listener, with the same key,
+    /// on the same port — and the group's name must not be one of them.**
+    ///
+    /// WHY THIS EXISTS. The engine that carries enrolment is a complete proxy. Its
+    /// safety rests on it being able to reach exactly one destination, because the
+    /// credential in it ships in every binary and must be assumed public. Adding a
+    /// second candidate opens the first real hole in that argument: a future edit
+    /// that pointed one member at a different host (a second hub, an operator's
+    /// test box, a `direct` outbound) would make a public credential a route to
+    /// somewhere nobody intended, and nothing at runtime would say so.
+    ///
+    /// The second half is the trap this client has already paid for: mihomo
+    /// refuses a config whose group shares a name with a member, and the document
+    /// is valid YAML either way, so only running the engine catches it.
+    ///
+    /// Falsified by construction: point `TARGET_BY_ADDRESS` at `"example.com"` and
+    /// the first loop fails; rename `GROUP_NAME` to `TARGET_BY_NAME` and the last
+    /// assertion fails.
+    #[test]
+    fn every_bootstrap_candidate_dials_the_one_listener_and_nothing_else() {
+        let targets = bootstrap_targets("hub.example.org", "203.0.113.7");
+        assert_eq!(targets.len(), 2, "the name and the address are both candidates");
+
+        let yaml = render_config(17999, &targets, "AAAA").expect("render");
+        let parsed: serde_yaml_ng::Value = serde_yaml_ng::from_str(&yaml).expect("parse");
+        let proxies = parsed["proxies"].as_sequence().expect("proxies is a sequence");
+        assert_eq!(proxies.len(), targets.len(), "one outbound per candidate");
+
+        let allowed: Vec<String> = targets.iter().map(|t| t.server.clone()).collect();
+        for proxy in proxies {
+            let server = proxy["server"].as_str().unwrap_or_default();
+            assert!(
+                allowed.iter().any(|candidate| candidate == server),
+                "{server:?} is not one of the bootstrap candidates; a route beside the \
+                 hub's listener makes a shipped credential a proxy to somewhere else"
+            );
+            assert_eq!(proxy["port"].as_u64(), Some(u64::from(TUNNEL_PORT)));
+            assert_eq!(
+                proxy["password"].as_str(),
+                Some("AAAA"),
+                "same credential, one listener"
+            );
+            assert_eq!(proxy["cipher"].as_str(), Some(TUNNEL_METHOD));
+        }
+
+        let group = &parsed["proxy-groups"][0];
+        let members = group["proxies"].as_sequence().expect("a member list");
+        assert_eq!(members.len(), targets.len(), "every candidate must be usable");
+        let group_name = group["name"].as_str().unwrap_or_default();
+        for member in members {
+            let member = member.as_str().unwrap_or_default();
+            assert_ne!(
+                group_name, member,
+                "the group must not share a name with a member: mihomo rejects the \
+                 whole document as a reference loop, and it is valid YAML, so only \
+                 running the engine catches it"
+            );
+        }
+    }
+
+    /// **The address candidate exists precisely because the name may not resolve.**
+    ///
+    /// `Failure::Dns` is not retryable over the tunnel on the grounds that the
+    /// fallback's engine resolves the same name — a true statement about the old
+    /// document and the reason a DNS-filtering network had no route at all. The
+    /// fix is that the second candidate is an address literal, so the engine can
+    /// dial without a lookup.
+    ///
+    /// FALSIFIED before keeping: with `bootstrap_targets` returning only the named
+    /// target (the pre-2026-11-09 document), the second assertion fails.
+    #[test]
+    fn an_address_candidate_exists_so_a_dns_block_cannot_strand_enrolment() {
+        let targets = bootstrap_targets("hub.example.org", "203.0.113.7");
+        let last = targets.last().expect("at least one candidate");
+        assert!(
+            last.server.parse::<std::net::IpAddr>().is_ok(),
+            "the last candidate must be an IP literal: it is the one that needs no \
+             resolver, and the network this exists for is the one that filters DNS"
+        );
+
+        // A duplicate under a second name would make the engine retry the same
+        // failed lookup and read in a log as "the fallback ran and also failed".
+        let collapsed = bootstrap_targets("203.0.113.7", "203.0.113.7");
+        assert_eq!(collapsed.len(), 1, "one server, one candidate — not two names for it");
+
+        // An empty build-time value degrades to name-only, which is the pre-fix
+        // behaviour and must be possible without producing a nonsense outbound.
+        assert_eq!(bootstrap_targets("hub.example.org", "").len(), 1);
+    }
+
     #[test]
     fn the_config_carries_exactly_one_proxy_and_one_catch_all_rule() {
-        let yaml = render_config(17999, "hub.example.org", "AAAA").expect("render");
+        let yaml = render_config(17999, &named_only(), "AAAA").expect("render");
         let parsed: serde_yaml_ng::Value = serde_yaml_ng::from_str(&yaml).expect("parse");
 
         let proxies = parsed["proxies"].as_sequence().expect("proxies is a sequence");
@@ -751,7 +986,7 @@ mod tests {
 
     #[test]
     fn the_config_dials_the_hub_and_not_the_local_machine() {
-        let yaml = render_config(17999, "hub.example.org", "AAAA").expect("render");
+        let yaml = render_config(17999, &named_only(), "AAAA").expect("render");
         let parsed: serde_yaml_ng::Value = serde_yaml_ng::from_str(&yaml).expect("parse");
 
         assert_eq!(
@@ -774,7 +1009,7 @@ mod tests {
 
     #[test]
     fn the_config_dials_the_bootstrap_port_and_nothing_else() {
-        let yaml = render_config(17999, "hub.example.org", "AAAA").expect("render");
+        let yaml = render_config(17999, &named_only(), "AAAA").expect("render");
         let parsed: serde_yaml_ng::Value = serde_yaml_ng::from_str(&yaml).expect("parse");
         let proxy = &parsed["proxies"][0];
 
@@ -796,7 +1031,7 @@ mod tests {
 
     #[test]
     fn the_listener_is_loopback_only_and_has_no_controller() {
-        let yaml = render_config(17999, "hub.example.org", "AAAA").expect("render");
+        let yaml = render_config(17999, &named_only(), "AAAA").expect("render");
         let parsed: serde_yaml_ng::Value = serde_yaml_ng::from_str(&yaml).expect("parse");
 
         assert_eq!(parsed["allow-lan"].as_bool(), Some(false));
@@ -814,7 +1049,7 @@ mod tests {
         // Not a real key. The point is that the renderer quotes it correctly, so a
         // future key format cannot break out of its scalar or leak into a sibling.
         let hostile = "a: b\nc: d #not-a-comment";
-        let yaml = render_config(17999, "hub.example.org", hostile).expect("render");
+        let yaml = render_config(17999, &named_only(), hostile).expect("render");
         let parsed: serde_yaml_ng::Value = serde_yaml_ng::from_str(&yaml).expect("parse");
         assert_eq!(parsed["proxies"][0]["password"].as_str(), Some(hostile));
     }

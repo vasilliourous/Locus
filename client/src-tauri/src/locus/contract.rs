@@ -78,6 +78,56 @@ pub const HUB_URL: &str = "https://networkingguides.jadedns.uk";
 /// contract visible in the one module that owns wire names.
 pub const LEGACY_HUB_URL: &str = "https://networkingguides.duckdns.org";
 
+/// The **address** of the hub's bootstrap listener, used only when the hub's
+/// name cannot be used.
+///
+/// # Why an address exists here at all
+///
+/// Every other place this repository refuses to write down an address is right:
+/// an address is a property of the box, the box moves, and a shipped constant
+/// outlives it. That argument is about a value a *reader* trusts; it does not
+/// apply to a **compiled build fallback** consumed in the order `name first,
+/// address second`.
+///
+/// The failure that needs it has no other escape: a network that blocks the hub
+/// by name *and* filters DNS. The activation tunnel was built to present no
+/// name, but its outbound is configured `server: <hub hostname>`
+/// ([`ss_hub`]), so the engine resolves the very name the network is blocking —
+/// and a resolver that answers nothing answers nothing for the fallback either.
+/// [`crate::locus::hub::Failure::Dns`] says so in as many words and is
+/// deliberately not retryable over the tunnel. An address removes the lookup
+/// from the path.
+///
+/// # Why it is safe for this to be stale
+///
+/// It is dialled only after the named path has failed, and only with a
+/// credential the hub can retire by rotating `ACTIVATION_TUNNEL_KEY`. A stale
+/// value therefore costs one refused connection, not a stranded fleet: nothing
+/// else in the client dials it.
+///
+/// # It is data, not prose
+///
+/// `check-consistency.sh` §48 asserts this is a plausible IPv4 literal, that the
+/// bootstrap path can be built from it, and that the value is the same one the
+/// release workflow is told to use. **No address is written into a `.md` file;
+/// this constant is its only home.**
+pub const ACTIVATION_TUNNEL_ADDR: &str = "114.23.136.196";
+
+/// The address a release was actually built with.
+///
+/// [`ACTIVATION_TUNNEL_ADDR`] is the checked-in default. `build.rs` forwards
+/// `LOCUS_ACTIVATION_TUNNEL_ADDR` as `LOCUS_ACTIVATION_TUNNEL_ADDR_OVERRIDE` when
+/// the release workflow sets it, so moving the hub is an operational input rather
+/// than a source edit — the same shape `LOCUS_ACTIVATION_TUNNEL_KEY` already uses.
+/// An empty override is ignored by `build.rs`, so this can never be blank.
+#[must_use]
+pub const fn activation_tunnel_addr() -> &'static str {
+    match option_env!("LOCUS_ACTIVATION_TUNNEL_ADDR_OVERRIDE") {
+        Some(value) => value,
+        None => ACTIVATION_TUNNEL_ADDR,
+    }
+}
+
 /// The hub base URL this run should use, given a stored override.
 ///
 /// # Why this is a pure function with the override injected
@@ -760,5 +810,57 @@ mod tests {
         // address Caddy treats as a non-host site.
         let host = LEGACY_HUB_URL.trim_start_matches("https://").trim_end_matches('/');
         assert!(!host.contains('/'), "the legacy hub must be a bare host, got {host}");
+    }
+
+    /// **The bootstrap address must be an address, and must never be the hub's
+    /// name wearing a different hat.**
+    ///
+    /// WHY THIS EXISTS. `ACTIVATION_TUNNEL_ADDR` is the one place in this
+    /// repository where an address is allowed to be a constant, and that
+    /// permission rests entirely on it doing the one job a name cannot: removing
+    /// DNS from the enrolment path on a network that filters it. Three ways that
+    /// stops being true, none visible at runtime:
+    ///
+    ///   * it drifts into a hostname — the fallback then resolves the same name
+    ///     as the path it is meant to rescue, and a DNS-filtered network fails
+    ///     both. This is the defect the constant exists to fix;
+    ///   * it is set to the hub's own host as a string, which passes a naive
+    ///     "looks like a value" check and does nothing at all;
+    ///   * it is left empty, and the fallback silently degrades to "name only"
+    ///     without saying so.
+    ///
+    /// Falsified by construction: change the constant to `"hub.example.org"` and
+    /// the first assertion fails; change it to `""` and the second does.
+    #[test]
+    fn the_bootstrap_address_is_an_address_and_not_another_name() {
+        assert!(
+            !ACTIVATION_TUNNEL_ADDR.is_empty(),
+            "an empty bootstrap address silently reduces the fallback to name-only, \
+             which is the failure it exists to fix"
+        );
+        let parsed: std::net::IpAddr = ACTIVATION_TUNNEL_ADDR.parse().unwrap_or_else(|_| {
+            panic!(
+                "ACTIVATION_TUNNEL_ADDR must be an IP literal, not a name — \
+                 a name here re-introduces the DNS lookup this constant removes. \
+                 Got {ACTIVATION_TUNNEL_ADDR:?}"
+            )
+        });
+        assert!(
+            parsed.is_ipv4(),
+            "the bootstrap address is dialled by the sidecar on the school network, \
+             where IPv6 is frequently absent; an AAAA-only constant would fail there \
+             for a reason nothing would report"
+        );
+        assert!(
+            !parsed.is_loopback() && !parsed.is_unspecified(),
+            "{ACTIVATION_TUNNEL_ADDR} is not a routable hub address"
+        );
+        // And it must not be the hub's own hostname in disguise.
+        let hub_host = HUB_URL.trim_start_matches("https://").trim_end_matches('/');
+        assert_ne!(
+            ACTIVATION_TUNNEL_ADDR, hub_host,
+            "the fallback must be an address; assigning the hub's name here means the \
+             same lookup is performed twice and the block is never escaped"
+        );
     }
 }

@@ -24,6 +24,12 @@ claim is **A4** in [`../operate/CLAIMS.md`](../operate/CLAIMS.md) §5, last veri
 for `v3.3.4` — read the register for what A4 is. This entry is the observation,
 the measured cause, and what is still not proven.
 
+> **`main` is green again (observed 2026-11-09).** The greeting fix landed in
+> `4acac2a` and the scheduled run that followed is `success`. The header above
+> says "red" because it names the run this entry was written from, not the state of
+> the branch — read the run list, not this heading. What is *not* closed is the
+> `502` and the UoT datagram timeout, both stated below.
+
 Run `42437559393` (push of `4865855`) is `failure`. Not the macOS work: `Verify`,
 `Build (macos-arm)`, `Build (macos-intel)` and `Build (windows)` all passed.
 `Build (linux)` failed on one test:
@@ -335,15 +341,24 @@ rate limit that mirrors Caddy's.
 - ~~**That a real activation completes over it, because no client code uses the
   tunnel yet.**~~ **CLOSED 2026-11-01: the client half now exists.** The fallback
   lives in `locus/activation_tunnel.rs` and is wired at `activation.rs::post_json`
-  and `heartbeat.rs::beat`, keyed on `Failure::ResetDuringHandshake` — which does
-  **not** fire on DNS, refusal or certificate failures. See
+  and `heartbeat.rs::beat`. It fires on `ResetDuringHandshake`, `Refused`, and —
+  since 2026-11-09 — `Dns`. See
   [`ACTIVATION-TUNNEL.md`](ACTIVATION-TUNNEL.md) §6.
+- **That the tunnel now fires on the failure the school network actually
+  produces.** Added and fixed in the tree on 2026-11-09, three defects, each
+  independently sufficient and each guarded (`FIXES.md`): a reset arriving
+  **after** the request was written classified as `Transport` and never reached
+  the tunnel; `Dns` was excluded on reasoning that stopped being true the moment
+  the outbound gained an address candidate; and every tunnelled client shared one
+  rate-limit bucket because PocketBase is reached on loopback. **Structural, not
+  observed** — no machine has run the result. The first two are proven by unit
+  tests shown failing pre-fix; the third by `§40.8`.
 - **That a deployed device activates over it end to end.** The mechanism is
   proven on loopback, against a stand-in for the hub's filter, by
   `client/src-tauri/tests/activation_tunnel_end_to_end.rs` — and that test was
   shown to fail against a broken outbound and against an open allowlist. What it
-  does not cover is the deployed hub's own Python filter, or a real machine on a
-  school network.
+  does not cover is the deployed hub's own Python filter, a real machine on a
+  school network, or the address candidate reaching a listener that answers.
 - **That the three defects found on 2026-11-06 are gone ON HARDWARE.** Each is
   fixed with a guard that was shown failing, and each fix is *structural* — but
   no machine has run the result:
@@ -382,9 +397,16 @@ is a third party's policy decision; recategorisation is the only fix that does
 not depend on the filter's behaviour, and it cannot be performed from here.
 
 **Re-verify with:** `curl -v --max-time 10 http://<hub>:8453/` from the school
-network. An immediate `Established connection` followed by a stall is the pass
-condition — SS says nothing sensible to HTTP. A timeout now genuinely means the
-network drops the port.
+network, and again from an ordinary connection. **The two must agree.** As of the
+2026-11-09 measurement from home they do not: an ordinary connection gets
+`Established connection`, uploads the request, and then
+`Recv failure: Connection reset by peer` — which is the client's
+`ResetDuringHandshake`, i.e. the fallback failing exactly like the direct path.
+Nothing that answers a reset is carrying an allowlisted request, so before asking
+the school question, settle it on the box:
+`systemctl status locus-activation-tunnel locus-activation-forwarder` and
+`ss -lntp | grep 8453`. The detail, and why this is now the more important open
+item, is [`ACTIVATION-TUNNEL.md`](ACTIVATION-TUNNEL.md) §6.6.
 
 ### Three field reports from the 2026-10 investigation: what is fixed, and what is not
 

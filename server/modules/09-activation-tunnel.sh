@@ -89,6 +89,9 @@ FORWARD_PORT="${ACTIVATION_FORWARD_PORT:-18090}"
 
 CONFIG_FILE="/etc/shadowsocks/activation-tunnel.json"
 PASS_FILE="/etc/locus/activation-tunnel.key"
+# The same key in `EnvironmentFile` form for the path filter, which keys each
+# client's rate-limit identity with it. Written by `setup_key`, mode 0600.
+PASS_ENV_FILE="/etc/locus/activation-tunnel.key.env"
 UNIT_FILE="/etc/systemd/system/locus-activation-tunnel.service"
 FORWARDER="/usr/local/bin/locus-activation-forwarder.py"
 FORWARD_UNIT="/etc/systemd/system/locus-activation-forwarder.service"
@@ -123,6 +126,23 @@ setup_key() {
     umask "$UMASK_SAVED"
     chmod 600 "$PASS_FILE"
     export ACTIVATION_TUNNEL_KEY
+
+    # ── The same key, in `EnvironmentFile` form, for the forwarder ──
+    #
+    # The path filter derives each client's rate-limit identity as a digest
+    # keyed with this value (see `identity` in the forwarder), so it needs it in
+    # its environment. It is written HERE, beside the file that already owns the
+    # value, rather than in the unit: a unit file is world-readable and this is
+    # the only value standing between one rate-limit bucket per client and one
+    # per class.
+    #
+    # Derived, never read back: `verify_key_consistency` still compares
+    # $PASS_FILE against the running ssserver config, and this file is not a
+    # third opinion — it is a copy of the same bytes, written by the same step.
+    umask 077
+    printf 'ACTIVATION_TUNNEL_KEY=%s\n' "$ACTIVATION_TUNNEL_KEY" > "$PASS_ENV_FILE"
+    chmod 600 "$PASS_ENV_FILE"
+    umask "$UMASK_SAVED"
 
     # ── Prove what was stored is what will be configured ──
     # The key reaches two places that must never disagree: $PASS_FILE (the copy an
@@ -164,11 +184,13 @@ address, matching 05-caddy.sh exactly — a second, laxer limit on the endpoint
 that mints entitlements would be the weakest link.
 """
 import http.client
+import os
+import hashlib
 import sys
 import time
 import urllib.parse
 
-LISTEN = ("127.0.0.1", int(__import__("os").environ.get("ACTIVATION_FORWARD_PORT", "18090")))
+LISTEN = ("127.0.0.1", int(os.environ.get("ACTIVATION_FORWARD_PORT", "18090")))
 UPSTREAM = ("127.0.0.1", 8090)
 
 ALLOWED = ("/api/activate", "/api/code-lookup", "/api/heartbeat")
@@ -196,6 +218,36 @@ RATE_EVENTS = 5
 RATE_WINDOW = 600  # seconds
 
 _seen: dict[str, list[float]] = {}
+
+# The header this process sets on every forwarded request, and the ONLY thing
+# the hub uses to tell one tunnelled client from another. See the `identity`
+# docstring for why the hub cannot work it out for itself.
+IDENTITY_HEADER = "X-Locus-Bootstrap"
+
+
+def identity(peer: str) -> str:
+    """A stable, unforgeable, address-free pseudonym for a tunnel client.
+
+    PocketBase is reached on loopback from here, so `remoteAddr` downstream is
+    always 127.0.0.1 and every tunnelled student shares one rate-limit bucket.
+    This is what replaces it.
+
+    Why a keyed digest and not the address:
+
+      * the hub stores no identity by design, and `activation_attempts.ip` is a
+        column an operator reads — writing an address there would undo that;
+      * the key is the bootstrap key, which every client already carries, so this
+        adds no secret to the hub and no new place for one to leak from;
+      * it cannot be forged by the client, because the header is overwritten here
+        with a value this process computed, from `client_address`, which the
+        kernel supplies.
+
+    Truncated to 32 hex characters: that is 128 bits of a keyed digest, far more
+    than a rate-limit key needs, and it keeps the column comfortably inside any
+    index limit.
+    """
+    key = os.environ.get("ACTIVATION_TUNNEL_KEY", "")
+    return hashlib.sha256((key + "|" + peer).encode("utf-8")).hexdigest()[:32]
 
 
 def rate_limited(peer: str) -> bool:
@@ -237,9 +289,13 @@ def main() -> None:
             if urllib.parse.urlsplit(target).path.startswith(RATE_LIMIT_PATH) and rate_limited(peer):
                 return self.respond(429, b'{"code":429,"message":"Too many attempts"}')
 
-            # Drain headers, then forward verbatim. Content-Length is required;
-            # a chunked body from a bootstrap client is not worth supporting and
-            # silently truncating one would corrupt the code.
+            # Drain headers, then forward. Content-Length is required; a chunked
+            # body from a bootstrap client is not worth supporting and silently
+            # truncating one would corrupt the code.
+            #
+            # The client's own `X-Locus-Bootstrap` header is NOT forwarded: it is
+            # the client's claim about itself, and PocketBase must not be told a
+            # rate-limit identity by the party being limited.
             length = 0
             while True:
                 h = self.rfile.readline(65536)
@@ -250,9 +306,32 @@ def main() -> None:
                     length = int(h.split(b":", 1)[1].strip() or 0)
             body = self.rfile.read(length) if length else b""
 
+            # ── The identity PocketBase rate-limits on ──
+            #
+            # WHY THIS HEADER EXISTS. PocketBase is reached at 127.0.0.1:8090, so
+            # `requestInfo(e).remoteAddr` here is ALWAYS loopback. Both hooks key
+            # their budget on `fp || ip` (activation.pb.js, code_lookup.pb.js), and
+            # /api/activate does not require a fingerprint — so before this header,
+            # EVERY student arriving through the tunnel shared one `activate_`
+            # bucket of 5 attempts per 10 minutes. The first five in a class
+            # activated and the rest were told "too many attempts", which the
+            # client reports as a connection failure.
+            #
+            # What goes here is the tunnel's OWN per-peer derivation, not anything
+            # the client sent: `X-Locus-Bootstrap: <sha256 of the peer address and
+            # the bootstrap key>`. It is a stable per-source pseudonym that reveals
+            # no address and cannot be forged by the client, because this process
+            # writes it and drops any copy the client supplied.
+            #
+            # The hook combines it with the fingerprint when there is one — see
+            # `rateKey` in activation.pb.js — so Caddy's path (no header) and this
+            # path behave as they did, and only the shared-bucket case changes.
             conn = http.client.HTTPConnection(*UPSTREAM, timeout=30)
             try:
-                conn.request(method, target, body=body, headers={"Content-Type": "application/json"})
+                conn.request(method, target, body=body, headers={
+                    "Content-Type": "application/json",
+                    "X-Locus-Bootstrap": identity(peer),
+                })
                 resp = conn.getresponse()
                 data = resp.read()
                 self.respond(resp.status, data, resp.getheader("Content-Type"))
@@ -303,6 +382,11 @@ Before=shadowsocks-activation-tunnel.service
 [Service]
 Type=simple
 Environment=ACTIVATION_FORWARD_PORT=${FORWARD_PORT}
+# The rate-limit identity is a digest keyed with the bootstrap key, so this
+# process needs it. It is read from the 0600 file at start rather than written
+# into this unit: a unit file is world-readable, and the key is the only value
+# standing between "one rate-limit bucket per client" and "one per class".
+EnvironmentFile=-/etc/locus/activation-tunnel.key.env
 ExecStart=/usr/bin/env python3 ${FORWARDER}
 Restart=on-failure
 RestartSec=2

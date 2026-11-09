@@ -160,6 +160,23 @@ forwarder enforces the same limit itself. `check-consistency.sh` §40 reads
 **both** numbers and fails when the tunnel's is laxer — a second, looser limit on
 the endpoint that mints entitlements would be the weakest link.
 
+> **The bucket was shared by every tunnelled client (found and fixed 2026-11-09).**
+> A limit per *source* needs a distinct source, and this path had none: the
+> forwarder reaches PocketBase at `127.0.0.1:8090`, so both enrolment hooks keyed
+> their budget on loopback. `/api/activate` does not require a device fingerprint
+> (deployed clients omit it), so **every** tunnelled student shared one `activate_`
+> bucket — the first five in a class would activate and the rest would be told
+> "too many attempts", which a client reports as a failure to reach the hub.
+>
+> The forwarder now sets `X-Locus-Bootstrap` to a digest it computes itself
+> (`sha256(bootstrap key | peer address)`, truncated to 32 hex characters). It is
+> per-source, reveals no address, and cannot be forged by the client because the
+> forwarder overwrites any value the client sent. Both hooks read it after the
+> fingerprint and before the address. `activation_attempts.ip` is left **empty**
+> on that path rather than filled with loopback, which would look like data.
+> `§40.8` asserts the header is set, that the identity derives from the observed
+> peer, and that both hooks use it in their key.
+
 ### 3.3 The bootstrap key
 
 The listener's password is a fixed value shipped in the client build. It does
@@ -381,6 +398,18 @@ not an address. The stream presents no hostname to the filter; resolving it is
 the one step the network still gets a say in, and the bootstrap port is precisely
 where that say does not matter.
 
+> **Corrected 2026-11-09.** That last sentence was true about the *filter* and
+> false about the *fallback*: the engine must resolve `<ss_hub>` before it can
+> dial anything, so a network that filters DNS left the tunnel unable to help with
+> the very failure `Failure::Dns` names. The engine now carries an **ordered
+> candidate list** — the name first, then
+> `contract::ACTIVATION_TUNNEL_ADDR` (a compiled address literal, overridable at
+> build time via `LOCUS_ACTIVATION_TUNNEL_ADDR`) — and `Failure::Dns` is retryable
+> over the tunnel because of it. The group is a `url-test` over both candidates;
+> a `select` group would have stayed on its first member forever. `§48` guards the
+> constant: it must be an IPv4 literal, it must be built into the candidate list,
+> and it must not appear in any live document.
+
 ### 6.3 The correction that mattered: the destination is the FILTER
 
 **Measured 2026-11-01, and it invalidated the deployed design.** `ssserver` has
@@ -439,9 +468,44 @@ still an operator action nobody has taken.
   tolerance.
 - That a real device activates over it end to end. The mechanism is proven on
   loopback against a stand-in filter; the deployed hub's Python filter has never
-  answered a tunnelled request.
+  answered a tunnelled request **from an unmodified deployment** — see the
+  2026-11-09 observation below, which suggests it has not answered any.
+- That the address candidate reaches a listening bootstrap listener. It is
+  proven to be *dialled* (§6.2), not to *answer*.
+- That "one rate-limit bucket per class" is fixed **on the hub**. The guards and
+  the code are in the tree (§3.2); `setup.sh` deploys from `/root/server/`, so
+  the running hooks are still the old ones until a re-run.
 - That the deployed hub is running this module at all — `setup.sh` deploys from
   `/root/server/` and has not re-run.
+
+> **Measured from an uncensored network on 2026-11-09, and it is a NEW warning.**
+> The 2026-11-06 timeout is superseded, and by something worse than a timeout.
+> From an ordinary residential connection, `curl -v http://<hub>:8453/api/activate`
+> **connects, uploads the whole request, then gets `Recv failure: Connection reset
+> by peer`** — after the request was sent, not at connect time. A path the
+> forwarder allowlists returned nothing, and `/api/health` did the same. So a
+> listener is accepting on 8453 and cutting the connection after reading the
+> request, which is not the `ssserver` + path-filter shape this document
+> describes: that shape answers an allowlisted path and refuses a non-allowlisted
+> one with an empty 403.
+>
+> Two readings, and nothing here can separate them:
+> (a) the deployed `locus-activation-tunnel` service is not running `ssserver`
+> with this module's config (a different process is on the port, or the module
+> has not been deployed since 2026-11-07), or (b) something upstream of the hub
+> resets non-standard ports. **(a) is the one an operator can settle from the
+> box**: `systemctl status locus-activation-tunnel locus-activation-forwarder`
+> and `ss -lntp | grep 8453` name the process in a single command, and a
+> `journalctl -u locus-activation-forwarder` line saying
+> `listening on 127.0.0.1:18090` proves the filter is up.
+>
+> This matters more than the previous timeout did. The tunnel is now the *only*
+> path a censored device has, its key ships in every release, and if the port
+> answers a reset rather than a decrypted stream then the client's fallback fails
+> with exactly the same `ResetDuringHandshake` that triggered it — a loop that
+> reads to a student as "nothing happens". Note also that this reset is what
+> `is_reset_kind` was widened for (§6.2): a reset *after* the request was written
+> used to be classified `Transport` and never reached the tunnel at all.
 
 > **Measured from an uncensored network on 2026-11-06, and it is a warning, not a
 > verdict.** `curl http://<hub>:8453/` **timed out**, while 8443 and 8445 accepted

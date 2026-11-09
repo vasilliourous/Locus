@@ -183,14 +183,22 @@ pub enum Failure {
     /// The connection failed while validating the peer's certificate. The only
     /// failure the root-store fallback can fix.
     Certificate,
-    /// The peer **accepted the TCP connection and then reset it** — either while
-    /// the TLS handshake was in flight or immediately after it.
+    /// The peer **accepted the TCP connection and then cut it** — during the TLS
+    /// handshake, or after the request had been written.
     ///
     /// This is separate from [`Self::Transport`] for one reason: it is the
     /// signature of a middlebox that read the destination (the TLS ClientHello
-    /// carries the SNI in the clear) and killed the flow. One of the failures the
-    /// activation tunnel can fix — see [`Self::retryable_over_tunnel`] for the
-    /// closed set.
+    /// carries the SNI in the clear) and killed the flow. One of the two failures
+    /// the activation tunnel can fix — see [`Self::retryable_over_tunnel`] for
+    /// the closed set.
+    ///
+    /// "After the request had been written" is part of the definition since
+    /// 2026-11-09. The check used to be gated on `error.is_connect()`, which is
+    /// true only of a connection that never came up, so an appliance that let
+    /// the request out and *then* reset it was classified [`Self::Transport`] and
+    /// never reached the tunnel. The kinds that matter — `ConnectionReset`,
+    /// `BrokenPipe`, `UnexpectedEof`, `InvalidData` — are listed once, in
+    /// `is_reset_kind`.
     ///
     /// Deliberately **not** the same as:
     ///   * a DNS failure — nothing was dialled, so nothing was reset;
@@ -265,7 +273,18 @@ impl Failure {
         // `is_connect()` catch-all below — and because confusing it with a
         // refusal or a DNS failure would either trigger a fallback that cannot
         // help or leave a censored student with no route at all.
-        if error.is_connect() && reset_in_chain(error) {
+        //
+        // The reset check is NOT gated on `is_connect()`, and that removed gate
+        // is the defect this guards. `is_connect()` is true only for a
+        // connection that never came up; an appliance that proxies the
+        // ClientHello and then tears the flow down produces a request-phase
+        // error instead (`UnexpectedEof`/`InvalidData` in the chain), which
+        // classified as `Transport` — not retryable over the tunnel — so the one
+        // transport built for a censored network was never attempted on the
+        // network it was built for. A reset means a flow was cut, whether it was
+        // being opened or already open; whether the connection had completed is
+        // not the question.
+        if reset_in_chain(error) {
             return Self::ResetDuringHandshake;
         }
 
@@ -327,40 +346,51 @@ impl Failure {
 
     /// Whether a **different transport** could plausibly change this outcome.
     ///
-    /// True for exactly one variant. The activation tunnel dials the same hub on
-    /// a different port speaking a protocol whose traffic carries no readable
-    /// destination, so it is a candidate fix only when the failure was the
-    /// network refusing to carry a **named** connection:
+    /// The activation tunnel dials the same hub on a different port speaking a
+    /// protocol whose traffic carries no readable destination, so it is a
+    /// candidate fix only when the failure was the network refusing to carry a
+    /// **named** connection. That is three variants:
     ///
-    ///   * `ResetDuringHandshake` — the middlebox read the name and killed it.
-    ///     This is the case the tunnel exists for.
+    ///   * `ResetDuringHandshake` — the middlebox read the name and cut the flow,
+    ///     before or after the request was written. This is the case the tunnel
+    ///     exists for.
+    ///   * `Refused` — **in the set since 2026-11-06.** The old reasoning was "a
+    ///     machine answered and said no; another port to the same machine would
+    ///     be asked differently, but nothing observed suggests it would help". On
+    ///     the network this exists for, the machine that answers is the *filter*,
+    ///     not the hub: it proxies the ClientHello and tears the flow down, which
+    ///     reaches this process as a reset or as a refusal depending on how far it
+    ///     got. Both are one decision — the destination's **name** is blocked — and
+    ///     the bootstrap port presents no name.
+    ///   * `Dns` — **in the set since 2026-11-09.** It used to be excluded, on the
+    ///     reasoning that the tunnel's engine dials the hub by name too, so a
+    ///     resolver that answers nothing answers nothing for the fallback either.
+    ///     That reasoning was correct *about the document being generated*: the
+    ///     bootstrap outbound's `server` was the hub hostname. It is no longer the
+    ///     whole story — the engine now carries an address candidate
+    ///     (`contract::ACTIVATION_TUNNEL_ADDR`, `activation_tunnel::Target`) that
+    ///     needs no resolver at all, which is what makes a DNS-filtered network
+    ///     reachable for the first time. Excluding `Dns` while shipping an address
+    ///     candidate would leave the one failure the candidate exists for
+    ///     untried.
+    ///
+    /// NOT in the set:
+    ///
     ///   * `Certificate` — the hub WAS reached; different roots fix it, and the
     ///     tunnel would present the same certificate.
     ///   * `Protocol` — the hub was reached and refused a TLS version.
-    ///   * `Dns` — the name did not resolve, and the tunnel's engine is dialled
-    ///     by name too. A resolver does not become less broken for a second
-    ///     connection.
-    ///   * `Transport` — the connection was dropped or timed out, which has no
-    ///     signature of a name-based block.
+    ///   * `Transport` — the connection was dropped or timed out with no signature
+    ///     of a name-based block. `TimedOut` in particular is indistinguishable
+    ///     from a hub that is merely slow, and retrying it on a heartbeat loop
+    ///     would spawn a 60 MB engine per beat.
     ///   * `Response` — an answer arrived; the problem is above the transport.
     ///
-    /// **`Refused` is IN the set**, and that was a correction (2026-11-06). The
-    /// old reasoning was "a machine answered and said no; another port to the
-    /// same machine would be asked differently, but nothing observed suggests it
-    /// would help". On the network this exists for, the machine that answers is
-    /// the *filter*, not the hub: it proxies the ClientHello and tears the flow
-    /// down, which reaches this process as a reset or as a refusal depending on
-    /// how far it got. Both are one decision — the destination's **name** is
-    /// blocked — and the bootstrap port presents no name. Excluding `Refused`
-    /// meant that on the day the appliance answered with a refusal instead of a
-    /// reset, the one transport built for this case was never attempted.
-    ///
     /// A hub that is genuinely down now costs one extra refused SOCKS dial,
-    /// reported in the same sentence as the original failure. That is the
-    /// cheaper of the two mistakes by a wide margin.
+    /// reported in the same sentence as the original failure. That is the cheaper
+    /// of the two mistakes by a wide margin.
     #[must_use]
     pub const fn retryable_over_tunnel(self) -> bool {
-        matches!(self, Self::ResetDuringHandshake | Self::Refused)
+        matches!(self, Self::ResetDuringHandshake | Self::Refused | Self::Dns)
     }
 
     /// A sentence a student can act on, or `None` when the cause is not theirs to
@@ -382,13 +412,20 @@ impl Failure {
             // The sentence a school-network student needed and did not get. It says
             // what actually happened — nothing was dialled, because the name did not
             // resolve — instead of "could not reach the hub", which sounds like the
-            // hub is down. It deliberately does not promise the tunnel: that would
-            // be untrue for exactly this failure.
+            // hub is down.
+            //
+            // It promised nothing about the tunnel until 2026-11-09, and that was
+            // honest then: the bootstrap outbound dialled the hub hostname, so the
+            // fallback needed the same lookup this failure says is filtering. With
+            // an address candidate the sentence can name the retry — and the hotspot
+            // advice stays, because the address is a compiled constant and an
+            // address can go stale in a way a name does not.
             Self::Dns => Some(
                 "This computer could not look up the hub's address, so the connection was \
                  never attempted. That is usually this network filtering DNS — common on \
-                 school and work networks. Try a different network or a phone hotspot; if \
-                 it works there, the network is the cause, not this computer.",
+                 school and work networks. Locus will try the activation tunnel instead \
+                 when one is available; if that does not work either, a phone hotspot \
+                 will tell you whether this computer is the cause.",
             ),
             Self::Refused => Some(
                 "The hub's address was found, but nothing there accepted the connection. \
@@ -449,14 +486,41 @@ const fn is_name_resolution(kind: std::io::ErrorKind) -> bool {
 /// "tls" in "tls handshake eof" and retrying a cut connection forever) does not
 /// recur here: a reset is a *reason to try another transport once*, never a reason
 /// to retry the same one in a loop.
+/// Whether this `io::ErrorKind` is the network cutting a flow that was live.
+///
+/// The set is wider than "connection reset" on purpose, and the extra members
+/// are not guesses — they are what a filtering appliance's teardown looks like
+/// one layer up, and each was missing from the original two.
+///
+///   * `ConnectionReset` — the RST itself.
+///   * `BrokenPipe`      — the same RST observed while writing.
+///   * `UnexpectedEof`   — **the common one.** A TLS connection closed inside
+///     the handshake reports a clean EOF at the record layer, and hyper
+///     surfaces it as `UnexpectedEof`. This is what an appliance that proxies
+///     the ClientHello and then drops the flow produces.
+///   * `InvalidData`     — the record layer receiving something that is not a
+///     TLS record, which is what an in-line appliance's rewritten bytes look
+///     like.
+///
+/// Deliberately NOT here: `NotFound`/`HostUnreachable` (a naming failure with
+/// its own class), `ConnectionRefused` (already retryable as its own class), and
+/// `TimedOut` (indistinguishable from a hub that is merely slow; retrying it
+/// would spawn an engine per beat on a heartbeat loop).
+const fn is_reset_kind(kind: std::io::ErrorKind) -> bool {
+    matches!(
+        kind,
+        std::io::ErrorKind::ConnectionReset
+            | std::io::ErrorKind::BrokenPipe
+            | std::io::ErrorKind::UnexpectedEof
+            | std::io::ErrorKind::InvalidData
+    )
+}
+
 fn reset_in_chain(error: &reqwest::Error) -> bool {
     let mut source: Option<&(dyn std::error::Error + 'static)> = Some(error);
     while let Some(current) = source {
         if let Some(io_error) = current.downcast_ref::<std::io::Error>()
-            && matches!(
-                io_error.kind(),
-                std::io::ErrorKind::ConnectionReset | std::io::ErrorKind::BrokenPipe
-            )
+            && is_reset_kind(io_error.kind())
         {
             return true;
         }
@@ -782,6 +846,17 @@ mod tests {
     /// "could not reach the Locus hub at …: error sending request for url (…)"
     /// and nothing else, with no way to learn that the name had not resolved.
     ///
+    /// **Updated 2026-11-09.** This test used to assert the opposite of its last
+    /// two checks: that the sentence must NOT mention the activation tunnel and
+    /// that `Dns` must NOT be retryable over it. Both were right for a tunnel
+    /// whose outbound dialled the hub hostname, and both became wrong when the
+    /// outbound gained a compiled address candidate
+    /// (`activation_tunnel::bootstrap_targets`). The assertions are inverted here
+    /// rather than removed, because the *property* they protect — the sentence and
+    /// the retry must agree — is the one that is easy to break by changing only
+    /// one of them. The pair is also asserted directly in
+    /// `a_name_that_does_not_resolve_must_reach_the_tunnel_now_that_it_carries_an_address`.
+    ///
     /// FALSIFIED before keeping: removing the `Dns` arm from `remedy()` makes the
     /// first assertion fail, and removing the `is_name_resolution` check from
     /// `classify` makes the last one fail.
@@ -798,12 +873,15 @@ mod tests {
             "must name the network as the usual cause, got {remedy:?}"
         );
         assert!(
-            !lowered.contains("activation tunnel"),
-            "must not promise the tunnel: the tunnel is dialled by the same name, got {remedy:?}"
+            lowered.contains("activation tunnel"),
+            "the sentence and the retry must agree: \
+             `retryable_over_tunnel` says this failure reaches the tunnel, so the \
+             sentence has to name it. Got {remedy:?}"
         );
         assert!(
-            !Failure::Dns.retryable_over_tunnel(),
-            "a resolver that answers nothing answers nothing for the tunnel either"
+            Failure::Dns.retryable_over_tunnel(),
+            "the address candidate needs no resolver, so a naming failure is exactly the \
+             case the tunnel can rescue"
         );
     }
 
@@ -847,7 +925,6 @@ mod tests {
             "the reset case must stay — it is the one that was measured"
         );
         for not_retryable in [
-            Failure::Dns,
             Failure::Certificate,
             Failure::Protocol,
             Failure::Transport,
@@ -868,6 +945,45 @@ mod tests {
             remedy.contains("activation tunnel"),
             "the refusal sentence must name the retry, or the student is told nothing \
              happened when one did: {remedy:?}"
+        );
+    }
+
+    /// **A DNS failure must reach the tunnel, because the tunnel can now dial an
+    /// address.**
+    ///
+    /// WHY THIS EXISTS. `Dns` was deliberately excluded from
+    /// `retryable_over_tunnel` with a reason that was true when it was written:
+    /// the bootstrap outbound's `server` was the hub hostname, so a resolver that
+    /// answered nothing answered nothing for the fallback too. That changed on
+    /// 2026-11-09 — `activation_tunnel::bootstrap_targets` now adds a compiled
+    /// address candidate — and the exclusion became the one thing standing between
+    /// a DNS-filtered student and the only transport that can carry enrolment.
+    ///
+    /// This test is the pair: the variant must be retryable, and the sentence must
+    /// say so. A retry nobody is told about, or a sentence promising a retry that
+    /// is not attempted, are the two ways this goes wrong.
+    ///
+    /// FALSIFIED before keeping: restoring `matches!(self,
+    /// ResetDuringHandshake | Refused)` fails the first assertion.
+    #[test]
+    fn a_name_that_does_not_resolve_must_reach_the_tunnel_now_that_it_carries_an_address() {
+        assert!(
+            Failure::Dns.retryable_over_tunnel(),
+            "a DNS-filtered network is the case the compiled address candidate exists \
+             for; not retrying it means the candidate is never dialled"
+        );
+        let remedy = Failure::Dns
+            .remedy()
+            .expect("a naming failure must carry a remedy")
+            .to_lowercase();
+        assert!(
+            remedy.contains("activation tunnel"),
+            "the sentence must name the retry now that it exists: {remedy:?}"
+        );
+        assert!(
+            remedy.contains("hotspot"),
+            "the address is a compiled constant and can go stale; the hotspot advice is \
+             what lets a student tell a stale address from a filtering network: {remedy:?}"
         );
     }
 
@@ -894,6 +1010,56 @@ mod tests {
                 !is_name_resolution(kind),
                 "{kind:?} must NOT be read as a naming failure: it would tell a student \
                  their DNS is filtering when the hub refused or the link dropped"
+            );
+        }
+    }
+
+    /// A reset that arrives AFTER the request was written must reach the tunnel.
+    ///
+    /// WHY THIS EXISTS. `reset_in_chain` is only consulted when reqwest reports
+    /// `is_connect()`, which is true of a connection that failed to establish and
+    /// **false** of a request that was refused or reset once it was sent. A
+    /// filtering appliance that proxies the ClientHello and then tears the flow
+    /// down produces exactly the second shape, and it reaches this process as an
+    /// `UnexpectedEof`, a `BrokenPipe` or an `InvalidData` in the source chain —
+    /// which classified as `Transport`, was NOT retryable over the tunnel, and so
+    /// the one transport built for a censored network was never attempted.
+    ///
+    /// Measured on 2026-11-09 against the deployed hub: `curl -v` to the
+    /// bootstrap port connected, sent the request off completely, and then
+    /// reported `Recv failure: Connection reset by peer`. That is the shape this
+    /// test pins.
+    #[test]
+    fn a_reset_after_the_request_was_sent_still_reaches_the_tunnel() {
+        use std::io::ErrorKind;
+
+        for kind in [
+            ErrorKind::ConnectionReset,
+            ErrorKind::BrokenPipe,
+            ErrorKind::UnexpectedEof,
+            ErrorKind::InvalidData,
+        ] {
+            assert!(
+                is_reset_kind(kind),
+                "{kind:?} in the chain is an appliance cutting the flow after it read the \
+                 name; not retrying it leaves a student with no route at all"
+            );
+        }
+
+        // The distance matters. These mean something else — a name that did not
+        // resolve, a machine that answered, a link that hung up — and retrying
+        // any of them spawns a 60 MB engine per attempt on the network where it
+        // cannot help.
+        for kind in [
+            ErrorKind::NotFound,
+            ErrorKind::HostUnreachable,
+            ErrorKind::ConnectionRefused,
+            ErrorKind::TimedOut,
+        ] {
+            assert!(
+                !is_reset_kind(kind),
+                "{kind:?} must not be read as a reset: it has its own classification and \
+                 its own remedy"
             );
         }
     }

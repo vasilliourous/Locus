@@ -57,6 +57,20 @@ routerAdd("POST", "/api/code-lookup", function(e) {
         var fp = (data.fingerprint || "").trim();
         try { var addr = (e.request().remoteAddr || "").split(":"); var ip = addr[0] || ""; } catch(ex) { var ip = ""; }
 
+        // The per-client identity the activation tunnel's path filter sets; see
+        // the longer note in activation.pb.js. This endpoint REQUIRES a
+        // fingerprint, so its bucket is already per-client in practice — but the
+        // header is read here too so that a client which fails to send one (a
+        // modified build, a future release) does not fall back to the one shared
+        // loopback bucket the tunnel path has.
+        var bootstrapId = "";
+        try {
+            var allHeaders = $apis.requestInfo(e).headers || {};
+            var rawId = allHeaders["x-locus-bootstrap"] || allHeaders["X-Locus-Bootstrap"] || "";
+            rawId = String(rawId).trim();
+            if (rawId.length >= 16 && rawId.length <= 64) bootstrapId = rawId;
+        } catch(ex) { bootstrapId = ""; }
+
         if (!code) return e.json(400, {status:"not_found", message:"Missing code"});
         if (!fp) return e.json(400, {status:"not_found", message:"Missing device fingerprint"});
 
@@ -93,7 +107,7 @@ routerAdd("POST", "/api/code-lookup", function(e) {
         // `codes`), so the risk of a wider budget is bounded, and the threshold
         // below still caps enumeration well under a meaningful rate.
         $app.dao().db().newQuery("DELETE FROM activation_attempts WHERE created < datetime('now','-10 minutes')").execute();
-        var rateKey = "lookup_" + (fp || ip).replace(/[^a-zA-Z0-9]/g,"_");
+        var rateKey = "lookup_" + (fp || bootstrapId || ip).replace(/[^a-zA-Z0-9]/g,"_");
         // findRecordsByExpr, not findRecordsByFilter — the list variant returns
         // zero rows on this PB build, which silently disabled the rate limit
         // (making this endpoint an unbounded code-enumeration oracle).
@@ -111,7 +125,7 @@ routerAdd("POST", "/api/code-lookup", function(e) {
         // afterwards, so lookups are counted too.
         var c2 = $app.dao().findCollectionByNameOrId("activation_attempts");
         var att = new Record(c2);
-        att.set("ip",ip); att.set("rate_key",rateKey);
+        att.set("ip", bootstrapId ? "" : ip); att.set("rate_key",rateKey);
         att.set("fingerprint",fp.substring(0,16)+"****");
         att.set("code_attempted",code.substring(0,4)+"****");
         $app.dao().saveRecord(att);

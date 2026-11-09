@@ -39,6 +39,26 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     println!("cargo:rerun-if-env-changed=LOCUS_ACTIVATION_TUNNEL_KEY");
 
+    // ── The bootstrap ADDRESS ──
+    //
+    // The compiled fallback the tunnel dials when the hub's name cannot be used
+    // (a DNS-filtering network — see `contract::ACTIVATION_TUNNEL_ADDR`). It is an
+    // ordinary `option_env!` in the source with the current value checked in, so a
+    // fresh clone builds a working candidate and nothing has to be set.
+    //
+    // A build may OVERRIDE it — that is the point of reading it here. The hub
+    // moving is an operational event that must not need a source edit reviewed and
+    // merged, and the release workflow passes the value it wants. Empty or absent
+    // is ignored rather than allowed to blank the compiled default: an empty
+    // address would silently reduce the fallback to name-only, which is the
+    // failure this candidate exists to fix.
+    if let Ok(addr) = std::env::var("LOCUS_ACTIVATION_TUNNEL_ADDR")
+        && !addr.trim().is_empty()
+    {
+        println!("cargo:rustc-env=LOCUS_ACTIVATION_TUNNEL_ADDR_OVERRIDE={}", addr.trim());
+    }
+    println!("cargo:rerun-if-env-changed=LOCUS_ACTIVATION_TUNNEL_ADDR");
+
     if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows")
         && std::env::var("CARGO_CFG_TARGET_ENV").as_deref() == Ok("msvc")
         && std::env::var_os("CARGO_FEATURE_CLIPPY").is_some()

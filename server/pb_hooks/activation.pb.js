@@ -118,6 +118,34 @@ routerAdd("POST", "/api/activate", function(e) {
         var fp = (data.fingerprint || "").trim();
         try { var addr = (e.request().remoteAddr || "").split(":"); var ip = addr[0] || ""; } catch(ex) { var ip = ""; }
 
+        // ── Who is asking, when loopback cannot say ──
+        //
+        // On the activation TUNNEL path (server/modules/09-activation-tunnel.sh)
+        // this hook is reached at 127.0.0.1:8090, so `ip` above is ALWAYS
+        // loopback and EVERY tunnelled student shares one `activate_` bucket.
+        // This request is the one that mints entitlements, so it does not
+        // require a fingerprint (`fp` is optional — see the note above; deployed
+        // 3.2.x clients still send one and a missing one must not break them).
+        // Measured consequence before this fix: the first five students in a
+        // class activate and the rest are told "too many attempts", which the
+        // client reports as a failure to reach the hub.
+        //
+        // The path filter sets `X-Locus-Bootstrap` to a per-client digest it
+        // computes itself (peer address keyed with the bootstrap key). It
+        // OVERWRITES any copy the client sent, so this value is the filter's
+        // statement about the client, not the client's about itself. Caddy's
+        // path sets no such header, so nothing changes there.
+        //
+        // Absent, empty or absurdly long is treated as absent: an unbounded
+        // string here would become an unbounded rate-key column.
+        var bootstrapId = "";
+        try {
+            var allHeaders = $apis.requestInfo(e).headers || {};
+            var rawId = allHeaders["x-locus-bootstrap"] || allHeaders["X-Locus-Bootstrap"] || "";
+            rawId = String(rawId).trim();
+            if (rawId.length >= 16 && rawId.length <= 64) bootstrapId = rawId;
+        } catch(ex) { bootstrapId = ""; }
+
         if (!code) return e.json(400, {code:400, message:"Missing code"});
 
         // Luhn-mod-N check (32-char charset matching client)
@@ -142,7 +170,7 @@ routerAdd("POST", "/api/activate", function(e) {
         // budget: a typo here would otherwise consume the read-only lookup that
         // exists to tell the student WHY the code was rejected. See the matching
         // note in code_lookup.pb.js.
-        var rateKey = "activate_" + (fp || ip).replace(/[^a-zA-Z0-9]/g,"_");
+        var rateKey = "activate_" + (fp || bootstrapId || ip).replace(/[^a-zA-Z0-9]/g,"_");
         // NOTE: findRecordsByFilter is broken in this PB build (0.22.21) — it
         // returns zero rows for every filter, which silently DISABLED this rate
         // limit entirely (5 attempts / 10 min was never enforced). We count with
@@ -159,7 +187,12 @@ routerAdd("POST", "/api/activate", function(e) {
         // Log attempt
         var c2 = $app.dao().findCollectionByNameOrId("activation_attempts");
         var att = new Record(c2);
-        att.set("ip",ip); att.set("rate_key",rateKey);
+        // `ip` is loopback on the tunnel path, and writing it would make every
+        // tunnelled student's row claim to come from 127.0.0.1 — which is worse
+        // than an empty column, because it looks like data. The rate key already
+        // carries the per-client digest, so the address is left empty rather
+        // than filled with something untrue.
+        att.set("ip", bootstrapId ? "" : ip); att.set("rate_key",rateKey);
         att.set("fingerprint",fp.substring(0,16)+"****");
         att.set("code_attempted",code.substring(0,4)+"****");
         $app.dao().saveRecord(att);

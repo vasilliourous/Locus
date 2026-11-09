@@ -24,6 +24,72 @@ commercial gaps, [`../business/17-not-built.md`](../business/17-not-built.md).
 
 ---
 
+## THE ACTIVATION TUNNEL COULD NOT FIRE ON THE FAILURE IT EXISTS FOR (2026-11-09, unreleased)
+
+Three defects, found together when the operator reported that enrolment still
+fails on the school network while an established tunnel keeps working — the exact
+signature the tunnel was built for. Each was independently sufficient to keep the
+one transport built for a censored network from ever running there.
+
+**1. A reset after the request was sent was classified `Transport`.** The reset
+check was gated on `error.is_connect()`, which is true only of a connection that
+never came up. An appliance that lets the request out and *then* cuts the flow
+produces `UnexpectedEof` (the TLS record layer seeing a clean EOF) or
+`InvalidData`, and `ConnectionReset`/`BrokenPipe` alone did not cover it — so it
+classified as `Transport`, which is deliberately not retryable over the tunnel.
+Measured on the deployed box: `curl -v` to the bootstrap port connected, uploaded
+the request, then reported `Recv failure: Connection reset by peer`.
+
+*Fixed:* the kinds are named once in `is_reset_kind` (`ConnectionReset`,
+`BrokenPipe`, `UnexpectedEof`, `InvalidData`) and the `is_connect()` gate is
+gone — a reset means a flow was cut, not that a connection failed to open.
+*Guarded by* `a_reset_after_the_request_was_sent_still_reaches_the_tunnel`,
+observed failing against the gated two-kind version.
+
+**2. `Failure::Dns` was excluded from the tunnel because the tunnel needed DNS.**
+The exclusion's reasoning was correct about the document being generated: the
+bootstrap outbound's `server` was the hub hostname, so a resolver that answered
+nothing answered nothing for the fallback either. It stayed correct for as long as
+nothing changed the document — which meant the one failure a DNS-filtering network
+produces had no route at all.
+
+*Fixed:* the outbound is built from an ordered candidate list
+(`bootstrap_targets`) — the resolved name first, then
+`contract::ACTIVATION_TUNNEL_ADDR`, a compiled IPv4 literal overridable at build
+time via `LOCUS_ACTIVATION_TUNNEL_ADDR`. `Dns` is now retryable and its remedy
+sentence names the retry. *Guarded by* two unit tests and
+`check-consistency.sh` §48, which also refuses a **hostname** in that constant
+(tried: substituting the hub's name fails the guard) and refuses the address being
+restated in any live document.
+
+**3. Every tunnelled student shared one rate-limit bucket.** The forwarder reaches
+PocketBase at loopback, so `remoteAddr` downstream is always `127.0.0.1`; both
+enrolment hooks key on `fp || ip`, and `/api/activate` does not require a
+fingerprint. The first five students in a class would activate and the rest would
+be told "too many attempts" — which the client reports as a network failure.
+Nothing on the hub reported it, and the per-source limit looked enforced.
+
+*Fixed:* the forwarder sets `X-Locus-Bootstrap` to
+`sha256(bootstrap key | peer)`, a per-source unforgeable digest that reveals no
+address (it overwrites anything the client sent), and both hooks key on
+`fp || bootstrapId || ip`. The audit column is left empty on that path rather than
+filled with loopback. *Guarded by* `§40.8`, two assertions of which were observed
+failing against the pre-fix module and hook.
+
+*The rule:* **a fallback's coverage is a property of its classifier and of the
+document it generates, and neither is exercised by the failure it exists for
+unless something runs it there.** Three of these three were invisible to a green
+tree; all three were found by reading the trigger condition and the generated
+YAML against the measured failure, not by running anything.
+
+> **Not closed by this.** Whether `hub:8453` answers a *decrypted stream* at all
+> is now open and is the next question — the 2026-11-09 measurement shows a
+> listener accepting and then resetting on an **uncensored** connection, which is
+> not what `ssserver` + a path filter does. See
+> [`ACTIVATION-TUNNEL.md`](ACTIVATION-TUNNEL.md) §6.6.
+
+---
+
 ## THE INTEL macOS SLICE COULD NOT RUN ITS OWN SIGNING TOOL (2026-11-08, unreleased)
 
 Found by the first release ever to run on a real Intel macOS machine (v3.3.7,

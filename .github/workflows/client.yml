@@ -417,8 +417,19 @@ jobs:
         working-directory: .
         env:
           LOCUS_ACTIVATION_TUNNEL_KEY: ${{ secrets.LOCUS_ACTIVATION_TUNNEL_KEY }}
+          LOCUS_ACTIVATION_TUNNEL_ADDR: ${{ vars.LOCUS_ACTIVATION_TUNNEL_ADDR }}
         run: |
           set -euo pipefail
+          # Report the bootstrap ADDRESS as well as the key. The address is not a
+          # secret: it ships in every binary that can use the tunnel, and the
+          # checked-in default in `contract.rs` is a working value. It is reported
+          # here because an override that silently did not reach the build would
+          # look exactly like a hub that had not moved.
+          if [ -n "${LOCUS_ACTIVATION_TUNNEL_ADDR:-}" ]; then
+            echo "LOCUS_ACTIVATION_TUNNEL_ADDR override is set (${LOCUS_ACTIVATION_TUNNEL_ADDR})"
+          else
+            echo "LOCUS_ACTIVATION_TUNNEL_ADDR is unset — the checked-in default in contract.rs is compiled in."
+          fi
           if [ -n "${LOCUS_ACTIVATION_TUNNEL_KEY:-}" ]; then
             echo "LOCUS_ACTIVATION_TUNNEL_KEY is present (value not printed; length ${#LOCUS_ACTIVATION_TUNNEL_KEY} bytes)"
           elif [ "${{ github.ref_type }}" = "tag" ]; then
@@ -1234,6 +1245,10 @@ jobs:
           # be assumed public. The hub's allowlist and rate limit are what bound
           # it (docs/reference/ACTIVATION-TUNNEL.md §3.1).
           LOCUS_ACTIVATION_TUNNEL_KEY: ${{ secrets.LOCUS_ACTIVATION_TUNNEL_KEY }}
+          # The compiled address fallback the tunnel dials when DNS is filtered.
+          # A repository VARIABLE rather than a secret: it is not confidential and
+          # it is meant to be readable by anyone auditing what a release dials.
+          LOCUS_ACTIVATION_TUNNEL_ADDR: ${{ vars.LOCUS_ACTIVATION_TUNNEL_ADDR }}
         run: |
           set -euo pipefail
 
