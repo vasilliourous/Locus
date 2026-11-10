@@ -171,6 +171,45 @@ pub fn stored_code_is_damaged(verge: &IVerge) -> bool {
     read(verge).is_some_and(|activation| crate::locus::activation::validate_code(&activation.code).is_err())
 }
 
+/// Writes `edit` into the verge config and **commits it** before saving.
+///
+/// # Why this is a function
+///
+/// Every writer in this module used to be `verge.edit_draft(..)` followed by
+/// `verge.data_arc().save_file()`, and that pair does not do what it reads as.
+/// `edit_draft` mutates the *draft slot*; `data_arc()` returns the last
+/// **committed** snapshot. `save_file` therefore wrote the state from BEFORE the
+/// edit, and the edit lived on only in the draft, where:
+///
+///   * it was invisible to `data_arc()`, so the file on disk never changed; and
+///   * it was destroyed by the next `discard()` — which `feat::listener`'s
+///     proxy-port recovery and `feat::config`'s clash reload both call on the
+///     verge layer.
+///
+/// For sign-out this was the whole defect: `clear_entitlement` cleared the code
+/// in a draft, saved the old code to disk, and the code returned the moment
+/// anything discarded the draft. The device reported itself activated again
+/// while the hub had already released the key — an app that could not reach its
+/// own activation screen and offered no sign-out, with nothing on disk to fix by
+/// hand. Verified against the real draft type: after `discard()`,
+/// `latest_arc().activation_code` was `Some("CODE")` again.
+///
+/// `apply()` collapses the draft into the committed snapshot, which is the step
+/// that was missing. Doing it here, once, rather than in 18 call sites is the
+/// point: this is a rule about the config plumbing, and the next writer added to
+/// this module must not have to know it.
+async fn save_verge<F>(edit: F) -> Result<()>
+where
+    F: FnOnce(&mut IVerge),
+{
+    let verge = Config::verge().await;
+    verge.edit_draft(edit);
+    // Commit BEFORE the save: `save_file` serialises `data_arc()`, and a draft
+    // that is still pending is not in it.
+    verge.apply();
+    verge.data_arc().save_file().await
+}
+
 /// The code held in the config alone, without consulting the mirror.
 #[must_use]
 fn config_code(verge: &IVerge) -> Option<String> {
@@ -188,11 +227,10 @@ fn config_code(verge: &IVerge) -> Option<String> {
 /// narrow: it must not touch the tier or the fingerprint, which the heartbeat
 /// owns and which a recovery has no new information about.
 async fn store_code_in_config(code: &str) -> Result<()> {
-    let verge = Config::verge().await;
-    verge.edit_draft(|draft| {
+    save_verge(|draft| {
         draft.activation_code = Some(SmartString::from(code));
-    });
-    verge.data_arc().save_file().await
+    })
+    .await
 }
 
 /// Persists an activation, then saves the file.
@@ -201,13 +239,12 @@ async fn store_code_in_config(code: &str) -> Result<()> {
 /// tier, or the reverse. `save_file` is the same path the rest of the app uses,
 /// so this inherits its atomicity.
 pub async fn store(activation: &Activation) -> Result<()> {
-    let verge = Config::verge().await;
-    verge.edit_draft(|draft| {
+    let saved = save_verge(|draft| {
         draft.activation_code = Some(SmartString::from(activation.code.as_str()));
         draft.locus_tier = Some(SmartString::from(activation.tier.as_str()));
         draft.device_fingerprint = Some(SmartString::from(activation.fingerprint.as_str()));
-    });
-    let saved = verge.data_arc().save_file().await;
+    })
+    .await;
 
     // Mirror the code to the machine store in the SAME operation, so a launch
     // that writes the code once is a launch that has a durable copy of it. This
@@ -242,21 +279,19 @@ pub async fn store(activation: &Activation) -> Result<()> {
 /// across two writes is how a device ends up with a fresh timestamp and a stale
 /// failure count, and then backs off as though it were still failing.
 pub async fn record_heartbeat_success(now_unix: i64) -> Result<()> {
-    let verge = Config::verge().await;
-    verge.edit_draft(|draft| {
+    save_verge(|draft| {
         draft.last_heartbeat_ok = Some(now_unix);
         draft.heartbeat_failures = Some(0);
-    });
-    verge.data_arc().save_file().await
+    })
+    .await
 }
 
 /// Records a failed heartbeat and the new consecutive-failure count.
 pub async fn record_heartbeat_failure(failures: u32) -> Result<()> {
-    let verge = Config::verge().await;
-    verge.edit_draft(|draft| {
+    save_verge(|draft| {
         draft.heartbeat_failures = Some(failures);
-    });
-    verge.data_arc().save_file().await
+    })
+    .await
 }
 
 /// Records the subscription expiry the hub reported.
@@ -270,11 +305,10 @@ pub async fn record_heartbeat_failure(failures: u32) -> Result<()> {
 /// worth writing; see the note in `runtime::handle_success` for why a `None` from
 /// an older hub must not overwrite a date we already hold.
 pub async fn record_expiry(expires_at: Option<String>) -> Result<()> {
-    let verge = Config::verge().await;
-    verge.edit_draft(|draft| {
+    save_verge(|draft| {
         draft.locus_expires_at = expires_at.map(Into::into);
-    });
-    verge.data_arc().save_file().await
+    })
+    .await
 }
 
 /// Records, or clears, a hub address the operator offered over the heartbeat.
@@ -310,11 +344,10 @@ pub async fn record_hub_override(offered: &str) -> Result<()> {
         return Ok(());
     }
 
-    let verge = Config::verge().await;
-    verge.edit_draft(|draft| {
+    save_verge(|draft| {
         draft.locus_hub_override = if accept { Some(resolved.as_str().into()) } else { None };
-    });
-    verge.data_arc().save_file().await
+    })
+    .await
 }
 
 /// Clears the entitlement after the hub has **definitively** refused it.
@@ -335,15 +368,14 @@ pub async fn record_hub_override(offered: &str) -> Result<()> {
 /// The refusal reason is NOT cleared, because it is the record of why this
 /// happened; see [`record_refusal`].
 pub async fn clear_entitlement() -> Result<()> {
-    let verge = Config::verge().await;
-    verge.edit_draft(|draft| {
+    let saved = save_verge(|draft| {
         draft.activation_code = None;
         draft.locus_tier = None;
         draft.locus_expires_at = None;
         draft.last_heartbeat_ok = None;
         draft.heartbeat_failures = None;
-    });
-    let saved = verge.data_arc().save_file().await;
+    })
+    .await;
     // The mirror goes with it, and this one IS the durable copy — leaving it
     // behind would let the next launch re-adopt a code the hub has refused.
     crate::locus::credential::remove_code();
@@ -382,16 +414,15 @@ pub async fn clear_entitlement() -> Result<()> {
 /// Signing out is the one path where the student has actively said "not me any
 /// more", so the history goes with them.
 pub async fn clear_device_state() -> Result<()> {
-    let verge = Config::verge().await;
-    verge.edit_draft(|draft| {
+    save_verge(|draft| {
         draft.locus_refusal_reason = None;
         draft.locus_usage = None;
         draft.locus_allowance_mb = None;
         draft.locus_throttle_mbps = None;
         draft.locus_update_check_reason = None;
         draft.locus_update_offered = None;
-    });
-    verge.data_arc().save_file().await
+    })
+    .await
 }
 
 /// Clears what a lapsed grace period invalidates, **keeping the code**.
@@ -406,14 +437,13 @@ pub async fn clear_device_state() -> Result<()> {
 /// launch, or as soon as the hub answers again, the device re-activates with a
 /// code it still holds rather than sending the student hunting for their card.
 pub async fn record_lapsed_grace() -> Result<()> {
-    let verge = Config::verge().await;
-    verge.edit_draft(|draft| {
+    save_verge(|draft| {
         draft.locus_tier = None;
         draft.locus_expires_at = None;
         draft.last_heartbeat_ok = None;
         draft.heartbeat_failures = None;
-    });
-    verge.data_arc().save_file().await
+    })
+    .await
 }
 
 /// Records why the hub refused this device, so the refusal can be explained.
@@ -428,11 +458,10 @@ pub async fn record_lapsed_grace() -> Result<()> {
 /// entitlement, and it is the only thing that can still answer "why" once the
 /// code itself is gone.
 pub async fn record_refusal(reason: &str) -> Result<()> {
-    let verge = Config::verge().await;
-    verge.edit_draft(|draft| {
+    save_verge(|draft| {
         draft.locus_refusal_reason = Some(reason.to_owned().into());
-    });
-    verge.data_arc().save_file().await
+    })
+    .await
 }
 
 /// Records the version the hub has offered this device.
@@ -444,11 +473,10 @@ pub async fn record_refusal(reason: &str) -> Result<()> {
 /// security-relevant material for an unbounded time is a liability with no
 /// benefit, since the fetch is cheap and already required.
 pub async fn record_update_offer(version: &str) -> Result<()> {
-    let verge = Config::verge().await;
-    verge.edit_draft(|draft| {
+    save_verge(|draft| {
         draft.locus_update_offered = Some(version.to_owned().into());
-    });
-    verge.data_arc().save_file().await
+    })
+    .await
 }
 
 /// Forgets an offered update, once it is installed or no longer relevant.
@@ -457,11 +485,10 @@ pub async fn record_update_offer(version: &str) -> Result<()> {
 /// version the student already has) and when the offer is no longer newer than
 /// what is running.
 pub async fn clear_update_offer() -> Result<()> {
-    let verge = Config::verge().await;
-    verge.edit_draft(|draft| {
+    save_verge(|draft| {
         draft.locus_update_offered = None;
-    });
-    verge.data_arc().save_file().await
+    })
+    .await
 }
 
 /// Records why the last heartbeat did or did not produce an update offer.
@@ -474,12 +501,11 @@ pub async fn clear_update_offer() -> Result<()> {
 /// on demand. It is per-heartbeat state, not an event log: the latest beat wins,
 /// because the question a student asks is about *now*.
 pub async fn record_update_check_reason(reason: Option<&crate::locus::update::NoOfferReason>) -> Result<()> {
-    let verge = Config::verge().await;
     let encoded = reason.map(|r| r.describe());
-    verge.edit_draft(|draft| {
-        draft.locus_update_check_reason = encoded.clone().map(Into::into);
-    });
-    verge.data_arc().save_file().await
+    save_verge(|draft| {
+        draft.locus_update_check_reason = encoded.map(Into::into);
+    })
+    .await
 }
 
 /// Forgets a previous refusal, after the device is entitled again.
@@ -488,11 +514,10 @@ pub async fn record_update_check_reason(reason: Option<&crate::locus::update::No
 /// keep being told why their previous code was refused, on a device that is now
 /// working — a stale explanation is its own kind of wrong answer.
 pub async fn clear_refusal() -> Result<()> {
-    let verge = Config::verge().await;
-    verge.edit_draft(|draft| {
+    save_verge(|draft| {
         draft.locus_refusal_reason = None;
-    });
-    verge.data_arc().save_file().await
+    })
+    .await
 }
 
 /// Persists the tier's connection details and UDP preference.
@@ -502,12 +527,11 @@ pub async fn clear_refusal() -> Result<()> {
 /// cannot be authorised. Keeping them in one write means a crash cannot leave a
 /// device that believes it is activated but has nothing to dial.
 pub async fn store_tier_config(config: &TierConfig, udp_relay: bool) -> Result<()> {
-    let verge = Config::verge().await;
-    verge.edit_draft(|draft| {
+    save_verge(|draft| {
         draft.locus_tier_server = Some(serde_json::to_string(config).unwrap_or_default().into());
         draft.locus_udp_relay = Some(udp_relay);
-    });
-    verge.data_arc().save_file().await
+    })
+    .await
 }
 
 /// Reads the free tier's usage window from the config.
@@ -555,12 +579,11 @@ fn decode_usage(raw: Option<&str>) -> crate::locus::usage::Usage {
 /// The whole window is written at once, because a count without its window is
 /// the corrupt state this shape exists to prevent.
 pub async fn store_usage(usage: &crate::locus::usage::Usage) -> Result<()> {
-    let verge = Config::verge().await;
     let encoded = serde_json::to_string(usage).unwrap_or_default();
-    verge.edit_draft(|draft| {
-        draft.locus_usage = Some(encoded.clone().into());
-    });
-    verge.data_arc().save_file().await
+    save_verge(|draft| {
+        draft.locus_usage = Some(encoded.into());
+    })
+    .await
 }
 
 /// Reads the throttle speed the hub advertised, in Mbps.
@@ -588,11 +611,10 @@ pub async fn throttle_mbps() -> Option<u32> {
 /// apart: one says *how much* data a free student gets, the other *how slow*
 /// they go once it is gone.
 pub async fn store_throttle_mbps(mbps: Option<u32>) -> Result<()> {
-    let verge = Config::verge().await;
-    verge.edit_draft(|draft| {
+    save_verge(|draft| {
         draft.locus_throttle_mbps = mbps.filter(|m| *m > 0);
-    });
-    verge.data_arc().save_file().await
+    })
+    .await
 }
 
 /// Caches the free-tier allowance the hub advertised, in mebibytes.
@@ -603,11 +625,10 @@ pub async fn store_throttle_mbps(mbps: Option<u32>) -> Result<()> {
 /// site in `locus::runtime::handle_success` for why this differs from the
 /// expiry rule.
 pub async fn store_allowance(allowance_mb: Option<u64>) -> Result<()> {
-    let verge = Config::verge().await;
-    verge.edit_draft(|draft| {
+    save_verge(|draft| {
         draft.locus_allowance_mb = allowance_mb.filter(|mb| *mb > 0);
-    });
-    verge.data_arc().save_file().await
+    })
+    .await
 }
 
 /// Reads back the stored tier connection details.
@@ -1136,6 +1157,133 @@ mod tests {
     /// Decoding must not silently repair: the repair belongs in
     /// `Usage::window`, which knows `now`. Doing it here would need a clock and
     /// would make the decode untestable.
+    /// A write must reach the COMMITTED snapshot, not just the draft slot.
+    ///
+    /// This is the guard for the defect that made sign-out a trap. The old
+    /// shape of every writer in this module was:
+    ///
+    /// ```ignore
+    /// verge.edit_draft(|draft| { draft.activation_code = None; });
+    /// verge.data_arc().save_file().await          // <- the OLD value
+    /// ```
+    ///
+    /// `edit_draft` mutates the draft; `data_arc()` returns the committed
+    /// snapshot. So `save_file` wrote the pre-edit state, and the edit died with
+    /// the next `discard()` — which `feat::listener`'s proxy-port recovery calls
+    /// on the verge layer. Observed on a real sign-out: the code came back, the
+    /// gate reported the device activated, the hub had already released the key,
+    /// and the app was left with no activation screen and no sign-out control.
+    ///
+    /// FALSIFIED before keeping: with `verge.apply()` removed from `save_verge`,
+    /// the `data_arc()` assertion below reads `Some(..)` and this test fails.
+    #[test]
+    fn a_clearing_write_reaches_the_committed_snapshot() {
+        // The same claim `store.rs` makes at runtime, expressed on the draft type
+        // directly so it needs no app config, no file and no async runtime.
+        let verge = clash_verge_draft::Draft::new(verge_with(
+            Some("RQ-VYG7-VL6U-CMM9-Q"),
+            Some("strike"),
+            Some("a".repeat(64).as_str()),
+        ));
+
+        verge.edit_draft(|draft| {
+            draft.activation_code = None;
+        });
+
+        assert!(
+            verge.data_arc().activation_code.is_some(),
+            "precondition: without a commit, the edit is invisible to `data_arc()` — \
+             this is the read `save_file` serialises, which is why the old shape wrote \
+             the code straight back to disk"
+        );
+
+        // What `save_verge` adds.
+        verge.apply();
+
+        assert!(
+            verge.data_arc().activation_code.is_none(),
+            "a clearing write must be committed before it is saved, or the value it \
+             cleared is written back to disk"
+        );
+
+        // ...and it must survive the thing that killed the edit before: a discard
+        // on a layer that has nothing pending. A committed value cannot be rolled
+        // back by a later rollback of somebody else's draft.
+        verge.discard();
+        assert!(
+            verge.data_arc().activation_code.is_none(),
+            "a committed clear must not be undone by a later discard on the same layer"
+        );
+    }
+
+    /// `save_verge` must commit before it saves, and every writer must use it.
+    ///
+    /// The test above pins WHY the commit is needed, using the draft type
+    /// directly. It cannot notice a regression in `save_verge` itself, because it
+    /// performs the `apply()` it is checking for. So the helper's own body is
+    /// read here, the way `signout.rs` reads `sign_out`'s body for its ordering:
+    /// a property this sharp should not live only in a comment.
+    ///
+    /// FALSIFIED before keeping: with the `verge.apply();` line deleted from
+    /// `save_verge`, this fails on the first assertion.
+    #[test]
+    fn the_write_helper_commits_before_it_saves() {
+        let source = include_str!("store.rs");
+        let start = source
+            .find("async fn save_verge<F>")
+            .expect("save_verge must exist; this test reads its body");
+        let body = &source[start..];
+        let body = &body[..body.find("\n}\n").unwrap_or(body.len())];
+
+        let apply = body.find("verge.apply();");
+        let save = body.find("save_file()");
+        let (Some(apply), Some(save)) = (apply, save) else {
+            panic!(
+                "save_verge must both commit (`verge.apply()`) and save (`save_file()`); \
+                    a write that only saves serialises the committed snapshot, which is the \
+                    state from BEFORE the edit"
+            );
+        };
+        assert!(
+            apply < save,
+            "save_verge commits after it saves: `save_file` serialises `data_arc()`, so the \
+             edit is written away, not written"
+        );
+
+        // ...and no writer may go around it. A single `edit_draft` followed by
+        // `data_arc().save_file()` is exactly the shape this defect had, so it
+        // must not come back in a nineteenth function.
+        let mut stray = Vec::new();
+        let mut lines = source.lines().peekable();
+        while let Some(line) = lines.next() {
+            // Code only: the doc comments in this module quote the defective
+            // shape in order to explain it, and matching those would make the
+            // guard fail on its own documentation.
+            let is_code = {
+                let trimmed = line.trim_start();
+                !trimmed.starts_with("//")
+            };
+            if !is_code || !line.contains("edit_draft(") || line.contains("verge.edit_draft(edit)") {
+                // The helper's own line, which is the one place it belongs.
+                continue;
+            }
+            for next in lines.clone().take(40) {
+                if next.contains("data_arc().save_file()") {
+                    stray.push(line.trim().to_owned());
+                    break;
+                }
+                if next.starts_with("pub async fn ") || next.starts_with("async fn ") {
+                    break;
+                }
+            }
+        }
+        assert!(
+            stray.is_empty(),
+            "these writers use `edit_draft(..)` then `data_arc().save_file()` straight, so their \
+             edit never reaches the file: {stray:?}. Use `save_verge` instead."
+        );
+    }
+
     #[test]
     fn decoding_does_not_pre_repair_a_skewed_window() {
         let skewed = crate::locus::usage::Usage {

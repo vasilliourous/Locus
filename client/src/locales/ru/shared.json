@@ -2,59 +2,19 @@
   "actions": {
     "cancel": "Отмена",
     "close": "Закрыть",
-    "confirm": "Подтвердить",
     "save": "Сохранить",
-    "delete": "Удалить",
-    "edit": "Редактировать",
     "new": "Новый",
-    "enable": "Включить",
-    "upgrade": "Обновить",
-    "restart": "Перезапустить",
     "resetToDefault": "Сбросить настройки",
-    "refresh": "Обновить",
     "retry": "Повторить",
     "refreshPage": "Обновить страницу",
     "showDetails": "Показать подробности",
-    "hideDetails": "Скрыть подробности",
-    "listView": "Отображать в виде списка",
-    "tableView": "Отображать в виде таблицы",
-    "pause": "Пауза",
-    "resume": "Возобновить",
-    "closeAll": "Закрыть всё",
-    "clear": "Очистить",
-    "previous": "Назад",
-    "next": "Далее",
-    "check": "Проверить"
+    "hideDetails": "Скрыть подробности"
   },
   "labels": {
-    "updateAt": "Обновлено в",
-    "timeout": "Тайм-аут",
-    "icon": "Иконка",
-    "name": "Название",
-    "readOnly": "Только для чтения",
-    "expireTime": "Время окончания",
-    "updateTime": "Время обновления",
-    "usedTotal": "Использовано / Всего",
-    "from": "От",
-    "password": "Пароль",
-    "retryAttempts": "Число попыток",
-    "downloaded": "Скачано",
-    "uploaded": "Загружено"
+    "retryAttempts": "Число попыток"
   },
   "statuses": {
-    "enabled": "Включено",
-    "disabled": "Отключено",
-    "saving": "Сохранение...",
-    "empty": "Пусто",
-    "loading": "Загрузка..."
-  },
-  "units": {
-    "milliseconds": "миллисекунды",
-    "seconds": "секунды",
-    "minutes": "минуты",
-    "hours": "часы",
-    "kilobytes": "КБ",
-    "files": "Файлы"
+    "empty": "Пусто"
   },
   "placeholders": {
     "resetInput": "Очистить поле ввода",
@@ -92,16 +52,10 @@
       "prefixedRaw": "{{prefix}} {{message}}"
     },
     "notifications": {
-      "importSuccess": "Профиль успешно импортирован",
       "importSubscriptionSuccess": "Подписка успешно импортирована",
-      "importWithClashProxy": "Профиль импортирован через Clash proxy",
       "updateAvailable": "Доступно обновление",
-      "saved": "Успешно сохранено",
       "common": {
-        "copySuccess": "Скопировано",
-        "saveSuccess": "Конфигурация успешно сохранена",
-        "saveFailed": "Не удалось сохранить конфигурацию",
-        "refreshFailed": "Не удалось обновить"
+        "copySuccess": "Скопировано"
       }
     },
     "validation": {
@@ -130,15 +84,6 @@
         "keyError": "Ошибка ключа в Merge File, откат изменений",
         "generalError": "Ошибка Merge File, откат изменений"
       }
-    }
-  },
-  "filters": {
-    "logLevels": {
-      "all": "ALL",
-      "debug": "DEBUG",
-      "info": "INFO",
-      "warn": "WARN",
-      "error": "ERROR"
     }
   },
   "update": {

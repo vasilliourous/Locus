@@ -541,10 +541,14 @@ fn require_packaged_tool(path: &Path, tool: &str) -> Result<()> {
 /// is otherwise invisible from here.
 const ERROR_MOD_NOT_FOUND: i32 = 126;
 
+/// The Windows-only half of the missing-runtime sentence.
+///
+/// `cfg`-gated rather than phrased as "if you are on Windows", so the sentence a
+/// student reads never names a platform their machine is not: the rest of that
+/// message is shared, and this is the only part whose remedy differs by one.
 #[cfg(windows)]
-const WINDOWS_MISSING_RUNTIME_ESSENTIAL: &str = "On a Windows machine behind an unofficial \
-     installation this usually means the Microsoft Visual C++ runtime (the Visual C++ \
-     Redistributable) is missing from this PC.";
+const WINDOWS_MISSING_RUNTIME_ESSENTIAL: &str = " This usually means the Microsoft Visual C++ \
+     Redistributable is missing from this PC.";
 
 #[cfg(not(windows))]
 const WINDOWS_MISSING_RUNTIME_ESSENTIAL: &str = "";

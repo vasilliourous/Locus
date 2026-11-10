@@ -2,59 +2,19 @@
   "actions": {
     "cancel": "İptal",
     "close": "Kapat",
-    "confirm": "Onayla",
     "save": "Kaydet",
-    "delete": "Sil",
-    "edit": "Düzenle",
     "new": "Yeni",
-    "enable": "Etkinleştir",
-    "upgrade": "Yükselt",
-    "restart": "Yeniden Başlat",
     "resetToDefault": "Varsayılana Sıfırla",
-    "refresh": "Yenile",
     "retry": "Yeniden Dene",
     "refreshPage": "Sayfayı Yenile",
     "showDetails": "Ayrıntıları Göster",
-    "hideDetails": "Ayrıntıları Gizle",
-    "listView": "Liste Görünümü",
-    "tableView": "Tablo Görünümü",
-    "pause": "Duraklat",
-    "resume": "Sürdür",
-    "closeAll": "Tümünü Kapat",
-    "clear": "Temizle",
-    "previous": "Önceki",
-    "next": "Sonraki",
-    "check": "Denetle"
+    "hideDetails": "Ayrıntıları Gizle"
   },
   "labels": {
-    "updateAt": "Güncelleme Zamanı",
-    "timeout": "Zaman Aşımı",
-    "icon": "Simge",
-    "name": "İsim",
-    "readOnly": "Salt Okunur",
-    "expireTime": "Sona Erme Zamanı",
-    "updateTime": "Güncelleme Zamanı",
-    "usedTotal": "Kullanılan / Toplam",
-    "from": "Kaynak",
-    "password": "Şifre",
-    "retryAttempts": "Yeniden deneme sayısı",
-    "downloaded": "İndirilen",
-    "uploaded": "Yüklenen"
+    "retryAttempts": "Yeniden deneme sayısı"
   },
   "statuses": {
-    "enabled": "Etkin",
-    "disabled": "Devre Dışı",
-    "saving": "Kaydediliyor...",
-    "empty": "Boş",
-    "loading": "Yükleniyor..."
-  },
-  "units": {
-    "milliseconds": "ms",
-    "seconds": "saniye",
-    "minutes": "dakika",
-    "hours": "saat",
-    "kilobytes": "KB",
-    "files": "Dosya"
+    "empty": "Boş"
   },
   "placeholders": {
     "resetInput": "Giriş alanını temizle",
@@ -92,16 +52,10 @@
       "prefixedRaw": "{{prefix}} {{message}}"
     },
     "notifications": {
-      "importSuccess": "Profil Başarıyla İçe Aktarıldı",
       "importSubscriptionSuccess": "Abonelik içe aktarımı başarılı",
-      "importWithClashProxy": "Profil Clash vekil ile içe aktarıldı",
       "updateAvailable": "Güncelleme Mevcut",
-      "saved": "Başarıyla kaydedildi",
       "common": {
-        "copySuccess": "Kopyalama Başarılı",
-        "saveSuccess": "Yapılandırma başarıyla kaydedildi",
-        "saveFailed": "Yapılandırma kaydedilemedi",
-        "refreshFailed": "Yenileme başarısız"
+        "copySuccess": "Kopyalama Başarılı"
       }
     },
     "validation": {
@@ -130,15 +84,6 @@
         "keyError": "Birleştirme dosyası anahtar hatası, değişiklikler geri alındı",
         "generalError": "Birleştirme dosyası hatası, değişiklikler geri alındı"
       }
-    }
-  },
-  "filters": {
-    "logLevels": {
-      "all": "ALL",
-      "debug": "DEBUG",
-      "info": "INFO",
-      "warn": "WARN",
-      "error": "ERROR"
     }
   },
   "update": {

@@ -2,59 +2,19 @@
   "actions": {
     "cancel": "Баш тарту",
     "close": "Ябу",
-    "confirm": "Растау",
     "save": "Саклау",
-    "delete": "Бетерү",
-    "edit": "Үзгәртү",
     "new": "Яңа",
-    "enable": "Кушу",
-    "upgrade": "Яңарту",
-    "restart": "Перезапуск",
     "resetToDefault": "Башлангычка кайтару",
-    "refresh": "Яңарту",
     "retry": "Retry",
     "refreshPage": "Refresh Page",
     "showDetails": "Show Details",
-    "hideDetails": "Hide Details",
-    "listView": "Исемлек күзаллау",
-    "tableView": "Таблица күзаллау",
-    "pause": "Туктау",
-    "resume": "Дәвам",
-    "closeAll": "Барысын да ябу",
-    "clear": "Чистарту",
-    "previous": "Previous",
-    "next": "Next",
-    "check": "Тикшерү"
+    "hideDetails": "Hide Details"
   },
   "labels": {
-    "updateAt": "Яңартылган вакыт",
-    "timeout": "Timeout",
-    "icon": "Иконка",
-    "name": "Исем",
-    "readOnly": "Уку режимы гына",
-    "expireTime": "Тамамлану вакыты",
-    "updateTime": "Яңарту вакыты",
-    "usedTotal": "Кулланылган / Барлыгы",
-    "from": "Каян",
-    "password": "Пароль",
-    "retryAttempts": "Retry attempts",
-    "downloaded": "Йөкләнгән",
-    "uploaded": "Чыгарылган"
+    "retryAttempts": "Retry attempts"
   },
   "statuses": {
-    "enabled": "Кушылган",
-    "disabled": "Сүнгән",
-    "saving": "Saving...",
-    "empty": "Буш",
-    "loading": "Йөкләнә..."
-  },
-  "units": {
-    "milliseconds": "Миллисекундлар",
-    "seconds": "Секундлар",
-    "minutes": "Минутлар",
-    "hours": "Сәгатьләр",
-    "kilobytes": "KB",
-    "files": "Files"
+    "empty": "Буш"
   },
   "placeholders": {
     "resetInput": "кертү кырын чистарту",
@@ -92,16 +52,10 @@
       "prefixedRaw": "{{prefix}} {{message}}"
     },
     "notifications": {
-      "importSuccess": "Профиль уңышлы импортланды",
       "importSubscriptionSuccess": "Import subscription successful",
-      "importWithClashProxy": "Profile Imported with Clash proxy",
       "updateAvailable": "Update Available",
-      "saved": "Saved successfully",
       "common": {
-        "copySuccess": "Күчерелде",
-        "saveSuccess": "Configuration saved successfully",
-        "saveFailed": "Failed to save configuration",
-        "refreshFailed": "Refresh failed"
+        "copySuccess": "Күчерелде"
       }
     },
     "validation": {
@@ -130,15 +84,6 @@
         "keyError": "Merge file key error, changes reverted",
         "generalError": "Merge file error, changes reverted"
       }
-    }
-  },
-  "filters": {
-    "logLevels": {
-      "all": "ALL",
-      "debug": "DEBUG",
-      "info": "INFO",
-      "warn": "WARN",
-      "error": "ERROR"
     }
   },
   "update": {

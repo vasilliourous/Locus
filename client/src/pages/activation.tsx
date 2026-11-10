@@ -245,7 +245,7 @@ const ActivationScreen = ({ onActivated }: Props) => {
             letterSpacing: '0.01em',
           }}
         >
-          Secure school VPN
+          Locus VPN
         </Typography>
 
         {/* A refusal, said before anything else on the screen.

@@ -3,12 +3,6 @@
     "navigation": {
       "tabs": {
         "home": "Home",
-        "proxies": "Proksi",
-        "profiles": "Profil",
-        "connections": "Koneksi",
-        "rules": "Aturan",
-        "logs": "Log",
-        "unlock": "Test",
         "settings": "Pengaturan"
       },
       "menu": {
@@ -32,14 +26,12 @@
       "errors": {
         "actionFailed": "Operasi layanan gagal",
         "stateRefreshFailed": "Gagal menyegarkan status layanan",
-        "restartFailed": "Gagal memulai ulang core",
-        "revalidationFailed": "Gagal menyegarkan status berjalan"
+        "restartFailed": "Gagal memulai ulang core"
       }
     },
     "sysproxyPrivilege": {
       "title": "Tidak dapat mengatur proxy sistem",
       "message": "macOS menolak perubahan ini karena izin tidak cukup. Setelah layanan Locus dipasang, layanan akan menerapkan pengaturan proxy sebagai administrator dan pesan ini tidak akan muncul lagi.",
-      "serviceReadyMessage": "Layanan Locus sudah siap, tetapi core masih berjalan sebagai sidecar sehingga pengaturan proxy sistem ditolak. Beralih ke mode layanan mengatasinya tanpa pemasangan ulang.",
       "alternative": "Alternatif: matikan opsi yang mewajibkan kata sandi administrator untuk mengakses pengaturan seluruh sistem di Pengaturan Sistem → Privasi & Keamanan → Lanjutan.",
       "later": "Nanti",
       "installing": "Memasang layanan sistem. Kata sandi administrator mungkin diminta.",

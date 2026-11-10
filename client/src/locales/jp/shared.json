@@ -2,59 +2,19 @@
   "actions": {
     "cancel": "キャンセル",
     "close": "閉じる",
-    "confirm": "確認",
     "save": "保存",
-    "delete": "削除",
-    "edit": "編集",
     "new": "新規作成",
-    "enable": "有効にする",
-    "upgrade": "コアをアップグレード",
-    "restart": "コアを再起動",
     "resetToDefault": "デフォルト値にリセット",
-    "refresh": "更新",
     "retry": "Retry",
     "refreshPage": "Refresh Page",
     "showDetails": "Show Details",
-    "hideDetails": "Hide Details",
-    "listView": "リストビュー",
-    "tableView": "テーブルビュー",
-    "pause": "一時停止",
-    "resume": "再開",
-    "closeAll": "すべて閉じる",
-    "clear": "クリア",
-    "previous": "Previous",
-    "next": "Next",
-    "check": "検査"
+    "hideDetails": "Hide Details"
   },
   "labels": {
-    "updateAt": "更新日時",
-    "timeout": "Timeout",
-    "icon": "アイコン",
-    "name": "名前",
-    "readOnly": "読み取り専用",
-    "expireTime": "有効期限",
-    "updateTime": "更新時間",
-    "usedTotal": "使用済み / 合計",
-    "from": "から",
-    "password": "パスワード",
-    "retryAttempts": "Retry attempts",
-    "downloaded": "ダウンロード量",
-    "uploaded": "アップロード量"
+    "retryAttempts": "Retry attempts"
   },
   "statuses": {
-    "enabled": "有効",
-    "disabled": "無効",
-    "saving": "Saving...",
-    "empty": "空っぽ",
-    "loading": "読み込み中..."
-  },
-  "units": {
-    "milliseconds": "ミリ秒",
-    "seconds": "秒",
-    "minutes": "分",
-    "hours": "時間",
-    "kilobytes": "KB",
-    "files": "Files"
+    "empty": "空っぽ"
   },
   "placeholders": {
     "resetInput": "入力フィールドをクリア",
@@ -92,16 +52,10 @@
       "prefixedRaw": "{{prefix}} {{message}}"
     },
     "notifications": {
-      "importSuccess": "プロファイルのインポートに成功しました。",
       "importSubscriptionSuccess": "サブスクリプションのインポートに成功しました。",
-      "importWithClashProxy": "Clashプロキシを使用してプロファイルのインポートに成功しました。",
       "updateAvailable": "Update Available",
-      "saved": "Saved successfully",
       "common": {
-        "copySuccess": "コピー成功",
-        "saveSuccess": "ランダム設定を保存完了",
-        "saveFailed": "Failed to save configuration",
-        "refreshFailed": "更新に失敗しました"
+        "copySuccess": "コピー成功"
       }
     },
     "validation": {
@@ -130,15 +84,6 @@
         "keyError": "上書きファイルのキーエラーがあります。変更は取り消されました。",
         "generalError": "上書きファイルにエラーがあります。変更は取り消されました。"
       }
-    }
-  },
-  "filters": {
-    "logLevels": {
-      "all": "ALL",
-      "debug": "DEBUG",
-      "info": "INFO",
-      "warn": "WARN",
-      "error": "ERROR"
     }
   },
   "update": {

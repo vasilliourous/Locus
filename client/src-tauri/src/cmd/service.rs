@@ -22,11 +22,14 @@ const ELEVATION_FAILED_CODE: &str = "SERVICE_ELEVATION_FAILED";
 
 /// A student-facing sentence for a failed elevation prompt.
 ///
-/// Names the two things that actually resolve it on a Linux desktop, because
-/// either one works and we cannot tell which applies from here.
-const ELEVATION_FAILED_MESSAGE: &str = "Locus asked for administrator permission to install its \
-     service, but the request was not approved. Approve the permission prompt and try again; if no \
-     prompt appeared, run Locus from a terminal so it can ask for a password there.";
+/// One sentence for every platform. It names what to do — approve the prompt —
+/// and nothing else: the previous version ended "if no prompt appeared, run
+/// Locus from a terminal so it can ask for a password there", which is a Linux
+/// route shown on Windows and macOS too, on the one screen where the student has
+/// least room to work out that the second half does not apply to them. The
+/// remedy that is common to all three is the one this app actually raises.
+const ELEVATION_FAILED_MESSAGE: &str = "Locus asked for permission to install its service, but the \
+     request was not approved. Approve the permission prompt and try again.";
 
 /// Recognise the installer's elevation failure and describe it usefully.
 ///
@@ -50,23 +53,27 @@ fn elevation_failure(error: &anyhow::Error) -> Option<super::CommandFailure> {
 /// problem: nothing was attempted, so "approve the prompt and try again" and
 /// "check your configuration" are both wrong things to tell a student. The helper
 /// is a file inside the bundle, so either the installation is incomplete or
-/// something removed it — and on Windows the bundle's helpers are prebuilt
-/// binaries that need a system runtime beside them, which is the one prerequisite
-/// this app has and does not carry.
+/// something removed it — and one platform's bundle also needs a system runtime
+/// beside it, which is the one prerequisite this app has and does not carry.
 const MISSING_HELPER_CODE: &str = "SERVICE_HELPER_MISSING";
 
 /// A sentence naming the file and the route that repairs it.
 ///
-/// No reinstall-the-VC++-runtime advice as a first move: on the machine that
-/// reported this, reinstalling Locus from the official installer would have
-/// replaced the helper and been the faster path. The runtime is named as the
-/// *second* possibility because it is the one thing a missing file cannot explain.
+/// Names the file and the route that repairs it — and nothing platform-specific.
+///
+/// Reinstalling is the first move, because it replaces the helper: on the machine
+/// that reported this, a fresh install was the faster path by far.
+///
+/// A missing system runtime used to be named here as the second possibility. The
+/// sentence is shown on every platform, so it presented a Windows-only dependency
+/// to everyone; and it is advice nobody can act on from this screen, because the
+/// runtime has to be found and installed before the name means anything.
+/// Reinstall first, then contact support — the runtime detail is in the log.
 fn missing_helper_message(tool: &str) -> std::string::String {
     format!(
-        "Locus could not start its service installer: the file {tool} is missing from this \
-         installation. Reinstall Locus from the installer you downloaded. If the same message \
-         still names this file after a fresh install, the Microsoft Visual C++ Redistributable is \
-         missing from this PC — install it and try again."
+        "Locus could not install its service: a file it needs, {tool}, is missing from this \
+         installation. Reinstall Locus from the installer you downloaded and try again. If the \
+         same message appears after a fresh install, contact support from the Account page."
     )
 }
 
@@ -95,9 +102,9 @@ fn missing_helper_failure(error: &anyhow::Error) -> Option<super::CommandFailure
         return Some(super::coded_error(
             MISSING_HELPER_CODE,
             format!(
-                "Locus's service installer could not start because a system library it needs is \
-                 missing from this PC.{runtime} Install the Microsoft Visual C++ Redistributable \
-                 and try again; if it still fails, reinstall Locus."
+                "Locus could not install its service: a system file it needs is missing.{runtime} \
+                 Reinstall Locus from the installer you downloaded and try again; if it still \
+                 fails, contact support from the Account page."
             ),
         ));
     }
@@ -219,8 +226,13 @@ mod tests {
         );
     }
 
-    /// The sentence must tell the student what to do, and be honest about the
-    /// thing we cannot know — whether a prompt appeared at all.
+    /// The sentence must tell the student what to do, and must not name an
+    /// action that only one platform has.
+    ///
+    /// It previously offered "run Locus from a terminal" as the no-prompt route,
+    /// which is a Linux remedy printed on a Windows and macOS dialog. The rule
+    /// now is the one a single sentence can keep everywhere: name the approval
+    /// step, and leave the mechanism out.
     #[test]
     fn the_elevation_message_is_actionable() {
         let lowered = ELEVATION_FAILED_MESSAGE.to_lowercase();
@@ -228,10 +240,13 @@ mod tests {
             lowered.contains("approve") || lowered.contains("permission"),
             "must say what to do, got {ELEVATION_FAILED_MESSAGE:?}"
         );
-        assert!(
-            lowered.contains("terminal"),
-            "must offer the route that works when no prompt can appear, got {ELEVATION_FAILED_MESSAGE:?}"
-        );
+        for platform_specific in ["terminal", "administrator", "mac", "windows", "linux"] {
+            assert!(
+                !lowered.contains(platform_specific),
+                "must not name a platform or a platform-only action ({platform_specific}), \
+                 got {ELEVATION_FAILED_MESSAGE:?}"
+            );
+        }
     }
 
     /// An absent privileged helper names the file, and is not called elevation.
@@ -261,6 +276,17 @@ mod tests {
             "this is not an elevation problem and must not ask for a prompt, got {:?}",
             failure.detail
         );
+        // The sentence is shared by every platform, so it must not name one —
+        // including in the rest of the sentence, not just the runtime clause.
+        // Observed failing against the previous wording ("this PC").
+        let lowered = failure.detail.to_lowercase();
+        for platform_word in ["pc", "mac", "windows", "linux"] {
+            assert!(
+                !lowered.contains(platform_word),
+                "must not name a platform, found {platform_word:?} in {:?}",
+                failure.detail
+            );
+        }
     }
 
     /// The typed error wins over everything below it in the classifier order.
@@ -298,13 +324,23 @@ mod tests {
         let failure = classify_privileged_failure(&error, "SERVICE_INSTALL_FAILED");
         assert_eq!(failure.code.as_deref(), Some(MISSING_HELPER_CODE));
         let lowered = failure.detail.to_lowercase();
+        // The runtime is named only where `cfg` puts it in — one platform's
+        // prerequisite is not a sentence for everybody. What every platform gets
+        // is a route, so that is asserted unconditionally.
+        #[cfg(windows)]
         assert!(
             lowered.contains("visual c++") || lowered.contains("runtime"),
-            "must name the prerequisite, got {:?}",
+            "must name the prerequisite on the platform that has one, got {:?}",
+            failure.detail
+        );
+        #[cfg(not(windows))]
+        assert!(
+            !lowered.contains("visual c++"),
+            "must not name another platform's prerequisite, got {:?}",
             failure.detail
         );
         assert!(
-            lowered.contains("reinstall") || lowered.contains("visual c++"),
+            lowered.contains("reinstall"),
             "must offer a route, got {:?}",
             failure.detail
         );

@@ -3,12 +3,6 @@
     "navigation": {
       "tabs": {
         "home": "Ana Sayfa",
-        "proxies": "Vekil'ler",
-        "profiles": "Profiller",
-        "connections": "Bağlantılar",
-        "rules": "Kurallar",
-        "logs": "Günlükler",
-        "unlock": "Test",
         "settings": "Ayarlar"
       },
       "menu": {
@@ -32,14 +26,12 @@
       "errors": {
         "actionFailed": "Hizmet işlemi başarısız oldu",
         "stateRefreshFailed": "Hizmet durumu yenilenemedi",
-        "restartFailed": "Çekirdek yeniden başlatılamadı",
-        "revalidationFailed": "Çalışma durumu yenilenemedi"
+        "restartFailed": "Çekirdek yeniden başlatılamadı"
       }
     },
     "sysproxyPrivilege": {
       "title": "Sistem proxy'si ayarlanamadı",
       "message": "macOS bu değişikliği yetersiz yetki nedeniyle reddetti. Locus hizmeti kurulduktan sonra proxy ayarlarını hizmet yönetici olarak uygular ve bu uyarı bir daha görünmez.",
-      "serviceReadyMessage": "Locus hizmeti hazır, ancak çekirdek hâlâ sidecar olarak çalıştığından sistem proxy'si ayarlanamadı. Hizmet moduna geçmek sorunu yeniden kurulum gerekmeden çözer.",
       "alternative": "Alternatif olarak Sistem Ayarları → Gizlilik ve Güvenlik → Gelişmiş bölümünde sistem genelindeki ayarlar için yönetici parolası isteyen seçeneği kapatın.",
       "later": "Daha sonra",
       "installing": "Sistem hizmeti kuruluyor. Yönetici parolası istenebilir.",

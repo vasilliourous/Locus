@@ -1353,6 +1353,14 @@ jobs:
       - name: Install sing-box (the hub's Shadowsocks listener, for the e2e test)
         if: matrix.label == 'linux'
         shell: bash
+        # REPO ROOT, overriding this job's `working-directory: client`. This step
+        # reads the hub's own module to get the pin, and that file lives under
+        # `server/`. Without this override sed ran from `client/` and reported
+        # `can't read server/modules/02-shadowsocks.sh: No such file or
+        # directory` — a path error that reads exactly like a removed file, which
+        # is how it was first diagnosed. Every other step in this job stays in
+        # `client/`; only this one reaches outside it.
+        working-directory: .
         run: |
           set -euo pipefail
           # The `v` prefix is part of the hub's value; the asset name drops it.

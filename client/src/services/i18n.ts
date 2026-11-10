@@ -81,17 +81,27 @@ type LocaleModule = {
   default: Record<string, unknown>
 }
 
+/**
+ * The locale sections the app loads at start-up.
+ *
+ * Every section listed here must have a file in EVERY language folder: the
+ * loader throws when a section is missing for a language, and the fallback path
+ * then throws too, so a section present for one language and absent for another
+ * silently fails the whole start-up load.
+ *
+ * `connections`, `logs`, `tests`, `proxies` and `rules` were removed when the
+ * Clash Verge screens they belonged to were removed. Their files had been reduced
+ * to `{}` — an empty object renders valid JSON and is loaded by nobody, which is
+ * why they survived two UI removals unnoticed. The generator emits `{}` for an
+ * empty section and the linter rejects the resulting type, which is how they were
+ * finally found: a dead file is invisible, a dead file that breaks a check is not.
+ */
 const STARTUP_LANGUAGE_SECTIONS = [
   'layout',
   'home',
   'shared',
   'settings',
   'profiles',
-  'proxies',
-  'tests',
-  'rules',
-  'connections',
-  'logs',
 ] as const
 
 const localeModules = import.meta.glob<LocaleModule>('@/locales/*/*.json')

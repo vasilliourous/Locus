@@ -258,6 +258,24 @@ export const useCustomTheme = () => {
 
   const theme = useMemo(() => {
     const setting = theme_setting || {}
+    // EVERY colour below is decided by `effectiveMode`, and so is the mode
+    // itself. Reading `mode` anywhere in this function is how the default skin's
+    // pop-ups became unreadable:
+    //
+    //   * `theme_mode` is the preference the Appearance control writes, and the
+    //     default skin could resolve to LIGHT while the app paints a dark
+    //     surface — so MUI's own defaults (a white `Dialog` paper, black text)
+    //     disagreed with what was actually drawn;
+    //   * the mismatch is a pop-up whose paper and whose text come from two
+    //     different answers. A white paper under the dark text, or a dark paper
+    //     forced by `!important` over light-mode black text — either way the
+    //     student cannot read it.
+    //
+    // Selecting a theme hid the bug because a theme carries its own `mode`, and
+    // that is what `effectiveMode` is. The rule is therefore: one value decides
+    // the palette AND the generated stylesheet, and both are produced in this
+    // same pass so they cannot be built from different answers.
+    //
     // `font_family` is a preference rather than a theme field, so it is read from
     // the same shipped defaults it always came from and handed to the projection.
     // A theme supplies every other value; none supplies a font.
@@ -327,13 +345,13 @@ export const useCustomTheme = () => {
       // page reads as a rendering bug), so they follow the brand palette while
       // keeping the same light/dark relationship.
       const backgroundColor =
-        mode === 'light' ? LOCUS_LIGHT.background : dt.background_color
+        effectiveMode === 'light' ? LOCUS_LIGHT.background : dt.background_color
       const selectColor =
-        mode === 'light' ? LOCUS_LIGHT.surfaceHover : LOCUS_COLORS.surfaceHover
+        effectiveMode === 'light' ? LOCUS_LIGHT.surfaceHover : LOCUS_COLORS.surfaceHover
       const scrollColor =
-        mode === 'light' ? '#8CA59680' : LOCUS_COLORS.textSecondary
+        effectiveMode === 'light' ? '#8CA59680' : LOCUS_COLORS.textSecondary
       const dividerColor =
-        mode === 'light'
+        effectiveMode === 'light'
           ? 'rgba(11, 31, 20, 0.08)'
           : 'rgba(234, 242, 236, 0.08)'
       rootEle.style.setProperty('--divider-color', dividerColor)
@@ -347,15 +365,15 @@ export const useCustomTheme = () => {
       )
       rootEle.style.setProperty(
         '--window-border-color',
-        mode === 'light' ? LOCUS_LIGHT.border : LOCUS_COLORS.border,
+        effectiveMode === 'light' ? LOCUS_LIGHT.border : LOCUS_COLORS.border,
       )
       rootEle.style.setProperty(
         '--scrollbar-bg',
-        mode === 'light' ? LOCUS_LIGHT.background : LOCUS_COLORS.surface,
+        effectiveMode === 'light' ? LOCUS_LIGHT.background : LOCUS_COLORS.surface,
       )
       rootEle.style.setProperty(
         '--scrollbar-thumb',
-        mode === 'light' ? LOCUS_LIGHT.border : LOCUS_COLORS.border,
+        effectiveMode === 'light' ? LOCUS_LIGHT.border : LOCUS_COLORS.border,
       )
       rootEle.style.setProperty(
         '--user-background-image',
@@ -399,7 +417,7 @@ export const useCustomTheme = () => {
           border-radius: 4px;
         }
         ::-webkit-scrollbar-thumb:hover {
-          background-color: ${mode === 'light' ? LOCUS_LIGHT.border : LOCUS_COLORS.textSecondary};
+          background-color: ${effectiveMode === 'light' ? LOCUS_LIGHT.border : LOCUS_COLORS.textSecondary};
         }
 
         /* 背景图处理 */
@@ -425,9 +443,17 @@ export const useCustomTheme = () => {
           border-color: var(--window-border-color) !important;
         }
 
-        /* 确保模态框和对话框也使用暗色主题 */
+        /* Dialog paper, pinned to the surface of the theme that is RENDERING.
+           A global rule with !important, because it has to beat MUI's own
+           .MuiPaper-root background, which is computed from the palette mode.
+           That is exactly why the mode here must be effectiveMode: driven by the
+           unthemed mode, the default skin could force a dark paper onto a theme
+           whose text colour was light-mode black -- the unreadable pop-up.
+           If this rule ever needs to disagree with the palette, the palette is
+           wrong; see the guard in theme-colors.test.ts.
+           (No backticks in here: this comment lives inside a template literal.) */
         .MuiDialog-paper {
-          background-color: ${mode === 'light' ? LOCUS_LIGHT.surface : LOCUS_COLORS.surface} !important;
+          background-color: ${effectiveMode === 'light' ? LOCUS_LIGHT.surface : LOCUS_COLORS.surface} !important;
         }
 
         /* 移除可能的白色点或线条 */
@@ -442,12 +468,16 @@ export const useCustomTheme = () => {
 
     return muiTheme
   }, [
+    // `mode` is deliberately NOT a dependency, and that is the whole fix rather
+    // than an oversight.
+    //
+    // It used to be, with a comment justifying it: the legacy font fallback read
+    // `mode`, so an OS light/dark switch had to re-create the theme. The fallback
+    // now reads `effectiveMode` — which already tracks `mode` when no theme is
+    // selected — so `mode` no longer changes anything this memo returns. Keeping
+    // it here would rebuild the theme (and every pop-up with it) for a change
+    // that cannot alter the result, and the lint caught exactly that.
     effectiveMode,
-    // `mode` is read only to pick the legacy font fallback, but it is a real
-    // input: a student on `theme_mode: system` who switches their OS from light
-    // to dark must re-create the theme. Omitting it is a stale-closure bug the
-    // linter caught, not a spurious warning.
-    mode,
     theme_setting,
     userBackgroundImage,
     hasUserBackground,

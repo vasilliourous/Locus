@@ -161,6 +161,9 @@ export const handleNoticeMessage = (status: string, msg: string) => {
   if (handler) {
     handler()
   } else {
-    console.warn(`未处理的通知状态: ${status}`)
+    // The log is read by whoever is diagnosing a report, not only by the
+    // developer who wrote this table: a status with no handler is a backend
+    // notification the UI dropped, and that is worth being able to read.
+    console.warn(`[locus] no handler for notification status: ${status}`)
   }
 }

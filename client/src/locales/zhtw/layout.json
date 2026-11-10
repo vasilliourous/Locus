@@ -3,12 +3,6 @@
     "navigation": {
       "tabs": {
         "home": "首 頁",
-        "proxies": "代 理",
-        "profiles": "訂 閱",
-        "connections": "連 線",
-        "rules": "規 則",
-        "logs": "日 誌",
-        "unlock": "解 鎖",
         "settings": "設 定"
       },
       "menu": {
@@ -32,14 +26,12 @@
       "errors": {
         "actionFailed": "服務操作失敗",
         "stateRefreshFailed": "重新整理服務狀態失敗",
-        "restartFailed": "重啟內核失敗",
-        "revalidationFailed": "重新整理執行狀態失敗"
+        "restartFailed": "重啟內核失敗"
       }
     },
     "sysproxyPrivilege": {
       "title": "無法設定系統代理",
       "message": "macOS 以權限不足為由拒絕了這次修改。安裝 Locus 系統服務後，代理設定將由服務以管理員身分完成，之後不會再出現這個提示。",
-      "serviceReadyMessage": "Locus 系統服務已就緒，但核心仍以 Sidecar 執行，因此設定系統代理時被拒絕。切換到服務模式即可解決，無需重新安裝。",
       "alternative": "另一種辦法：在系統設定 → 隱私權與安全性 → 進階中，關閉「存取系統範圍設定需要管理員密碼」。",
       "later": "稍後再說",
       "installing": "正在安裝系統服務，可能會要求管理員密碼，請稍候……",

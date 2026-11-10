@@ -647,3 +647,67 @@ describe('locus palette consistency across paint layers', () => {
     expect(luminance('#1B2A23')).toBeLessThan(luminance(LOCUS_LIGHT.background))
   })
 })
+
+/**
+ * The pop-up surfaces and the text on them must come from ONE mode.
+ *
+ * # The defect this exists for
+ *
+ * On the default skin, every pop-up — the sign-out confirmation, the helper
+ * install dialog, error toasts — rendered as a bright white panel whose text
+ * could not be read. The palette and the generated stylesheet that force-paints
+ * `.MuiDialog-paper` were built from `mode` (the stored/`system` preference)
+ * while the theme itself was built from `effectiveMode` (the mode of the skin
+ * actually selected). Those agree when a theme is selected and disagree when
+ * none is, so the default skin could paint a dark surface while the palette
+ * supplied the light theme's black text.
+ *
+ * Selecting any theme hid it, which is why it survived: the bug only existed in
+ * the configuration nobody had switched away from.
+ *
+ * # What this can and cannot see
+ *
+ * The stylesheet is a string, so a test cannot see the colour it paints. It CAN
+ * see which value fed the string, and feeding it from a different mode than the
+ * palette is the entire defect. Each of these was observed failing against the
+ * code that shipped it.
+ */
+describe('pop-up theming', () => {
+  const hook = readCode('../src/pages/_layout/hooks/use-custom-theme.ts')
+
+  it('no colour is chosen from the raw preference instead of the resolved mode', () => {
+    // `theme_mode` is the *preference*; `effectiveMode` is what renders. A
+    // decision made on the bare identifier `mode` is the mismatch.
+    //
+    // The lookbehind excludes a letter or underscore, not just "effective":
+    // `theme_mode === 'light'` is the preference being READ in the effect that
+    // assigns it — legitimate — and the first version of this check flagged it,
+    // which is how the anchor came to be written this way.
+    const rawBranches = hook.match(/(?<![a-z_])mode === 'light'/g) ?? []
+    expect(
+      rawBranches,
+      'a colour is chosen from `mode` rather than `effectiveMode` — the ' +
+        'default-skin pop-up defect (see this describe block)',
+    ).toEqual([])
+    // Guard on the guard: the strip must still leave the real comparisons in,
+    // or the assertion above passes on a file that has no colours at all.
+    expect(hook.match(/effectivemode === 'light'/g)?.length ?? 0).toBeGreaterThan(3)
+  })
+
+  it('the dialog paper rule is not exempt from it', () => {
+    // The rule that paints every dialog is `!important`, so it beats the palette.
+    // That is exactly why it must be derived from the same mode: otherwise it
+    // overrides a correct paper with a paper for the other mode.
+    const rule = hook.match(/\.muidialog-paper\s*\{[^}]*\}/)
+    expect(rule, '.MuiDialog-paper rule is missing').not.toBeNull()
+    expect(rule![0]).toContain('effectivemode')
+  })
+
+  it("the resolved mode is the selected theme's own mode", () => {
+    // Pins the wiring the two assertions above depend on: if `effectiveMode`
+    // ever stops following the theme, selecting a skin stops fixing the pop-ups.
+    expect(hook).toMatch(
+      /const effectivemode: [^=]+= hastheme \? spec\.mode : mode/,
+    )
+  })
+})

@@ -991,15 +991,16 @@ fn describe_outcome(outcome: &activation::ActivationOutcome) -> String {
 /// "TUN" — the student does not know what TUN is, and naming our mechanism would
 /// describe the implementation instead of the obstacle.
 ///
-/// It used to say "Install the service from Settings". That is now false on
-/// macOS, and it was never the whole story: an absent Service on macOS is
-/// requested by startup, so the install prompt appears on its own and the
-/// student's job is to APPROVE it. Sending them to hunt for a Settings control
-/// (which macOS does not render) was the second half of a real dead end — a
-/// student reported this message and could find nothing to press.
-const TUN_UNAVAILABLE_MESSAGE: &str = "Locus needs administrator rights to create the VPN tunnel, \
+/// It used to say "Install the service from Settings", then "start Locus as an
+/// administrator". Both named a route that only exists on some platforms: the
+/// Settings control is not rendered on macOS, and there is no "run as
+/// administrator" there at all. An absent Service is requested by startup on
+/// every platform, so the install prompt appears on its own and the student's
+/// job is to APPROVE it — that is the one route that exists everywhere, so it is
+/// the only one the sentence names.
+const TUN_UNAVAILABLE_MESSAGE: &str = "Locus needs permission to create the VPN tunnel, \
      and its helper service is not available on this device. Approve the permission prompt when \
-     Locus asks to install it, or start Locus as an administrator, then try again.";
+     Locus asks to install it, then try again.";
 
 /// Whether a connect attempt may proceed on the given run state.
 ///
@@ -2219,14 +2220,21 @@ mod tests {
     ///
     /// Two independent things could make this useless: a message so terse it does
     /// not say what to do, or one that says "TUN" — our mechanism, not their
-    /// problem. It must mention administrator access and where to get the fix.
+    /// problem. It must name the step that grants the privilege, and where to
+    /// get the fix.
+    ///
+    /// It names the *permission prompt*, not an OS role. It used to say
+    /// "administrator rights", which is a Windows and Linux concept: on macOS
+    /// there is no way to "run Locus as an administrator", so an instruction to
+    /// do so is a dead end for a macOS student, and the wording varied by reader
+    /// on a message that is identical everywhere.
     #[test]
     fn the_tun_refusal_is_actionable() {
         let text = TUN_UNAVAILABLE_MESSAGE;
         let lowered = text.to_lowercase();
         assert!(
-            lowered.contains("administrator"),
-            "must name the privilege that is missing, got {text:?}"
+            lowered.contains("permission") || lowered.contains("prompt"),
+            "must name the step that grants the privilege, got {text:?}"
         );
         assert!(
             lowered.contains("settings") || lowered.contains("install"),
@@ -2268,6 +2276,13 @@ mod tests {
             !lowered.contains("from settings"),
             "must not direct the student to a Settings control that is not rendered, \
              got {TUN_UNAVAILABLE_MESSAGE:?}"
+        );
+        // And it must not name an OS role or an OS action: the same sentence is
+        // shown on every platform, and "run as administrator" does not exist on
+        // macOS. See the test above for why this is a rule and not a preference.
+        assert!(
+            !lowered.contains("administrator") && !lowered.contains("mac"),
+            "must not name an OS role or platform, got {TUN_UNAVAILABLE_MESSAGE:?}"
         );
     }
 

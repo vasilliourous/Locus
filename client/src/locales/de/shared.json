@@ -2,59 +2,19 @@
   "actions": {
     "cancel": "Abbrechen",
     "close": "Schließen",
-    "confirm": "Bestätigen",
     "save": "Speichern",
-    "delete": "Löschen",
-    "edit": "Bearbeiten",
     "new": "Neu",
-    "enable": "Aktivieren",
-    "upgrade": "Kern aktualisieren",
-    "restart": "Kern neustarten",
     "resetToDefault": "Auf Standardwerte zurücksetzen",
-    "refresh": "Aktualisieren",
     "retry": "Retry",
     "refreshPage": "Refresh Page",
     "showDetails": "Show Details",
-    "hideDetails": "Hide Details",
-    "listView": "Listenansicht",
-    "tableView": "Tabellenansicht",
-    "pause": "Pausieren",
-    "resume": "Fortsetzen",
-    "closeAll": "Alle schließen",
-    "clear": "Löschen",
-    "previous": "Previous",
-    "next": "Next",
-    "check": "Prüfen"
+    "hideDetails": "Hide Details"
   },
   "labels": {
-    "updateAt": "Aktualisiert am",
-    "timeout": "Timeout",
-    "icon": "Symbol",
-    "name": "Name",
-    "readOnly": "Schreibgeschützt",
-    "expireTime": "Ablaufzeit",
-    "updateTime": "Aktualisierungszeit",
-    "usedTotal": "Verwendet / Gesamt",
-    "from": "Von",
-    "password": "Passwort",
-    "retryAttempts": "Retry attempts",
-    "downloaded": "Heruntergeladen",
-    "uploaded": "Hochgeladen"
+    "retryAttempts": "Retry attempts"
   },
   "statuses": {
-    "enabled": "Aktiviert",
-    "disabled": "Deaktiviert",
-    "saving": "Saving...",
-    "empty": "Leer",
-    "loading": "Wird geladen..."
-  },
-  "units": {
-    "milliseconds": "Millisekunden",
-    "seconds": "Sekunden",
-    "minutes": "Minuten",
-    "hours": "Stunden",
-    "kilobytes": "KB",
-    "files": "Files"
+    "empty": "Leer"
   },
   "placeholders": {
     "resetInput": "Eingabefeld leeren",
@@ -92,16 +52,10 @@
       "prefixedRaw": "{{prefix}} {{message}}"
     },
     "notifications": {
-      "importSuccess": "Abonnement erfolgreich importiert",
       "importSubscriptionSuccess": "Abonnement erfolgreich importiert",
-      "importWithClashProxy": "Abonnement mit Clash-Proxy importiert",
       "updateAvailable": "Update Available",
-      "saved": "Saved successfully",
       "common": {
-        "copySuccess": "Kopieren erfolgreich",
-        "saveSuccess": "Zufalls-Konfiguration erfolgreich gespeichert",
-        "saveFailed": "Failed to save configuration",
-        "refreshFailed": "Aktualisierung fehlgeschlagen"
+        "copySuccess": "Kopieren erfolgreich"
       }
     },
     "validation": {
@@ -130,15 +84,6 @@
         "keyError": "Schlüsselfehler in der Überdeckungsdatei. Die Änderungen wurden rückgängig gemacht.",
         "generalError": "Fehler in der Überdeckungsdatei. Die Änderungen wurden rückgängig gemacht."
       }
-    }
-  },
-  "filters": {
-    "logLevels": {
-      "all": "ALL",
-      "debug": "DEBUG",
-      "info": "INFO",
-      "warn": "WARN",
-      "error": "ERROR"
     }
   },
   "update": {

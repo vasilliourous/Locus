@@ -6132,10 +6132,39 @@ else
                 bad "  Read SING_BOX_VERSION from server/modules/02-shadowsocks.sh."
             fi
 
-            # (b) The extraction the workflow performs must yield a real version.
+            # (b) The step must run from the REPO ROOT.
+            #
+            # Every other step in the `build` job inherits
+            # `defaults.run.working-directory: client`, and this one reads a path
+            # under `server/`. Without the override sed ran from `client/` and
+            # reported `can't read server/modules/02-shadowsocks.sh: No such file
+            # or directory` — which reads exactly like a deleted file, and was
+            # first diagnosed as one. Assertions (a) and (c) both passed on that
+            # workflow, because they check the step's TEXT and neither of them
+            # cares which directory the text runs in.
+            #
+            # The test is a POSITIVE one: the step must carry
+            # `working-directory: .`. A bare grep for the string would also match
+            # the comment explaining it, which is the false pass §47(a) hit with
+            # the module's path, so the key line is matched as a key.
+            step_dir="$(printf '%s\n' "$SINGBOX_STEP" \
+                | sed -n 's/^ *working-directory: *\(.*\)$/\1/p' | head -1)"
+            if [ "$step_dir" = "." ]; then
+                ok "the CI sing-box step runs from the repository root, where server/ is"
+            else
+                bad "the CI sing-box step does not set 'working-directory: .'"
+                bad "  This job defaults to client/, so 'server/modules/…' resolves"
+                bad "  to client/server/modules/… and sed fails before any download."
+                bad "  That is the linux build failure of run 42656242564."
+            fi
+
+            # (c) The extraction the workflow performs must yield a real version.
             # The workflow's `sed` EXPRESSION is lifted verbatim and executed
             # against the same module, so the two cannot agree with each other
-            # while disagreeing with the pin.
+            # while disagreeing with the pin. The module is resolved from the
+            # step's OWN working directory — the one (b) just pinned — so a step
+            # that runs from the wrong place fails here as well, at the point
+            # where the value actually stops resolving.
             #
             # The first draft re-expressed the pattern here instead of lifting it,
             # and the re-expression matched nothing — the check compared itself
@@ -6150,7 +6179,18 @@ else
             if [ -z "$ci_singbox_expr" ]; then
                 ci_singbox="<no extraction found>"
             else
-                ci_singbox="$(sed -n -e "$ci_singbox_expr" "$SINGBOX_MODULE" 2>/dev/null | head -1)"
+                # Run from the step's directory, exactly as CI would, rather than
+                # from $REPO. That is the difference between this check testing
+                # the expression and testing the expression AS PLACED.
+                #
+                # The fallback is the job's own default (`client`), NOT `.`:
+                # falling back to the root would make this assertion pass on
+                # exactly the workflow that broke — it would read the module from
+                # a directory CI never runs in. With `client` the extraction
+                # yields nothing, which is the truth.
+                ci_singbox="$(cd "$REPO/${step_dir:-client}" 2>/dev/null \
+                    && sed -n -e "$ci_singbox_expr" server/modules/02-shadowsocks.sh 2>/dev/null \
+                    | head -1)"
                 ci_singbox="v${ci_singbox#v}"
                 [ "$ci_singbox" = "v" ] && ci_singbox=""
             fi

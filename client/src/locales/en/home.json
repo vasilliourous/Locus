@@ -1,126 +1,10 @@
 {
-  "page": {
-    "tooltips": {
-      "lightweightMode": "Lightweight Mode",
-      "manual": "Manual",
-      "settings": "Home Settings"
-    },
-    "cards": {
-      "trafficStats": "Traffic Stats",
-      "networkSettings": "Network Settings",
-      "proxyMode": "Proxy Mode"
-    },
-    "settings": {
-      "cards": {
-        "profile": "Profile Card",
-        "currentProxy": "Current Proxy Card",
-        "network": "Network Settings Card",
-        "proxyMode": "Proxy Mode Card",
-        "traffic": "Traffic Stats Card",
-        "tests": "Website Tests Card",
-        "ip": "IP Information Card",
-        "clashInfo": "Clash Info Cards",
-        "systemInfo": "System Info Cards"
-      },
-      "title": "Home Settings"
-    },
-    "title": "Home"
-  },
   "components": {
-    "proxyTun": {
-      "status": {
-        "systemProxyEnabled": "System Proxy Enabled",
-        "systemProxyDisabled": "System Proxy Disabled",
-        "tunModeServiceRequired": "TUN Mode Service Required",
-        "tunModeEnabled": "TUN Mode Enabled",
-        "tunModeDisabled": "TUN Mode Disabled"
-      },
-      "tooltips": {
-        "systemProxy": "System Proxy Info",
-        "tunMode": "TUN Mode Intercept Info"
-      }
-    },
-    "clashInfo": {
-      "title": "Clash Info",
-      "fields": {
-        "coreVersion": "Core Version",
-        "systemProxyAddress": "System Proxy Address",
-        "mixedPort": "Mixed Port",
-        "uptime": "Uptime",
-        "rulesCount": "Rules Count"
-      }
-    },
-    "systemInfo": {
-      "title": "System Info",
-      "fields": {
-        "osInfo": "OS Info",
-        "autoLaunch": "Auto Launch",
-        "runningMode": "Running Mode",
-        "lastCheckUpdate": "Last Check Update",
-        "vergeVersion": "Version"
-      },
-      "actions": {
-        "settings": "Settings"
-      },
-      "badges": {
-        "notRunning": "Core Not Running",
-        "adminMode": "Administrator Mode",
-        "serviceMode": "Service Mode",
-        "adminServiceMode": "Admin + Service Mode"
-      }
-    },
-    "ipInfo": {
-      "title": "IP Information",
-      "labels": {
-        "ip": "IP",
-        "asn": "ASN",
-        "isp": "ISP",
-        "org": "ORG",
-        "location": "Location",
-        "timezone": "Timezone",
-        "autoRefresh": "Auto refresh",
-        "unknown": "Unknown"
-      },
-      "errors": {
-        "load": "Failed to get IP info",
-        "loadWithDetails": "Failed to get IP info: {{message}}",
-        "noServices": "No IP detection services are available"
-      }
-    },
-    "currentProxy": {
-      "title": "Current Node",
-      "actions": {
-        "refreshDelay": "Delay check"
-      },
-      "labels": {
-        "globalMode": "Global Mode",
-        "directMode": "Direct Mode",
-        "group": "Group",
-        "proxy": "Proxy",
-        "noActiveNode": "No active proxy node"
-      },
-      "status": {
-        "testing": "Testing",
-        "untested": "Not tested",
-        "error": "Error",
-        "timeout": "Timeout",
-        "latencyHigh": "High latency",
-        "latencyMedium": "Moderate latency",
-        "latencyGood": "Good latency",
-        "latencyExcellent": "Excellent latency",
-        "uninitialized": "Not initialized",
-        "noProxyNode": "No proxy node"
-      }
-    },
-    "tests": {
-      "title": "Website Tests"
-    },
     "traffic": {
       "metrics": {
         "uploadSpeed": "Upload Speed",
         "downloadSpeed": "Download Speed",
-        "activeConnections": "Active Connections",
-        "memoryUsage": "Core Usage"
+        "memoryUsage": "VPN memory"
       },
       "legends": {
         "upload": "Upload",
@@ -137,21 +21,6 @@
       },
       "diagnostics": "Points: {{points}} | Compressed: {{compressed}}"
     },
-    "clashMode": {
-      "errors": {
-        "communication": "Core communication error, please restart your computer and try again"
-      },
-      "labels": {
-        "rule": "Rule",
-        "global": "Global",
-        "direct": "Direct"
-      },
-      "descriptions": {
-        "rule": "Automatically choose proxies according to the rule set.",
-        "global": "Forward all network requests through the selected proxy.",
-        "direct": "Bypass the proxy and connect to the internet directly."
-      }
-    },
     "connection": {
       "connect": "Connect",
       "disconnect": "Disconnect",
@@ -165,17 +34,15 @@
       "activeConnections": "Active connections",
       "metricsWhenConnected": "Traffic figures appear once the VPN is on.",
       "metricPending": "Not reported yet",
-      "speed": "Speed",
       "needsActivation": "This device needs an activation code before it can connect.",
-      "requiresSetup": "Locus cannot turn the VPN on yet: it needs administrator rights, and its helper service is not installed. Locus will ask for permission to set this up when it starts — approve that prompt, then try again.",
-      "blockerServiceInstallRequired": "Locus cannot turn the VPN on yet: its helper service is not installed, and the permission prompt to install it was dismissed, denied, or never appeared. Quit and reopen Locus, then approve the system prompt when it appears. If no prompt appears at all, your Mac may be remembering an old answer for a previous version — reinstall Locus, then approve the prompt.",
+      "requiresSetup": "Locus cannot turn the VPN on yet: it needs permission, and its helper service is not installed. Locus will ask for that permission when it starts — approve the prompt, then try again.",
+      "blockerServiceInstallRequired": "Locus cannot turn the VPN on yet: its helper service is not installed, and the permission prompt to install it was dismissed, denied, or never appeared. Quit and reopen Locus, then approve the prompt when it appears. If no prompt appears at all, reinstall Locus, then approve the prompt.",
       "blockerServiceUnavailable": "Locus cannot turn the VPN on yet: its helper service is installed but not working ({{reason}}). Quit and reopen Locus to repair it. If that does not work, reinstall Locus.",
       "blockerServiceOperationInFlight": "Locus is setting up its helper service. This takes a moment — wait for the prompt or for this message to clear, then try again.",
       "subscriptionLapsed": "Your Locus subscription has expired, so the VPN will not connect. Contact the person who sold you the code to renew it.",
       "subscriptionExpiresToday": "Your Locus subscription expires today. Contact the person who sold you the code to renew it.",
       "subscriptionExpiresIn": "Your Locus subscription expires in {{count}} days. Contact the person who sold you the code to renew it.",
       "account": {
-        "title": "Account",
         "subscription": "Subscription",
         "plan": "Plan",
         "expires": "Expires",
@@ -224,17 +91,15 @@
         "confirmedMinutesAgo": "{{count}} min ago",
         "confirmedHoursAgo": "{{count}} h ago",
         "confirmedDaysAgo": "{{count}} d ago",
-        "neverConfirmed": "Not confirmed with the server yet",
         "checkingStatus": "Checking…",
         "notActivatedToCheck": "Activate a code first — there is nothing to confirm yet.",
         "updateCheckOff": "Automatic update checking is off, so Locus is not being told about new versions. Turn it on above to receive fixes.",
         "updateCheckOffAction": "Turn on automatic updates",
-        "updateBlocked": "Locus cannot update itself right now: {{reason}}",
-        "updateUpToDate": "Locus is up to date."
+        "updateBlocked": "Locus cannot update itself right now: {{reason}}"
       },
-      "cancel": "Cancel",
+      "cancel": "Stop",
       "toggleHint": "Press Enter to turn the VPN on or off",
-      "takingLonger": "Still connecting. This can take a few seconds on a school network — you can cancel and try again.",
+      "takingLonger": "Still connecting. This can take a few seconds on a school network — you can stop and try again.",
       "supportBlock": {
         "title": "Any problem at all — email us.",
         "middleman": "Start with the person who sold you your code: they know your account and can usually fix it on the spot.",
@@ -244,7 +109,6 @@
         "why": "Locus is run by one person, so an email that names the error is something that can actually be fixed.",
         "deviceIdHint": "Include the Device ID from your Account page — it is the one thing that tells us which install you are using."
       },
-      "support": "Need help?",
       "supportEmail": "maillcontainer@proton.me",
       "signOut": {
         "title": "Signed in on this device",
@@ -254,7 +118,6 @@
         "confirmBody": "Locus will forget your access key on this computer. This computer will stop working with Locus until you enter the key from your card again.",
         "confirmMoving": "If you are moving to a new computer, this is what you want.",
         "confirmKeeps": "Your subscription is not cancelled, and it will not be shortened.",
-        "confirmAction": "Sign out",
         "countingDown": "Signing out in {{count}}…",
         "undo": "Cancel",
         "signedOut": "Signed out. This computer no longer holds your key.",
@@ -270,6 +133,12 @@
       "freeDataNearlyOut": "{{used}} of {{total}} used — nearly out of free data",
       "freeDataThrottled": "{{used}} of {{total}} used — free data is spent for this month",
       "freeDataThrottledUpgrade": "Full is faster and unmetered. Ask the person who sold you your code about upgrading."
+    },
+    "ipInfo": {
+      "errors": {
+        "loadWithDetails": "Failed to get IP info: {{message}}",
+        "noServices": "No IP detection services are available"
+      }
     }
   }
 }

@@ -3,12 +3,6 @@
     "navigation": {
       "tabs": {
         "home": "Hogar",
-        "proxies": "Proxies",
-        "profiles": "Perfiles",
-        "connections": "Conexiones",
-        "rules": "Normas",
-        "logs": "Registros",
-        "unlock": "Descubrir",
         "settings": "Ajustes"
       },
       "menu": {
@@ -32,14 +26,12 @@
       "errors": {
         "actionFailed": "La operación del servicio falló",
         "stateRefreshFailed": "No se pudo actualizar el estado del servicio",
-        "restartFailed": "No se pudo reiniciar el núcleo",
-        "revalidationFailed": "No se pudo actualizar el estado de ejecución"
+        "restartFailed": "No se pudo reiniciar el núcleo"
       }
     },
     "sysproxyPrivilege": {
       "title": "No se pudo configurar el proxy del sistema",
       "message": "macOS rechazó el cambio por falta de permisos. Al instalar el servicio de Locus, este aplicará los cambios de proxy como administrador y este aviso no volverá a aparecer.",
-      "serviceReadyMessage": "El servicio de Locus está listo, pero el núcleo sigue ejecutándose como sidecar, por eso se rechazó la configuración del proxy. Cambiar al modo servicio lo resuelve sin reinstalar.",
       "alternative": "Otra opción: desactiva «requerir contraseña de administrador para acceder a los ajustes de todo el sistema» en Ajustes del Sistema → Privacidad y seguridad → Avanzado.",
       "later": "Más tarde",
       "installing": "Instalando el servicio del sistema. Puede pedir una contraseña de administrador.",

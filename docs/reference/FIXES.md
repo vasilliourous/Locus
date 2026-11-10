@@ -24,6 +24,87 @@ commercial gaps, [`../business/17-not-built.md`](../business/17-not-built.md).
 
 ---
 
+## THE LINUX BUILD READ THE HUB'S MODULE FROM A DIRECTORY IT IS NEVER IN (2026-11-10, unreleased)
+
+- **What broke.** `Build (linux)` failed in `Install sing-box` with
+  `sed: can't read server/modules/02-shadowsocks.sh: No such file or directory`,
+  exit 2, under `bash -e -o pipefail`. It was first reported as "a CI command
+  tried to read a file that is not present in the checked-out repo", and the
+  suggested remedy was to fix a repository or path problem.
+- **That diagnosis was wrong, and the file was never missing.** The module is
+  tracked at that exact path, is not gitignored, and
+  `sed -n 's/^SING_BOX_VERSION=…' server/modules/02-shadowsocks.sh` yields
+  `v1.12.1` from the repo root. What was wrong is the **directory**. The `build`
+  job sets `defaults.run.working-directory: client`, so the step ran from
+  `client/` and `server/modules/…` resolved to `client/server/modules/…`. Reproduced
+  locally from `client/` with byte-identical output and the same exit code.
+- **Why nothing caught it.** The step is the only one in `build` that reaches
+  outside `client/`; every other step there wants `client/`. §47 of
+  `check-consistency.sh` already guarded this step closely — it lifts the `sed`
+  expression from the workflow and executes it, so a drift between the two cannot
+  hide — but it ran the expression from `$REPO`, and it never asked **where the
+  step runs**. Both checks pass on a step that cannot resolve its own input.
+- **The fix.** `working-directory: .` on that one step, with a comment saying why
+  it is the exception, so the next reader does not "tidy" it back into the job
+  default.
+- **The guards, each observed failing.** §47 gains a positive assertion that the
+  step carries `working-directory: .` (matched as a key line, not a bare string,
+  because the explaining comment contains the same text — the false pass §47(a)
+  already paid for), and the extraction in §47(c) now runs from the **step's own
+  directory**, not from `$REPO`. With the override removed from the workflow,
+  both report `BAD`; with it restored, both pass. `(c)` deliberately falls back to
+  the job default `client` and not `.`, so a missing override reads as "yields
+  nothing" rather than silently resolving from a directory CI never uses.
+- **The rule.** A guard that checks a step's *text* says nothing about *where the
+  text runs*. When a job sets a default working directory, every path a step
+  reads is relative to that default — and a `No such file` in that setting is a
+  claim about the working directory until proven otherwise, not about the file.
+
+---
+
+## SIGN-OUT CLEARED A DRAFT AND SAVED THE OLD VALUE, LEAVING THE APP UNABLE TO REACH ITS OWN ACTIVATION SCREEN (2026-11-10, unreleased)
+
+- **What the operator saw.** "Sign out doesn't actually sign you out — it kicks
+  you to an unusable state where the code has been deregistered, but doesn't send
+  you back to the registration page, leaving you trapped in a broken app that
+  doesn't let you re-enter the code."
+- **Root cause, in the config plumbing rather than in `signout.rs`.** All 18
+  writers in `locus/store.rs` had the shape
+  `verge.edit_draft(|d| …)` followed by `verge.data_arc().save_file()`. The two
+  reads target different slots: `edit_draft` mutates the **draft**, and
+  `data_arc()` returns the **committed** snapshot (`crates/clash-verge-draft`).
+  So `save_file` wrote the state from *before* the edit, and the edit survived
+  only in the draft — invisible to `data_arc()`, and destroyed by the next
+  `discard()`, which `feat::listener`'s proxy-port recovery calls on the verge
+  layer. Verified against the real draft type before writing any fix: after the
+  clear and a `discard()`, `latest_arc().activation_code` was `Some("CODE")`
+  again and the file on disk had never changed.
+- **Why that produced *this* symptom, and not just "sign-out does nothing".**
+  `locus_status` reads `latest_arc()`, which prefers the draft. So the gate did
+  flip to the activation screen for as long as the draft lived — and then the
+  code came back, the gate re-read "activated", and the student was returned to a
+  connection screen for a device whose key the hub had already released. The
+  sign-out control is gated on `status.activated`, so it was not even offered as
+  a way out. Nothing on disk could be fixed by hand, because the disk copy was
+  correct-looking and the draft was the thing lying.
+- **The fix.** One helper, `store::save_verge`, which is `edit_draft` →
+  `apply()` → `data_arc().save_file()`. Every writer now goes through it. The
+  commit is a rule about the config plumbing, so it lives in one function rather
+  than in 18 call sites and 18 comments.
+- **The guards, each observed failing.** `the_write_helper_commits_before_it_saves`
+  reads `save_verge`'s body and fails when `verge.apply();` is deleted (shown), and
+  separately fails when any writer reintroduces the bare
+  `edit_draft`/`data_arc().save_file()` pair (shown by restoring
+  `clear_entitlement` to its old shape). `a_clearing_write_reaches_the_committed_snapshot`
+  pins the mechanism on the draft type itself, with no config, file or async
+  runtime, and asserts both that an uncommitted edit is invisible to `data_arc()`
+  and that a committed one survives a later `discard()`.
+- **The rule.** `save_file` writes `data_arc()`. An edit that is not committed is
+  not saved, and "it looked right until something else reloaded" is the signature
+  of a draft that was never applied — not a caching problem, and not a race.
+
+---
+
 ## THE ACTIVATION TUNNEL COULD NOT FIRE ON THE FAILURE IT EXISTS FOR (2026-11-09, unreleased)
 
 Three defects, found together when the operator reported that enrolment still
