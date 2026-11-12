@@ -54,6 +54,10 @@ One clause each; the file that owns it has the story.
 - **Frozen wire names** (`uot_port`, `download_*`→`update_*`, the
   `macos_intel`/`darwin-*` asymmetry, the `eco`/`free` and `strike`/`Full`
   splits) are contracts with deployed clients and the hub. Do not "tidy" them.
+- **Linux runs three gates, and passing tests says nothing about the other two**
+  — `cargo test`, `cargo clippy --all-targets --features clippy -- -D warnings`,
+  and `cargo fmt --check`. A change with 685 passing tests went red on `Build
+  (linux)` because it was never formatted. Run all three before pushing Rust.
 - **A repo fix is inert until the piece that runs it is redeployed.** The hub runs
   its own copy; `server/scripts/hooks-sync.sh` compares them.
 - **`main` and the tag are separate pushes**, and CI does not bump versions — a
