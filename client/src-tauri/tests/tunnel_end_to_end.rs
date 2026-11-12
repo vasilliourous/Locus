@@ -253,11 +253,19 @@ fn wait_for<F: Fn() -> bool>(what: &str, within: Duration, ready: F) {
 
 /// The client config, in the shape `locus::tier::build_profile` produces for a
 /// tier with UDP-over-TCP.
+///
+/// **`log-level` is `debug`, not `warning`.** At `warning` mihomo emits nothing
+/// at all, so the mihomo log attached to a failure was always empty — the
+/// controller bind, the mixed-port bind and, critically, *why an upstream dial
+/// failed* are all logged below that level. The `502` in `main`'s run
+/// 43139506588 was reported with a full sing-box log and no mihomo log
+/// whatsoever, which is a harness that cannot be diagnosed rather than a quiet
+/// one. The cost is a larger scratch log, deleted with the scratch directory.
 fn client_yaml(ss_port: u16, controller: u16, mixed: u16) -> String {
     format!(
         "mixed-port: {mixed}\n\
          external-controller: 127.0.0.1:{controller}\n\
-         log-level: warning\n\
+         log-level: debug\n\
          proxies:\n\
          \x20 - name: \"Locus\"\n\
          \x20   type: ss\n\
@@ -358,6 +366,8 @@ struct Harness {
     controller_addr: String,
     mixed_port: u16,
     server_log: PathBuf,
+    /// mihomo's own log. The peer that returns a `502` is the one that logs why.
+    client_log: PathBuf,
 }
 
 /// `label` names the scratch directory, and every test passes its own.
@@ -455,6 +465,7 @@ fn start(label: &str, engine: &Path, sing: &Path) -> Harness {
         controller_addr,
         mixed_port,
         server_log: server_log_path,
+        client_log,
     }
 }
 
@@ -556,8 +567,17 @@ fn tcp_crosses_a_real_shadowsocks_2022_listener() {
             assert_eq!(
                 code,
                 "204",
-                "a request through the tunnel must reach the target; sing-box log:\n{}",
-                std::fs::read_to_string(&h.server_log).unwrap_or_default()
+                "a request through the tunnel must reach the target.\n\
+                 sing-box (the peer) says:\n{}\n\
+                 mihomo (the client that chose 502) says:\n{}",
+                std::fs::read_to_string(&h.server_log).unwrap_or_default(),
+                // THE CLIENT'S LOG IS THE POINT. A 502 is produced by mihomo, not
+                // by the listener: it means mihomo accepted the request and then
+                // failed to dial upstream. The reason — a refused connect, a
+                // failed handshake, an unreachable address — is in THIS log and
+                // nowhere else. Before this line the failure printed only the
+                // peer's log, which by construction has nothing to say about it.
+                std::fs::read_to_string(&h.client_log).unwrap_or_default()
             );
         }
         Ok(out) => {
@@ -569,8 +589,9 @@ fn tcp_crosses_a_real_shadowsocks_2022_listener() {
                 return;
             }
             panic!(
-                "curl through the tunnel failed: {stderr}\nsing-box log:\n{}",
-                std::fs::read_to_string(&h.server_log).unwrap_or_default()
+                "curl through the tunnel failed: {stderr}\nsing-box (peer) log:\n{}\nmihomo (client) log:\n{}",
+                std::fs::read_to_string(&h.server_log).unwrap_or_default(),
+                std::fs::read_to_string(&h.client_log).unwrap_or_default()
             );
         }
         Err(error) => {

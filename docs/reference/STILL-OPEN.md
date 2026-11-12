@@ -55,21 +55,39 @@ in 25**; the greeting wait **0 in 25**. At ordinary load the old rate was 1–3 
 
 **What is NOT proven, and is stated so nobody reads this as closed:**
 
-- **The `502` itself was never reproduced again**, in roughly 200 further runs
-  after the fix. A `502` means mihomo accepted the request and failed to dial
-  upstream — a failure *after* the handshake the new wait covers — so it is not
-  obviously the same defect and the fix is not offered as its cure. One green run
-  is what would close it, and none has happened yet.
-- **A `UDP-over-TCP` datagram still times out at the 10 s `recv_from`** about 1–2
-  runs in 50 under load. It reproduced on the pre-fix harness as well, so it
-  predates this change and is a **separate open item** — the one piece of this
-  story that is still unexplained.
-- **The new wait is not proven under CI's conditions.** It has only run locally.
+- **The `502` reproduced on 2026-11-12**, on `main`'s run `43139506588` (push of
+  `fdc06b1`, a test-only change) and then locally — about 1 run in 10 when two
+  `cargo test` invocations overlap on one machine. **So it is not closed, and the
+  greeting wait is not offered as its cure.** What changed is that it can now be
+  diagnosed: the harness ran mihomo at `log-level: warning`, which emits
+  *nothing*, so every earlier report attached an empty mihomo log and only the
+  peer's log — and the peer, by construction, has nothing to say about a `502`.
+  It now runs at `debug` and prints **both** logs
+  (`src-tauri/tests/tunnel_end_to_end.rs`: `client_yaml`, the assertion message,
+  and `Harness::client_log`).
+- **What the first capture shows, and what it does not.** In the captured run
+  mihomo logged its API bind, its mixed-port bind and `Auth success from …`, and
+  then **no dial attempt at all**; the peer showed one inbound connection with no
+  corresponding outbound. That is not "a dial failed", it is "no dial was
+  logged". **It does not yet distinguish** a request that never reached mihomo's
+  SOCKS handler from a dial that failed below the level a debug build logs —
+  closing that needs `curl -v` in the failure message or mihomo's own `-d`
+  debug flag, and neither has been added.
+- **A `UDP-over-TCP` datagram still times out at the 10 s `recv_from`.** Seen in
+  the same 2026-11-12 runs, alongside the `502`. It reproduced on the pre-fix
+  harness too, so it predates the greeting change and is a **separate open
+  item** — the one piece of this story still unexplained. The two co-occurring is
+  a reason to suspect one cause for both.
+- **The new wait is not proven under CI's conditions.** It has run locally only,
+  and the 2026-11-12 local runs were *deliberately* loaded (two suites at once),
+  which is not how CI runs it.
 
 **What would close the rest.** A green `Build (linux)` on a run with the same
-matrix shape. If the datagram timeout recurs there, sing-box's log line
-`sp.v2.udp-over-tcp.arpa` is the first thing to read: its absence means the
-negotiation never happened, its presence means the datagram was lost downstream.
+matrix shape, and a `502` capture that includes mihomo's log covering the moment
+of the request — which the harness can now produce. If the datagram timeout
+recurs, sing-box's log line `sp.v2.udp-over-tcp.arpa` is the first thing to read:
+its absence means the negotiation never happened, its presence means the datagram
+was lost downstream.
 
 ---
 
