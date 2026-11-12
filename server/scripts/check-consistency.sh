@@ -4551,6 +4551,52 @@ else
     else
         ok "the verifier reads only the per-plan sing-box configs"
     fi
+
+    # ── EVERY SEEDED PLAN MUST BE VERIFIED, NOT JUST THE TWO OLDEST ──────────
+    #
+    # WHY THIS EXISTS. Adding Budget to the tree while leaving the verifier's
+    # tier list at `eco strike` is a defect that cannot be seen from the tree:
+    # the hub serves a working plan, `verify-ss2022.sh` reports healthy, and the
+    # one script whose job is "is this plan's key right" never looked at it. That
+    # is the same shape as §24's free-listener gap, one tier over.
+    #
+    # HOW. The seed loop in `seed-pb.py` is the authority for which rows exist,
+    # so each seeded row is required to appear in the verifier's tier loop. Both
+    # sides are read from code lines, so a comment naming a tier cannot satisfy
+    # it — and the verifier's list is literal on purpose (a directory scan would
+    # verify a retired `stealth.json` as if it were current).
+    _seed_rows="$(
+        grep -oE '^\s+\("([a-z_]+)",\s*"[A-Z_]+_PASS"' "$SEED" 2>/dev/null \
+            | sed -E 's/.*\("([a-z_]+)".*/\1/' | sort -u
+    )"
+    _verify_loop="$(grep -vE '^\s*#' "$VERIFY_SS" | grep -oE '^for tier in [a-z ]+; do' | head -1)"
+    _missing_verified=""
+    for _row in $_seed_rows; do
+        # `free`'s on-box config is `eco.json` — the frozen asymmetry §4.5
+        # documents. Mapping it here rather than renaming either side.
+        _cfg_name="$_row"
+        [ "$_row" = "free" ] && _cfg_name="eco"
+        case "$_verify_loop" in
+            *"$_cfg_name"*) : ;;
+            *) _missing_verified="$_missing_verified ${_row}(as ${_cfg_name}.json)" ;;
+        esac
+    done
+    if [ -n "$_missing_verified" ]; then
+        bad "verify-ss2022.sh never checks these seeded plans:${_missing_verified}"
+        bad "  a plan the hub serves whose key is never verified can be dead on TCP and"
+        bad "  still be reported healthy — extend the 'for tier in ...' loop."
+    else
+        ok "verify-ss2022.sh verifies every seeded plan's config and key"
+    fi
+
+    # Budget's UoT listener carries its own class, and that is a SECURITY
+    # property, not a cosmetic one: 25 Mbps is what the plan sells.
+    if grep -vE '^\s*#' "$VERIFY_SS" | grep -qE 'uot_check "budget".*"50"'; then
+        ok "the verifier asserts Budget's UoT listener is shaped (class 1:50)"
+    else
+        bad "verify-ss2022.sh does not assert Budget's UoT class — its UDP could be"
+        bad "  unshaped on the box while every check reports healthy."
+    fi
 fi
 
 echo

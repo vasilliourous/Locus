@@ -89,6 +89,18 @@ if [ -n "$IFACE" ]; then
     if ! echo "$TC_CLASSES" | grep -q "1:20"; then
         warn "free-plan UDP class (1:20 / port 8447) missing — free UDP is uncapped"
     fi
+    # BUDGET'S TWO CLASSES (added 2026-11-12, docs/business/04-tiers.md §4.2.5).
+    # Both are asserted, and the UDP one is the point: Budget is sold on a RATE
+    # and every one of its listeners is capped, so an unshaped 1:50 would be a
+    # route around the 25 Mbps the plan sells. `1:40` is TCP on 8448. This is the
+    # mirror of the paid UDP port (8446), which is deliberately NOT shaped — a
+    # difference worth keeping, not tidying.
+    echo "$TC_CLASSES" | grep -q "1:40" && pass "tc Budget TCP class (1:40) exists — 25 Mbps cap" || warn "tc Budget TCP class (1:40) missing — 8448 is uncapped at the hub"
+    if ! echo "$TC_CLASSES" | grep -q "1:50"; then
+        warn "Budget UDP class (1:50 / port 8449) missing — Budget UDP is uncapped, which is the rate the plan sells"
+    else
+        pass "tc Budget UDP class (1:50) exists — 25 Mbps cap"
+    fi
 else
     warn "Could not detect primary interface"
 fi

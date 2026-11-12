@@ -53,7 +53,15 @@ fi
 
 # ── 1. The tier configs declare SS2022, and their keys are the right size ──
 log "Step 1/5: Checking /etc/shadowsocks/*.json method and key length..."
-for tier in eco strike; do
+# EVERY SERVED PLAN, not the two that existed when this loop was written.
+# `budget` was added 2026-11-12 (docs/business/04-tiers.md §4.2.5) and a missing
+# entry here is exactly the failure this script exists to catch: the listeners
+# report `active`, the TCP tier works, and the plan's key was never checked.
+# The list is deliberately literal rather than discovered from
+# `/etc/shadowsocks/`, because a config left behind by a retired tier must NOT be
+# verified as current — `stealth.json` on an upgraded box would pass a directory
+# scan and be reported healthy while serving a port nothing sells.
+for tier in eco budget strike; do
     cfg="/etc/shadowsocks/${tier}.json"
     if [ ! -f "$cfg" ]; then
         fail "${cfg} does not exist — ${tier} was never configured"

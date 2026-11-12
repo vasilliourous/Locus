@@ -128,6 +128,49 @@ image Actions will provide, available until August 2027** — after that
 
 ---
 
+## Budget, the third tier — written, verified in the tree, never run on the hub
+
+**Added 2026-11-12.** A middle rung: Free ($0, 1 Mbps, 10 GB), **Budget**
+($2, 25 Mbps, unmetered), Full ($5, 100 Mbps unmetered). Both of Budget's
+listeners are capped server-side — TCP on 8448 (`1:40`) and its own
+UDP-over-TCP listener on 8449 (`1:50`) — because the plan sells a *rate*, so an
+unshaped UDP port would be a route around the thing being sold. That asymmetry
+with Full's deliberately unshaped 8446 is intended and asserted (§27(j2)), not
+an oversight. See [`../business/04-tiers.md`](../business/04-tiers.md) §4.2.5.
+
+**"Stealth" did not come back.** That name was branding over the same
+Shadowsocks transport, and the tier was merged away because it shared Full's
+endpoint and differed only by a number. Nothing in this change adds a transport:
+censorship resistance lives in the client's host/address substitution and the
+maintenance tunnel, which are a separate, unverified body of work.
+
+**Verified in the tree.** `check-consistency.sh` §27(j) asserts fifteen
+agreements — applied cap, shaped UDP, both reboot units, the seed row with its
+key and port, the UoT listener, both firewall rules, the console list, the
+colour, the badge label, and the negative that Budget is not on the retired
+8444 slot. Every one was **observed failing** against the defect it catches
+before being kept, including two that had to be re-shaped: the `uot_port`
+two-way conditional (which would have handed a third plan the free listener)
+and a double-escaped `$` that made the listener check report BAD on a correct
+tree. `verify-ss2022.sh` now verifies Budget's key and its shaped listener;
+`smoke-test.sh` asserts both `tc` classes.
+
+**NOT verified here, and not verifiable from a checkout:**
+
+- **That the hub has taken it.** The tree being green says nothing about the
+  box. The operator list is
+  [`../business/18-open-items.md`](../business/18-open-items.md) P2.0.
+- **That a Budget code activates and connects.** No code has been minted against
+  `budget`, and no device has been handed a `server_config` on 8448.
+- **That 25 Mbps is the rate a student actually sees.** `tc` is asserted to
+  apply a `25mbit` class; that a transfer measured through the tunnel matches it
+  has not been run. The class is the ceiling, and nothing here measures what
+  throughput lands underneath it.
+- **The cost of 25 Mbps unmetered at adoption.** Unmeasured; recorded as a risk
+  ([`../business/14-risks.md`](../business/14-risks.md) §14.11), not a fact.
+
+---
+
 ## The Free/Full tier merge — written, verified in the tree, never run on the hub
 
 **Added 2026-10-05.** The paid ladder was merged from two tiers into one: Free
