@@ -1028,10 +1028,7 @@ pub async fn stop_maintenance() {
 /// plan tunnel is up, [`stop_maintenance`] has stopped the engine, so every call
 /// goes direct at full speed even though the session still prefers maintenance —
 /// the flag records what the network did, not what the route is.
-pub async fn hub_client_for(
-    hub: &str,
-    timeout: crate::locus::hub::Timeout,
-) -> crate::locus::hub::HubClient {
+pub async fn hub_client_for(hub: &str, timeout: crate::locus::hub::Timeout) -> crate::locus::hub::HubClient {
     let proxy = if prefer_maintenance() {
         match maintenance_proxy() {
             Some(url) => match reqwest::Proxy::all(&url) {
@@ -1574,9 +1571,8 @@ mod tests {
             if let Ok((mut stream, _)) = listener.accept() {
                 let mut buf = [0u8; 1024];
                 let _ = stream.read(&mut buf);
-                let _ = stream.write_all(
-                    b"HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
-                );
+                let _ = stream
+                    .write_all(b"HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
             }
         });
 
@@ -1668,10 +1664,18 @@ mod tests {
             !warmed,
             "with no free-tier key compiled in, warming must report no route rather than pretending"
         );
-        assert_eq!(maintenance_proxy(), None, "nothing is held, so the rule sees a cold slot");
+        assert_eq!(
+            maintenance_proxy(),
+            None,
+            "nothing is held, so the rule sees a cold slot"
+        );
 
         stop_maintenance().await;
-        assert_eq!(maintenance_proxy(), None, "stopping an already-stopped engine is not an error");
+        assert_eq!(
+            maintenance_proxy(),
+            None,
+            "stopping an already-stopped engine is not an error"
+        );
 
         // The transition that matters at TUN-up: the slot is emptied, so the next
         // `hub_client_for` takes the direct branch even though the session may
@@ -1695,7 +1699,10 @@ mod tests {
             port: FREE_TIER_PORT,
             key: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=".to_owned(),
         };
-        let target = Target { name: "hub-8443".to_owned(), server: bootstrap.server.clone() };
+        let target = Target {
+            name: "hub-8443".to_owned(),
+            server: bootstrap.server.clone(),
+        };
         let yaml = render_config(17999, &[target], &bootstrap.key, bootstrap.port).expect("render");
         let parsed: serde_yaml_ng::Value = serde_yaml_ng::from_str(&yaml).expect("parse");
 
@@ -1705,7 +1712,10 @@ mod tests {
             "the maintenance outbound must dial the free-tier port, not the activation port"
         );
         assert_eq!(FREE_TIER_PORT, 8443, "server/modules/02-shadowsocks.sh:279");
-        assert_ne!(FREE_TIER_PORT, TUNNEL_PORT, "the two tunnels must not collide on one listener");
+        assert_ne!(
+            FREE_TIER_PORT, TUNNEL_PORT,
+            "the two tunnels must not collide on one listener"
+        );
     }
 
     #[test]

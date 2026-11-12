@@ -364,9 +364,14 @@ mod tests {
 
         // Credentials and ports are the plan's, unchanged: substitution moves the
         // host and nothing else.
-        assert_eq!(switched_yaml["proxies"][0]["password"].as_str(), Some(config.password.as_str()));
-        assert_eq!(switched_yaml["proxies"][0]["port"].as_u64(), Some(u64::from(config.server_port)));
-
+        assert_eq!(
+            switched_yaml["proxies"][0]["password"].as_str(),
+            Some(config.password.as_str())
+        );
+        assert_eq!(
+            switched_yaml["proxies"][0]["port"].as_u64(),
+            Some(u64::from(config.server_port))
+        );
     }
 
     /// The same one-field rule, in the direction that must never change: without

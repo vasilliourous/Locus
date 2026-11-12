@@ -529,7 +529,12 @@ async fn retry_beat_over_maintenance<B: serde::Serialize + Sync>(
         "the direct heartbeat produced no response; retrying through the maintenance tunnel"
     );
     let retry = crate::locus::activation_tunnel::hub_client_for(hub, crate::locus::hub::Timeout::Heartbeat).await;
-    let sent = retry.client().post(format!("{hub}/api/heartbeat")).json(body).send().await;
+    let sent = retry
+        .client()
+        .post(format!("{hub}/api/heartbeat"))
+        .json(body)
+        .send()
+        .await;
     if crate::locus::activation_tunnel::log_retry_outcome(&sent) {
         sent.ok()
     } else {

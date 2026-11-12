@@ -655,7 +655,10 @@ pub async fn client_with_proxy(hub: &str, timeout: Timeout, proxy: Option<reqwes
     // built to remove.
     let selected = client(hub, timeout).await;
     match proxied_client(timeout, &proxy) {
-        Ok(client) => HubClient { client, diagnosis: selected.diagnosis().cloned() },
+        Ok(client) => HubClient {
+            client,
+            diagnosis: selected.diagnosis().cloned(),
+        },
         Err(error) => {
             tracing::error!("locus hub client (proxied): {error:#}");
             selected
@@ -683,7 +686,12 @@ fn proxied_client(timeout: Timeout, proxy: &reqwest::Proxy) -> Result<&'static r
     // `Proxy` exposes no accessor for its URL, so the key is the debug form: it
     // contains the proxy URL and nothing that changes per call.
     let key = format!("{}|{:?}", timeout.seconds(), proxy);
-    if let Some(client) = CACHE.get_or_init(Default::default).lock().ok().and_then(|c| c.get(&key).copied()) {
+    if let Some(client) = CACHE
+        .get_or_init(Default::default)
+        .lock()
+        .ok()
+        .and_then(|c| c.get(&key).copied())
+    {
         return Ok(client);
     }
 

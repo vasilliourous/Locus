@@ -364,7 +364,8 @@ where
     // `activation_tunnel::hub_client_for` — the preference is set by a previous
     // call that produced no HTTP response at all, which is what a network that
     // blocks the hub by name does.
-    let hub_client = crate::locus::activation_tunnel::hub_client_for(&hub, crate::locus::hub::Timeout::Activation).await;
+    let hub_client =
+        crate::locus::activation_tunnel::hub_client_for(&hub, crate::locus::hub::Timeout::Activation).await;
     if hub_client.diagnosis().is_some() {
         // Once per process is enough; the diagnosis is a property of the
         // machine, not of this request. The warn names the store, so a support
