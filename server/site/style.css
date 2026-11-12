@@ -1,15 +1,13 @@
 /*
  * Locus landing page.
  *
- * The palette is the CLIENT's, copied by value from
- * `client/src/pages/_theme.tsx` (LOCUS_COLORS / LOCUS_LIGHT) and the first
- * frame of `client/src/index.html`. It is duplicated rather than imported
- * because this page is served as a static file by Caddy and has no build step —
- * importing across the tree would mean this page acquiring a bundler, which is
- * the complexity the static-file approach exists to avoid.
+ * The palette is copied by value from the client. It is duplicated rather than
+ * imported because this page is served as a static file by Caddy and has no
+ * build step — importing across the tree would mean this page acquiring a
+ * bundler, which is the complexity the static-file approach exists to avoid.
  *
- * If those values change, this file changes with them. It is a copy of a
- * derived fact, not a second source of truth — the client owns the palette.
+ * The values are `/COLOURS.md` §5, which is the only place they are described.
+ * If they change, this file changes with them: it is a copy, not a source.
  *
  * No web fonts, no CDN, no external requests of any kind: the hub's landing
  * block sets a strict CSP (`default-src 'none'`), so anything fetched from
@@ -17,27 +15,27 @@
  */
 
 :root {
-  --bg: #edf1ef;
-  --surface: #f2f6f4;
-  --surface-hover: #dfe6e2;
-  --border: #c3d0c9;
-  --text: #0b1f14;
-  --text-secondary: #4a6356;
-  --accent: #2a6e4c;
-  --accent-hover: #215839;
+  --bg: #ececec;
+  --surface: #f7f7f7;
+  --surface-hover: #e6e6e6;
+  --border: #c0c0c0;
+  --text: #151515;
+  --text-secondary: #565656;
+  --accent: #4C4C4C;
+  --accent-hover: #404040;
   color-scheme: light;
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --bg: #0d1512;
-    --surface: #1b2a24;
-    --surface-hover: #22332c;
-    --border: #2c3f35;
-    --text: #e4ede7;
-    --text-secondary: #9bafa3;
-    --accent: #4fbf84;
-    --accent-hover: #6ed29c;
+    --bg: #141414;
+    --surface: #202020;
+    --surface-hover: #2a2a2a;
+    --border: #4a4a4a;
+    --text: #e8e8e8;
+    --text-secondary: #a6a6a6;
+    --accent: #D0D0D0;
+    --accent-hover: #e2e2e2;
     color-scheme: dark;
   }
 }

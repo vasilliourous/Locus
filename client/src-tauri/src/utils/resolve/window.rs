@@ -9,20 +9,20 @@ use clash_verge_logging::{Type, logging, logging_error};
 // Locus's window colours, applied natively.
 //
 // The window is shown before the WebView has parsed anything, so this is the
-// first pixel a student sees. Verge's grey used to live here, which meant a
-// flash of another product's colours before Locus's green-black page painted.
+// first pixel a student sees. A value that disagrees with the page shows as a
+// flash of the wrong colour on every launch.
 //
 // Must stay in step with `src/pages/_theme.tsx` (LOCUS_COLORS.background /
 // LOCUS_LIGHT.background) and the `--bg-color` values in `src/index.html`. The
 // three layers exist because each one paints at a different moment: native
-// window, pre-bundle document, then themed app.
+// window, pre-bundle document, then themed app. Values: /COLOURS.md §1-§2.
 //
 // The hex strings are the source and the `Color` tuples are DERIVED from them,
 // rather than four independent literals. Two literals per mode is exactly how
 // the tuple and the hex drift apart — and the symptom would be a subtly wrong
 // flash colour that no test would catch.
-const DARK_BACKGROUND_HEX: &str = "#06130C";
-const LIGHT_BACKGROUND_HEX: &str = "#F4F8F5";
+const DARK_BACKGROUND_HEX: &str = "#141414";
+const LIGHT_BACKGROUND_HEX: &str = "#ECECEC";
 
 /// Parses `#RRGGBB` into the `Color` the window builder wants.
 ///
@@ -273,23 +273,22 @@ pub fn reload_main_window_if_needed() {
 mod tests {
     use super::*;
 
-    /// The native window colour is Locus's, not Verge's.
+    /// The native window colour is the palette's dark ground.
     ///
     /// Pinned as literals because this is the FIRST pixel a student sees, and it
-    /// is the one layer with no CSS to inspect. It previously held Clash Verge
-    /// Rev's grey (`#2E303D` / `#F5F5F5`), so a flash of another product's
-    /// colours preceded Locus's own page.
+    /// is the one layer with no CSS to inspect. A wrong value here shows as a
+    /// flash of the wrong colour before the page paints.
     #[test]
-    fn the_window_background_is_locus_green_black() {
-        assert_eq!(DARK_BACKGROUND_HEX, "#06130C");
-        assert_eq!(DARK_BACKGROUND_COLOR, Color(6, 19, 12, 255));
+    fn the_window_background_is_the_dark_ground() {
+        assert_eq!(DARK_BACKGROUND_HEX, "#141414");
+        assert_eq!(DARK_BACKGROUND_COLOR, Color(20, 20, 20, 255));
     }
 
-    /// Light mode is Locus's light surface, not Verge's grey.
+    /// Light mode is the palette's light ground.
     #[test]
-    fn the_light_window_background_is_locus_light() {
-        assert_eq!(LIGHT_BACKGROUND_HEX, "#F4F8F5");
-        assert_eq!(LIGHT_BACKGROUND_COLOR, Color(244, 248, 245, 255));
+    fn the_light_window_background_is_the_light_ground() {
+        assert_eq!(LIGHT_BACKGROUND_HEX, "#ECECEC");
+        assert_eq!(LIGHT_BACKGROUND_COLOR, Color(236, 236, 236, 255));
     }
 
     /// The tuple is DERIVED from the hex, so the two cannot disagree.

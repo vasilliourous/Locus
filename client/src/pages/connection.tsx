@@ -173,10 +173,12 @@ const ConnectionPage = () => {
           ? t('home.components.connection.connected')
           : t('home.components.connection.notConnected')
 
-  // Spec §5: connected green, connecting amber, disconnected grey. The dot is
-  // paired with the word everywhere it appears, so colour is never the only cue.
-  // `checking` stays grey like disconnected: it is an absence of information, not
-  // a state of the tunnel, and colouring it would assert something we do not know.
+  // The dot reads one of three palette roles: success when connected, warning
+  // while a transition is in flight, disabled otherwise. It is paired with the
+  // word everywhere it appears, so colour is never the only cue.
+  // `checking` uses the disabled role like disconnected: it is an absence of
+  // information, not a state of the tunnel, and tinting it would assert
+  // something we do not know.
   const accent =
     phase === 'connecting' || phase === 'disconnecting'
       ? theme.palette.warning.main

@@ -8,20 +8,26 @@
 > from `legacy/wails-client/` in the 2026-09-23 restructure; the content was not otherwise
 > reviewed. Kept because it documents the contract the fork must reproduce —
 > see `legacy/wails-client/ARCHIVED.md`.
-
-
-> **This spec describes the implemented UI.** The client uses a **Wails v2 +
-> Vue 3** frontend (`legacy/wails-client/frontend/`) — the design tokens below are the
-> actual values used in the components. The old Fyne-era spec was superseded
-> when the GUI was migrated (see `WAILS-MIGRATION.md`).
+>
+> **Its colour content has been removed.** This document used to carry the
+> palette, the button and badge colours, and the CSS for them. Those values are
+> gone from it on purpose — they were superseded twice and were still being cited
+> as a source, and a retired spec cannot be allowed to look like an authority on
+> what the product looks like. **Colour is owned by `/COLOURS.md` at the
+> workspace root and by nothing else.** What remains here is layout, type scale
+> and behaviour, none of which is colour.
 
 ---
 
 ## 1. Design Principles
 
-1. **One glance, one action** — The user opens the window and instantly knows what to do.
-2. **Status without reading** — Color + icon convey connection state at a glance.
-3. **Tier sells itself** — Subtle visual cues differentiate Eco from Strike without extra UI complexity.
+1. **One glance, one action** — The user opens the window and instantly knows
+   what to do.
+2. **Status without reading** — Colour, icon and position convey connection state
+   at a glance. (The colours are `/COLOURS.md`'s; that state is conveyed by more
+   than one channel is the rule this document owns.)
+3. **Tier sells itself** — Subtle visual cues differentiate the plans without
+   extra UI complexity.
 
 **Non-goals:**
 - No custom animations (CSS transitions are kept minimal)
@@ -30,57 +36,16 @@
 
 ---
 
-## 2. Color Palette
+## 2. Colour
 
-```
-Token              Hex       Purpose
-─────────────────────────────────────────────
-Background         #06130C   Main window background (green-black)
-Surface            #0C1711   Card backgrounds, panels
-SurfaceHover       #13241A   Hover states on interactive elements
-Border             #1F3629   Dividers, input borders
-TextPrimary        #EAF2EC   Main body text
-TextSecondary      #8CA596   Labels, hints, secondary info
-Accent             #2EA86A   Primary buttons, active indicators (Locus green)
-AccentHover        #46C186   Button hover
-Success            #22C55E   Connected status
-Error              #EF4444   Disconnected, errors
-Warning            #F59E0B   Connecting, degraded
-TierStrike         #EAB308   Strike tier badge (gold)
-TierStealth        #46C186   Stealth tier badge (green)
-TierEco            #7FB48F   Eco tier badge (muted green)
-```
+**Deliberately absent.** The palette this section used to state was superseded in
+3.3.0 and again in the 2026-11-11 monochrome reset, and the value that made it
+dangerous was that it *looked* current. Read `/COLOURS.md` §2 for the shipped
+palette, §11 for what happened to the values that used to be written here.
 
-### Implementation (Vue 3 + CSS)
-
-The window background is also set natively (`WindowSetBackgroundColour(6, 19, 12, 255)`
-in `app.go`) so there is no white flash while the WebView loads.
-
-```css
-body {
-  background-color: #06130C;
-  color: #EAF2EC;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
-  -webkit-font-smoothing: antialiased;
-  user-select: none;
-}
-
-.app-container {
-  background: linear-gradient(180deg, #06130C 0%, #0C1A12 100%);
-  padding: 24px;
-}
-
-.card {
-  background: #0C1711;
-  border: 1px solid #1F3629;
-  border-radius: 12px;
-}
-
-.btn-primary { background: #2EA86A; }        /* hover: #46C186 */
-.btn-danger  { background: #EF4444; }
-.btn-secondary { background: #1F3629; }
-.btn-accent   { background: #2EA86A; }
-```
+What this document still owns about paint: the window background is also set
+**natively**, so there is no flash while the WebView loads. That mechanism — not
+its value — is the part worth keeping, and the value is `/COLOURS.md`'s.
 
 ---
 
@@ -109,9 +74,9 @@ when the device is not activated (`App.vue` → `v-if="!activated"`).
 ```
 ┌──────────────────────────────────────┐
 │                                      │
-│            [shield logo SVG]         │  brand icon, 48×48, green #2EA86A
+│            [shield logo SVG]         │  brand icon, 48×48
 │                 Locus                │  brand title, 28px bold
-│          Secure School VPN           │  subtitle, 14px, #8CA596
+│          Secure School VPN           │  subtitle, 14px
 │                                      │
 │  ┌────────────────────────────────┐  │
 │  │  Activate                      │  │  card (max-width 380px)
@@ -120,9 +85,9 @@ when the device is not activated (`App.vue` → `v-if="!activated"`).
 │  │  ┌──────────────────────────┐  │  │
 │  │  │ RQ-XXXX-XXXX-XXXX-C      │  │  │  code input, monospace, auto-format
 │  │  └──────────────────────────┘  │  │
-│  │  ✓ Valid code / ✗ error hint   │  │  live Luhn validation (green/red)
+│  │  ✓ Valid code / ✗ error hint   │  │  live Luhn validation
 │  │  ┌──────────────────────────┐  │  │
-│  │  │        Activate          │  │  │  button, #2EA86A, spinner while loading
+│  │  │        Activate          │  │  │  button, spinner while loading
 │  │  └──────────────────────────┘  │  │
 │  └────────────────────────────────┘  │
 │                                      │
@@ -135,12 +100,12 @@ when the device is not activated (`App.vue` → `v-if="!activated"`).
 ```
 
 **Implementation notes (ActivationScreen.vue):**
-- Logo: inline SVG shield with checkmark, `#2EA86A` fill
+- Logo: inline SVG shield with checkmark
 - Input: auto-inserts hyphens as the user types (max 23 chars), uppercases,
-  and calls `ValidateCode` when complete — the hint turns green ("✓ Valid code")
-  or red with the error message
+  and calls `ValidateCode` when complete — the hint reports valid or the error
+  message
 - Button: disabled until ≥16 chars, shows a CSS spinner while loading
-- Errors from the server appear in a red error box below the button
+- Errors from the server appear in an error box below the button
 
 ---
 
@@ -153,12 +118,12 @@ Shown when activated. Header + connection card + stats card + actions.
 │  ● Connected          [Strike ⚡]    │  header: StatusIndicator + label + TierBadge
 │                                      │
 │  ┌────────────────────────────────┐  │
-│  │          [status SVG]          │  │  status circle (green shield / grey globe)
+│  │          [status SVG]          │  │  status circle
 │  │          Connected             │  │  15px status text
 │  │             Strike             │  │  tier name
 │  │  ⚠ 3 days remaining           │  │  grace warning (graceDays ≤ 3, connected)
 │  │  ┌──────────────────────────┐  │  │
-│  │  │        Disconnect        │  │  │  btn-primary (Connect) / btn-danger (Disconnect)
+│  │  │        Disconnect        │  │  │  primary (Connect) / danger (Disconnect)
 │  │  └──────────────────────────┘  │  │  spinner while loading
 │  └────────────────────────────────┘  │
 │                                      │
@@ -174,10 +139,9 @@ Shown when activated. Header + connection card + stats card + actions.
 └──────────────────────────────────────┘
 ```
 
-**Status colors:**
-- Connected → green (`#22C55E`) status circle + "Connected"
-- Engine crashed → red (`#EF4444`) + "Engine Error"
-- Disconnected → grey (`#6B7280`) + "Disconnected"
+**Status presentation:** the connection state is carried by the status circle's
+role, the word beside it, and the label — never by one channel alone. The roles
+and their values are `/COLOURS.md`'s.
 
 **Diagnostics modal:** fixed overlay with a monospace `<pre>` report
 (`GetDiagnostics` — version, OS, Go, activated, connected, tier, engine state,
@@ -199,22 +163,24 @@ heartbeat stats, grace days), Copy + Close buttons.
 
 | State | Label | Style |
 |-------|-------|-------|
-| Disconnected | "Connect" | `btn-primary` (#2EA86A) |
+| Disconnected | "Connect" | primary |
 | Connecting | spinner replaces label | disabled |
-| Connected | "Disconnect" | `btn-danger` (#EF4444) |
+| Connected | "Disconnect" | danger |
 | Loading | CSS spinner (16px ring) | disabled |
+
+The role names are the contract; their values are `/COLOURS.md`'s.
 
 ---
 
 ## 7. Tier Badge Styling
 
-Implemented in `TierBadge.vue`:
+Implemented in `TierBadge.vue`.
 
-| Tier | Icon | Color | Background |
-|------|:----:|-------|------------|
-| `strike` | ⚡ | `#EAB308` gold | `rgba(234, 179, 8, 0.2)` |
-| `stealth` | ◉ | `#46C186` green | `rgba(70, 193, 134, 0.18)` |
-| `eco` (default) | ○ | `#7FB48F` muted green | `rgba(127, 180, 143, 0.18)` |
+| Tier | Icon | Colour |
+|------|:----:|--------|
+| `strike` | ⚡ | `/COLOURS.md` §6 |
+| `stealth` | ◉ | *(retired tier — no longer rendered)* |
+| `eco` (default) | ○ | `/COLOURS.md` §6 |
 
 Rendered as a 12px bold pill (`border-radius: 20px`, padding 4px 10px) next to
 the status label in the main-screen header.
@@ -238,41 +204,19 @@ real tray with Show/Quit is a future enhancement.
 
 ## 9. Visual Testing Checklist
 
-| Test | Expected |
-|------|----------|
-| App launches | Window appears immediately (dark-green background, green accents). |
-| Open from tray/dock | Window appears. Dark-green background, green accents. |
-| Activation screen | Brand icon, centered input, green button, tier info. |
-| Code typing | Auto-formats with hyphens, uppercases. |
-| Invalid code | Red error hint below input (instant — no server call). |
-| Valid code | Green "✓ Valid code". |
-| Activate success | Transitions to main screen. |
-| Connected | Green dot + "Connected". "Disconnect" button. |
-| Engine crash | Red dot + "Engine Error". |
-| Grace warning | Amber "⚠ X days remaining" when ≤3 days left and connected. |
-| Stats card | State / Heartbeat / Grace Period values update. |
-| Diagnostics | Modal opens with the full report; Copy works. |
-| Update available | "Update X available" button appears. |
-| Close window | App quits (no close-to-tray in Wails v2.9). |
-| Eco badge | Muted-green pill + ○ icon. |
-| Stealth badge | Green pill + ◉ icon. |
-| Strike badge | Gold pill + ⚡ icon. |
-| High DPI | Everything renders crisp (WebView handles this). |
+The original checklist asked a reviewer to confirm colours by eye. That is now
+`/COLOURS.md`'s problem, not this document's. What remains checkable here:
+
+- [ ] The activation screen renders before any other surface on a fresh install
+- [ ] The status readout names the state in words, not only in colour
+- [ ] The tier badge shows a plan name beside its glyph
+- [ ] The window paints its background before the WebView shows content
+- [ ] Diagnostics copy produces a complete report
 
 ---
 
 ## 10. When to Do This
 
-```
-Phase 1–5: Backend (storage, activation, manager, heartbeat, updater)
-Phase 6:   GUI functional (buttons work, screens exist, ugly)
-               ↓
-          NOW DO THIS UI POLISH
-               ↓
-Phase 6b:  Theme, icons, layout, tier badges, animations
-Phase 8:   Test on all platforms, tweak spacing
-```
-
-The app should **function perfectly** before any UI polish. A beautiful app
-that doesn't connect is useless. An ugly app that connects reliably is useful.
-Make it work, then make it pretty.
+Read this document to understand how the **retired** client was laid out. Do not
+take any value from it: every colour it used to state is superseded, and the
+current values are `/COLOURS.md`'s.

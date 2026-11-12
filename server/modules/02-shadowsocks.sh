@@ -95,8 +95,21 @@ setup_passwords() {
     ECO_PASS="${ECO_PASS:-}"
     STEALTH_PASS="${STEALTH_PASS:-}"
     STRIKE_PASS="${STRIKE_PASS:-}"
+    BUDGET_PASS="${BUDGET_PASS:-}"
 
-    if [ -n "$ECO_PASS" ] && [ -n "$STEALTH_PASS" ] && [ -n "$STRIKE_PASS" ]; then
+    # THREE keys are required: the two that are still served (eco, strike) and
+    # Budget's, which has been served since 2026-11-12. STEALTH_PASS is NOT in
+    # this list any more: nothing has served 8444 since the 2026-10-05 merge, so
+    # requiring it kept a retired credential in the fleet's required set — the
+    # exact shape of instruction that gets a retired PSK re-committed
+    # (client/docs/LOGIC-INVENTORY.md says the same about the client). It is
+    # still read and still validated when present (module 00), so an upgraded
+    # box carries it harmlessly.
+    #
+    # WHY BUDGET_PASS IS REQUIRED, not optional: it is a SOLD plan's credential.
+    # A deploy that cannot set it must fail here, where the cause is named, and
+    # not at `seed-pb.py` where the symptom would be "no budget row".
+    if [ -n "$ECO_PASS" ] && [ -n "$STRIKE_PASS" ] && [ -n "$BUDGET_PASS" ]; then
         log "Using tier passwords from environment (decrypted secrets)."
         TIER_PASSWORDS_GENERATED=0
     elif [ -f "$PASS_FILE" ]; then
@@ -111,11 +124,13 @@ setup_passwords() {
         ECO_PASS=$(gen_tier_key)
         STEALTH_PASS=$(gen_tier_key)
         STRIKE_PASS=$(gen_tier_key)
+        BUDGET_PASS=$(gen_tier_key)
         TIER_PASSWORDS_GENERATED=1
         warn "            (write these back to secrets.env.age, or this host forks)"
         warn "            ECO_PASS=$ECO_PASS"
         warn "            STEALTH_PASS=$STEALTH_PASS"
         warn "            STRIKE_PASS=$STRIKE_PASS"
+        warn "            BUDGET_PASS=$BUDGET_PASS"
     else
         # Should be unreachable: module 00 fails the deploy first. Kept as a
         # belt-and-braces guard so this module cannot fork the fleet if it is
@@ -154,12 +169,13 @@ setup_passwords() {
             warn ""
             warn "To adopt the new secrets, force a rewrite of the configs:"
             warn "    rm -f /etc/shadowsocks/eco.json /etc/shadowsocks/strike.json \\"
-            warn "          /etc/sing-box/eco.json /etc/sing-box/strike.json"
+            warn "          /etc/shadowsocks/budget.json \\"
+            warn "          /etc/sing-box/eco.json /etc/sing-box/strike.json /etc/sing-box/budget.json"
             warn "    then re-run setup.sh and scripts/seed-pb.py"
             warn "── or, to keep the box as it is, leave ${PASS_FILE} untouched."
             warn "════════════════════════════════════════════════════════════"
             # Keep the file. seed-pb.py reads it, and it still describes reality.
-            export ECO_PASS STEALTH_PASS STRIKE_PASS
+            export ECO_PASS STEALTH_PASS STRIKE_PASS BUDGET_PASS
             log "✓ Tier passwords loaded (deployed values preserved)"
             return 0
         fi
@@ -169,6 +185,7 @@ setup_passwords() {
 ECO_PASS=$ECO_PASS
 STEALTH_PASS=$STEALTH_PASS
 STRIKE_PASS=$STRIKE_PASS
+BUDGET_PASS=$BUDGET_PASS
 EOF
     chmod 600 "$PASS_FILE"
 
@@ -177,7 +194,7 @@ EOF
     # carrying them would look deployed and serve a listener that rejects
     # every handshake. Checked here as well as in module 00 because this file
     # is runnable standalone (`bash 02-shadowsocks.sh`).
-    for _k in ECO_PASS STEALTH_PASS STRIKE_PASS; do
+    for _k in ECO_PASS STEALTH_PASS STRIKE_PASS BUDGET_PASS; do
         _v="${!_k}"
         _bytes=$(printf '%s' "$_v" | base64 -d 2>/dev/null | wc -c) || _bytes=0
         if [ "$_bytes" -ne "${SS_KEY_BYTES:-32}" ]; then
@@ -187,9 +204,9 @@ EOF
     done
 
     # Export for use in config files
-    export ECO_PASS STEALTH_PASS STRIKE_PASS
+    export ECO_PASS STEALTH_PASS STRIKE_PASS BUDGET_PASS
     export TIER_PASSWORDS_GENERATED
-    log "✓ Tier passwords ready (eco, strike; stealth retired)"
+    log "✓ Tier passwords ready (eco, strike, budget; stealth retired)"
 }
 
 # ── Create Shadowsocks config ──
@@ -286,15 +303,33 @@ write_service "eco" "Eco/Free — BBR, 1 Mbps tc cap"
 write_config "strike" 8445 "STRIKE_PASS" "tcp_and_udp"
 write_service "strike" "Strike/Full — BBR, 100 Mbps tc cap, UDP"
 
+# ── Budget (BBR, TCP+UDP, 25 Mbps tc) ──
+#
+# THE MIDDLE RUNG, ADDED 2026-11-12 (docs/business/04-tiers.md §4.2.5). It has
+# its own port, its own credential and its own units BECAUSE that is what makes
+# it a tier rather than a rate on someone else's endpoint — the failure Stealth
+# had, and the reason the merge above even happened.
+#
+# 8448, NOT 8444. 8444 is the retired stealth slot and this module deliberately
+# does not reuse it: `write_config` and `write_service` are skip-if-exists, so a
+# Budget listener placed on 8444 would either collide with `/etc/shadowsocks/
+# stealth.json` and `shadowsocks-stealth.service` on an upgraded box or silently
+# inherit their old password. A fresh port can inherit nothing. 8444 stays dark
+# until an operator removes that unit by hand (see the NOTE in the log below).
+write_config "budget" 8448 "BUDGET_PASS" "tcp_and_udp"
+write_service "budget" "Budget — BBR, 25 Mbps tc cap, UDP"
+
 # ── Reload systemd ──
 systemctl daemon-reload
 
 # ── Enable services (started by setup.sh after all modules complete) ──
 systemctl enable shadowsocks-eco.service 2>/dev/null || true
 systemctl enable shadowsocks-strike.service 2>/dev/null || true
+systemctl enable shadowsocks-budget.service 2>/dev/null || true
 log "   Services enabled (will start after all modules complete)"
 log "   Eco/Free:     :8443 (TCP, BBR)"
 log "   Strike/Full:  :8445 (TCP+UDP, BBR)"
+log "   Budget:       :8448 (TCP+UDP, BBR)"
 log ""
 log "   NOTE: shadowsocks-stealth (:8444) is retired. If this box previously ran"
 log "   it, the service still exists and must be removed by hand:"
@@ -310,20 +345,25 @@ log "   Passwords saved to ${PASS_FILE} (chmod 600)"
 # plan's own SS2022 credentials, so game/voice UDP can ride inside an allowed
 # TCP flow on networks that drop raw UDP (N4L school WiFi).
 #
-# TWO INSTANCES, NOT ONE, BECAUSE THE LISTENER IS BOUND TO A PASSWORD.
-# A sing-box shadowsocks inbound is configured with ONE password. Pointing both
+# ONE INSTANCE PER PLAN, BECAUSE THE LISTENER IS BOUND TO A PASSWORD.
+# A sing-box shadowsocks inbound is configured with ONE password. Pointing two
 # plans at one listener would mean one plan's clients handshaking with the
-# other's credential — so the free plan gets its own listener with ECO_PASS,
-# exactly as the paid plan has one with STRIKE_PASS. This also lets each be
-# shaped independently (see 04-tc.sh: the free instance carries the same 1 Mbps
-# ceiling as the free TCP tier).
+# other's credential — so each plan gets its own listener with its own key.
+# This also lets each be shaped independently (see 04-tc.sh: the free instance
+# carries the same 1 Mbps ceiling as the free TCP tier, and Budget's carries its
+# 25 Mbps).
 #
-#   paid (strike) -> UOT_PORT       (default 8446)
-#   free (eco)    -> UOT_PORT_FREE  (default 8447)
+#   paid (strike) -> UOT_PORT        (default 8446, unshaped)
+#   free (eco)    -> UOT_PORT_FREE   (default 8447, capped 1 Mbps)
+#   budget        -> UOT_PORT_BUDGET (default 8449, capped 25 Mbps)
 #
-# UDP IS NOT A DIFFERENTIATOR ANY MORE. Both plans carry it; the paid plan is
-# differentiated by RATE (100 Mbps vs 1 Mbps), which is the only property that
-# actually separates them on this network. See docs/business/04-tiers.md §4.2.4.
+# UDP IS NOT A DIFFERENTIATOR ANY MORE. Every plan carries it; the plans are
+# separated by RATE, which is the only property that actually divides them on
+# this network. See docs/business/04-tiers.md §4.2.4 and §4.2.5.
+#
+# BUDGET'S SLOT IS NOT STEALTH'S. 8444 was the retired tier's listener and is
+# deliberately not reused; Budget's is 8449, so nothing here can inherit the
+# retired config (see the write_config note above).
 #
 # ADDITIVE: the shadowsocks-rust TCP services are untouched — TCP traffic never
 # uses these instances. Clients only route UDP here when the tier's
@@ -336,6 +376,7 @@ log "   Passwords saved to ${PASS_FILE} (chmod 600)"
 UOT_ENABLED="${ENABLE_UOT:-1}"
 UOT_PORT="${UOT_PORT:-8446}"
 UOT_PORT_FREE="${UOT_PORT_FREE:-8447}"
+UOT_PORT_BUDGET="${UOT_PORT_BUDGET:-8449}"
 SING_BOX_VERSION="${SING_BOX_VERSION:-v1.12.1}"
 SING_BOX_BINARY="/usr/local/bin/sing-box"
 
@@ -463,9 +504,14 @@ if [ "$UOT_ENABLED" = "1" ]; then
         write_uot_service "strike" "paid"
         write_uot_config "eco"    "$UOT_PORT_FREE" "$ECO_PASS"
         write_uot_service "eco"    "free"
+        # Budget last: it is the newest listener, so on a box that has never had
+        # it, this is the only new unit in the block.
+        write_uot_config "budget" "$UOT_PORT_BUDGET" "$BUDGET_PASS"
+        write_uot_service "budget" "budget"
         systemctl daemon-reload
         systemctl enable sing-box-uot-strike.service 2>/dev/null || true
         systemctl enable sing-box-uot-eco.service 2>/dev/null || true
+        systemctl enable sing-box-uot-budget.service 2>/dev/null || true
         # START them, not just enable them.
         #
         # `enable` only takes effect at the NEXT boot, and `write_uot_service`
@@ -480,13 +526,15 @@ if [ "$UOT_ENABLED" = "1" ]; then
             warn "Could not start sing-box-uot-strike.service (:${UOT_PORT}) — start it by hand"
         systemctl start sing-box-uot-eco.service 2>/dev/null || \
             warn "Could not start sing-box-uot-eco.service (:${UOT_PORT_FREE}) — start it by hand"
+        systemctl start sing-box-uot-budget.service 2>/dev/null || \
+            warn "Could not start sing-box-uot-budget.service (:${UOT_PORT_BUDGET}) — start it by hand"
 
         # Prove they are actually listening rather than assuming the start
         # worked. A unit that "started" and immediately died is the classic
         # sing-box failure (an unknown config key makes it exit), and the whole
         # point of this block is that UDP dies silently otherwise.
         sleep 1
-        for pair in "strike:${UOT_PORT}" "eco:${UOT_PORT_FREE}"; do
+        for pair in "strike:${UOT_PORT}" "eco:${UOT_PORT_FREE}" "budget:${UOT_PORT_BUDGET}"; do
             _n="${pair%%:*}"; _p="${pair#*:}"
             if systemctl is-active --quiet "sing-box-uot-${_n}.service"; then
                 log "  ✓ sing-box-uot-${_n} is active on :${_p}"
@@ -495,10 +543,11 @@ if [ "$UOT_ENABLED" = "1" ]; then
                 warn "  Check: journalctl -u sing-box-uot-${_n} -n 20 --no-pager"
             fi
         done
-        log "✓ UoT enabled on both plans:"
+        log "✓ UoT enabled on every plan:"
         log "    paid (strike creds): :${UOT_PORT}"
         log "    free (eco creds):    :${UOT_PORT_FREE}  <- capped at 1 Mbps by 04-tc.sh"
-        log "  seed-pb.py advertises \"uot_port\" on BOTH tier rows, so every client"
+        log "    budget creds:        :${UOT_PORT_BUDGET}  <- capped at 25 Mbps by 04-tc.sh"
+        log "  seed-pb.py advertises \"uot_port\" on EVERY tier row, so every client"
         log "  picks its own endpoint up on the next heartbeat."
 
         # Retire the OLD single-listener unit if this box has one. It served the

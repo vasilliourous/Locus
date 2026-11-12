@@ -2,12 +2,15 @@
 # Module 04: Traffic Shaping (tc)
 # Applies bandwidth caps using tc HTB qdisc:
 #   - Eco / Free (port 8443): 1 Mbps   (the legacy Eco slot, renamed customer-side)
+#   - Budget     (port 8448): 25 Mbps  (the middle rung; added 2026-11-12)
 #   - Full       (port 8445): 100 Mbps (the merged paid tier; on-box name `strike`)
 #
-# TWO tiers, not three. Stealth (port 8444) was retired when the paid ladder was
-# merged into one plan: Stealth and Strike were the same tier at two rates, and
-# the only real difference was Strike's UDP-over-TCP endpoint. See
-# docs/business/04-tiers.md §4.2.4 and §4.7.
+# THREE tiers. Stealth (port 8444) was retired on 2026-10-05 when the paid ladder
+# was merged into one plan: Stealth and Strike shared one endpoint and a shape,
+# and differed by a rate. Budget is NOT that tier back — it has its own ports
+# (8448 TCP, 8449 UoT), its own credential and its own classes, so it cannot
+# collapse into Full by an edit to this file. See docs/business/04-tiers.md
+# §4.2.4, §4.2.5 and §4.7.
 #
 # RETIRING 8444 DOES NOT STOP THE OLD SERVICE. `create_tc_service` and
 # `02-shadowsocks.sh`'s `write_service` are skip-if-exists (so a re-run is
@@ -206,10 +209,32 @@ apply_tc_now 8447 "1:20" "1mbit"
 # stale filter on the next run; the SERVICE behind the port must be stopped by
 # hand (header comment, and docs/business/14-risks.md §14.8).
 apply_tc_now 8445 "1:30" "100mbit"
+#
+# 8448 is BUDGET, the middle rung added 2026-11-12 (docs/business/04-tiers.md
+# §4.2.5). 25mbit is its whole product: it sits far above the 1mbit free ceiling
+# (comfortable video, a game that runs properly) and far below the 100mbit Full
+# sells, so the ladder is three steps of rate rather than two.
+#
+# 1:40 is a FRESH class id. Stealth's old 1:20 now belongs to the free UDP
+# listener, and reusing it here would have made this port share that class as
+# soon as someone "tidied" one of them — the collision §27 exists to catch.
+apply_tc_now 8448 "1:40" "25mbit"
+#
+# 8449 is BUDGET's UDP-over-TCP listener (the sing-box `budget` instance).
+#
+# IT IS SHAPED, AND THAT IS THE DELIBERATE ASYMMETRY WITH THE PAID PORT ABOVE.
+# Full leaves 8446 unshaped because the plan is sold on low latency and a tc
+# ceiling trades that away for bandwidth the plan is not short of. Budget is
+# sold on comfort at a rate, not on latency — so an unshaped 8449 would be a
+# route around the exact number the plan sells, and the hub would be trusting a
+# client it is supposed to be shaping. Same reasoning as the free UDP listener
+# at 1:20; the number differs because the plan does.
+apply_tc_now 8449 "1:50" "25mbit"
 
 # ── Create systemd services for reboot persistence ──
 #
-# Unit names: `tc-eco-cap.service` (8443), `tc-eco-udp-cap.service` (8447) and
+# Unit names: `tc-eco-cap.service` (8443), `tc-eco-udp-cap.service` (8447),
+# `tc-budget-cap.service` (8448), `tc-budget-udp-cap.service` (8449) and
 # `tc-strike-cap.service` (8445). The retired `tc-stealth-cap.service` is NOT
 # recreated here — but note `create_tc_service` is skip-if-exists, so an
 # upgraded box keeps its old unit until a human removes it.
@@ -220,6 +245,12 @@ apply_tc_now 8445 "1:30" "100mbit"
 # oneshot is ordered against the listener, not the reverse.)
 create_tc_service "eco"     "1:10" "1mbit"   8443 "shadowsocks-eco.service"
 create_tc_service "eco-udp" "1:20" "1mbit"   8447 "sing-box-uot-eco.service"
+
+# Budget's two units, same shape. Each names the listener it shapes, so a reboot
+# cannot apply the cap after the traffic has already started flowing through an
+# unshaped port.
+create_tc_service "budget"     "1:40" "25mbit" 8448 "shadowsocks-budget.service"
+create_tc_service "budget-udp" "1:50" "25mbit" 8449 "sing-box-uot-budget.service"
 
 # The PAID UDP port is deliberately left unshaped here, and this comment exists
 # so the asymmetry is not "fixed" by a later reader: the paid plan is sold on
@@ -232,6 +263,8 @@ create_tc_service "strike"  "1:30" "100mbit" 8445 "shadowsocks-strike.service"
 systemctl daemon-reload
 systemctl enable tc-eco-cap.service 2>/dev/null || warn "Could not enable tc-eco-cap.service"
 systemctl enable tc-eco-udp-cap.service 2>/dev/null || warn "Could not enable tc-eco-udp-cap.service"
+systemctl enable tc-budget-cap.service 2>/dev/null || warn "Could not enable tc-budget-cap.service"
+systemctl enable tc-budget-udp-cap.service 2>/dev/null || warn "Could not enable tc-budget-udp-cap.service"
 systemctl enable tc-strike-cap.service 2>/dev/null || warn "Could not enable tc-strike-cap.service"
 
 # Retire the Stealth cap unit if this box still has one. Best-effort and
@@ -265,15 +298,32 @@ tc -s class show dev "$IFACE" 2>/dev/null | head -20 || warn "No tc classes (nor
 #
 # The port is decoded from the match instead: "20fb" is 8443, "20ff" is 8447,
 # "20fd" is 8445, and the filter's flowid must be the class this module intended.
+#
+# Budget's two ports are here for the same reason as the free UDP one: they are
+# the ports whose shaping is a SECURITY property rather than a product one, so
+# "it applied" must be checked and not assumed. 0x2100 is 8448 and 0x2101 is
+# 8449 — written as the hex `tc` prints, because a decimal port in this loop
+# would silently never match and the check would cry wolf forever.
 FILTERS="$(tc filter show dev "$IFACE" parent 1: 2>/dev/null || true)"
-for pair in "8443:20fb:1:10" "8447:20ff:1:20" "8445:20fd:1:30"; do
+for pair in "8443:20fb:1:10" "8447:20ff:1:20" "8445:20fd:1:30" "8448:2100:1:40" "8449:2101:1:50"; do
     fport="${pair%%:*}"; rest="${pair#*:}"
     fhex="${rest%%:*}"; fclass="${rest#*:}"
     if printf '%s' "$FILTERS" | grep -qi "match ${fhex}0000/ffff0000" \
        && printf '%s' "$FILTERS" | grep -qi "flowid ${fclass}"; then
         log "✓ Filter for port ${fport} → class ${fclass} is active"
     else
-        warn "Filter for port ${fport} (class ${fclass}) NOT found — run: systemctl restart tc-eco-cap.service"
+        # Name the unit that OWNS this class, derived from the pair above rather
+        # than assumed. The old message told every operator to restart
+        # `tc-eco-cap.service`, which is wrong for four of the five ports and
+        # would have been actively misleading on the two security-relevant ones.
+        _owner=eco
+        case "$fclass" in
+            1:20) _owner=eco-udp ;;
+            1:30) _owner=strike ;;
+            1:40) _owner=budget ;;
+            1:50) _owner=budget-udp ;;
+        esac
+        warn "Filter for port ${fport} (class ${fclass}) NOT found — run: systemctl restart tc-${_owner}-cap.service"
     fi
 done
 

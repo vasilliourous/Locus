@@ -8,8 +8,10 @@ import { activationRefusal } from '@/pages/connect-notice'
 import {
   locusActivate,
   locusCheckCode,
+  locusStatus,
   locusValidateCode,
   type ActivationResult,
+  type LocusStatus,
   type ValidateCodeResult,
 } from '@/services/locus'
 import { errorDetail } from '@/services/notice-service'
@@ -83,6 +85,20 @@ const ActivationScreen = ({ onActivated }: Props) => {
   // rewording it here would replace an action with a description.
   const { subscription } = useSubscription()
   const refusal = activationRefusal(subscription)
+
+  // One field, read once on mount, only to say whether the backup route is
+  // carrying this screen's requests. Deliberately not polled and not a second
+  // state system: the screen's job is the code, and this is a caption.
+  const [status, setStatus] = useState<LocusStatus | null>(null)
+  useEffect(() => {
+    let cancelled = false
+    void locusStatus().then((value) => {
+      if (!cancelled) setStatus(value)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   useEffect(() => {
     inputRef.current?.focus()
@@ -202,11 +218,11 @@ const ActivationScreen = ({ onActivated }: Props) => {
         // Locus constants directly.
         //
         // That is not only a styling choice. The document sets
-        // `body { color: var(--text-color) }`, which flips to `#ffffff` under a
-        // dark system scheme, and it once paired that with MUI's white default
-        // background: white text on white, so every label was invisible while
-        // present and correct in the DOM. Stating both colours makes the screen
-        // self-consistent by construction.
+        // `body { color: var(--text-color) }`, and pairing that with MUI's
+        // default background once made every label invisible while present and
+        // correct in the DOM. Stating the text colour and the page together makes
+        // the screen self-consistent by construction. The values are in
+        // `/COLOURS.md` §2.
         //
         // It is also the highest-value surface in the product: it is the first
         // thing a student sees, and the only screen a person who has not paid
@@ -247,6 +263,22 @@ const ActivationScreen = ({ onActivated }: Props) => {
         >
           Locus VPN
         </Typography>
+
+        {/* The maintenance tunnel, said plainly while it is carrying this
+            screen's own requests.
+
+            This screen makes the two hub calls that enrolment depends on, and on
+            a network that blocks the hub by name those calls travel through the
+            free-tier relay. Without a line saying so, the only visible effect is
+            that enrolment works — or, when it does not, that it fails with no
+            indication of which route was tried.
+            One line, from the backend's own verdict (`LocusStatus.bootstrapping`),
+            never inferred here. */}
+        {status?.bootstrapping && (
+          <Typography variant="caption" sx={{ mb: 2, color: LOCUS_COLORS.textSecondary }}>
+            Using the Locus backup route to reach the server.
+          </Typography>
+        )}
 
         {/* A refusal, said before anything else on the screen.
             A suspended or expired device lands here with no other explanation:

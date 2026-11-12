@@ -324,7 +324,7 @@ export const useConnection = (): ConnectionState => {
       // the core reports ready, so `connected: true` here does imply ready; a false
       // is "the tunnel did not come up". The status re-read below re-settles the
       // phase from the backend either way, which is what promotes a success that
-      // somehow outran readiness to `connecting` rather than a premature green.
+      // somehow outran readiness to `connecting` rather than a premature connected.
       setPhase(result.connected ? 'connected' : 'disconnected')
       // Re-read so the tier, subscription and core state shown are the ones the
       // backend now holds — and so a connect that returned `connected: true` but is

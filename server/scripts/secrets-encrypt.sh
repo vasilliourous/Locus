@@ -88,12 +88,19 @@ B2_APPLICATION_KEY
 B2_BUCKET
 ECO_PASS
 STRIKE_PASS
+BUDGET_PASS
 PB_ADMIN_EMAIL
 PB_ADMIN_PASS
 LOCUS_UPDATE_KEY_B64
 VPS_PW
 "
-# STEALTH_PASS is optional now (retired tier) but must still be a real value if
+# BUDGET_PASS joined the required list on 2026-11-12: Budget is a SOLD plan
+# (docs/business/04-tiers.md §4.2.5), so a bundle without its key would deploy a
+# tier that cannot be served. This is the same reasoning ACTIVATION_TUNNEL_KEY
+# got its own entry for — a key absent from the bundle becomes a surprise on the
+# VPS, not at this prompt.
+#
+# STEALTH_PASS stays OPTIONAL (retired tier) but must still be a real value if
 # present, so an upgraded host does not fork. ACTIVATION_TUNNEL_KEY is reported
 # separately below because its absence is survivable-but-wrong, not fatal.
 
@@ -124,7 +131,7 @@ EOF
 
 # SS2022 keys are base64 of 16/32 bytes; a passphrase-shaped or truncated value
 # produces a config that validates and then refuses every client at connect time.
-for tier in ECO_PASS STRIKE_PASS STEALTH_PASS; do
+for tier in ECO_PASS STRIKE_PASS STEALTH_PASS BUDGET_PASS; do
     line="$(grep -E "^${tier}=" "$IN_FILE" 2>/dev/null | tail -n1 || true)"
     [ -n "$line" ] || continue
     val="${line#*=}"

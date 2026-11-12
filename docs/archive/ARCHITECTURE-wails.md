@@ -341,9 +341,9 @@ intercept close → hide). An **optional** tray icon is available behind
 it is off by default because it runs native code that must be validated per OS.
 The background colour is set natively to avoid a white flash while the WebView loads.
 
-**Dark-green theme** (`#06130C` background, Locus green `#2EA86A` accent — see
-`archive/UI-AESTHETICS.md`). No technical protocol names visible — just "Connected" /
-"Disconnected" with a tier badge (Eco/Stealth/Strike).
+**A dark theme** (the values lived in `archive/UI-AESTHETICS.md` and are now
+superseded; `/COLOURS.md` owns colour). No technical protocol names visible —
+just "Connected" / "Disconnected" with a tier badge (Eco/Stealth/Strike).
 
 The old Fyne GUI was removed in the Wails migration (see git history); the
 pre-migration client lives in `v4/` (reference only).
@@ -525,7 +525,7 @@ user must right-click → Open or run `xattr -cr` (see `archive/CLIENT-GUIDE.md`
 | `archive/IMPLEMENT.md` | Phased implementation plan (historical) |
 | `GAMING-UDP.md` | **Planned:** sing-box server + UDP-over-TCP change plan for gaming on hostile-UDP networks |
 | `archive/WAILS-MIGRATION.md` | Fyne → Wails migration history & build notes |
-| `archive/UI-AESTHETICS.md` | Visual design spec (colors, layout, icons) |
+| `archive/UI-AESTHETICS.md` | Visual design spec (layout, icons; colour removed — see `/COLOURS.md`) |
 | `FIXES.md` | Issues discovered & fixes applied (dated log) |
 | `archive/` | Retired-client docs moved here: build guide, backend API, migration history, aesthetics |
 | `history/` | Curated pre-V5 research archive (business model, N4L threat analysis) — reference only |

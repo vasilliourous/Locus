@@ -39,6 +39,34 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     println!("cargo:rerun-if-env-changed=LOCUS_ACTIVATION_TUNNEL_KEY");
 
+    // ── The free tier's key, for the maintenance tunnel ──
+    //
+    // WHY THIS IS A SECOND SECRET AND NOT THE ONE ABOVE. `ACTIVATION_TUNNEL_KEY`
+    // authenticates to the hub's `:8453` listener, whose forwarder admits exactly
+    // three paths (`ALLOWED` in `server/modules/09-activation-tunnel.sh:196`) and
+    // refuses everything else with an empty 403. It is a bootstrap for ENROLMENT,
+    // not a relay: asking it to carry a plan's TCP stream to `:8445` is precisely
+    // what its allowlist exists to prevent. `ECO_PASS` authenticates to `:8443`
+    // (`server/modules/02-shadowsocks.sh:279`), which is a general relay, and it
+    // is the credential the maintenance tunnel must carry.
+    //
+    // Same shape as the key above, for the same reason it is `option_env!` in the
+    // source rather than `env!`: a build without it must still produce a working
+    // client that simply has no maintenance tunnel, never a broken build.
+    match std::env::var("LOCUS_FREE_TIER_KEY") {
+        Ok(key) if !key.is_empty() => {
+            // No `_PRESENT` companion, unlike the activation key above: that one
+            // exists because `build_stamp()` renders it for a support log and the
+            // *absence* of the tunnel is invisible in the artifact. Here a missing
+            // key is visible where it matters — `Bootstrap::maintenance()` returns
+            // `None` and the routing rule takes the direct branch — so a second
+            // constant would have no reader.
+            println!("cargo:rustc-env=LOCUS_FREE_TIER_KEY={key}");
+        }
+        _ => {}
+    }
+    println!("cargo:rerun-if-env-changed=LOCUS_FREE_TIER_KEY");
+
     // ── The bootstrap ADDRESS ──
     //
     // The compiled fallback the tunnel dials when the hub's name cannot be used

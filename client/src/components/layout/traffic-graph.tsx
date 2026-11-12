@@ -1,4 +1,4 @@
-import { useTheme } from '@mui/material'
+import { alpha, useTheme } from '@mui/material'
 import { useEffect, useImperativeHandle, useRef, type Ref } from 'react'
 import { Traffic } from 'tauri-plugin-mihomo-api'
 
@@ -97,14 +97,14 @@ export function TrafficGraph({ ref }: { ref?: Ref<TrafficRef> }) {
 
     if (!context) return
 
-    const { primary, secondary, divider } = palette
-    const refLineColor = divider || 'rgba(0, 0, 0, 0.12)'
-    // Fallbacks used only if the palette is missing a colour entirely, which
-    // should not happen — but the previous values were Clash Verge Rev's purple
-    // (`#5b5c9d`) and magenta, so a graph drawn without a palette would have
-    // appeared in another product's colours. Locus's green, and its secondary.
-    const upLineColor = secondary.main || '#46c186'
-    const downLineColor = primary.main || '#2ea86a'
+    const { primary, secondary, divider, text } = palette
+    // A palette with a missing role should not happen. The fallbacks keep the
+    // graph drawable rather than throwing, and read the same roles the palette
+    // would — so a graph drawn without one is dimmer, never a different colour.
+    const refLineColor =
+      divider || alpha(text.primary, 0.12)
+    const upLineColor = secondary.main || alpha(text.primary, 0.35)
+    const downLineColor = primary.main || alpha(text.primary, 0.55)
 
     const cancelPendingDraw = () => {
       if (frameTimer !== null) {

@@ -308,11 +308,14 @@ class as `download_* → update_*`.)
 | Tier | Transport | Notes |
 |---|---|---|
 | free | Shadowsocks TCP | the free plan (port 8443). The `eco` seed row was **removed 2026-10-06**: the live hub held no code carrying it, and a duplicate row on one port renders in the console as a second plan. The on-box names (`shadowsocks-eco`, `tc-eco-cap`, `ECO_PASS`) are infrastructure, not a tier. See `docs/business/04-tiers.md` §4.1 and §4.5 |
-| strike | + UDP over TCP (UoT) | the paid plan (port 8445), customer-facing name **Full**. Gated on `udp_relay` **and** `uot_port > 0` |
+| budget | + UDP over TCP (UoT) | the middle plan (port 8448, UoT 8449), customer-facing name **Budget**, added 2026-11-12 (`docs/business/04-tiers.md` §4.2.5). Every plan carries UDP now; this row's listener is its own, because a sing-box inbound holds one password |
+| strike | + UDP over TCP (UoT) | the paid plan (port 8445, UoT 8446), customer-facing name **Full**. Gated on `udp_relay` **and** `uot_port > 0` |
 
 > **`stealth` is deliberately absent from this table, not listed as retired.**
 > Instructions for a dead tier are how its PSK gets re-committed; nothing in the
-> client or the hub resolves `stealth`.
+> client or the hub resolves `stealth`. Its absence is *not* a statement that the
+> paid ladder has one rung — `budget` above is a paid rung added afterwards, on
+> its own ports and credential, and it reuses none of the retired vocabulary.
 
 The GC rule for `udp_relay`: it is only meaningful when `uot_port > 0`; an operator
 toggling one without the other is editing a half-configured tier (noted in

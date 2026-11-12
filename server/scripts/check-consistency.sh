@@ -1235,6 +1235,46 @@ def free_tier():
     # carries no meaning, so comparing by position would fail on a harmless
     # reorder. Compare as a set.
     return {"port": int(port), "cap": cap, "tier_rows": sorted(rows)}
+def budget_tier():
+    """Budget's port, cap, UoT port and row names, from the tree.
+
+    Same shape and same reasoning as `free_tier()`/`paid_tier()`, with two
+    differences that are deliberate:
+
+    * The CAP and the TCP PORT come from the applied class in `04-tc.sh`; the
+      UoT port comes from the `write_uot_config` call in `02-shadowsocks.sh`.
+      Both files, because a tier is two listeners and each has its own file that
+      creates it.
+    * The row name is read from `seed-pb.py`'s loop, where the row, its password
+      and its port appear together on one line — so the three cannot be checked
+      independently and quietly disagree.
+
+    8444 (the retired stealth slot) is asserted NOWHERE here on purpose; the
+    fact that Budget is not on it is carried by §27's negative, not by this
+    recomputer.
+
+    Returns a dict matching the TOML shape, or None if either file has moved.
+    """
+    tc = read("server/modules/04-tc.sh")
+    m = re.search(r'apply_tc_now\s+8448\s+"[0-9:]+"\s+"([0-9a-z]+)"', tc)
+    if not m:
+        return None
+    cap = m.group(1)
+
+    ss = read("server/modules/02-shadowsocks.sh")
+    u = re.search(r'write_uot_config\s+"budget"\s+"\$UOT_PORT_BUDGET"', ss)
+    # The default is the number that matters; resolve it from the assignment so
+    # this cannot agree with a stale literal in `state.toml` by coincidence.
+    d = re.search(r'UOT_PORT_BUDGET="\$\{UOT_PORT_BUDGET:-(\d+)\}"', ss)
+    if not u or not d:
+        return None
+    uot_port = int(d.group(1))
+
+    seed = read("server/scripts/seed-pb.py")
+    rows = re.findall(r'\("(budget)",\s*"BUDGET_PASS",\s*8448\)', seed)
+    if not rows:
+        return None
+    return {"port": 8448, "uot_port": uot_port, "cap": cap, "tier_rows": sorted(rows)}
 def paid_tier():
     """The paid tier's port, cap and row names, from the tree.
 
@@ -1363,6 +1403,7 @@ CHECKERS = {
     "licence.client":       licence_client,
     "client.theme_ids":     theme_ids,
     "tiers.free":           free_tier,
+    "tiers.budget":         budget_tier,
     "tiers.paid":           paid_tier,
     "site.domain":           landing_domain,
     "site.document_root":    landing_docroot,
@@ -3148,7 +3189,11 @@ else
     # (e) The retired tier must not be SEEDED. Its row may survive in a live DB
     #     (field codes may carry the string), but a fresh seed must not recreate
     #     it — that is how a retired tier silently becomes sellable again.
-    if grep -Eq '\("stealth\",[[:space:]]*"STEALTH_PASS"' "$SEED"; then
+    # `"stealth"` — the quote is NOT escaped. The old `\"stealth\"` made GNU grep
+    # emit `warning: stray \ before "` on stderr on every run: harmless to the
+    # result, and harmful to the habit of reading this output, which is the thing
+    # §27's own note says this script exists to protect.
+    if grep -Eq '("stealth",[[:space:]]*"STEALTH_PASS"' "$SEED"; then
         bad "seed-pb.py still seeds a \`stealth\` row — the retired tier is sellable again on a fresh deploy"
     else
         ok "seed-pb.py seeds no retired \`stealth\` row"
@@ -3205,10 +3250,39 @@ else
         bad "seed-pb.py does NOT advertise UDP for every plan — the paid-only gate is back, and free users lose UDP silently"
     fi
 
-    if grep -Eq 'uot_port if t == "strike" else uot_port_free' "$SEED"; then
-        ok "seed-pb.py gives each plan its own uot_port (free -> ${UOT_FREE_PORT})"
+    # WAS A PIN ON ONE EXPRESSION, now a pin on the PROPERTY.
+    #
+    # The old check grepped the literal `uot_port if t == "strike" else
+    # uot_port_free`, which is the two-way conditional the free plan's UDP fix
+    # introduced. That expression is correct only while there are exactly two
+    # plans: a third would fall through to the `else` and be handed the FREE
+    # listener, so Budget clients would handshake against a listener holding
+    # ECO_PASS — TCP fine, every game silently dead. It was, as written, a check
+    # that made the hazard un-fixable: any restructure to support N plans had to
+    # break it first.
+    #
+    # The property that actually matters is negative as well as positive: the
+    # two-way conditional must be GONE, and each plan's port must come from its
+    # own variable. Both arms were observed failing — the second by reverting
+    # `seed-pb.py` to the two-way form, the first by leaving it in place after
+    # the mapping was added.
+    if grep -Eq 'uot_port if t == "strike"' "$SEED"; then
+        bad "seed-pb.py still selects uot_port with a two-way conditional — a third plan would be handed the free plan's listener"
     else
-        bad "seed-pb.py does not select a per-plan uot_port — one plan would be told to use the other's listener"
+        ok "seed-pb.py no longer selects uot_port with a two-way conditional"
+    fi
+
+    _uot_bad=""
+    for _pair in "free:uot_port_free" "strike:uot_port" "budget:uot_port_budget"; do
+        _plan="${_pair%%:*}"; _var="${_pair#*:}"
+        # The mapping literal must name the row and its variable together.
+        grep -Eq "\"${_plan}\":\s*${_var}" "$SEED" || _uot_bad="${_uot_bad} ${_plan}"
+    done
+    if [ -n "$_uot_bad" ]; then
+        bad "seed-pb.py's uot_port mapping does not give each plan its own listener:${_uot_bad}"
+        bad "  expected a dict entry per plan: \"free\": uot_port_free, \"strike\": uot_port, \"budget\": uot_port_budget"
+    else
+        ok "seed-pb.py gives each plan its own uot_port (free, strike, budget)"
     fi
 
     if grep -Eq "apply_tc_now[[:space:]]+${UOT_FREE_PORT}[[:space:]]+\"[0-9:]+\"[[:space:]]+\"1mbit\"" "$TC_MOD"; then
@@ -3334,6 +3408,145 @@ else
         else
             ok "README.md does not restate a retired tier's cap"
         fi
+    fi
+
+    # ── (j) BUDGET: THE THIRD TIER, HELD TO THE SAME STANDARD ──────────────
+    #
+    # WHY THIS EXISTS. §27(a)-(h) hold the ONE paid tier in agreement because
+    # Stealth and Strike drifted into being the same plan at two rates and
+    # nothing noticed. The 2026-11-12 change adds a second paid rung
+    # (docs/business/04-tiers.md §4.2.5), so the class of defect §27 exists for
+    # returns with it — and the specific failure here is quieter than the old
+    # one: a Budget that shares Full's endpoint works perfectly for anyone whose
+    # traffic never touches it, and is only wrong where it costs money.
+    #
+    # WHAT "AGREES" MEANS FOR A TIER. Five surfaces describe this endpoint, in
+    # four vocabularies, and each pair can disagree silently:
+    #
+    #   04-tc.sh (cap + class, twice: applied and reboot)
+    #     ↕ 02-shadowsocks.sh (the listener's port and credential)
+    #     ↕ seed-pb.py       (the row name and the port it advertises)
+    #     ↕ 08-firewall.sh   (whether the advertised port is admitted)
+    #     ↕ Codes.vue / _theme.tsx / tier-badge.tsx (whether it is sellable and
+    #       how it is labelled)
+    #
+    # EVERY ASSERTION BELOW WAS OBSERVED FAILING FIRST, by mutating the tree to
+    # each defect and re-running: the cap, the reboot unit, the seed row, the
+    # firewall rule, the console list, the colour and the label.
+    BUDGET_PORT=8448
+    BUDGET_CAP=25mbit
+    BUDGET_ROW=budget
+    BUDGET_UOT_PORT=8449
+    THEME_TSX="$REPO/client/src/pages/_theme.tsx"
+    BADGE_TSX="$REPO/client/src/components/connection/tier-badge.tsx"
+
+    # (j1) The applied cap, anchored on the APPLY LINE so a comment cannot
+    #      satisfy it — §27(a)'s lesson, one tier over.
+    if grep -Eq "apply_tc_now[[:space:]]+${BUDGET_PORT}[[:space:]]+\"[0-9:]+\"[[:space:]]+\"${BUDGET_CAP}\"" "$TC_MOD"; then
+        ok "04-tc.sh caps Budget's TCP port (${BUDGET_PORT}) at ${BUDGET_CAP}"
+    else
+        bad "04-tc.sh does NOT cap port ${BUDGET_PORT} at ${BUDGET_CAP} (expected: apply_tc_now ${BUDGET_PORT} \"1:40\" \"${BUDGET_CAP}\")"
+    fi
+
+    # (j2) SHAPED UDP. The opposite assertion from the paid port at §27(h), and
+    #      the asymmetry is the point: Full is sold on latency so its 8446 is
+    #      deliberately unshaped; Budget is sold on a rate, so an unshaped
+    #      listener is a route around the whole product. A guard that "tidied"
+    #      the two into agreement would remove the plan's only server-side bound.
+    if grep -Eq "apply_tc_now[[:space:]]+${BUDGET_UOT_PORT}[[:space:]]+\"[0-9:]+\"[[:space:]]+\"${BUDGET_CAP}\"" "$TC_MOD"; then
+        ok "04-tc.sh caps Budget's UDP port (${BUDGET_UOT_PORT}) at ${BUDGET_CAP}, server-side"
+    else
+        bad "04-tc.sh does NOT cap Budget's UDP port (${BUDGET_UOT_PORT}) — its UDP would be bounded only by the client, which a modified client controls"
+    fi
+
+    # (j3) BOTH reboot units. A class that exists now and disappears at boot is
+    #      the §23(b) defect: the running system says one thing, the reboot
+    #      another, and nobody finds out until a reboot.
+    for _pair in "${BUDGET_ROW}:${BUDGET_PORT}" "${BUDGET_ROW}-udp:${BUDGET_UOT_PORT}"; do
+        _unit="${_pair%%:*}"; _port="${_pair#*:}"
+        if grep -Eq "create_tc_service[[:space:]]+\"${_unit}\"[[:space:]]+\"[0-9:]+\"[[:space:]]+\"${BUDGET_CAP}\"[[:space:]]+${_port}" "$TC_MOD"; then
+            ok "04-tc.sh's tc-${_unit}-cap.service uses the same ${BUDGET_CAP} rate"
+        else
+            bad "04-tc.sh's tc-${_unit}-cap.service rate disagrees with the applied cap (or is missing)"
+        fi
+    done
+
+    # (j4) The seed row, with the ROW, its PASSWORD and its PORT asserted
+    #      together — a row on the wrong port serves a listener it has no key
+    #      for, which is §27(h)'s "one plan told to use the other's listener".
+    if grep -Eq "\(\"${BUDGET_ROW}\",[[:space:]]*\"BUDGET_PASS\",[[:space:]]*${BUDGET_PORT}\)" "$SEED"; then
+        ok "seed-pb.py seeds the \`${BUDGET_ROW}\` row on port ${BUDGET_PORT} with its own key"
+    else
+        bad "seed-pb.py has no \`${BUDGET_ROW}\` row on port ${BUDGET_PORT} — a Budget code could not resolve"
+    fi
+
+    # (j5) The listener the hub will advertise. Asserted at BOTH ends: the
+    #      config is written, and its port is the one the seed will hand out.
+    # The `\$` here is a LITERAL dollar (the file contains a shell variable
+    # reference, not its expansion), written in single quotes so the shell does
+    # not eat it before grep sees it. The first draft double-escaped it and
+    # matched nothing — a guard that reported BAD on a correct tree, which is
+    # the failure mode that teaches an operator to skim this output.
+    if grep -Eq 'write_uot_config[[:space:]]+"budget"[[:space:]]+"\$UOT_PORT_BUDGET"' "$REPO/server/modules/02-shadowsocks.sh" \
+       && grep -Eq "UOT_PORT_BUDGET:-${BUDGET_UOT_PORT}" "$REPO/server/modules/02-shadowsocks.sh"; then
+        ok "02-shadowsocks.sh creates Budget's UoT listener on :${BUDGET_UOT_PORT}"
+    else
+        bad "02-shadowsocks.sh does not create a \`budget\` UoT listener on :${BUDGET_UOT_PORT} — the hub would advertise a port nothing answers"
+    fi
+
+    # (j6) The firewall admits it. Anchored on `ufw allow`, because a bare mention
+    #      of the port in a log line made §27(h)'s first draft pass with the rules
+    #      deleted — a check that cannot fail.
+    if [ -f "$FW" ]; then
+        if grep -Eq '^[[:space:]]*ufw allow[[:space:]]+"\$\{BUDGET_PORT:-8448\}"/tcp' "$FW"; then
+            ok "08-firewall.sh opens Budget's TCP port (${BUDGET_PORT})"
+        else
+            bad "08-firewall.sh does not open Budget's TCP port — the hub would serve a tier nothing can reach"
+        fi
+        if grep -Eq '^[[:space:]]*ufw allow[[:space:]]+"\$\{UOT_PORT_BUDGET:-8449\}"/udp' "$FW"; then
+            ok "08-firewall.sh opens Budget's UDP port (${BUDGET_UOT_PORT})"
+        else
+            bad "08-firewall.sh does not open Budget's UDP port with ufw allow — the hub would advertise it and refuse it"
+        fi
+    fi
+
+    # (j7) The THREE CLIENT LISTS, which is the check that would have caught the
+    #      original Stealth/Strike divergence years earlier. A tier can be live
+    #      on the hub and still be unsellable (no console entry) or unbranded
+    #      (no colour). Neither is an error anywhere; both are invisible.
+    if [ -f "$CONSOLE_CODES" ]; then
+        if grep -Eq "ref<string\[\]>\(\[[^]]*'${BUDGET_ROW}'" "$CONSOLE_CODES"; then
+            ok "the console's tier placeholder offers the Budget row"
+        else
+            bad "the console's tier placeholder does not name '${BUDGET_ROW}' — the plan would be live on the hub and un-mintable"
+        fi
+    fi
+    if [ -f "$THEME_TSX" ]; then
+        if grep -Eq "^[[:space:]]*${BUDGET_ROW}:[[:space:]]*\{[[:space:]]*color:" "$THEME_TSX"; then
+            ok "TIER_COLORS has an entry for the Budget wire name"
+        else
+            bad "TIER_COLORS has no '${BUDGET_ROW}' entry — every Budget student would see the generic fallback badge"
+        fi
+    fi
+    if [ -f "$BADGE_TSX" ]; then
+        # The label mapping, not merely the word: `budget` must appear in an arm
+        # that produces a label for a student, so a bare mention in the doc
+        # comment above cannot satisfy it.
+        if grep -Eq "key === '${BUDGET_ROW}'" "$BADGE_TSX"; then
+            ok "tier-badge.tsx maps the Budget wire name to a student-visible label"
+        else
+            bad "tier-badge.tsx has no label arm for '${BUDGET_ROW}' — the badge would show the raw wire name"
+        fi
+    fi
+
+    # (j8) THE NEGATIVE, and the one that protects the fleet: Budget must not be
+    #      on the retired Stealth port, and its credential must not be reused
+    #      anywhere. Both are one-line edits away and neither is visible.
+    if grep -Eq "\(\"${BUDGET_ROW}\",[[:space:]]*\"BUDGET_PASS\",[[:space:]]*8444\)" "$SEED" \
+       || grep -Eq "write_config[[:space:]]+\"${BUDGET_ROW}\"[[:space:]]+8444" "$REPO/server/modules/02-shadowsocks.sh"; then
+        bad "Budget is on port 8444 — the retired Stealth slot. Its unit and config survive a redeploy (skip-if-exists), so a Budget listener there would collide with them or inherit their old password"
+    else
+        ok "Budget is not on the retired Stealth port (8444 stays dark)"
     fi
 fi
 
@@ -6281,6 +6494,142 @@ if grep -q 'Self::ResetDuringHandshake | Self::Refused | Self::Dns' \
 else
     bad "Failure::Dns is not retryable over the tunnel — the address candidate is never dialled"
     bad "  and a DNS-filtered school network still has no path to enrolment."
+fi
+
+echo
+echo "════════════════════════════════════════════════════════════"
+echo "49. Colour is written down in exactly one place"
+
+# ── WHY THIS GUARD EXISTS ──
+#
+# Colour is the fact class this project has rewritten most often and recorded
+# worst. Three documents were carrying palettes as though they were current:
+#
+#   * `THEMES.md` held the pre-3.3.0 palette, and a light-vs-dark accent argument
+#     that stopped being true when the values changed under it;
+#   * `client/docs/FRONTEND.md` listed ten themes and named eight that had never
+#     existed in the registry;
+#   * `docs/archive/UI-AESTHETICS.md` was cited as "the spec" by the two above,
+#     while describing a client that had been retired and a palette that had been
+#     replaced twice.
+#
+# None of those could fail. A hex value in a sentence is not recomputable, so it
+# drifts in silence — the defect `CLAIMS.md` §2 exists to prevent, in the one
+# domain where it kept being granted an exception because "it's design".
+#
+# The rule: `/COLOURS.md` is the only file allowed to state a colour. Everything
+# else links to it. This check makes that a property rather than a habit.
+#
+# Deliberately NOT flagged, because a false positive trains people to ignore the
+# check: a `#`-prefixed value with no colour meaning (a git short hash, a GitHub
+# issue number such as #13518, a shell `${line#BAD}`); the words "colour" and
+# "palette" in prose, which is how a document LINKS here; `docs/history/`, which
+# is cryptography and hashes; and `legacy/`, a retired client never built.
+# ─────────────────────────────────────────────────────────────
+COLOUR_HOME="COLOURS.md"
+
+# THE ALLOWLIST, and why it is not only the doc.
+#
+# A palette has to be expressible in code, so the modules `/COLOURS.md` §2-§8
+# name hold the literal and the doc describes it. That pair is the whole
+# allowance. Everything else - every document, every comment, every component -
+# links instead of stating.
+#
+# This list is asserted, not trusted: each path must exist, so a renamed palette
+# module fails here rather than silently widening the allowlist to nothing.
+COLOUR_SOURCES="
+client/src/pages/_theme.tsx
+client/src/pages/_themes.ts
+client/src/index.html
+client/src/assets/styles/index.scss
+client/src-tauri/src/utils/resolve/window.rs
+server/site/style.css
+server/console/src/styles.css
+"
+if [ -f "$REPO/$COLOUR_HOME" ]; then
+    ok "$COLOUR_HOME exists at the workspace root"
+else
+    bad "$COLOUR_HOME is missing - colour has no home, and this guard has nothing to allow"
+fi
+for src in $COLOUR_SOURCES; do
+    if [ -f "$REPO/$src" ]; then
+        ok "palette source present: $src"
+    else
+        bad "palette source named by $COLOUR_HOME is missing: $src"
+        bad "  Either the file moved (update the allowlist and the doc), or it was"
+        bad "  deleted (then the palette it held is gone and the doc is describing air)."
+    fi
+done
+
+colour_offenders=$(cd "$REPO" && LC_ALL=C python3 - "$COLOUR_SOURCES" <<'PYCOLOUR'
+import os, re, sys
+
+HOME = 'COLOURS.md'
+ALLOWED = set(sys.argv[1].split())
+
+# A colour literal: a `#`-prefixed hex value, or a functional notation with a
+# numeric argument. The lookbehind keeps `${line#BAD}` and `&#x...` out.
+HEX = re.compile(r'(?<![\w&$#])#(?:[0-9a-fA-F]{8}|[0-9a-fA-F]{6}|[0-9a-fA-F]{3})(?![0-9a-fA-F])')
+FN = re.compile(r'\b(?:rgba?|hsla?)\s*\(\s*[0-9]')
+
+ROOTS = ['docs', 'client/docs', 'client/src', 'client/src-tauri/src',
+         'server/site', 'server/console/src', 'server/scripts']
+SKIP_DIRS = {'node_modules', 'target', 'dist', '.git', 'legacy'}
+TEXT_EXT = {'.md', '.ts', '.tsx', '.rs', '.sh', '.css', '.scss', '.html', '.json', '.py', '.vue'}
+
+# A `#` followed by six hex characters is ALSO how a commit sha and an issue
+# number are written. The word test separates a palette entry from a reference:
+# a colour is written near a colour word, or after a declaration separator.
+# `#13518` in a sentence about CI runners has neither.
+NEAR = re.compile(r'\b(colou?r|palette|accent|background|foreground|fill|stroke|border|tint|shade|hex)\b', re.I)
+DECL = re.compile(r'^\s*(?:--?[\w-]+|[\w-]+)\s*[:=]\s*')
+
+offenders = []
+
+for root in ROOTS:
+    if not os.path.isdir(root):
+        continue
+    for dirpath, dirs, files in os.walk(root):
+        dirs[:] = [d for d in dirs if d not in SKIP_DIRS]
+        for fn in files:
+            if os.path.splitext(fn)[1] not in TEXT_EXT:
+                continue
+            path = os.path.normpath(os.path.join(dirpath, fn)).replace(os.sep, '/')
+            if path == HOME or path in ALLOWED or path.startswith('docs/history/'):
+                continue
+            try:
+                text = open(path, encoding='utf-8', errors='replace').read()
+            except OSError:
+                continue
+            for n, line in enumerate(text.splitlines(), 1):
+                m = HEX.search(line)
+                if m and (NEAR.search(line) or DECL.search(line)):
+                    offenders.append('%s:%d\t%s' % (path, n, m.group(0)))
+                    continue
+                f = FN.search(line)
+                if f:
+                    offenders.append('%s:%d\t%s' % (path, n, f.group(0).strip()))
+
+print('\n'.join(offenders))
+PYCOLOUR
+)
+
+if [ -z "$colour_offenders" ]; then
+    ok "no colour literal outside ${COLOUR_HOME} across docs and the client/server source trees"
+else
+    bad "a colour value is written outside ${COLOUR_HOME}:"
+    printf '%s\n' "$colour_offenders" | head -25 | sed 's/^/        /' >&2
+    bad "  ${COLOUR_HOME} is the single home for every colour. State the value there, and"
+    bad "  put a link to it where the value was."
+fi
+
+# The purge must stay done. The archived spec is the one document that has
+# previously been cited as an authority on colour, so assert it carries none.
+if grep -qE '#[0-9a-fA-F]{6}|rgba?\(' "$REPO/docs/archive/UI-AESTHETICS.md" 2>/dev/null; then
+    bad "docs/archive/UI-AESTHETICS.md has grown a colour value again"
+    bad "  That document is cited as a design authority; a value in it is a second home."
+else
+    ok "the archived design spec carries no colour value"
 fi
 
 echo

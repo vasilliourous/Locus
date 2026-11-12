@@ -133,10 +133,16 @@ whale.txt
 # file — the public key belongs in tauri.conf.json, the private key in CI
 # secrets and offline custody.
 .locus-keys/
+.icon-backup/
 
 # Secrets (encrypted is fine; plaintext never)
 .secrets.env
 age-key.txt
+
+# Local backups taken during the 2026-11-11 monochrome reset. The pre-reset icon
+# binaries and palette files, kept so the change can be reverted on one machine
+# without a rebuild. They describe a colour design that no longer exists, and
+# /COLOURS.md is the authority — so they must not be committed.
 
 # Clash Verge client profiles. These embed the tier's shadowsocks password in
 # cleartext, so they must never be committed.

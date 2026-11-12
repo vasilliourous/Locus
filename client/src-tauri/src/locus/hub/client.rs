@@ -623,6 +623,86 @@ pub async fn client_refusing_redirects(hub: &str, timeout: Timeout) -> HubClient
     client_with(hub, timeout, Redirects::Refuse).await
 }
 
+/// A client that sends its requests through `proxy`, or the ordinary client when
+/// it is `None`.
+///
+/// # Why this exists
+///
+/// Every other client here sets `.no_proxy()` ([`platform_client`],
+/// [`bundled_roots_client`]), deliberately: the hub is normally reached directly,
+/// because routing activation through the tunnel would make activation depend on
+/// the Core that activation is supposed to start. On a network that blocks the hub
+/// by name that reasoning inverts — direct cannot work at all — so the maintenance
+/// tunnel supplies a local SOCKS5 to dial instead.
+///
+/// # Why it is a sibling and not a parameter on the existing builders
+///
+/// The root-store selection and the probe cache are what must NOT be duplicated
+/// (see the module docs). Proxy support is orthogonal to them: the same selected
+/// client is rebuilt with a proxy attached. Keeping it adjacent means the store
+/// logic is untouched and the classifier is untouched.
+///
+/// `None` returns exactly what [`client`] returns, so a caller can pass its
+/// routing decision straight through without branching.
+pub async fn client_with_proxy(hub: &str, timeout: Timeout, proxy: Option<reqwest::Proxy>) -> HubClient {
+    let Some(proxy) = proxy else {
+        return client(hub, timeout).await;
+    };
+
+    // The store selection is NOT repeated here: it is reused by taking the
+    // ordinary client's verdict and rebuilding only the transport. A second
+    // probe would be a second policy, which is the divergence this module was
+    // built to remove.
+    let selected = client(hub, timeout).await;
+    match proxied_client(timeout, &proxy) {
+        Ok(client) => HubClient { client, diagnosis: selected.diagnosis().cloned() },
+        Err(error) => {
+            tracing::error!("locus hub client (proxied): {error:#}");
+            selected
+        }
+    }
+}
+
+/// Builds (once per proxy URL) a client that dials through `proxy`.
+///
+/// # Why it does not set `no_proxy`
+///
+/// `no_proxy()` clears the proxy list, which would discard the very proxy this
+/// function exists to install. Every other builder in this module sets it; this
+/// one must not, and that difference is the whole function.
+///
+/// # Why the cache is keyed on the proxy URL
+///
+/// The maintenance engine's loopback port changes every time it is restarted
+/// (a free port is picked per start, `free_loopback_port`), so a cache keyed only
+/// on the timeout would hand back a client pointing at a dead port.
+fn proxied_client(timeout: Timeout, proxy: &reqwest::Proxy) -> Result<&'static reqwest::Client> {
+    type Cache = OnceLock<std::sync::Mutex<std::collections::HashMap<String, &'static reqwest::Client>>>;
+    static CACHE: Cache = OnceLock::new();
+
+    // `Proxy` exposes no accessor for its URL, so the key is the debug form: it
+    // contains the proxy URL and nothing that changes per call.
+    let key = format!("{}|{:?}", timeout.seconds(), proxy);
+    if let Some(client) = CACHE.get_or_init(Default::default).lock().ok().and_then(|c| c.get(&key).copied()) {
+        return Ok(client);
+    }
+
+    let client: &'static reqwest::Client = Box::leak(Box::new(
+        reqwest::Client::builder()
+            .timeout(timeout.seconds_public())
+            .pool_idle_timeout(HUB_POOL_IDLE)
+            .user_agent(concat!("Locus-Client/", env!("CARGO_PKG_VERSION")))
+            .redirect(Redirects::Follow.policy())
+            .proxy(proxy.clone())
+            .build()
+            .context("could not build the proxied hub HTTP client")?,
+    ));
+    if let Ok(mut cache) = CACHE.get_or_init(Default::default).lock() {
+        cache.insert(key, client);
+    }
+    Ok(client)
+}
+
 async fn client_with(hub: &str, timeout: Timeout, redirects: Redirects) -> HubClient {
     let primary = RootStore::primary();
     let primary_client = match client_for(primary, timeout, redirects) {

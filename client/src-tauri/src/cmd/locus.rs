@@ -96,7 +96,8 @@ pub struct LocusStatus {
     /// device, and a student who re-enters their code cannot tell whether the
     /// first attempt ever registered.
     pub stored_code_damaged: bool,
-    /// The tier name as the hub sent it (`free`/`eco`, or `strike`), when known.
+    /// The tier name as the hub sent it (`free`/`eco`, `budget`, or `strike`),
+    /// when known.
     /// This is the WIRE name, not the label the student reads — the frontend
     /// maps it in `tier-badge.tsx`, which is the single place that mapping
     /// lives, so the two can never disagree.
@@ -154,6 +155,14 @@ pub struct LocusStatus {
     /// "connected, but no traffic" instead of either claiming success or
     /// claiming the app is off. `false` whenever the core is not serving.
     pub core_up: bool,
+
+    /// Whether the maintenance tunnel is carrying this device's hub traffic.
+    ///
+    /// True when the session has decided to prefer the free-tier relay AND one is
+    /// warm — i.e. the state in which hub calls go through it. Reported so the
+    /// screen can say "getting ready" rather than "not connected" during the one
+    /// window where the app is genuinely working but the plan tunnel is not up.
+    pub bootstrapping: bool,
 
     /// The subscription state, already parsed — see [`SubscriptionStatus`].
     ///
@@ -505,6 +514,26 @@ pub async fn locus_status() -> LocusStatus {
     // command the UI polls at 750 ms while a connect settles.
     let readiness = CoreManager::global().observe_readiness().await;
 
+    // ── The maintenance tunnel's lifecycle ──
+    //
+    // This is the only hook that observes BOTH transitions. The connect loop sees
+    // readiness once and returns; `stop_core` sees a deliberate disconnect but not
+    // a tunnel that died on its own. This command is polled continuously, so it is
+    // where a transition can actually be noticed.
+    //
+    // Two branches, no state machine: the plan tunnel is carrying traffic, so stop
+    // the maintenance engine; or it is not, so make sure one is running. Both calls
+    // are idempotent, so a repeated poll costs an atomic read.
+    //
+    // TUN-down is OPPORTUNISTIC, not prompt: the idle poll is 15 s
+    // (`use-connection.ts:84`), and nothing auto-reconnects, so the tunnel is
+    // re-warmed on the next poll rather than at the instant it drops.
+    if readiness.is_ready() {
+        crate::locus::activation_tunnel::stop_maintenance().await;
+    } else {
+        crate::locus::activation_tunnel::warm_maintenance().await;
+    }
+
     // Read for the report, after readiness has been decided: `observe_readiness`
     // is what starts and feeds the stream, so reading it here means the field
     // describes the same observation the verdict above was reached from.
@@ -545,6 +574,12 @@ pub async fn locus_status() -> LocusStatus {
         connected: core_is_running(&crate::core::runstate::RUN_STATE.state()),
         ready: readiness.is_ready(),
         core_up: readiness.is_core_up(),
+        // Both halves: the session must PREFER the route (a direct call produced
+        // no response) and an engine must be warm to carry it. Reading only the
+        // preference would claim a route exists when the plan tunnel is up and the
+        // relay has been stopped.
+        bootstrapping: crate::locus::activation_tunnel::prefer_maintenance()
+            && crate::locus::activation_tunnel::maintenance_proxy().is_some(),
         subscription,
         last_confirmed_at: verge_data.last_heartbeat_ok,
         traffic_flowing,

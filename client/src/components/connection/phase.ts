@@ -44,7 +44,7 @@ import type { LocusStatus } from '@/services/locus'
  * having to guess: the transition is a fact the backend reports, so a fresh
  * app-open that finds a half-dialled core renders "connecting" honestly, and a
  * core that starts and then dies settles back to `disconnected` on the next poll
- * instead of leaving a green light on.
+ * instead of leaving a connected indicator on.
  */
 export type ConnectionPhase =
   /**
@@ -64,6 +64,18 @@ export type ConnectionPhase =
   | 'checking'
   /** Read, and this device holds no entitlement. The activation prompt applies. */
   | 'unactivated'
+  /**
+   * Activated, and the app is reaching the hub through the maintenance tunnel
+   * because nothing answered directly.
+   *
+   * Placed here, immediately after `unactivated`, on purpose: this state exists
+   * for the network in which direct does not work, and it is the state a device
+   * shows while enrolling. It is NOT `disconnected` (a route exists and works) and
+   * NOT `connecting` (that is the plan tunnel being dialled, and this precedes
+   * it). Only reported when the backend says a relay is actually carrying the
+   * call — `bootstrapping` requires both the preference and a warm engine.
+   */
+  | 'bootstrapping'
   | 'disconnected'
   | 'connecting'
   | 'disconnecting'
@@ -71,6 +83,10 @@ export type ConnectionPhase =
 
 export const phaseFromStatus = (status: LocusStatus): ConnectionPhase => {
   if (!status.activated) return 'unactivated'
+  // Before the connected/connecting split, because this is the state in which
+  // the PLAN tunnel is not what is carrying the app's own traffic. A device on a
+  // blocking network is working, just not through the plan yet.
+  if (status.bootstrapping) return 'bootstrapping'
   // Running but not yet able to carry a packet: this is the connecting window,
   // and it is a backend fact rather than a UI guess.
   //

@@ -98,7 +98,18 @@ log "✓ Cipher: ${SS_METHOD} (${SS_KEY_BYTES}-byte key)"
 # -- and then do the write-back described in SECRETS-MANAGEMENT.md, or the
 # fleet forks anyway.
 MISSING_SECRETS=""
-for v in ECO_PASS STEALTH_PASS STRIKE_PASS PB_ADMIN_PASS; do
+# ONE ENTRY PER PLAN THAT IS SERVED, PLUS THE ADMIN PASSWORD.
+#
+# `BUDGET_PASS` is required (since 2026-11-12) because Budget is a sold plan:
+# a deploy that cannot set its key must fail here, named, rather than at
+# `seed-pb.py` where the symptom would be a missing tier row.
+#
+# `STEALTH_PASS` was REMOVED from this list at the same time. Nothing has served
+# 8444 since the 2026-10-05 merge, so requiring its key kept a retired credential
+# in the set every deploy must supply — which is how a retired PSK ends up back
+# in a secrets file. It is still validated below when present, so an upgraded box
+# that carries it is unaffected.
+for v in ECO_PASS STRIKE_PASS BUDGET_PASS PB_ADMIN_PASS; do
     eval "val=\${${v}:-}"
     if [ -z "$val" ]; then
         MISSING_SECRETS="${MISSING_SECRETS} ${v}"
@@ -132,7 +143,7 @@ validate_tier_key() {
     fi
 }
 
-for v in ECO_PASS STEALTH_PASS STRIKE_PASS; do
+for v in ECO_PASS STEALTH_PASS STRIKE_PASS BUDGET_PASS; do
     eval "val=\${${v}:-}"
     [ -n "$val" ] && validate_tier_key "$v" "$val"
 done
@@ -166,7 +177,7 @@ SOFT_FAIL
        (setup.sh decrypts secrets.env.age and exports these.)
 
     2. Pass them explicitly:
-         ECO_PASS=... STEALTH_PASS=... STRIKE_PASS=... PB_ADMIN_PASS=... \
+         ECO_PASS=... STRIKE_PASS=... BUDGET_PASS=... PB_ADMIN_PASS=... \
            ssh root@host "/root/server/setup.sh"
 
     3. Deliberately generate fresh tier passwords for a TEST host:

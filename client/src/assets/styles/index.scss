@@ -16,17 +16,16 @@ body {
 // real document element at runtime.
 //
 // They still matter: this is what paints in the window between the stylesheet
-// loading and the theme hook running, so an upstream colour here is momentarily
-// visible on every launch. These were Clash Verge Rev's (a purple accent,
-// `#5b5c9d`, and grey surfaces); they are now Locus's, matching
-// `src/pages/_theme.tsx`. `tests/theme-colors.test.ts` fails if they drift.
+// loading and the theme hook running, so a wrong value here is momentarily
+// visible on every launch. They mirror `src/pages/_theme.tsx`; the values are
+// `/COLOURS.md` §2, and `tests/theme-colors.test.ts` fails if they drift.
 :root {
-  --primary-main: #4fbf84;
-  --text-primary: #e4ede7;
-  --selection-color: #16211c;
-  --scroller-color: #9bafa3;
-  --background-color: #0d1512;
-  --background-color-alpha: rgba(79, 191, 132, 0.1);
+  --primary-main: #C4C4C4;
+  --text-primary: #e8e8e8;
+  --selection-color: #202020;
+  --scroller-color: #a6a6a6;
+  --background-color: #141414;
+  --background-color-alpha: rgba(191, 195, 199, 0.1);
   --border-radius: 8px;
 }
 
@@ -51,12 +50,6 @@ body {
 body {
   overflow: hidden;
 }
-
-// @media (prefers-color-scheme: dark) {
-//   :root {
-//     background-color: rgba(18, 18, 18, 1);
-//   }
-// }
 
 .user-none {
   user-select: none;

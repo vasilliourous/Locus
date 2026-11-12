@@ -21,6 +21,7 @@ const status = (
   activated: boolean,
   connected: boolean,
   ready: boolean,
+  bootstrapping = false,
 ): LocusStatus => ({
   activated,
   // `phaseFromStatus` never reads this: a damaged sign-in is an Account-screen
@@ -34,6 +35,10 @@ const status = (
   // traffic still counts as up. `phaseFromStatus` does not read this field, but
   // the type requires it.
   coreUp: connected,
+  // Defaulted false: no route through the maintenance tunnel. The one test that
+  // needs it passes it explicitly, because "the relay is carrying this device's
+  // traffic" is a distinct fact from any of the three above.
+  bootstrapping,
   tier: null,
   deviceId: 'abc123',
   platform: 'windows-x86_64',
@@ -160,5 +165,37 @@ describe('connection phase from backend status', () => {
     const noNetwork: LocusStatus = status(true, true, false)
     expect(phaseFromStatus(noNetwork)).not.toBe('connected')
     expect(phaseFromStatus(noNetwork)).toBe('connecting')
+  })
+
+  /**
+   * The maintenance tunnel is its own phase, and it is NOT "disconnected".
+   *
+   * On a network that blocks the hub by name, the app reaches the hub through the
+   * free-tier relay before the plan tunnel can exist. Reporting that as
+   * `disconnected` would be a lie of the same shape as the old "connecting" bug:
+   * the student is on a route that works, and the screen says nothing is running.
+   */
+  test('a device on the maintenance route reads as bootstrapping, not disconnected', () => {
+    const relayed = status(true, false, false, true)
+    expect(phaseFromStatus(relayed)).toBe('bootstrapping')
+    expect(phaseFromStatus(relayed)).not.toBe('disconnected')
+  })
+
+  /**
+   * It outranks the connected/connecting split but never outranks `unactivated`:
+   * a device with no code is at the activation gate whatever route it has.
+   */
+  test('an unactivated device stays unactivated even when the relay is carrying it', () => {
+    expect(phaseFromStatus(status(false, false, false, true))).toBe('unactivated')
+  })
+
+  /**
+   * A ready plan tunnel is what the student is paying for, so once it carries
+   * traffic the phase says so. The backend clears `bootstrapping` when it stops
+   * the relay, and this pins that the screen follows the backend rather than
+   * keeping a remembered route.
+   */
+  test('a ready tunnel outranks the bootstrap phase once the backend clears it', () => {
+    expect(phaseFromStatus(status(true, true, true, false))).toBe('connected')
   })
 })

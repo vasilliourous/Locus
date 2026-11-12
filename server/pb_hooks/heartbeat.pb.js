@@ -298,7 +298,16 @@ routerAdd("POST", "/api/heartbeat", function(e) {
         //   3 = + the free tier's advisory allowance (free_allowance_mb /
         //       free_throttle_mbps). Purely additive: an older client ignores
         //       the keys, so the bump is for a human, not for a gate.
-        response.enforcement_version = 3;
+        //   4 = + the `budget` tier exists in tier_configs (2026-11-12). THIS HOOK
+        //       NEEDED NO CHANGE for it, and the bump is the record of that:
+        //       a tier is resolved by the `tier_configs` row its string names
+        //       (line ~187), so a third row is served with no code edit here.
+        //       Budget is UNMETERED on purpose, so it must NOT appear in the
+        //       free-allowance branch above — a paying plan that was sent
+        //       `free_allowance_mb` would render a data bar for a plan with no
+        //       allowance. Bumped so a deploy that predates the row is
+        //       distinguishable from one that has it.
+        response.enforcement_version = 4;
 
         return e.json(200, response);
     } catch(err) {

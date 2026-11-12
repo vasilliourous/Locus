@@ -139,6 +139,15 @@ const BOOTSTRAP_KEY: Option<&str> = option_env!("LOCUS_ACTIVATION_TUNNEL_KEY");
 /// Rendered by [`build_stamp`] and logged at startup.
 const BOOTSTRAP_KEY_PRESENT: &str = env!("LOCUS_ACTIVATION_TUNNEL_KEY_PRESENT");
 
+/// The hub's free-tier listener — the `free` plan's own shadowsocks port.
+///
+/// Mirrors `write_config "eco" 8443 "ECO_PASS" "tcp_only"` in
+/// `server/modules/02-shadowsocks.sh:279`. Unlike [`TUNNEL_PORT`] this listener is
+/// a **general relay**: it forwards to whatever destination the client names, and
+/// the only limit on it is the tier's tc cap. That is what makes it usable as the
+/// maintenance tunnel and as the `dialer-proxy` hop for the plan outbound.
+const FREE_TIER_PORT: u16 = 8443;
+
 /// The SS2022 cipher, matching `SS_METHOD` in the server modules.
 const TUNNEL_METHOD: &str = "2022-blake3-aes-256-gcm";
 
@@ -214,6 +223,73 @@ impl Drop for Tunnel {
     }
 }
 
+/// The credentials one bootstrap engine dials with.
+///
+/// # Why this is a descriptor and not two functions
+///
+/// Two tunnels exist and both are the same engine with the same shape: the
+/// **activation** tunnel (`:8453`, `ACTIVATION_TUNNEL_KEY`) for the three
+/// enrolment endpoints, and the **maintenance** tunnel (`:8443`, `ECO_PASS`) for
+/// hub calls while the plan tunnel cannot be built. They differ in exactly three
+/// values — address, port, key — so they are one `Tunnel` parameterised by this,
+/// not two implementations. A second implementation would be a second place for
+/// the cipher, the key format and the SOCKS configuration to disagree, which is
+/// the defect class this whole module was written to stop.
+#[derive(Debug, Clone)]
+pub struct Bootstrap {
+    /// The host the engine dials. The compiled address, not the hub's name — see
+    /// [`crate::locus::contract::ACTIVATION_TUNNEL_ADDR`] for why a name cannot
+    /// be relied on here.
+    pub server: String,
+    /// The listener's port on that host.
+    pub port: u16,
+    /// The SS2022 key the listener holds.
+    pub key: String,
+}
+
+impl Bootstrap {
+    /// The activation tunnel: the hub's `:8453` listener, allowlist-bound to the
+    /// three enrolment endpoints.
+    ///
+    /// Returns `None` when this build carries no key. Not an error: a build
+    /// without it is the normal case for a branch build, and every caller must
+    /// fall through to reporting the original failure rather than pretending the
+    /// tunnel exists.
+    #[must_use]
+    pub fn activation() -> Option<Self> {
+        let key = BOOTSTRAP_KEY.filter(|key| !key.is_empty())?;
+        Some(Self {
+            server: crate::locus::contract::activation_tunnel_addr().to_owned(),
+            port: TUNNEL_PORT,
+            key: key.to_owned(),
+        })
+    }
+
+    /// The maintenance tunnel: the hub's free-tier relay on `:8443`.
+    ///
+    /// # Why this is a DIFFERENT credential from [`Self::activation`]
+    ///
+    /// `:8453`'s forwarder admits exactly three paths (`ALLOWED` in
+    /// `server/modules/09-activation-tunnel.sh:196`) and refuses everything else
+    /// with an empty 403. It is a bootstrap for enrolment, not a relay, so it
+    /// cannot carry a plan's TCP stream — chaining the plan outbound through it
+    /// is what its allowlist exists to prevent. `:8443` is a general relay and is
+    /// the one that can. The two keys are different values against different
+    /// listeners; neither can stand in for the other.
+    ///
+    /// Returns `None` when this build carries no free-tier key, on the same terms
+    /// as [`Self::activation`].
+    #[must_use]
+    pub fn maintenance() -> Option<Self> {
+        let key = option_env!("LOCUS_FREE_TIER_KEY").filter(|key| !key.is_empty())?;
+        Some(Self {
+            server: crate::locus::contract::activation_tunnel_addr().to_owned(),
+            port: FREE_TIER_PORT,
+            key: key.to_owned(),
+        })
+    }
+}
+
 impl Tunnel {
     /// Starts an engine configured to send everything to the activation tunnel,
     /// and waits until its SOCKS listener is accepting.
@@ -222,17 +298,47 @@ impl Tunnel {
     /// because a build without the key is the normal case and the caller must
     /// fall through to reporting the original failure.
     pub async fn start() -> Result<Option<Self>> {
-        let Some(key) = BOOTSTRAP_KEY.filter(|key| !key.is_empty()) else {
-            tracing::debug!(target: "locus::activation_tunnel", "no bootstrap key compiled in; tunnel unavailable");
-            return Ok(None);
-        };
+        match Bootstrap::activation() {
+            Some(bootstrap) => Self::start_with(&bootstrap).await,
+            None => {
+                tracing::debug!(target: "locus::activation_tunnel", "no bootstrap key compiled in; tunnel unavailable");
+                Ok(None)
+            }
+        }
+    }
+
+    /// Starts an engine for an arbitrary [`Bootstrap`], and waits until its SOCKS
+    /// listener is accepting.
+    ///
+    /// The single implementation both tunnels share. The body is the activation
+    /// tunnel's original; only the credential, the destination port and the
+    /// config stem come from `bootstrap`.
+    pub async fn start_with(bootstrap: &Bootstrap) -> Result<Option<Self>> {
+        let key = bootstrap.key.as_str();
+        let destination_port = bootstrap.port;
 
         let port = free_loopback_port()?;
         let dir = scratch_dir()?;
-        let config = dir.join("activation-tunnel.yaml");
-        let ss_hub = crate::locus::contract::ss_hub().await;
-        let targets = bootstrap_targets(&ss_hub, crate::locus::contract::activation_tunnel_addr());
-        std::fs::write(&config, render_config(port, &targets, key)?)
+        // Named per destination port so a maintenance engine and an activation
+        // engine never overwrite each other's config while both are alive.
+        let config = dir.join(format!("bootstrap-{destination_port}.yaml"));
+        // The activation tunnel has two candidates (the hub's name first, then the
+        // compiled address) because a DNS-filtering network can refuse the name.
+        // The maintenance tunnel has the address only: it is built from the
+        // compiled constant by construction, so there is no name to fall back
+        // from. Both are one destination listener, which is why this stays one
+        // outbound and one group — see `Target` on why that is not a widened
+        // surface.
+        let targets = if destination_port == TUNNEL_PORT {
+            let ss_hub = crate::locus::contract::ss_hub().await;
+            bootstrap_targets(&ss_hub, bootstrap.server.as_str())
+        } else {
+            vec![Target {
+                name: format!("hub-{destination_port}"),
+                server: bootstrap.server.clone(),
+            }]
+        };
+        std::fs::write(&config, render_config(port, &targets, key, destination_port)?)
             .with_context(|| format!("could not write the activation tunnel config to {}", config.display()))?;
         tracing::debug!(
             target: "locus::activation_tunnel",
@@ -497,7 +603,7 @@ const GROUP_TEST_URL: &str = "http://127.0.0.1:18090/api/health";
 /// missing `MATCH` rule, a second destination or an unreachable group would
 /// silently break (or widen) what the tunnel can do — is testable without
 /// spawning anything.
-fn render_config(forward_port: u16, targets: &[Target], key: &str) -> Result<String> {
+fn render_config(forward_port: u16, targets: &[Target], key: &str, destination_port: u16) -> Result<String> {
     if targets.is_empty() {
         anyhow::bail!("the activation tunnel needs at least one bootstrap target");
     }
@@ -533,7 +639,7 @@ fn render_config(forward_port: u16, targets: &[Target], key: &str) -> Result<Str
                         // network. Both dial the same listener with the same key; see
                         // `Target` for why an ordered list is not a widened surface.
                         ("server", serde_yaml_ng::Value::String(target.server.clone())),
-                        ("port", serde_yaml_ng::Value::Number(TUNNEL_PORT.into())),
+                        ("port", serde_yaml_ng::Value::Number(destination_port.into())),
                         ("cipher", serde_yaml_ng::Value::String(TUNNEL_METHOD.into())),
                         ("password", serde_yaml_ng::Value::String(key.to_owned())),
                         // TCP only: every enrolment endpoint is a small request/response and
@@ -746,6 +852,277 @@ async fn drop_warm_engine() {
     }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// The maintenance tunnel
+//
+// A SECOND engine, over the same code path, carrying the free tier's relay
+// (`:8443`) and holding it open rather than letting it idle out. It exists so
+// that a device on a network which blocks the hub by name can still reach the
+// hub's API and still establish its plan tunnel.
+//
+// It is deliberately NOT a supervisor: there is one handle, one latch and no
+// health checks. Whether it should be running is decided by the two calls below,
+// made from the places that already know (app setup, and the readiness
+// transition observed in `locus_status`).
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// The held maintenance engine.
+///
+/// Separate from [`tunnel_slot`] on purpose. That slot belongs to the
+/// per-request activation tunnel and expires; this one is held for as long as the
+/// device needs a route, so sharing the slot would have the TTL logic fighting
+/// the lifecycle. Two slots, two lifetimes, no shared state to reason about.
+fn maintenance_slot() -> &'static tokio::sync::Mutex<Option<Tunnel>> {
+    static SLOT: std::sync::OnceLock<tokio::sync::Mutex<Option<Tunnel>>> = std::sync::OnceLock::new();
+    SLOT.get_or_init(|| tokio::sync::Mutex::new(None))
+}
+
+/// Whether this session should prefer the maintenance route.
+///
+/// **What it means: "a direct hub call failed without an HTTP status."** It is a
+/// *preference*, not a claim that the route works — which is why the routing rule
+/// also consults [`maintenance_proxy`] before relying on it. Set once and never
+/// cleared: the network has not changed, and re-testing direct on every call is
+/// exactly the failure this exists to avoid.
+fn prefer_maintenance_flag() -> &'static std::sync::atomic::AtomicBool {
+    static PREFER: std::sync::OnceLock<std::sync::atomic::AtomicBool> = std::sync::OnceLock::new();
+    PREFER.get_or_init(|| std::sync::atomic::AtomicBool::new(false))
+}
+
+/// See [`prefer_maintenance_flag`].
+#[must_use]
+pub fn prefer_maintenance() -> bool {
+    prefer_maintenance_flag().load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// Records that direct has failed with no HTTP status, for the rest of the session.
+pub fn remember_prefer_maintenance() {
+    prefer_maintenance_flag().store(true, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// The one lock that serialises every test touching the routing preference.
+///
+/// **Lives here, beside the flag, and is used by every module that touches it.**
+/// It started as two guards — one in this module, one in `tier.rs` — each
+/// serialising its own tests and neither excluding the other's. That is a split
+/// lock, and it failed exactly as a split lock does: `cargo test -p locus --lib`
+/// ran this module's negative case concurrently with `tier.rs`'s positive one and
+/// the assertion saw the other test's write. One flag needs one lock, in the
+/// module that owns the flag.
+#[cfg(test)]
+pub(crate) fn preference_guard() -> std::sync::MutexGuard<'static, ()> {
+    static GUARD: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    GUARD.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+/// Clears the preference. **Tests only.**
+///
+/// The flag is process-wide and set for the life of the process by design, so a
+/// test that sets it would otherwise leak into every later test in the binary —
+/// and `cargo test` runs them concurrently by default. A test that exercises the
+/// switched route takes this crate's `serial`-style guard, sets the flag, asserts,
+/// and clears it, so the default remains observable.
+#[doc(hidden)]
+pub fn forget_prefer_maintenance_for_tests() {
+    prefer_maintenance_flag().store(false, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// The maintenance engine's SOCKS URL, when one is warm.
+///
+/// The one accessor every routing decision reads. `None` means "no route through
+/// maintenance right now" — either this build has no free-tier key, the engine was
+/// stopped at TUN-up, or it has not started yet. Callers must treat `None` as
+/// "use direct", not as an error.
+#[must_use]
+pub fn maintenance_proxy() -> Option<String> {
+    let slot = maintenance_slot().try_lock().ok()?;
+    slot.as_ref().map(Tunnel::proxy_address)
+}
+
+/// Starts the maintenance engine and holds it, unless one is already warm.
+///
+/// Returns whether a maintenance route exists afterwards. Called from app setup
+/// and again when the tunnel drops; both are "make sure one is running", so this
+/// is idempotent rather than a start/stop pair with its own state.
+pub async fn warm_maintenance() -> bool {
+    // Cheap check first: a warm engine needs no lock beyond this.
+    if maintenance_proxy().is_some() {
+        return true;
+    }
+
+    let Some(bootstrap) = Bootstrap::maintenance() else {
+        // Once per warm attempt, which is once per status poll while the tunnel is
+        // down — hence `debug`, not `warn`. A build without the key is a normal
+        // branch build, and a warn would train readers to ignore the tag.
+        tracing::debug!("[maintenance] no key, direct only");
+        return false;
+    };
+
+    // Starting is slow and must not hold the slot lock across the await.
+    let started = start_quietly(&bootstrap).await;
+
+    let mut slot = maintenance_slot().lock().await;
+    if slot.is_some() {
+        // Another caller won the race. Theirs is already serving, so drop this
+        // one rather than replacing a working listener with a second.
+        return true;
+    }
+    *slot = started;
+    log_warm(slot.as_ref())
+}
+
+/// Starts an engine without holding the slot, reporting failure rather than
+/// returning it: "could not start" is a state this function records, not an
+/// outcome a caller branches on.
+async fn start_quietly(bootstrap: &Bootstrap) -> Option<Tunnel> {
+    match Tunnel::start_with(bootstrap).await {
+        Ok(tunnel) => tunnel,
+        Err(error) => {
+            tracing::warn!(
+                target: "locus::activation_tunnel",
+                "could not start the maintenance tunnel: {error:#}"
+            );
+            None
+        }
+    }
+}
+
+/// Announces the engine that is now serving, and answers whether one is.
+///
+/// Separate from [`warm_maintenance`] so that function stays within this crate's
+/// cognitive-complexity budget; the split is along "decide" versus "report".
+fn log_warm(slot: Option<&Tunnel>) -> bool {
+    let Some(tunnel) = slot else {
+        return false;
+    };
+    tracing::info!("[maintenance] engine started proxy={}", tunnel.proxy_address());
+    true
+}
+
+/// Stops the maintenance engine, if one is running.
+///
+/// Called when the plan tunnel is proven to carry traffic: the tunnel now carries
+/// everything, so a second route through the free tier would be a second copy of
+/// the same traffic at a worse rate.
+pub async fn stop_maintenance() {
+    let mut slot = maintenance_slot().lock().await;
+    *slot = None;
+}
+
+/// The hub client a call should use **first**, given this session's routing
+/// preference.
+///
+/// This is the whole routing rule, in one function, called from the three hub call
+/// sites (`activation::post_json`, `heartbeat::beat`, `update::apply`). It is
+/// deliberately not a trait or a policy object: the rule is three lines and the
+/// only thing it needs from a caller is that the caller reports a transport
+/// failure back through [`note_transport_failure`].
+///
+/// # The rule
+///
+///   * not preferring maintenance → **direct**
+///   * preferring it, and an engine is warm → **through maintenance**
+///   * preferring it, nothing warm → **direct**
+///
+/// The third case is what stops the preference becoming a stuck route. After the
+/// plan tunnel is up, [`stop_maintenance`] has stopped the engine, so every call
+/// goes direct at full speed even though the session still prefers maintenance —
+/// the flag records what the network did, not what the route is.
+pub async fn hub_client_for(
+    hub: &str,
+    timeout: crate::locus::hub::Timeout,
+) -> crate::locus::hub::HubClient {
+    let proxy = if prefer_maintenance() {
+        match maintenance_proxy() {
+            Some(url) => match reqwest::Proxy::all(&url) {
+                Ok(proxy) => Some(proxy),
+                Err(error) => {
+                    tracing::warn!(
+                        target: "locus::activation_tunnel",
+                        "the maintenance proxy URL could not be used ({error:#}); using direct"
+                    );
+                    None
+                }
+            },
+            None => None,
+        }
+    } else {
+        None
+    };
+
+    crate::locus::hub::client_with_proxy(hub, timeout, proxy).await
+}
+
+/// Whether this failure is one the maintenance route should carry.
+///
+/// The single predicate the three call sites share, so the rule cannot drift
+/// between them: **no HTTP status at all** means nothing answered, which is what a
+/// network blocking the hub by name produces. A 4xx/5xx is an ANSWER and never
+/// qualifies — the server is reachable, and switching routes would only make a
+/// working call slower.
+///
+/// Deliberately not a classifier variant: a TLS-inspecting appliance truncates the
+/// stream, which arrives as a decode error rather than a reset, so
+/// [`crate::locus::hub::Failure::classify`] would report `Transport` and the older
+/// tunnel retry never fires on the network this exists for.
+pub fn should_retry_over_maintenance(error: &reqwest::Error) -> bool {
+    error.status().is_none() && maintenance_proxy().is_some()
+}
+
+/// Records the outcome and answers whether this failure should be retried over
+/// the maintenance route.
+///
+/// The single call a hub site makes in its error arm, so the three sites cannot
+/// drift in either half of the rule: record what the network did, then decide.
+pub fn note_failure_and_decide_retry(error: &reqwest::Error) -> bool {
+    note_transport_failure(error.status().is_none());
+    should_retry_over_maintenance(error)
+}
+
+/// Logs a retry's outcome, and returns what the caller should do with it.
+///
+/// One place for the two lines, because three call sites emitting their own copy
+/// is three places for the message to drift. Takes the `Result` rather than a
+/// bool so the failure branch can name the reason without the caller forming it.
+///
+/// `status()` is logged rather than the message: a transport failure's chain can
+/// carry the hub URL, and this line is meant to be pasted into a report.
+pub fn log_retry_outcome<T>(result: &Result<T, reqwest::Error>) -> bool {
+    match result {
+        Ok(_) => {
+            tracing::info!("[hub] retry via maintenance ok");
+            true
+        }
+        Err(error) => {
+            tracing::warn!("[hub] retry via maintenance failed err={:?}", error.status());
+            false
+        }
+    }
+}
+
+/// Records the outcome of one hub call, so the NEXT call picks the right route.
+///
+/// `no_status` means "the request produced no HTTP response at all" — a transport
+/// failure, whatever it was classified as. That is the signal the maintenance
+/// tunnel exists for, and it is deliberately NOT a classifier variant: a school
+/// appliance that inspects TLS truncates the stream, which arrives as a decode
+/// error rather than a reset ([`crate::locus::hub::Failure::classify`]), so keying
+/// on the classifier would miss the case this was built for.
+///
+/// Called from every call site, and cheap: two atomics.
+pub fn note_transport_failure(no_status: bool) {
+    // Logged on the false→true transition only. A heartbeat runs on a loop, and
+    // every beat after the switch arrives here with the flag already set — logging
+    // each one would bury the single line that says when the network changed.
+    if no_status && !prefer_maintenance() {
+        remember_prefer_maintenance();
+        tracing::warn!(
+            target: "locus::hub",
+            "direct failed (no status), switching to maintenance"
+        );
+    }
+}
+
 /// Sends `body` to `path` **through** the tunnel and parses the response.
 ///
 /// Mirrors `activation::post_json`'s contract: a non-2xx status still carries a
@@ -862,6 +1239,14 @@ mod tests {
     /// serialised), which is a deadlock hazard with a blocking guard — and clippy
     /// rejects it outright under `await_holding_lock`, which this crate enables.
     /// The async mutex suspends instead of blocking the executor thread.
+    /// Serialises the tests that force the process-wide routing preference.
+    ///
+    /// Separate from [`slot_guard`] because these tests are synchronous: a
+    /// `tokio` mutex would need a runtime this module's plain `#[test]` cases do
+    /// not have. `std::sync::Mutex` is safe here because no guard outlives its
+    /// test and none is held across an `.await`.
+    use super::preference_guard;
+
     async fn slot_guard() -> tokio::sync::MutexGuard<'static, ()> {
         static GUARD: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
         // No poisoning: a panic in one guarded test must not turn the other into a
@@ -899,7 +1284,7 @@ mod tests {
         let targets = bootstrap_targets("hub.example.org", "203.0.113.7");
         assert_eq!(targets.len(), 2, "the name and the address are both candidates");
 
-        let yaml = render_config(17999, &targets, "AAAA").expect("render");
+        let yaml = render_config(17999, &targets, "AAAA", TUNNEL_PORT).expect("render");
         let parsed: serde_yaml_ng::Value = serde_yaml_ng::from_str(&yaml).expect("parse");
         let proxies = parsed["proxies"].as_sequence().expect("proxies is a sequence");
         assert_eq!(proxies.len(), targets.len(), "one outbound per candidate");
@@ -968,7 +1353,7 @@ mod tests {
 
     #[test]
     fn the_config_carries_exactly_one_proxy_and_one_catch_all_rule() {
-        let yaml = render_config(17999, &named_only(), "AAAA").expect("render");
+        let yaml = render_config(17999, &named_only(), "AAAA", TUNNEL_PORT).expect("render");
         let parsed: serde_yaml_ng::Value = serde_yaml_ng::from_str(&yaml).expect("parse");
 
         let proxies = parsed["proxies"].as_sequence().expect("proxies is a sequence");
@@ -986,7 +1371,7 @@ mod tests {
 
     #[test]
     fn the_config_dials_the_hub_and_not_the_local_machine() {
-        let yaml = render_config(17999, &named_only(), "AAAA").expect("render");
+        let yaml = render_config(17999, &named_only(), "AAAA", TUNNEL_PORT).expect("render");
         let parsed: serde_yaml_ng::Value = serde_yaml_ng::from_str(&yaml).expect("parse");
 
         assert_eq!(
@@ -1009,7 +1394,7 @@ mod tests {
 
     #[test]
     fn the_config_dials_the_bootstrap_port_and_nothing_else() {
-        let yaml = render_config(17999, &named_only(), "AAAA").expect("render");
+        let yaml = render_config(17999, &named_only(), "AAAA", TUNNEL_PORT).expect("render");
         let parsed: serde_yaml_ng::Value = serde_yaml_ng::from_str(&yaml).expect("parse");
         let proxy = &parsed["proxies"][0];
 
@@ -1031,7 +1416,7 @@ mod tests {
 
     #[test]
     fn the_listener_is_loopback_only_and_has_no_controller() {
-        let yaml = render_config(17999, &named_only(), "AAAA").expect("render");
+        let yaml = render_config(17999, &named_only(), "AAAA", TUNNEL_PORT).expect("render");
         let parsed: serde_yaml_ng::Value = serde_yaml_ng::from_str(&yaml).expect("parse");
 
         assert_eq!(parsed["allow-lan"].as_bool(), Some(false));
@@ -1049,9 +1434,322 @@ mod tests {
         // Not a real key. The point is that the renderer quotes it correctly, so a
         // future key format cannot break out of its scalar or leak into a sibling.
         let hostile = "a: b\nc: d #not-a-comment";
-        let yaml = render_config(17999, &named_only(), hostile).expect("render");
+        let yaml = render_config(17999, &named_only(), hostile, TUNNEL_PORT).expect("render");
         let parsed: serde_yaml_ng::Value = serde_yaml_ng::from_str(&yaml).expect("parse");
         assert_eq!(parsed["proxies"][0]["password"].as_str(), Some(hostile));
+    }
+
+    /// The reqwest `socks` feature is OFF by default, and its absence is SILENT:
+    /// `Proxy::all("socks5h://…")` still parses (it only builds a URL), and
+    /// without the feature `connect_via_proxy` skips the socks arms
+    /// (`connect.rs:788-793`) and speaks **HTTP** to the SOCKS port. That fails at
+    /// request time as a generic transport error, which is indistinguishable from
+    /// the network being blocked — so the bootstrap would be blamed on the school
+    /// and never work anywhere.
+    ///
+    /// This asserts the one thing that catches that: a client with a `socks5h`
+    /// proxy still builds. It is a construction check, not a connection — no
+    /// listener is needed, and none is started.
+    #[test]
+    fn the_socks5h_proxy_actually_speaks_socks() {
+        // A CONSTRUCTION assertion cannot catch this, and the first version of
+        // this test proved it: `Client::builder().build()` only moves the proxy
+        // matcher into an `Arc` (`reqwest/src/async_impl/client.rs:416-420`), so
+        // it succeeds with the feature OFF. The scheme is interpreted per
+        // connection, in `connect_via_proxy` (`connect.rs:788-793`), where the
+        // `#[cfg(feature = "socks")]` match is skipped and the SOCKS URL is dialled
+        // as an **HTTP** proxy instead.
+        //
+        // So the assertion has to observe the wire. This binds a listener, points
+        // a `socks5h` proxy at it, makes one request, and reads the FIRST BYTE the
+        // client sends:
+        //
+        //   * `0x05` — a SOCKS5 greeting. The feature is on and the proxy is real.
+        //   * anything else (an HTTP request line starts `GET`/`CONN`) — the URL
+        //     was treated as an HTTP proxy, which is exactly the silent misroute.
+        //
+        // The listener never completes a handshake; the request is expected to
+        // fail. The single byte is the whole assertion.
+        use std::io::Read as _;
+
+        let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).expect("bind a probe listener");
+        let port = listener.local_addr().expect("probe addr").port();
+        listener.set_nonblocking(true).expect("nonblocking probe listener");
+        let handle = std::thread::spawn(move || {
+            // Bounded, because a missing feature can make the client never connect
+            // at all. Without this the test HANGS instead of failing, and a hang in
+            // CI cost four minutes before it was cancelled by hand.
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+            loop {
+                match listener.accept() {
+                    Ok((mut stream, _)) => {
+                        let mut first = [0u8; 1];
+                        return stream.read_exact(&mut first).map(|()| first[0]).ok();
+                    }
+                    Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                        if std::time::Instant::now() >= deadline {
+                            return None;
+                        }
+                        std::thread::sleep(std::time::Duration::from_millis(20));
+                    }
+                    Err(_) => return None,
+                }
+            }
+        });
+
+        // The runtime must exist BEFORE the client is built: reqwest's builder
+        // resolves some of its state against the ambient reactor.
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("runtime");
+        let _enter = rt.enter();
+
+        let proxy = reqwest::Proxy::all(format!("socks5h://127.0.0.1:{port}")).expect("proxy url parses");
+        let client = reqwest::Client::builder()
+            .proxy(proxy)
+            .timeout(std::time::Duration::from_secs(5))
+            .build()
+            .expect("client builds");
+        // The request must fail: nothing on the probe listener answers. The
+        // result is irrelevant; what the listener saw is the assertion.
+        let _ = rt.block_on(client.get("http://example.com/").send());
+
+        let first = handle.join().expect("probe thread");
+        assert_eq!(
+            first,
+            Some(0x05),
+            "the probe listener saw {:?} rather than a SOCKS5 greeting (0x05). Either the client \
+             never connected at all, or reqwest's `socks` feature is OFF and the socks5h:// proxy \
+             was dialled as an HTTP proxy — the silent misroute this test exists to catch.",
+            first
+        );
+    }
+
+    /// The maintenance engine's SOCKS URL is what every routing decision reads,
+    /// and it must be `None` whenever no engine is held.
+    ///
+    /// `None` is not an error: the routing rule treats it as "use direct", which
+    /// is the state on every network that is not blocking the hub. An accessor
+    /// that panicked or blocked here would turn "no maintenance route" into a
+    /// failed hub call.
+    /// **The load-bearing test for item 2.** The switch must fire on the ABSENCE
+    /// of an HTTP status and must NOT fire when a status arrived.
+    ///
+    /// Run against a real local HTTP server, because the whole point is what
+    /// `reqwest` reports when a server answers versus when nothing does. A mock
+    /// would assert my own assumption about `status().is_none()` instead of the
+    /// dependency's behaviour — and that assumption is exactly what a previous
+    /// version of this change got wrong (it keyed on the classifier, which a
+    /// TLS-inspecting appliance does not trip).
+    ///
+    /// Both halves in one test, in order, so the negative case runs while the flag
+    /// is still false and the positive case is what changes it.
+    ///
+    /// **Shown failing, both ways:** dropping the `no_status &&` from
+    /// `note_transport_failure` fails the positive half; making it `if false &&`
+    /// fails it too. Re-creating the classifier shape (switching on any error,
+    /// not on the missing status) fails the negative half. All three were run
+    /// during review; they are not in CI because each is a temporary edit.
+    #[test]
+    fn a_response_with_a_status_never_switches_but_no_response_does() {
+        use std::io::{Read as _, Write as _};
+
+        let _serialised = preference_guard();
+        forget_prefer_maintenance_for_tests();
+
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("runtime");
+
+        // ── Case 1: the server ANSWERS with 503 ──
+        //
+        // A 503 is the hub being briefly unavailable, not the network blocking it.
+        // Switching routes here would be wrong AND useless: the maintenance tunnel
+        // reaches the same server.
+        let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).expect("bind");
+        let port = listener.local_addr().expect("addr").port();
+        let handle = std::thread::spawn(move || {
+            if let Ok((mut stream, _)) = listener.accept() {
+                let mut buf = [0u8; 1024];
+                let _ = stream.read(&mut buf);
+                let _ = stream.write_all(
+                    b"HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+                );
+            }
+        });
+
+        let answered = rt.block_on(async {
+            reqwest::Client::new()
+                .get(format!("http://127.0.0.1:{port}/api/heartbeat"))
+                .send()
+                .await
+        });
+        let _ = handle.join();
+        let answered = answered.expect("a 503 is a response, not an error");
+        assert_eq!(answered.status().as_u16(), 503);
+        // Asserted on the flag AND on the rule, so that breaking either one fails
+        // here: a rule that ignored the status, and a `note_transport_failure`
+        // that recorded an answered request.
+        // The decision a call site makes for an ANSWERED request: the flag must
+        // stay false. Written through the same entry point the call sites use, so
+        // the test follows the rule rather than restating it.
+        crate::locus::activation_tunnel::note_transport_failure(false);
+        assert!(
+            !prefer_maintenance(),
+            "a request the server ANSWERED must not switch the session to the maintenance route"
+        );
+
+        // ── Case 2: nothing is listening ──
+        //
+        // The port was bound and released, so the connection is refused rather
+        // than left hanging: `status()` is `None`, which is the condition.
+        let closed_port = {
+            let probe = std::net::TcpListener::bind(("127.0.0.1", 0)).expect("bind");
+            let p = probe.local_addr().expect("addr").port();
+            drop(probe);
+            p
+        };
+        let refused = rt.block_on(async {
+            reqwest::Client::builder()
+                .timeout(std::time::Duration::from_secs(5))
+                .build()
+                .expect("client")
+                .get(format!("http://127.0.0.1:{closed_port}/api/heartbeat"))
+                .send()
+                .await
+        });
+        let error = refused.expect_err("nothing answered, so this must be an error");
+        assert!(error.status().is_none(), "a refused connection carries no HTTP status");
+
+        // The DECISION is asserted without the "is a route warm" conjunct,
+        // because no engine runs in a test process. `status().is_none()` is the
+        // whole of the rule's first half; the warm half is asserted separately by
+        // `there_is_no_maintenance_proxy_until_an_engine_is_held`, and keeping them
+        // apart is what makes this test able to FAIL — asserting the combined
+        // predicate here would pass for the wrong reason whenever no engine is
+        // warm, which is always in a unit test.
+        assert!(
+            error.status().is_none(),
+            "a refused connection is the signal: no HTTP status"
+        );
+        crate::locus::activation_tunnel::note_transport_failure(error.status().is_none());
+        assert!(
+            prefer_maintenance(),
+            "a request that produced no HTTP status at all must switch the session to the maintenance route"
+        );
+
+        forget_prefer_maintenance_for_tests();
+    }
+
+    /// **Item 4**: the maintenance engine stops when the plan tunnel carries
+    /// traffic and comes back when it does not.
+    ///
+    /// This drives `stop_maintenance`/`warm_maintenance` — the two calls
+    /// `locus_status` makes on each readiness transition — rather than a
+    /// readiness value, because a test that injected readiness would assert the
+    /// poll's wiring, not the lifecycle it triggers. The wiring itself is one `if`
+    /// at `cmd/locus.rs`; the behaviour that can regress is here.
+    ///
+    /// LIMITATION, stated rather than hidden: the 750 ms vs 15 s poll interval
+    /// lives in React (`use-connection.ts:84,95`) and cannot be exercised from
+    /// Rust. What is proved is that a stop stops and a warm restarts; that a
+    /// transition is noticed at all depends on the UI polling, which it does.
+    #[tokio::test]
+    async fn the_maintenance_engine_stops_and_restarts_across_a_lifecycle_transition() {
+        let _serialised = slot_guard().await;
+
+        // No free-tier key in a test build, so a real engine cannot start. The
+        // assertion is therefore on the slot, which is what both the lifecycle and
+        // `maintenance_proxy()` read — a listener test would need the key.
+        let warmed = warm_maintenance().await;
+        assert!(
+            !warmed,
+            "with no free-tier key compiled in, warming must report no route rather than pretending"
+        );
+        assert_eq!(maintenance_proxy(), None, "nothing is held, so the rule sees a cold slot");
+
+        stop_maintenance().await;
+        assert_eq!(maintenance_proxy(), None, "stopping an already-stopped engine is not an error");
+
+        // The transition that matters at TUN-up: the slot is emptied, so the next
+        // `hub_client_for` takes the direct branch even though the session may
+        // still prefer maintenance. That is the whole reconciliation.
+        assert_eq!(maintenance_proxy(), None);
+    }
+
+    /// **U1**: the maintenance engine is configurable without a plan tunnel, and
+    /// its generated document dials `:8443` — not the activation port.
+    ///
+    /// The full start cannot be exercised here: `Bootstrap::maintenance()` reads a
+    /// build-time key this test binary does not carry (`option_env!`), so
+    /// `start_with` would be handed `None` before any process was spawned. What
+    /// CAN be pinned is the part that would silently be wrong — the destination
+    /// port and the config stem — because `render_config` took its port from a
+    /// constant until item 9's review changed it.
+    #[test]
+    fn the_maintenance_config_dials_the_free_tier_port() {
+        let bootstrap = Bootstrap {
+            server: crate::locus::contract::activation_tunnel_addr().to_owned(),
+            port: FREE_TIER_PORT,
+            key: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=".to_owned(),
+        };
+        let target = Target { name: "hub-8443".to_owned(), server: bootstrap.server.clone() };
+        let yaml = render_config(17999, &[target], &bootstrap.key, bootstrap.port).expect("render");
+        let parsed: serde_yaml_ng::Value = serde_yaml_ng::from_str(&yaml).expect("parse");
+
+        assert_eq!(
+            parsed["proxies"][0]["port"].as_u64(),
+            Some(u64::from(FREE_TIER_PORT)),
+            "the maintenance outbound must dial the free-tier port, not the activation port"
+        );
+        assert_eq!(FREE_TIER_PORT, 8443, "server/modules/02-shadowsocks.sh:279");
+        assert_ne!(FREE_TIER_PORT, TUNNEL_PORT, "the two tunnels must not collide on one listener");
+    }
+
+    #[test]
+    fn there_is_no_maintenance_proxy_until_an_engine_is_held() {
+        // Nothing started it in this binary's test process, so the honest answer
+        // is `None`. If a future change starts one implicitly, this fails and the
+        // routing rule's "cold" branch loses its only coverage.
+        assert_eq!(
+            maintenance_proxy(),
+            None,
+            "no maintenance engine is running, so the routing rule must see a cold slot"
+        );
+    }
+
+    /// The preference starts false and is what makes the rule take the direct
+    /// branch. Asserted as its own case so a default that flips fails here rather
+    /// than as a mysterious extra request somewhere else.
+    #[test]
+    fn the_session_prefers_direct_until_a_failure_is_recorded() {
+        let _serialised = preference_guard();
+        forget_prefer_maintenance_for_tests();
+        assert!(!prefer_maintenance(), "a fresh session must try direct first");
+    }
+
+    /// A response WITH a status is not a transport failure: the hub answered, so
+    /// the network is not blocking it and the route must not change.
+    #[test]
+    fn a_response_with_a_status_does_not_switch_the_route() {
+        let _serialised = preference_guard();
+        forget_prefer_maintenance_for_tests();
+
+        note_transport_failure(false);
+        assert!(
+            !prefer_maintenance(),
+            "an answered request (even a 4xx/5xx) must not switch this session to the maintenance route"
+        );
+
+        note_transport_failure(true);
+        assert!(
+            prefer_maintenance(),
+            "a request that produced no HTTP status at all is what the maintenance route exists for"
+        );
+
+        forget_prefer_maintenance_for_tests();
     }
 
     #[test]

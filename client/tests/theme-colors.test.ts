@@ -4,7 +4,14 @@ import path from 'node:path'
 
 import { describe, expect, it } from 'vitest'
 
-import { LOCUS_COLORS, LOCUS_LIGHT } from '../src/pages/_theme'
+import {
+  defaultDarkTheme,
+  defaultTheme,
+  LOCUS_COLORS,
+  LOCUS_LIGHT,
+  TIER_COLORS,
+  TIER_FALLBACK,
+} from '../src/pages/_theme'
 import {
   DECORATIONS,
   DEFAULT_SHAPE,
@@ -214,7 +221,7 @@ describe('theme registry', () => {
     expect(hasTheme(DEFAULT_THEME_ID)).toBe(true)
   })
 
-  it('the two default themes are byte-identical to the shipped palette', () => {
+  it('the two default themes are projections of the shipped palette', () => {
     // This is what makes the registry a SUPERSET of the shipped appearance rather
     // than a replacement for it: an install with no `theme_id` must render
     // exactly what it rendered before themes existed. If this fails, the layer is
@@ -239,9 +246,10 @@ describe('theme registry', () => {
     expect(light.palette.border).toBe(LOCUS_LIGHT.border)
     expect(light.palette.accent).toBe(LOCUS_LIGHT.accent)
     expect(light.palette.accentHover).toBe(LOCUS_LIGHT.accentHover)
-    // The two legacy typography values the MUI palette is built from.
-    expect(light.palette.textPrimary).toBe('#1B2A23')
-    expect(light.palette.textSecondary).toBe('#55665D')
+    // The two legacy typography values the MUI palette is built from, read
+    // from the same source the projection reads them from.
+    expect(light.palette.textPrimary).toBe(defaultTheme.primary_text)
+    expect(light.palette.textSecondary).toBe(defaultTheme.secondary_text)
   })
 
   it('body text clears 4.5:1 on its own surface, and labels clear 3:1', () => {
@@ -472,6 +480,68 @@ describe('theme registry', () => {
     expect(failures).toEqual([])
   })
 
+  it('the Locus-owned palettes carry no chroma (the monochrome reset holds)', () => {
+    // `/COLOURS.md` §0 records the decision: every surface Locus OWNS is
+    // neutral, so a colour design can start from a neutral base. The themes that
+    // are not Locus's own keep their colour, and are excluded by ID below rather
+    // than by a heuristic — this test must not accidentally bless a green as
+    // "authored by someone else".
+    //
+    // WHAT THIS CANNOT DO, stated so nobody reads it as more: it cannot police a
+    // future theme, because keeping a coloured theme is legitimate. It asserts
+    // only that the brand layer is neutral, which is the exact claim §0 makes.
+    //
+    // Demonstrated failing before it was kept: with `LOCUS_COLORS.accent` at the
+    // pre-reset green, the message below names that field.
+    const NEUTRAL_THEMES = ['default-dark', 'default-light', 'moss']
+
+    // A colour carries no chroma when the largest and smallest channels agree.
+    // An alpha suffix is stripped: it is not a channel.
+    const chroma = (value: string): number | null => {
+      const m = /^#([0-9a-fA-F]{6})(?:[0-9a-fA-F]{2})?$/.exec(value.trim())
+      if (!m) return null
+      const hex = m[1]
+      const parts = [0, 2, 4].map((i) => parseInt(hex.slice(i, i + 2), 16))
+      return Math.max(...parts) - Math.min(...parts)
+    }
+
+    const failures: string[] = []
+    const check = (label: string, value: string) => {
+      const c = chroma(value)
+      if (c === null) {
+        failures.push(`${label}: ${value} is not a hex colour`)
+      } else if (c !== 0) {
+        failures.push(`${label}: ${value} carries chroma ${c}`)
+      }
+    }
+
+    for (const [field, value] of Object.entries(LOCUS_COLORS)) {
+      check(`LOCUS_COLORS.${field}`, value as string)
+    }
+    for (const [field, value] of Object.entries(LOCUS_LIGHT)) {
+      check(`LOCUS_LIGHT.${field}`, value as string)
+    }
+    for (const [field, value] of Object.entries(defaultTheme)) {
+      if (field === 'font_family') continue
+      check(`defaultTheme.${field}`, value as string)
+    }
+    for (const [field, value] of Object.entries(defaultDarkTheme)) {
+      if (field === 'font_family') continue
+      check(`defaultDarkTheme.${field}`, value as string)
+    }
+    for (const [tier, entry] of Object.entries(TIER_COLORS)) {
+      check(`TIER_COLORS.${tier}.color`, entry.color)
+    }
+    check('TIER_FALLBACK.color', TIER_FALLBACK.color)
+    for (const id of NEUTRAL_THEMES) {
+      for (const [field, value] of Object.entries(THEMES[id].palette)) {
+        check(`${id}.${field}`, value as string)
+      }
+    }
+
+    expect(failures).toEqual([])
+  })
+
   it('the projection carries every field the MUI palette is built from', () => {
     // `themeDefaultFor` is the bridge between the registry's vocabulary and the
     // hook's. A missing field here does not crash — it falls back to `undefined`
@@ -543,23 +613,28 @@ describe('locus palette consistency across paint layers', () => {
 
   it('the comment-stripping did not defeat the check', () => {
     // Guard on the guard: if the strip became too eager it would remove real
-    // code too, and the test above would pass vacuously. A colour that IS in the
-    // code must still be found.
+    // code too, and the tests above would pass vacuously. A value that IS in the
+    // code must still be found — taken from the palette itself, so this stays
+    // true whatever the colour design becomes.
     const theme = readCode('../src/pages/_theme.tsx')
-    expect(theme).toContain('#4fbf84')
+    expect(theme).toContain(LOCUS_COLORS.accent.toLowerCase())
   })
 
-  it('the stylesheet fallback is Locus, not Verge', () => {
+  it('the stylesheet fallback matches the palette', () => {
     // The fourth place the palette is written, and the easiest to forget: SCSS
     // `:root` variables are overwritten by the theme hook at runtime, so a wrong
     // value here is only visible for a moment on each launch — which is exactly
-    // how it survives review. It previously held Verge's purple accent
-    // (`#5b5c9d`), visible as a purple flash before the green theme applied.
+    // how it survives review.
+    //
+    // Asserted against the palette rather than against a literal, so this keeps
+    // its meaning through a recolour instead of pinning one.
     const scss = readCode('../src/assets/styles/index.scss')
-    expect(scss).toContain('--primary-main: #4fbf84')
-    expect(scss).toContain('--background-color: #0d1512')
-    expect(scss).not.toContain('#5b5c9d')
-    expect(scss).not.toContain('#f5f5f5')
+    expect(scss).toContain(
+      `--primary-main: ${LOCUS_COLORS.accent.toLowerCase()}`,
+    )
+    expect(scss).toContain(
+      `--background-color: ${LOCUS_COLORS.background.toLowerCase()}`,
+    )
   })
 
   it('no component hardcodes an upstream surface colour', () => {
@@ -605,31 +680,58 @@ describe('locus palette consistency across paint layers', () => {
     expect(offenders).toEqual([])
   })
 
-  it('the tier colours are the spec values', () => {
-    // Lowercased helper, lowercased needles — the two must agree or the
-    // assertion can never fire.
-    const theme = readCode('../src/pages/_theme.tsx')
-    // From docs/archive/UI-AESTHETICS.md §7. Pinned because these are the
-    // "tier sells itself" cues and a wrong gold/green would be a brand error
-    // nobody notices in code review.
-    expect(theme).toContain('#eab308') // strike, gold — the paid tier
-    expect(theme).toContain('#7fb48f') // free/eco, muted green
-    // The retired tier's colour is gone. If `stealth` reappears in the palette,
-    // someone has re-added a tier the hub no longer seeds
+  it('the tier colours cover every wire name the hub can send', () => {
+    // The badge is keyed by a FROZEN wire name, so the thing worth asserting is
+    // coverage, not a particular colour: a tier the hub sends with no entry here
+    // renders through `TIER_FALLBACK`, which is correct but generic.
+    for (const name of ['strike', 'budget', 'free', 'eco']) {
+      expect(TIER_COLORS[name]).toBeDefined()
+      expect(TIER_COLORS[name].color).toMatch(/^#[0-9A-F]{6}$/i)
+      expect(TIER_COLORS[name].background).toMatch(/^rgba\(/)
+    }
+    expect(TIER_FALLBACK.color).toMatch(/^#[0-9A-F]{6}$/i)
+
+    // The retired tier is gone from the registry's vocabulary entirely. If
+    // `stealth` reappears, someone has re-added a tier the hub no longer seeds
     // (docs/business/04-tiers.md §4.2.4).
-    expect(theme).not.toContain('#46c186')
+    //
+    // This assertion SURVIVED the 2026-11-12 third tier. Budget is a new row on
+    // its own ports (§4.2.5) and deliberately reuses none of the retired
+    // vocabulary, so "stealth is absent" and "budget is present" are both true
+    // and both worth asserting — the second is in the coverage list above.
+    expect(Object.hasOwn(TIER_COLORS, 'stealth')).toBe(false)
   })
 
-  it('the base palette is the designed values', () => {
-    expect(LOCUS_COLORS.accent).toBe('#4FBF84')
-    expect(LOCUS_COLORS.background).toBe('#0D1512')
-    expect(LOCUS_COLORS.surface).toBe('#1B2A24')
-    expect(LOCUS_COLORS.border).toBe('#2C3F35')
-    expect(LOCUS_COLORS.textPrimary).toBe('#E4EDE7')
-    expect(LOCUS_COLORS.textSecondary).toBe('#9BAFA3')
-    // The light surfaces, which are where the sharp white used to be.
-    expect(LOCUS_LIGHT.background).toBe('#EDF1EF')
-    expect(LOCUS_LIGHT.surface).toBe('#F2F6F4')
+  it('the base palette is complete, and every value is well-formed', () => {
+    // The VALUES are `/COLOURS.md` §2's, and pinning them here as literals would
+    // make this file a second home for colour — which is the defect that guard
+    // now prevents (`check-consistency.sh` §49). What is asserted instead is the
+    // shape a palette must have, and that shape is what the code depends on.
+    const HEX = /^#[0-9A-Fa-f]{6}$/
+    for (const [name, palette] of [
+      ['LOCUS_COLORS', LOCUS_COLORS],
+      ['LOCUS_LIGHT', LOCUS_LIGHT],
+    ] as const) {
+      for (const field of [
+        'background',
+        'surface',
+        'surfaceHover',
+        'border',
+        'accent',
+        'accentHover',
+      ] as const) {
+        expect(palette[field], `${name}.${field}`).toMatch(HEX)
+      }
+    }
+    for (const field of [
+      'textPrimary',
+      'textSecondary',
+      'success',
+      'warning',
+      'error',
+    ] as const) {
+      expect(LOCUS_COLORS[field], `LOCUS_COLORS.${field}`).toMatch(HEX)
+    }
   })
 
   it('light-mode text is dark and dark-mode text is light', () => {

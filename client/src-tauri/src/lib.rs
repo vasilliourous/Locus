@@ -390,6 +390,20 @@ pub fn run() -> std::process::ExitCode {
                     logging!(warn, Type::Setup, "[locus] {stamp}");
                 }
 
+                // Warm the maintenance tunnel in the background.
+                //
+                // Started here rather than lazily at the first hub call so the
+                // engine is already listening by the time a student submits a
+                // code: the point of the tunnel is that it is THERE when the
+                // direct route fails, and starting it on demand would spend the
+                // 60 MB sidecar load at exactly the moment the screen is waiting.
+                //
+                // Nothing routes through it yet — `hub_client_for` decides that
+                // per call, and this session has not seen a failure.
+                AsyncHandler::spawn(|| async {
+                    crate::locus::activation_tunnel::warm_maintenance().await;
+                });
+
                 if let Err(e) = app_init::setup_autostart(app) {
                     logging!(error, Type::Setup, "Failed to setup autostart: {}", e);
                 }

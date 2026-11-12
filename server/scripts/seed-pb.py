@@ -449,7 +449,10 @@ tiers_seeded = 0
 pw_from_file = False
 
 # Check if any tier passwords are already set in environment
-for t_name in ["ECO_PASS", "STEALTH_PASS", "STRIKE_PASS"]:
+# Any one of these being present means the passwords are available. STEALTH_PASS
+# is still listed because an upgraded box's /root/.tier_passwords carries it; it
+# gates nothing, since no `stealth` row is seeded.
+for t_name in ["ECO_PASS", "STEALTH_PASS", "STRIKE_PASS", "BUDGET_PASS"]:
     if os.environ.get(t_name, ""):
         pw_from_file = True  # actually from env, but indicates they're available
 if not pw_from_file and os.path.exists(pw_file):
@@ -464,6 +467,7 @@ if pw_from_file:
     uot_enabled = os.environ.get("ENABLE_UOT", "1") != "0"
     uot_port = int(os.environ.get("UOT_PORT", "8446"))
     uot_port_free = int(os.environ.get("UOT_PORT_FREE", "8447"))
+    uot_port_budget = int(os.environ.get("UOT_PORT_BUDGET", "8449"))
     # ONE ROW PER PLAN. There is no `eco` row any more.
     #
     # `eco` was seeded alongside `free` as the same endpoint (port 8443, same
@@ -491,7 +495,26 @@ if pw_from_file:
     # decision made with the console in front of them — not a side effect of
     # re-running a seed script. The probe that decides it is in
     # docs/operate/CLAIMS.md §5.
+    #
+    # `budget` is the THIRD plan (added 2026-11-12, §4.2.5) — a paid rung on its
+    # OWN port and credential, not a re-seeded stealth. It is seeded like the
+    # others: one row, its own `uot_port`, advertised UDP. The row string is
+    # `budget` and that is the frozen name a code carries, because activation and
+    # heartbeat resolve a tier by looking that string up in this collection.
+    #
+    # EACH PLAN'S UoT PORT COMES FROM ITS OWN VARIABLE, in a dict keyed by row
+    # rather than by an `if` — the previous two-way conditional was correct only
+    # while there were exactly two plans, and a third would have silently been
+    # given the free plan's listener. The failure that produces is not a crash:
+    # it is Budget clients handshaking against a listener holding ECO_PASS, so
+    # TCP works and every game silently fails.
+    uot_port_for = {
+        "free":   uot_port_free,
+        "strike": uot_port,
+        "budget": uot_port_budget,
+    }
     for t, pw_key, port in [("free", "ECO_PASS", 8443),
+                            ("budget", "BUDGET_PASS", 8448),
                             ("strike", "STRIKE_PASS", 8445)]:
         pw = os.environ.get(pw_key, "")
         if not pw:
@@ -505,7 +528,7 @@ if pw_from_file:
             "password": pw, "method": SS_METHOD,
         }
         if udp:
-            cfg_dict["uot_port"] = uot_port if t == "strike" else uot_port_free
+            cfg_dict["uot_port"] = uot_port_for[t]
         config_str = json.dumps(cfg_dict)
         body = {"tier": t, "config": config_str, "active": True, "udp_relay": udp}
 

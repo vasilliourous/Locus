@@ -340,20 +340,23 @@ export const useCustomTheme = () => {
 
     const rootEle = document.documentElement
     if (rootEle) {
-      // These were Verge's greys. Every one of them is visible against Locus's
-      // green-black surface (a neutral `#3E3E3E` selection block next to a green
-      // page reads as a rendering bug), so they follow the brand palette while
-      // keeping the same light/dark relationship.
+      // The window-chrome variables: selection, scrollers, dividers. Each is read
+      // from the resolved mode's palette so the chrome tracks the theme instead
+      // of being a second, hand-maintained copy of it. Values: `/COLOURS.md` §2.
       const backgroundColor =
         effectiveMode === 'light' ? LOCUS_LIGHT.background : dt.background_color
       const selectColor =
         effectiveMode === 'light' ? LOCUS_LIGHT.surfaceHover : LOCUS_COLORS.surfaceHover
-      const scrollColor =
-        effectiveMode === 'light' ? '#8CA59680' : LOCUS_COLORS.textSecondary
-      const dividerColor =
+      const scrollColor = alpha(
         effectiveMode === 'light'
-          ? 'rgba(11, 31, 20, 0.08)'
-          : 'rgba(234, 242, 236, 0.08)'
+          ? defaultTheme.primary_text
+          : LOCUS_COLORS.textSecondary,
+        0.5,
+      )
+      const dividerColor = alpha(
+        effectiveMode === 'light' ? defaultTheme.primary_text : LOCUS_COLORS.textPrimary,
+        0.08,
+      )
       rootEle.style.setProperty('--divider-color', dividerColor)
       rootEle.style.setProperty('--background-color', backgroundColor)
       rootEle.style.setProperty('--selection-color', selectColor)

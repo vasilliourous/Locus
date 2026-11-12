@@ -206,11 +206,19 @@ pub async fn download(
     }
     let download_client = hub_client.client();
 
-    let response = download_client
-        .get(&offer.url)
-        .send()
-        .await
-        .with_context(|| format!("could not reach {}", offer.url))?;
+    let response = match download_client.get(&offer.url).send().await {
+        Ok(response) => response,
+        Err(error) => {
+            // Same rule as the other two call sites: no HTTP status means nothing
+            // answered, which is what the maintenance tunnel exists for. The
+            // download is the call that REPAIRS a blocked device, so it is the one
+            // that most needs this route.
+            match retry_download_over_maintenance(&error, &hub, &offer.url).await? {
+                Some(response) => response,
+                None => return Err(error).with_context(|| format!("could not reach {}", offer.url)),
+            }
+        }
+    };
 
     // A redirect is reported as the destination it names, because that
     // destination is the answer to "why did this not download" on a filtered
@@ -359,6 +367,35 @@ pub fn prune_staging_dir(staging_dir: &Path) {
             let _ = std::fs::remove_file(&path);
         }
     }
+}
+
+/// One retry of the artifact download through the maintenance route, when this
+/// failure calls for it.
+///
+/// Returns `Ok(None)` when the route should not be used (the hub ANSWERED, whatever
+/// the status). Extracted from `download`'s error arm: that function already
+/// handles the redirect policy and the signature checks, and the extra branch
+/// inline pushed it past this crate's cognitive-complexity limit.
+async fn retry_download_over_maintenance(
+    error: &reqwest::Error,
+    hub: &str,
+    url: &str,
+) -> Result<Option<reqwest::Response>> {
+    if !crate::locus::activation_tunnel::note_failure_and_decide_retry(error) {
+        return Ok(None);
+    }
+    tracing::warn!(
+        target: "locus::activation_tunnel",
+        "the direct update download produced no response; retrying through the maintenance tunnel"
+    );
+    let retry = crate::locus::activation_tunnel::hub_client_for(hub, crate::locus::hub::Timeout::Download).await;
+    let sent = retry.client().get(url).send().await;
+    if !crate::locus::activation_tunnel::log_retry_outcome(&sent) {
+        return Err(anyhow::anyhow!(
+            "could not reach {url} directly ({error:#}), and the maintenance tunnel also failed"
+        ));
+    }
+    Ok(sent.ok())
 }
 
 #[cfg(test)]

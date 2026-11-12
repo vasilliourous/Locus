@@ -32,10 +32,9 @@ export const BasePage: React.FC<Props> = (props) => {
 
         <div
           className={full ? 'base-container no-padding' : 'base-container'}
-          // The page surface. Was Verge's `#1e1f27` — a neutral grey that read as
-          // a blue-grey panel behind Locus's green cards. Now the theme's own
-          // background, so it follows the palette (and light/dark) automatically
-          // instead of being a second, hand-maintained copy of it.
+          // The page surface is the theme's own background, so it follows the
+          // palette (and light/dark) automatically instead of being a second,
+          // hand-maintained copy of it.
           style={{ backgroundColor: theme.palette.background.default }}
         >
           <section

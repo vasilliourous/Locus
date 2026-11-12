@@ -150,6 +150,12 @@ uot_check() {
 # Ports and classes mirror modules/02-shadowsocks.sh and modules/04-tc.sh.
 uot_check "strike" "/etc/sing-box/strike.json" "sing-box-uot-strike" ""
 uot_check "eco"    "/etc/sing-box/eco.json"    "sing-box-uot-eco"    "20"
+# Budget (2026-11-12, docs/business/04-tiers.md §4.2.5). Its class is asserted
+# because the shaping is the product: 25 Mbps is what the plan sells, and an
+# unshaped :8449 is a route around it. Note this is the OPPOSITE assertion from
+# `strike` above, which correctly passes no class — the paid plan sells latency
+# and is deliberately unshaped. Do not "fix" the asymmetry.
+uot_check "budget" "/etc/sing-box/budget.json" "sing-box-uot-budget" "50"
 
 # The retired single-listener unit must be gone. If it survived an upgrade it
 # binds :8446, racing the per-plan listener for the paid UDP port — and whichever
@@ -170,7 +176,7 @@ pass "the retired sing-box-uot.service is not running (a running one races :8446
 # repeat a single `sing-box-uot` check here against a unit that no longer exists,
 # which reported a false FAIL on every healthy box.
 log "Step 3/5: Checking listeners..."
-for svc in shadowsocks-eco shadowsocks-strike; do
+for svc in shadowsocks-eco shadowsocks-strike shadowsocks-budget; do
     if systemctl is-active --quiet "$svc"; then
         pass "${svc} is running"
     else

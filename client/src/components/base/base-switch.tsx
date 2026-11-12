@@ -18,7 +18,7 @@ export const Switch = styled((props: SwitchProps) => (
     transitionDuration: '300ms',
     '&.Mui-checked': {
       transform: 'translateX(16px)',
-      color: '#fff',
+      color: theme.palette.primary.contrastText,
       '& + .MuiSwitch-track': {
         backgroundColor: theme.palette.primary.main,
         opacity: 1,

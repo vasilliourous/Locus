@@ -39,7 +39,8 @@ export interface LocusStatus {
    */
   storedCodeDamaged: boolean
   /**
-   * The tier name as the hub sent it (`free`/`eco`, or `strike`), when known.
+   * The tier name as the hub sent it (`free`/`eco`, `budget`, or `strike`),
+   * when known.
    * This is the WIRE name, not the label the student reads — the frontend
    * maps it in `tier-badge.tsx`, which is the single place that mapping
    * lives, so the two can never disagree.
@@ -108,6 +109,15 @@ export interface LocusStatus {
    * claiming the app is off. `false` whenever the core is not serving.
    */
   coreUp: boolean
+  /**
+   * Whether the maintenance tunnel is carrying this device's hub traffic.
+   *
+   * True when the session has decided to prefer the free-tier relay AND one is
+   * warm — i.e. the state in which hub calls go through it. Reported so the
+   * screen can say "getting ready" rather than "not connected" during the one
+   * window where the app is genuinely working but the plan tunnel is not up.
+   */
+  bootstrapping: boolean
   /**
    * The subscription state, already parsed — see [`SubscriptionStatus`].
    *

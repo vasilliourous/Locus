@@ -1,13 +1,18 @@
 import { LOCUS_COLORS, LOCUS_LIGHT } from '@/pages/_theme'
 
 /**
- * The theme registry — the named looks a student can pick between (nine today;
- * this comment deliberately does not restate the count — see `THEMES` below).
+ * The theme registry — the named looks a student picks between.
  *
- * `docs/reference/THEMES.md` is the design record and the authority on *why*
- * each theme exists; this file is the authority on *what* each theme is.
- * `check-consistency.sh` §9 recomputes the id list from here and fails when it
- * disagrees with `docs/state.toml`, so a theme cannot be added in one place.
+ * **Every colour in this file is documented in `/COLOURS.md` §§3–4**, which is
+ * also where the rationale for each theme and each decoration preset lives. This
+ * file is the data; do not restate a value or a design note here.
+ *
+ * `docs/reference/THEMES.md` owns the *layer's* mechanics: what a theme may and
+ * may not change, how an id resolves, and how to add one.
+ *
+ * `check-consistency.sh` §9 recomputes the id list from `THEMES` below and fails
+ * when it disagrees with `docs/state.toml`, so a theme cannot be added in one
+ * place.
  *
  * # Debugging a theme problem
  *
@@ -24,27 +29,6 @@ import { LOCUS_COLORS, LOCUS_LIGHT } from '@/pages/_theme'
  * `default-dark` when you selected something else means `resolveTheme` hit its
  * fallback — which is what an *absent* id looks like, so check the write path
  * before assuming the registry is wrong.
- *
- * # The rules, in short (full version: THEMES.md §3)
- *
- *   1. Text on its own surface, and the accent used as text, must clear the
- *      contrast floors the test suite applies.
- *   2. `mode` must match the palette direction — a `dark` theme has light text
- *      on a dark surface. This is the check that catches a copy-paste error
- *      between two similar themes, which is how a registry entry really gets
- *      authored wrong.
- *   3. `surface` is a visible step from `background`, `border` is visible
- *      against both, `textSecondary` is dimmer than `textPrimary` but readable.
- *   4. Tier colours are NOT themed. See `TIER_COLORS` in `_theme.tsx`.
- *
- * # Why the defaults are re-exported rather than restated
- *
- * `default-dark` and `default-light` are built from `LOCUS_COLORS` and
- * `LOCUS_LIGHT` directly, not from copies of their hex values. The shipped
- * palette has one home, and a theme that restated it would be a second home that
- * can drift — which is the exact defect class `theme-colors.test.ts` exists to
- * catch. The registry is a *superset* of the shipped appearance, provably,
- * because the two default entries are literally the same objects.
  */
 
 /**
@@ -69,12 +53,9 @@ export interface ThemeSpec {
 }
 
 /**
- * The colours a theme owns.
- *
- * Deliberately the *whole* palette rather than a delta against a base: a theme
- * that inherits most of its values from another theme cannot be read on its own,
- * and "which theme does this actually derive from" is not a question anyone
- * should have to answer while looking at a palette.
+ * The colours a theme owns. Deliberately the *whole* palette rather than a
+ * delta against a base: a theme that inherits most of its values from another
+ * theme cannot be read on its own.
  *
  * Not exported: the test suite reaches it through `THEMES`, and exporting a
  * second name for the shape would invite a consumer to type against it instead
@@ -107,39 +88,9 @@ export interface ThemeShape {
 }
 
 /**
- * A named decoration preset.
- *
- * # Why this is a structure and not one string
- *
- * A preset began as a single flat declaration block, and the guard enforcing
- * that forbade any `{` or `}`. That was true to the original design — a preset
- * was one `radial-gradient` — but it cannot express a *rice*, which is
- * inherently layered: a base wash, a directional sheen, a grain or scanline
- * pass, and a vignette, composited in a defined order.
- *
- * So a preset is now a small structure with the layers spelled out:
- *
- *   - `short`   — declarations applied to the skin root itself.
- *   - `layers`  — further declaration blocks, painted in order on top. Each is
- *                 still a *declaration block*, never a selector: the scoping
- *                 rule is unchanged.
- *
- * # The constraint that has NOT changed
- *
- * Every layer must remain compositor-only. `background-image`, `background-*`,
- * `box-shadow`, `border-*`, `opacity`, `filter`, `mix-blend-mode` and the
- * `--var` declarations a component may read are all fine, because none of them
- * can change layout. **Nothing here may set `width`, `height`, `margin`,
- * `padding`, `position`, `display`, `flex`, `grid`, `gap`, `order` or `font-size`
- * on anything** — a decoration that could resize or move an element is a
- * decoration that can move the Connect button, which is the one thing this app
- * must not do. That rule is a review obligation, not something a test can prove;
- * `THEMES.md` §8 says so.
- *
- * Multi-layer presets that draw at the *edges* of the skin element are what make
- * a rice read as a rice. They work here only because the skin element is the
- * layout root and already fills the window; a preset that assumed its own box
- * could paint outside the app.
+ * A named decoration preset: `short` declarations on the skin root, plus
+ * ordered `layers` painted over them. Each is a declaration block, never a
+ * selector. Values: `/COLOURS.md` §4; the safety rules: `THEMES.md` §1.
  */
 export interface DecorationSpec {
   /** Declarations on the skin root. Empty string is valid. */
@@ -168,46 +119,27 @@ export type ThemeId =
   | 'contrast'
 
 /**
- * The decoration presets.
+ * The decoration presets, scoped to `[data-theme-skin]`.
  *
- * Each is a self-contained block scoped to `[data-theme-skin]`, which is set on
- * the layout root only while that theme is active. Nothing here targets a
- * component, a class, or the document: a preset that could reach outside the
- * skin attribute would defeat the point of naming presets at all.
- *
- * Every technique used is painted by the compositor and needs no asset. That is
- * what lets a decoration be additive: `use-custom-theme` writes this into one
- * `<style id="locus-theme-decoration">` element scoped to `[data-theme-skin]`,
- * and removing that element removes every trace of the layer.
+ * Every technique here is painted by the compositor and needs no asset, so the
+ * layer is additive: `use-custom-theme` writes this into one
+ * `<style id="locus-theme-decoration">` element, and removing that element
+ * removes every trace. What each one paints: `/COLOURS.md` §4.
  */
 export const DECORATIONS: Record<DecorationId, DecorationSpec> = {
-  /**
-   * `forest-glow` — a soft green wash from above, for `moss`.
-   *
-   * The light source is the top edge, which is the conventional reading of a
-   * window in a wall. Kept at a low alpha against a desaturated palette, so it
-   * reads as depth rather than as a coloured panel.
-   */
   'forest-glow': {
     short: `
       background-image:
         radial-gradient(
           ellipse 120% 60% at 50% -10%,
-          rgba(143, 191, 159, 0.10),
-          rgba(143, 191, 159, 0) 70%
+          rgba(153, 153, 153, 0.10),
+          rgba(153, 153, 153, 0) 70%
         );
       background-repeat: no-repeat;
     `,
     layers: [],
   },
 
-  /**
-   * `ember-pit` — a warm light source from below, for `ember`.
-   *
-   * Deliberately bottom-anchored: every other wash in this registry comes from
-   * the top, which is the generic "product hero gradient". Light from underneath
-   * reads as a fire, which is the palette's whole conceit.
-   */
   'ember-pit': {
     short: `
       background-image:
@@ -221,14 +153,6 @@ export const DECORATIONS: Record<DecorationId, DecorationSpec> = {
     layers: [],
   },
 
-  /**
-   * `blueprint` — a cold grid, for `slate`.
-   *
-   * Drawn with repeating gradients rather than an image so it needs no asset and
-   * cannot shift layout. The lines are extremely low-alpha on purpose: a grid
-   * that is visible at a glance competes with the UI on top of it, and the point
-   * of a rice's texture is that it is felt rather than read.
-   */
   blueprint: {
     short: `
       background-image:
@@ -245,14 +169,6 @@ export const DECORATIONS: Record<DecorationId, DecorationSpec> = {
     layers: [],
   },
 
-  /**
-   * `risograph` — print misregistration, for `sepia`.
-   *
-   * Two offset flat tints that read as over-inked plates. Kept to a very low
-   * alpha and a small offset: the effect is meant to be noticed only once you
-   * look for it, and a stronger version would be a bug report about a colour
-   * cast rather than a style choice.
-   */
   risograph: {
     short: `
       background-image:
@@ -271,20 +187,6 @@ export const DECORATIONS: Record<DecorationId, DecorationSpec> = {
     layers: [],
   },
 
-  /**
-   * `signal-noise` — a phosphor glow with a fine scanline, for `dawn`.
-   *
-   * The glow is the second layer and the scanline the first, so the glow sits
-   * *behind* the line pattern — which is what makes it read as light coming off
-   * the screen rather than as an overlay on the text.
-   *
-   * **The scanline is the one preset here that can cost legibility**, because it
-   * is a pattern over the entire window rather than a static wash. It is
-   * therefore limited to a 1px line on a 4px period at a very low alpha, and it
-   * is deliberately *not* on `contrast` — the theme whose whole job is
-   * legibility. If text ever reads as thin or shimmering under this theme, this
-   * preset is the first thing to remove.
-   */
   'signal-noise': {
     short: `
       background-image:
@@ -314,13 +216,7 @@ export const DECORATIONS: Record<DecorationId, DecorationSpec> = {
 /** Today's radii. Kept as named values so a theme reads as a delta from them. */
 export const DEFAULT_SHAPE: ThemeShape = { cardRadius: 12, controlRadius: 8 }
 
-/**
- * `default-dark` — the shipped dark appearance.
- *
- * Built from `LOCUS_COLORS`, so it is byte-identical to what ships today. This
- * is the default a fresh install sees, and the fallback for an id that is
- * absent, empty or unknown (THEMES.md §2).
- */
+/** The shipped dark appearance: a projection of `LOCUS_COLORS`, not a copy. */
 const defaultDark: ThemeSpec = {
   id: 'default-dark',
   labelKey: 'home.components.connection.account.themeDefaultDark',
@@ -337,19 +233,13 @@ const defaultDark: ThemeSpec = {
     success: LOCUS_COLORS.success,
     warning: LOCUS_COLORS.warning,
     error: LOCUS_COLORS.error,
-    secondary: '#7FB8A0',
-    info: '#7FB0C9',
+    secondary: '#A6A6A6',
+    info: '#D0D0D0',
   },
   shape: DEFAULT_SHAPE,
 }
 
-/**
- * `default-light` — the shipped light appearance.
- *
- * The accent is the *darker* green because this value is used for text-bearing
- * controls, where the dark accent on an off-white page fails the body-copy rule.
- * That is a property of this theme, not a special case in the code.
- */
+/** The shipped light appearance: `LOCUS_LIGHT` grounds plus the light roles. */
 const defaultLight: ThemeSpec = {
   id: 'default-light',
   labelKey: 'home.components.connection.account.themeDefaultLight',
@@ -359,15 +249,15 @@ const defaultLight: ThemeSpec = {
     surface: LOCUS_LIGHT.surface,
     surfaceHover: LOCUS_LIGHT.surfaceHover,
     border: LOCUS_LIGHT.border,
-    textPrimary: '#1B2A23',
-    textSecondary: '#55665D',
+    textPrimary: '#151515',
+    textSecondary: '#565656',
     accent: LOCUS_LIGHT.accent,
     accentHover: LOCUS_LIGHT.accentHover,
-    success: '#2A6E4C',
-    warning: '#8A5A00',
-    error: '#A33226',
-    secondary: '#4F6B5E',
-    info: '#2C6480',
+    success: '#151515',
+    warning: '#151515',
+    error: '#151515',
+    secondary: '#565656',
+    info: '#565656',
   },
   shape: DEFAULT_SHAPE,
 }
@@ -375,27 +265,13 @@ const defaultLight: ThemeSpec = {
 /**
  * The registry. Order here is the order of the dropdown.
  *
- * Read it as a table: every entry is a full, self-contained look. See
- * `docs/reference/THEMES.md` §4 for why each one exists and what it must not be
- * confused with — a theme with no rationale is a palette nobody can safely
- * change later.
+ * Read it as a table: every entry is a full, self-contained look. Palette values
+ * and the rationale for each entry: `/COLOURS.md` §3.
  */
 export const THEMES: Record<ThemeId, ThemeSpec> = {
   'default-dark': defaultDark,
   'default-light': defaultLight,
 
-  /**
-   * `slate` — cool blue-grey, low stimulus.
-   *
-   * Scheme: **split-complementary** on a ~h220 blue-grey base. The accent
-   * (`#88C0D0`, a frost blue) sits a quarter-turn from the surfaces, and the
-   * status colours swing across to the warm side (`#D08770` orange, `#EBCB8B`
-   * straw) so a warning is never mistaken for a link.
-   *
-   * Mood: calm and recessive. Every colour is low-saturation and close in value,
-   * so nothing competes with the Connect control. This is the theme for someone
-   * who wants the app to stop shouting.
-   */
   slate: {
     id: 'slate',
     labelKey: 'home.components.connection.account.themeSlate',
@@ -419,18 +295,6 @@ export const THEMES: Record<ThemeId, ThemeSpec> = {
     decoration: 'blueprint',
   },
 
-  /**
-   * `dawn` — indigo night with a lit horizon.
-   *
-   * Scheme: **analogous** on an indigo base (h~230), with the accent a step
-   * toward blue-cyan and the warm accents (peach, coral, violet) acting as
-   * complements. Four hues in the accent family, deliberately: this is the most
-   * colourful theme, and the variety is the point.
-   *
-   * Mood: nocturnal but not gloomy — the palette of a screen in a dark room at
-   * 3am. It is the highest-chroma dark theme in the registry, which is what makes
-   * it the "vibrant alternative" rather than another grey.
-   */
   dawn: {
     id: 'dawn',
     labelKey: 'home.components.connection.account.themeDawn',
@@ -454,19 +318,6 @@ export const THEMES: Record<ThemeId, ThemeSpec> = {
     decoration: 'signal-noise',
   },
 
-  /**
-   * `ember` — warm terracotta, lamplight.
-   *
-   * Scheme: **complementary** on a warm terracotta base (h~25). The accent
-   * (`#E0895F`) is the base hue at full strength, and the cool counterweight is
-   * carried by `info` (`#8FB0C9`) rather than by the accent — which is what keeps
-   * a warm theme from turning muddy.
-   *
-   * Mood: warm and energetic without being loud. Warm light is easier on the eye
-   * at night than a blue-white screen, and this is the theme for a cold room.
-   * The blue channel is kept low throughout so it reads as lamplight, not as a
-   * tinted grey.
-   */
   ember: {
     id: 'ember',
     labelKey: 'home.components.connection.account.themeEmber',
@@ -491,50 +342,31 @@ export const THEMES: Record<ThemeId, ThemeSpec> = {
   },
 
   /**
-   * `moss` — desaturated deep green, the quiet one.
-   *
-   * Scheme: **analogous** on a green base (h~145), a half-turn away from the
-   * brand green in value rather than in hue. Every colour is muted, and the
-   * range between the lightest and darkest surface is small.
-   *
-   * Mood: restful and organic. This is the closest relative of the default in the
-   * registry, and it exists for people who like the default's character but want
-   * it softer — the difference is saturation and lift, not identity.
+   * `moss` — neutral since the 2026-11-11 reset; keeps the larger card radius.
    */
   moss: {
     id: 'moss',
     labelKey: 'home.components.connection.account.themeMoss',
     mode: 'dark',
     palette: {
-      background: '#1B2320',
-      surface: '#243029',
-      surfaceHover: '#2E3D35',
-      border: '#3A4A41',
-      textPrimary: '#DCE8DF',
-      textSecondary: '#A3B5A8',
-      accent: '#8FBF9F',
-      accentHover: '#A8D4B6',
-      success: '#8FBF9F',
-      warning: '#D9B382',
-      error: '#D98C8C',
-      secondary: '#7FA8B8',
-      info: '#8FB8C9',
+      background: '#1E1E1E',
+      surface: '#2A2A2A',
+      surfaceHover: '#333333',
+      border: '#3D3D3D',
+      textPrimary: '#E6E6E6',
+      textSecondary: '#ABABAB',
+      accent: '#C8C8C8',
+      accentHover: '#DCDCDC',
+      success: '#C8C8C8',
+      warning: '#B4B4B4',
+      error: '#A6A6A6',
+      secondary: '#ABABAB',
+      info: '#B4B4B4',
     },
     shape: { cardRadius: 14, controlRadius: 8 },
     decoration: 'forest-glow',
   },
 
-  /**
-   * `linen` — cool neutral light.
-   *
-   * Scheme: **analogous** on a neutral-cool base (h~210). Near-monochrome
-   * surfaces with a single blue accent, so the one saturated thing on screen is
-   * always interactive.
-   *
-   * Mood: clean and clinical. The off-white ground (`#F4F7FA`, L=0.93) is chosen
-   * rather than white so the card edge is a relationship rather than a glare —
-   * see the note in `_theme.tsx` on why `#FFFFFF` was removed.
-   */
   linen: {
     id: 'linen',
     labelKey: 'home.components.connection.account.themeLinen',
@@ -557,17 +389,6 @@ export const THEMES: Record<ThemeId, ThemeSpec> = {
     shape: DEFAULT_SHAPE,
   },
 
-  /**
-   * `sepia` — warm paper, low glare.
-   *
-   * Scheme: **analogous** on a warm paper base (h~35), with a burnt-orange accent
-   * the same hue at full strength. The text is a warm near-black rather than a
-   * neutral one, which is what makes the whole surface feel like paper.
-   *
-   * Mood: calm and analogue. Designed for a bright room or beside a window, where
-   * a cool white screen competes with the daylight. The warm ground also reduces
-   * the blue-light load for evening reading.
-   */
   sepia: {
     id: 'sepia',
     labelKey: 'home.components.connection.account.themeSepia',
@@ -591,22 +412,6 @@ export const THEMES: Record<ThemeId, ThemeSpec> = {
     decoration: 'risograph',
   },
 
-  /**
-   * `contrast` — maximum legibility, still not a glare.
-   *
-   * Scheme: a **neutral ramp** with a single green accent. Not a colour scheme at
-   * all, deliberately: this theme's job is legibility, and hue variety would
-   * work against it. What separates it from the other dark themes is *range* —
-   * text at ~13:1 on the surface, borders at 2.40:1, and the largest surface step
-   * in the registry.
-   *
-   * It replaces the old pure-white-on-pure-black `high-contrast`, which met the
-   * contrast numbers by every measure and was still the wrong answer: `#FFFFFF`
-   * on `#000000` is the highest-glare combination possible, and for the people
-   * who need this theme most — those with astigmatism or light sensitivity —
-   * glare is the symptom, not the fix. `#F0F3F5` on `#242A30` is still ~13:1 and
-   * does not halo.
-   */
   contrast: {
     id: 'contrast',
     labelKey: 'home.components.connection.account.themeContrast',
@@ -681,20 +486,11 @@ export const resolveTheme = (id: unknown): ThemeSpec =>
  * This exists as a function rather than by widening `ThemeSpec` because the two
  * are different things: `ThemeSpec` is the registry's own vocabulary (names a
  * theme author writes), and this is the MUI-shaped projection the hook consumes.
- * Keeping them separate means a theme author never has to know that MUI wants a
- * `background_color` where the registry says `background`.
  *
  * `font_family` is deliberately not a *theme* field -- it is a preference, not a
- * look, and no theme in the registry sets one. It is still on this object
- * because the hook reads it from the same base as everything else and falls back
- * to the built-in stack when `theme_setting.font_family` is unset, so dropping it
- * would change behaviour for an unthemed app. It is passed through from the
- * shipped defaults, unchanged.
+ * look, and no theme in the registry sets one.
  */
-export const themeDefaultFor = (
-  spec: ThemeSpec,
-  fontFamily: string,
-) => ({
+export const themeDefaultFor = (spec: ThemeSpec, fontFamily: string) => ({
   primary_color: spec.palette.accent,
   secondary_color: spec.palette.secondary,
   primary_text: spec.palette.textPrimary,

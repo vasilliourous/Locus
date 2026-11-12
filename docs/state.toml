@@ -250,15 +250,42 @@ value      = { port = 8443, cap = "1mbit", tier_rows = ["free"] }
 source     = "server/modules/04-tc.sh; server/scripts/seed-pb.py"
 provenance = "derived"
 
+[tiers.budget]
+# The middle rung, added 2026-11-12 — recomputable from the same files.
+#
+# NOT a reborn Stealth. Stealth shared Strike's endpoint and differed by a rate;
+# Budget has its own ports (8448 TCP, 8449 UoT), its own credential and its own
+# tc classes (1:40 and 1:50), so it cannot collapse into Full by a config edit.
+# None of the retired stealth vocabulary is reused: 8444 stays dark until an
+# operator removes that unit and config. See docs/business/04-tiers.md §4.2.5.
+#
+# Its UDP listener is SHAPED, unlike Full's: Budget is sold on comfort at a rate,
+# so an unshaped 8449 would be a route around the 25 Mbps the plan sells.
+#
+# `budget` is the FROZEN row name for the same reason `eco` and `strike` are: a
+# code carries that string in its `tier` field and activation/heartbeat resolve a
+# tier by looking it up in `tier_configs`. The customer-facing name is "Budget"
+# and happens to match — that is a coincidence of this tier, not a rule.
+#
+# check-consistency.sh §27 recomputes the cap and both ports from 04-tc.sh and
+# `02-shadowsocks.sh`, and asserts the seed row and its `uot_port` agree.
+value      = { port = 8448, uot_port = 8449, cap = "25mbit", tier_rows = ["budget"] }
+source     = "server/modules/04-tc.sh; server/modules/02-shadowsocks.sh; server/scripts/seed-pb.py"
+provenance = "derived"
+
 [tiers.paid]
 # The paid tier's endpoint, recomputable from the same three files.
 #
-# THERE IS ONE PAID TIER. Stealth (port 8444) was retired when the paid ladder
-# was merged into one plan: Stealth and Strike were the same tier at two rates,
-# and the only real difference was Strike's UDP-over-TCP endpoint. Retiring it
-# also retired the faster class the second paid tier existed to advertise; the
-# paid cap is now 100 Mbps, which is the rate Stealth already sold at and far
-# above what any game needs. See docs/business/04-tiers.md §4.2.4.
+# ONE rung, Stealth (port 8444) was retired on 2026-10-05 when the paid ladder
+# was merged into it: Stealth and Strike were the same tier at two rates, and
+# the structural difference was Strike's UDP-over-TCP endpoint. Retiring it also
+# retired the faster class the second paid tier existed to advertise; the paid
+# cap is now 100 Mbps, which is the rate Stealth already sold at and far above
+# what any game needs. See docs/business/04-tiers.md §4.2.4.
+#
+# On 2026-11-12 a second paid rung returned as `budget` (§4.2.5) — on new ports
+# and with a new name, so the reason §4.2.4 gave for the merge (one endpoint,
+# two prices) does not apply to it. 8444 itself is still retired.
 #
 # The retired rate is deliberately NOT written down here, even as history. A
 # number in a comment is a number the next person copies back into the code —

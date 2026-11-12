@@ -1,4 +1,4 @@
-import { Box, CircularProgress } from '@mui/material'
+import { alpha, Box, CircularProgress } from '@mui/material'
 
 interface BaseLoadingOverlayProps {
   isLoading: boolean
@@ -20,11 +20,10 @@ export const BaseLoadingOverlay: React.FC<BaseLoadingOverlayProps> = ({
         display: 'flex',
         justifyContent: 'center',
         alignItems: 'center',
-        // Respect current theme; avoid bright flash in dark mode
+        // Respect current theme; avoid a bright flash in dark mode. The scrim
+        // is the page ground at alpha, so it darkens and lightens with the mode.
         backgroundColor: (theme) =>
-          theme.palette.mode === 'dark'
-            ? 'rgba(0, 0, 0, 0.5)'
-            : 'rgba(255, 255, 255, 0.7)',
+          alpha(theme.palette.background.default, 0.6),
         zIndex: 1000,
       }}
     >

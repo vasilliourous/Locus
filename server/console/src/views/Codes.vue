@@ -95,7 +95,12 @@ watch([query, tierFilter, statusFilter, middlemanFilter, worklistDays], () => {
 // placeholder offering a retired tier is a dropdown entry that mints a code
 // which can never resolve, and `check-consistency.sh` §27 holds it to
 // `seed-pb.py` for exactly that reason.
-const tiers = ref<string[]>(['free', 'strike'])
+//
+// Keyed by the FROZEN row name the code will carry: `free`, `budget`, `strike`.
+// `budget` was added 2026-11-12 (docs/business/04-tiers.md §4.2.5); without it
+// here the mint form offers no Budget entry on first paint, and the operator
+// could not sell the plan the hub serves.
+const tiers = ref<string[]>(['free', 'budget', 'strike'])
 const middlemen = ref<{ name: string; codes: number }[]>([])
 
 async function load() {

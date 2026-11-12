@@ -82,6 +82,21 @@ reqwest = { version = "0.13.5", features = [
   "gzip",
   "rustls",
   "form",
+  # SOCKS5H, for the maintenance tunnel (`locus::activation_tunnel`).
+  #
+  # WITHOUT THIS, `Proxy::all("socks5h://…")` COMPILES AND RETURNS `Err` AT
+  # RUNTIME. In reqwest 0.13.5 (`src/proxy.rs:730-742`) every `socks*` arm of the
+  # scheme match is `#[cfg(feature = "socks")]`, so with the feature absent the
+  # URL falls through to `_ => Err(crate::error::builder("unknown proxy
+  # scheme"))`. The build is green, the tests are green, and the proxy is never
+  # constructed — which is how the activation tunnel shipped without ever having
+  # built a working SOCKS client.
+  #
+  # The absence is visible in `Cargo.lock` rather than in any source file: the
+  # lock is generated from the union of every resolved feature across dev, build
+  # and release, so `tokio-socks` appearing there is the proof the feature is
+  # actually enabled. It did not appear until this line existed.
+  "socks",
 ] }
 rust_iso3166 = "0.2.0"
 

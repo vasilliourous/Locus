@@ -56,10 +56,9 @@ export const LayoutItem = (props: Props) => {
               mode === 'light'
                 ? alpha(primary.main, 0.15)
                 : alpha(primary.main, 0.35)
-            // The selected nav item's label. Verge's `#1f1f1f` / `#ffffff` are
-            // neutral, which on Locus's green surface reads as slightly wrong
-            // grey text beside green accents. Use the theme's own text colour so
-            // it tracks the palette in both modes.
+            // The selected nav item's label, read from the theme rather than
+            // from a pair of hardcoded neutrals, so it tracks the palette in
+            // both modes.
             const color = text.primary
             return {
               '&.Mui-selected': { bgcolor },

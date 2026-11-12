@@ -158,11 +158,11 @@ legacy/wails-client/
 | 3.3 | `stores/vpn.ts` | Reactive state: connection status, tier, timer, diagnostics |
 | 3.4 | `ActivationScreen.vue` | Code input, client-side Luhn check, "Activate" button, error display |
 | 3.5 | `MainScreen.vue` | Connect/Disconnect button, status dot, timer, tier badge, speed |
-| 3.6 | `StatusIndicator.vue` | Green/grey/red dot + label (Connected/Disconnected/Error) |
-| 3.7 | `TierBadge.vue` | Eco (grey), Stealth (purple), Strike (gold) with icon |
+| 3.6 | `StatusIndicator.vue` | Status dot + label (Connected/Disconnected/Error) |
+| 3.7 | `TierBadge.vue` | Eco, Stealth, Strike — glyph plus label |
 | 3.8 | Diagnostics | Copy-to-clipboard support report (modal inside `MainScreen.vue`) |
 | 3.9 | `App.vue` | Root: routing between activation and main screens |
-| 3.10 | Component styles | Dark theme (#0D0D0F background, #A855F7 accent) in scoped SFC `<style>` blocks |
+| 3.10 | Component styles | The dark theme in scoped SFC `<style>` blocks; colour is `/COLOURS.md`'s |
 
 ### Phase 4: Polish & Testing
 

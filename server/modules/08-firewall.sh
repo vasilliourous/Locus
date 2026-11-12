@@ -35,10 +35,22 @@ ufw allow 443/tcp 2>/dev/null || true
 log "✓ HTTP (80/tcp) and HTTPS (443/tcp) allowed"
 
 # ── Shadowsocks tiers ──
+#
+# 8444 IS STILL OPENED, and that is deliberate rather than an oversight: it is
+# the retired Stealth port, and a box upgraded from before the merge may still be
+# running `shadowsocks-stealth` — which an operator is told to remove by hand
+# (docs/business/14-risks.md §14.8). Closing the rule here would leave that
+# service running but unreachable, which hides the exposure instead of removing
+# it. Do not "tidy" this line until §14.8's operator step is known done.
+#
+# 8448 is Budget's TCP listener, added 2026-11-12 (docs/business/04-tiers.md
+# §4.2.5). It is a fresh port precisely so it cannot share a rule, a unit or a
+# credential with the retired one above.
 ufw allow 8443/tcp 2>/dev/null || true
 ufw allow 8444/tcp 2>/dev/null || true
 ufw allow 8445/tcp 2>/dev/null || true
-log "✓ Shadowsocks ports 8443, 8444, 8445 (TCP) allowed"
+ufw allow "${BUDGET_PORT:-8448}"/tcp 2>/dev/null || true
+log "✓ Shadowsocks ports 8443, 8444, 8445, ${BUDGET_PORT:-8448} (TCP) allowed"
 
 # ── Allow UDP only on Strike port ──
 ufw allow 8445/udp 2>/dev/null || true
@@ -50,18 +62,22 @@ log "✓ Strike UDP (8445/udp) allowed"
 # unreachable from the internet, and clients would sit on the advertised
 # uot_port until they timed out and fell back — a silent, confusing failure.
 #
-# BOTH ports, not just the paid one. UDP is carried by both plans now; opening
-# only 8446 would leave every free client's game traffic failing on a port the
-# hub advertises but does not admit.
-# ENABLE_UOT=0 skips both the services and both rules.
+# EVERY plan's port, not just the paid one. UDP is carried by every plan now;
+# opening only 8446 would leave free and Budget clients' game traffic failing on
+# a port the hub advertises but does not admit. Budget's 8449 is the newest and
+# the one this comment was extended for (2026-11-12) — a listener that exists and
+# is not admitted fails exactly like one that is not running.
+# ENABLE_UOT=0 skips all three services and all six rules.
 if [ "${ENABLE_UOT:-1}" = "1" ]; then
     ufw allow "${UOT_PORT:-8446}"/tcp 2>/dev/null || true
     ufw allow "${UOT_PORT:-8446}"/udp 2>/dev/null || true
     ufw allow "${UOT_PORT_FREE:-8447}"/tcp 2>/dev/null || true
     ufw allow "${UOT_PORT_FREE:-8447}"/udp 2>/dev/null || true
-    log "✓ UoT ports allowed: paid ${UOT_PORT:-8446}, free ${UOT_PORT_FREE:-8447} (TCP+UDP each)"
+    ufw allow "${UOT_PORT_BUDGET:-8449}"/tcp 2>/dev/null || true
+    ufw allow "${UOT_PORT_BUDGET:-8449}"/udp 2>/dev/null || true
+    log "✓ UoT ports allowed: paid ${UOT_PORT:-8446}, free ${UOT_PORT_FREE:-8447}, budget ${UOT_PORT_BUDGET:-8449} (TCP+UDP each)"
 else
-    log "UoT disabled (ENABLE_UOT=0) — ports ${UOT_PORT:-8446}/${UOT_PORT_FREE:-8447} not opened"
+    log "UoT disabled (ENABLE_UOT=0) — ports ${UOT_PORT:-8446}/${UOT_PORT_FREE:-8447}/${UOT_PORT_BUDGET:-8449} not opened"
 fi
 
 # ── Pre-activation activation tunnel ──
@@ -198,7 +214,7 @@ ufw status verbose 2>&1 | head -20
 # ── Verify critical rules ──
 # Port 22's rules are injected directly into ufw-user-input (see above), so
 # `ufw status` alone won't list them — check the live chain too.
-for port in 22 80 443 8443 8444 8445; do
+for port in 22 80 443 8443 8444 8445 "${BUDGET_PORT:-8448}"; do
     if ufw status | grep -q "${port}/tcp" || iptables -S ufw-user-input 2>/dev/null | grep -q "dport ${port}"; then
         log "✓ Port ${port}/tcp rule confirmed"
     else

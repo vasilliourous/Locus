@@ -1,4 +1,4 @@
-import { Box, useTheme } from '@mui/material'
+import { alpha, Box, useTheme } from '@mui/material'
 import type { Ref } from 'react'
 import {
   memo,
@@ -1102,9 +1102,9 @@ export const EnhancedCanvasTrafficGraph = memo(
               px: 1,
               py: 0.5,
               borderRadius: 0.5,
-              bgcolor: 'rgba(0,0,0,0.05)',
+              bgcolor: alpha(theme.palette.text.primary, 0.05),
               '&:hover': {
-                bgcolor: 'rgba(0,0,0,0.1)',
+                bgcolor: alpha(theme.palette.text.primary, 0.1),
               },
             }}
           >
@@ -1210,7 +1210,7 @@ export const EnhancedCanvasTrafficGraph = memo(
                 pointerEvents: 'none',
                 transform:
                   tooltipData.x > 200 ? 'translateX(-100%)' : 'translateX(0)',
-                boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
+                boxShadow: `0 4px 12px ${alpha(theme.palette.text.primary, 0.15)}`,
                 backdropFilter: 'none',
                 opacity: 1,
                 whiteSpace: 'nowrap',

@@ -27,6 +27,9 @@ Five rules, each enforced by a guard:
    §5, dated). **Neither belongs in a sentence.** (§9, §10)
 4. **One home per topic.** [`STATE.md`](STATE.md) is the ownership map; a second
    copy of a fact is a second thing that can disagree. Link to the owner.
+   **Colour is one of those topics and it is not in `docs/`**: every value, palette
+   and rule lives in [`/COLOURS.md`](../COLOURS.md) at the workspace root, and a
+   colour written into any document here is a build failure (§49).
 5. **Every live document is reachable from this page**, and none may announce its
    own retirement. (§28)
 
@@ -76,9 +79,10 @@ bulk-delete `codes` or `code_events`; revoke with Suspend, move with Unbind.*
 | [`../server/data/sidecar.lock.json`](../server/data/sidecar.lock.json) | live | **The pinned build inputs** — sha256 of the mihomo engine, the service bundle and the four geo databases, plus the engine versions. Enforced by §39 and by `prebuild.mjs` at download time. Read before bumping an engine. |
 | [`reference/DEVICE-IDENTITY.md`](reference/DEVICE-IDENTITY.md) | live | **How a student keeps their entitlement** across an update, an uninstall or a reset, and why device identity was removed. Read before touching the activation gate. |
 | [`reference/ACTIVATION-TUNNEL.md`](reference/ACTIVATION-TUNNEL.md) | live | **When a censored network blocks enrolment** — the measured traces, why no existing override can rescue a new device, and the pre-activation Shadowsocks listener that carries the three enrolment endpoints. Read before changing the activation transport, the allowlist or the activation rate limit. |
+| [`reference/MAINTENANCE-TUNNEL.md`](reference/MAINTENANCE-TUNNEL.md) | live | **The free-tier route used when the hub cannot be reached by name** — what it carries, the "no HTTP status" switch rule, the lifecycle, and why the plan dials an address instead of chaining. Read before changing the switch, the lifecycle or `tier.rs::dial_server`. |
 | [`reference/DEBUGGING-METHOD.md`](reference/DEBUGGING-METHOD.md) | live | **How to diagnose a defect here** — the reproduce→locate→prove→fix→guard order, two-sided contracts, and checks that cannot fail. Read before fixing anything that "should work". |
 | [`reference/EGRESS-READINESS.md`](reference/EGRESS-READINESS.md) | live | **Why the button says "connecting"** — the readiness chain from probe to rendered phase, and how to localise a stall. Read before touching `probe.rs`. |
-| [`reference/THEMES.md`](reference/THEMES.md) | live | **The theme registry** — what a theme may and may not change, and the checklist for adding one. Read before touching `_themes.ts`. |
+| [`reference/THEMES.md`](reference/THEMES.md) | live | **The theme layer** — what a theme may and may not change, how an id resolves, and the checklist for adding one. Read before touching `_themes.ts`. **Colour itself is not here**: every palette and value is in [`/COLOURS.md`](../COLOURS.md). |
 | [`reference/FIXES.md`](reference/FIXES.md) | live | Dated defect log — what broke, what fixed it, and the rule it produced. **Historical** — later entries sometimes correct earlier ones. |
 | [`reference/STILL-OPEN.md`](reference/STILL-OPEN.md) | live | What is unfinished or unvalidated. |
 | [`reference/DOC-AUDIT.md`](reference/DOC-AUDIT.md) | live | **The state of this doc set** as of 2026-10-18 — the defects found, what a guard cannot see, and the one guard change still worth making. |

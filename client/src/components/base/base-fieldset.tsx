@@ -23,7 +23,8 @@ export const BaseFieldset: React.FC<Props> = ({
       component="fieldset"
       sx={{
         position: 'relative',
-        border: '1px solid #bbb',
+        border: '1px solid',
+        borderColor: 'divider',
         borderRadius: '5px',
         width: width ?? 'auto',
         padding: fieldsetPadding,
@@ -36,8 +37,6 @@ export const BaseFieldset: React.FC<Props> = ({
           top: '-10px',
           left: fieldsetPadding,
           backgroundColor: 'background.paper',
-          backgroundImage:
-            'linear-gradient(rgba(255, 255, 255, 0.16), rgba(255, 255, 255, 0.16))',
           color: 'text.primary',
           fontSize: fontSize ?? '1em',
         }}

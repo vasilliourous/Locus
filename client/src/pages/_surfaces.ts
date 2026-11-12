@@ -5,23 +5,20 @@ import { LOCUS_COLORS } from '@/pages/_theme'
 /**
  * Shared surface styling, so every card in the app is the same object.
  *
- * From `docs/archive/UI-AESTHETICS.md` §2: a card is a one-step-up surface with
- * a 1px border and a 12px radius, and — notably — **no shadow**. MUI's shadow
- * scale is already zeroed app-wide (`shadows: Array(25).fill('none')` in
+ * A card is a one-step-up surface with a 1px border and a radius. MUI's shadow
+ * scale is zeroed app-wide (`shadows: Array(25).fill('none')` in
  * `use-custom-theme`), so a card that relied on `elevation` to separate itself
- * would be invisible against the page. The border is what does the work.
+ * would be invisible against the page; the border is what does the work.
  *
  * Defined once because the alternative is what this fork had: each screen
- * hand-rolling its own `sx`, which is how the old app ended up with Verge greys
- * in some places and Locus greens in others.
+ * hand-rolling its own `sx`, which is how the old app ended up with upstream
+ * greys in some places and brand colours in others.
  *
- * # The radius is a variable, and 12px is the fallback
+ * The radius is a variable and `12px` is the fallback: it is what an unthemed
+ * app renders, and what renders in the window before `use-custom-theme` has run,
+ * so a card cannot flash a different shape on startup.
  *
- * A theme may change the corner radius (`docs/reference/THEMES.md` §1), and it
- * does so by writing `--card-radius`. The explicit `12px` fallback is not
- * redundant: it is what an unthemed app renders, and what renders in the window
- * before `use-custom-theme` has run. A card whose radius depended on a theme
- * having been applied would flash a different shape on startup.
+ * Colours: `/COLOURS.md` §2.
  */
 export const cardSx = (theme: Theme): SxProps<Theme> => ({
   borderRadius: `var(--card-radius, 12px)`,
@@ -35,8 +32,7 @@ export const cardSx = (theme: Theme): SxProps<Theme> => ({
  * A card with a coloured accent, for state-bearing panels.
  *
  * Used by the Connection screen's status panel, where the border and wash carry
- * the connection state. The alpha values match the spec's badge backgrounds so
- * a connected panel and a connected badge read as the same family.
+ * the connection state. Colours: `/COLOURS.md` §2.
  */
 export const accentCardSx = (theme: Theme, accent: string): SxProps<Theme> => ({
   borderRadius: `var(--card-radius, 12px)`,

@@ -4,16 +4,12 @@ import { useTheme } from '@mui/material/styles'
 import { TIER_COLORS, TIER_FALLBACK } from '@/pages/_theme'
 
 /**
- * The tier badge.
- *
- * From `docs/archive/UI-AESTHETICS.md` §7 — the "tier sells itself" principle:
- * a student on the paid plan should be able to see that without opening a
- * settings page. Each tier gets a colour, a small glyph, and nothing else.
+ * The tier badge: a glyph, a label, and a tint. The tint is redundant by
+ * design — it reinforces the word rather than carrying meaning, so the badge
+ * survives a recolour unchanged. Palette: `/COLOURS.md` §6.
  *
  * The glyph is decorative (`aria-hidden`) because it duplicates the label: a
- * screen reader announcing "lightning bolt full" is worse than "full". The
- * colour is likewise redundant — it reinforces the word rather than carrying
- * meaning on its own, which is the rule the whole palette follows.
+ * screen reader announcing "lightning bolt full" is worse than "full".
  *
  * ## Two tiers, two frozen wire names and their labels
  *
@@ -24,16 +20,26 @@ import { TIER_COLORS, TIER_FALLBACK } from '@/pages/_theme'
  *
  *   `eco`     → shown as "Free"   (the legacy slot the free tier reuses)
  *   `free`    → shown as "Free"
+ *   `budget`  → shown as "Budget" (the middle rung, added 2026-11-12)
  *   `strike`  → shown as "Full"   (the merged paid tier)
  *
  * `strike` deliberately does NOT display as "Strike", and `Full` is not a wire
  * name: renaming the row would strand every paid code in the field. See
  * `docs/business/04-tiers.md` §4.6.
+ *
+ * `budget` is the one row whose wire name and label agree. That is a coincidence
+ * of the tier, not a rule — `04-tiers.md` §4.2.5 chose the row string
+ * deliberately, and it is still frozen: a deployed build that predates this
+ * mapping renders the raw string through `TIER_FALLBACK`, which is correct and
+ * generic, rather than guessing a label.
  */
 
 /** The tier identity, including the unknown case. */
 const tierIdentity = (tier: string | null | undefined) => {
   const key = (tier ?? '').trim().toLowerCase()
+  // Full gets the lightning bolt; Budget and Free share the plain ring, because
+  // the glyph is decorative reinforcement and two paid rungs must not look like
+  // the same thing by icon alone. The LABEL carries the distinction.
   const glyph = key === 'strike' ? '\u26A1' : '\u25CB'
   const palette = TIER_COLORS[key] ?? TIER_FALLBACK
 
@@ -43,9 +49,11 @@ const tierIdentity = (tier: string | null | undefined) => {
   const label =
     key === 'strike'
       ? 'Full'
-      : key === 'free' || key === 'eco'
-        ? 'Free'
-        : (tier ?? '')
+      : key === 'budget'
+        ? 'Budget'
+        : key === 'free' || key === 'eco'
+          ? 'Free'
+          : (tier ?? '')
 
   return { glyph, palette, label }
 }
@@ -58,7 +66,7 @@ interface Props {
 
 export const TierBadge = ({ tier, compact = false }: Props) => {
   // Reads the palette only for the text colour, so the badge sits correctly on
-  // both the dark surface and the light one without a second colour table.
+  // both the dark surface and the light one without a second table.
   const theme = useTheme()
   const { glyph, palette, label } = tierIdentity(tier)
 

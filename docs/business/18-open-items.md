@@ -70,6 +70,12 @@ deploy are the two items that matter.
 ([`05-pricing.md`](05-pricing.md)). This replaces the $0/$4/$7 ladder, which is
 now historical.
 
+> **Since 2026-11-12 the ladder has three rungs again — Free / Budget ($2) /
+> Full ($5)** ([`04-tiers.md`](04-tiers.md#425-budget-is-added-as-a-third-tier--and-it-is-not-a-reborn-stealth)).
+> That is an addition to the 2026-10 merge, not a reversal of it: Budget is a
+> distinct endpoint rather than a second price on one, which is what made the
+> original pair redundant. The deployment work it adds is P2.0 above.
+
 **What remains for the operator:**
 
 - **Re-print the cards.** `scripts/print_codes.sh` labels a code by its tier, so
@@ -80,6 +86,38 @@ now historical.
 - **Confirm $5 is right after the first term.** §5.4.2 names the failure mode:
   the $4 volume seller is gone, so if conversion collapses the fix is a price
   cut, not a new tier.
+
+### P2.0 — Deploy Budget to the live hub (2026-11-12, operator step)
+
+**Written in the tree; inert on the box.** Every one of the following is a thing
+the *box* needs, and none of it happens because a commit exists — the hub runs
+`/root/server/`, not this checkout.
+
+1. **Put `BUDGET_PASS` in the secrets bundle.** It is now a REQUIRED variable
+   (`secrets-encrypt.sh`, `00-env.sh`), so a deploy that lacks it fails by name
+   rather than shipping a tier that cannot be served. Generate it with
+   `openssl rand -base64 32 | tr -d '\n'` and re-encrypt — see
+   [`../operate/SECRETS-MANAGEMENT.md`](../operate/SECRETS-MANAGEMENT.md).
+2. **Re-run `setup.sh`** so `02-shadowsocks.sh` (ports 8448/8449), `04-tc.sh`
+   (the two 25 Mbit classes and their reboot units), `08-firewall.sh` (the two
+   new rules) and `seed-pb.py` (the `budget` row) take effect.
+3. **Prove the listeners** with `scripts/verify-ss2022.sh` — it now asserts
+   Budget's UoT key matches its own tier key and that its listener carries the
+   `1:50` class. A listener that is running but unshaped is the failure this
+   plan cares about most.
+4. **Mint nothing until step 2 is done.** The console's dropdown offers `budget`
+   from this release on; a code minted before the row exists is remapped or
+   rejected by `admin_console.pb.js` (it refuses an unservable tier), so the
+   failure is loud — but it is still a wasted card.
+5. **Leave 8444 alone except to retire it.** Budget deliberately does not reuse
+   the retired Stealth port, so the §14.8 operator step (disable
+   `shadowsocks-stealth`, remove its unit and config) is still owed and still
+   the only thing that stops 8444 serving.
+
+**Not verified from a checkout:** that a Budget code activates and receives a
+`server_config` on 8448 with `uot_port` 8449, that it connects, and that 25 Mbps
+is the rate a student actually sees. Record the result as a dated world claim in
+[`../operate/CLAIMS.md`](../operate/CLAIMS.md) §5, not here.
 
 ### P2.1 — Deploy the merge to the live hub (operator step, not a code change)
 

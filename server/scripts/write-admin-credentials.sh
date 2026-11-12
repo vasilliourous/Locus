@@ -53,7 +53,12 @@ env_val() {  # read from /etc/environment
 ECO_PASS="${ECO_PASS:-}";       ECO_SRC="environment (secrets.env.age)"
 STEALTH_PASS="${STEALTH_PASS:-}"; STEALTH_SRC="environment (secrets.env.age)"
 STRIKE_PASS="${STRIKE_PASS:-}"; STRIKE_SRC="environment (secrets.env.age)"
-for t in ECO STEALTH STRIKE; do
+BUDGET_PASS="${BUDGET_PASS:-}"; BUDGET_SRC="environment (secrets.env.age)"
+# STEALTH is still loaded (an upgraded box carries it) but is no longer PRINTED:
+# nothing has served 8444 since the 2026-10-05 merge, and a paste sheet that
+# lists a retired plan's live credential is the instruction that gets it reused.
+# The row that IS served is Budget's, three rows above it in the outline below.
+for t in ECO STEALTH STRIKE BUDGET; do
     eval "cur=\${${t}_PASS}"
     if [ -z "$cur" ]; then
         v="$(get_val "$PASS_FILE" "${t}_PASS")"
@@ -94,7 +99,7 @@ DIVERGED=0
 GENERATED_LIST=""
 if [ "${TIER_PASSWORDS_GENERATED:-0}" = "1" ]; then
     DIVERGED=1
-    GENERATED_LIST="${GENERATED_LIST}  - Shadowsocks tier passwords (eco/strike)\n"
+    GENERATED_LIST="${GENERATED_LIST}  - Shadowsocks tier passwords (eco/strike/budget)\n"
 fi
 if [ "${ADMIN_TOKEN_GENERATED:-0}" = "1" ]; then
     DIVERGED=1
@@ -154,11 +159,17 @@ ECO     (port 8443, tcp_only)      ${ECO_PASS}
                                    source: ${ECO_SRC}
 STRIKE  (port 8445, tcp_and_udp)   ${STRIKE_PASS}
                                    source: ${STRIKE_SRC}
+BUDGET  (port 8448, tcp_and_udp)   ${BUDGET_PASS}
+                                   source: ${BUDGET_SRC}
 
 STRIKE UDP-over-TCP endpoint:      port ${UOT_PORT:-8446}
   (sing-box only — Clash/mihomo DO implement udp-over-tcp v2;
    point port: 8446 with udp-over-tcp: true. Pointing it at 8445
    does NOT fall back and breaks UDP silently.)
+
+BUDGET UDP-over-TCP endpoint:      port ${UOT_PORT_BUDGET:-8449}
+  (same shape, same caveat: point port 8449 with udp-over-tcp: true.
+   It is capped at 25 Mbps on the hub, unlike STRIKE's 8446.)
 
   cipher: ${SS_METHOD:-2022-blake3-aes-256-gcm}  (all tiers)
 

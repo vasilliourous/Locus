@@ -115,7 +115,7 @@ has bound its ports and can carry a packet — a gap of seconds on a real
 connection. `ready` is **observed**: the backend asks the Core's own control API
 (`CoreManager::observe_readiness`) and refuses to report `ready` for a Core it
 cannot get an answer from, so a machine with no usable network reports
-`connected && !ready` and renders as `connecting`, never as a false green.
+`connected && !ready` and renders as `connecting`, never as a false positive.
 
 `use-connection.ts` owns the state machine, the polling intervals (15 s idle, 750 ms
 while connecting) and `toggle()`. Two rules there matter:
@@ -239,7 +239,7 @@ activated".
 | Field | Meaning |
 |---|---|
 | `activated` | This device has a complete, usable entitlement record. |
-| `tier` | The tier name (`free`/`strike` — customer-facing **Free**/**Full**), when known. `stealth` is never returned. |
+| `tier` | The tier name (`free`/`budget`/`strike` — customer-facing **Free**/**Budget**/**Full**), when known. A retired name is never returned. A name this build predates renders through `TIER_FALLBACK`, which is correct — do not make the label a guess. |
 | `deviceId` | The fingerprint, **truncated** — enough for support, not a shareable id. |
 | `connected` | The core works. The UI derives its phase from this **and** `ready`. |
 | `ready` | The core can carry a packet (observed, not latched). |
@@ -270,44 +270,44 @@ and noted in `docs/reference/STILL-OPEN.md`.
 
 ---
 
-## 5. Appearance: the Locus palette, and the theme layer on top
+## 5. Appearance: the palette, and the theme layer on top
 
-`src/pages/_theme.tsx` holds `LOCUS_COLORS` (dark) and `LOCUS_LIGHT`, both
-exported and both **defaults, not overrides** — `use-custom-theme` reads each
-field as `setting.X || dt.X`, so a student who customised a colour keeps it.
+**Colour is not described in this document.** Every palette, value and rule lives
+in [`/COLOURS.md`](../../COLOURS.md) — the single home for colour across the
+client, the hub and the landing page. Read §1 there for how a value reaches the
+screen, §2 for the shipped palette, and §9 for the contrast rules a palette must
+satisfy.
 
-- The brand is a green-black window with Locus green (`#2EA86A`) as the single
-  accent. It comes from `docs/archive/UI-AESTHETICS.md`, which was written for the
-  retired client and never ported — which is why the fork shipped Clash Verge's
-  iOS blue and grey on every screen.
-- **Light mode is derived, not quoted.** The spec is dark-only. The light accent is
-  a *darker* green (`#1E7A4A`, ~4.6:1 on white) for text-bearing controls, because
-  `#2EA86A` on white is ~3.0:1 and fails the body-text contrast rule.
-- **The window's background colour exists in three layers that cannot share code**
-  — the native window (`utils/resolve/window.rs`), the document (`src/index.html`),
-  and the theme (`_theme.tsx`). They are pinned against each other by
+What this section owns is the *structure* the palette flows through:
+
+- `src/pages/_theme.tsx` holds `LOCUS_COLORS` (dark) and `LOCUS_LIGHT`, both
+  exported and both **defaults, not overrides** — `use-custom-theme` reads each
+  field as `setting.X || dt.X`, so a student who customised a colour keeps it.
+- **The window's background exists in three layers that cannot share code** — the
+  native window (`utils/resolve/window.rs`), the document (`src/index.html`), and
+  the theme (`_theme.tsx`). They are pinned against each other by
   `tests/theme-colors.test.ts` instead of by a shared constant, because layer 2
   cannot import the theme module and layer 1 is Rust. All three must change
-  together or the window flashes the wrong colour on startup.
-- **Tier colours** (`TIER_COLORS`) are per-tier so the badge "sells itself";
-  `TIER_FALLBACK` covers a tier this build does not know, so an unknown tier still
-  renders.
+  together or the window flashes the wrong colour on startup. `/COLOURS.md` §1
+  has the table.
+- **Tier identity** (`TIER_COLORS`, `TIER_FALLBACK`) is per-tier so the badge
+  reinforces the plan without being relied on, and `TIER_FALLBACK` covers a tier
+  this build does not know so an unknown tier still renders.
 
 ### The named themes are a layer over this, not a replacement for it
 
-`src/pages/_themes.ts` holds a registry of ten named themes (`default-dark`,
-`default-light`, `midnight`, `paper`, `high-contrast`, `forest`, `gruvbox`,
-`nord`, `ink`, `amber-crt`) that a student picks from a dropdown on **Account**.
-The design record is
-[`../../docs/reference/THEMES.md`](../../docs/reference/THEMES.md) — read it before
-touching the registry.
+`src/pages/_themes.ts` holds the registry a student picks from a dropdown on
+**Account**. Which themes exist and what each one looks like is
+`/COLOURS.md` §3; the layer's mechanics are
+[`../../docs/reference/THEMES.md`](../../docs/reference/THEMES.md) — read that
+before touching the registry.
 
 The three properties that make it safe to have alongside this section:
 
-- **It is additive.** `verge.theme_id` unset — every existing install — resolves
-  through `theme_mode` exactly as before. `default-dark` and `default-light` are
-  built from `LOCUS_COLORS`/`LOCUS_LIGHT` rather than restating them, so the
-  shipped appearance is a *member* of the registry, not a copy that can drift.
+- **It is additive.** `verge.theme_id` unset — every install that never opened the
+  dropdown — resolves through `theme_mode` exactly as before. The shipped
+  appearance is a *member* of the registry, projected from `LOCUS_COLORS` /
+  `LOCUS_LIGHT` rather than restating them, so it cannot drift from the base.
 - **`setting.X || dt.X` is unchanged.** A selected theme changes only which base
   `dt` is; the custom-colour precedence above still applies field by field.
 - **Shape and decoration travel by CSS variables** (`--card-radius`,
@@ -337,4 +337,4 @@ instead — a card that relied on `elevation` would be invisible.
 | Connections table, Rules browser, Unlock checker | Tools for choosing between nodes, or unrelated to a VPN. |
 | Node picker, core selector, TUN/system-proxy switches, ports, DNS | One server per tier, one core, decided by Locus and the hub. Exposing them is the interface the product exists to remove. |
 | Deep links entirely | They existed solely to import subscription URLs. |
-| A Locus logo asset | `src-tauri/icons/*` is still the Clash Verge Rev mark. `UI-AESTHETICS.md` §4 asks for a 48×48 `#2EA86A` shield; drawing a brand mark needs a human decision, so the activation screen shows the wordmark alone. |
+| A Locus logo asset | `src-tauri/icons/*` is still the Clash Verge Rev mark. A separate 48×48 shield is a brand decision nobody has taken, so the activation screen shows the wordmark alone. Marks: [`/COLOURS.md`](../../COLOURS.md) §8. |

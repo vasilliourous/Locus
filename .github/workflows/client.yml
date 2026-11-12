@@ -418,6 +418,7 @@ jobs:
         env:
           LOCUS_ACTIVATION_TUNNEL_KEY: ${{ secrets.LOCUS_ACTIVATION_TUNNEL_KEY }}
           LOCUS_ACTIVATION_TUNNEL_ADDR: ${{ vars.LOCUS_ACTIVATION_TUNNEL_ADDR }}
+          LOCUS_FREE_TIER_KEY: ${{ secrets.LOCUS_FREE_TIER_KEY }}
         run: |
           set -euo pipefail
           # Report the bootstrap ADDRESS as well as the key. The address is not a
@@ -450,6 +451,26 @@ jobs:
             exit 1
           else
             echo "LOCUS_ACTIVATION_TUNNEL_KEY is not set — this build has no activation tunnel. Fine for a branch build; see docs/reference/ACTIVATION-TUNNEL.md before tagging."
+          fi
+
+          # The free tier's key, for the maintenance tunnel.
+          #
+          # A DIFFERENT credential from the one above, not a typo: the activation
+          # key belongs to the `:8453` listener, whose forwarder allows three paths
+          # and nothing else, so it cannot relay a plan's traffic. This one is
+          # `ECO_PASS` for `:8443`, which can. Same rule as above — an error on a
+          # tag, a note on a branch build — because a release that ships without it
+          # has no maintenance tunnel and, on a network that blocks the hub by
+          # name, cannot reach the plan port at all.
+          if [ -n "${LOCUS_FREE_TIER_KEY:-}" ]; then
+            echo "LOCUS_FREE_TIER_KEY is present (value not printed; length ${#LOCUS_FREE_TIER_KEY} bytes)"
+          elif [ "${{ github.ref_type }}" = "tag" ]; then
+            echo "::error::LOCUS_FREE_TIER_KEY is not set, so this RELEASE would ship without the maintenance tunnel."
+            echo "::error::Set it with: gh secret set LOCUS_FREE_TIER_KEY --repo ${GITHUB_REPOSITORY:-<owner>/<repo>}"
+            echo "::error::The value is the hub's ECO_PASS (server/secrets.env.age). See docs/operate/SECRETS-MANAGEMENT.md."
+            exit 1
+          else
+            echo "LOCUS_FREE_TIER_KEY is not set — this build has no maintenance tunnel. Fine for a branch build."
           fi
 
       - uses: pnpm/action-setup@v4

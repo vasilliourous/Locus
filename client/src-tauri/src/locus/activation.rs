@@ -360,7 +360,11 @@ where
     let hub = crate::locus::contract::hub_url().await;
     let url = format!("{hub}{path}");
 
-    let hub_client = crate::locus::hub::client(&hub, crate::locus::hub::Timeout::Activation).await;
+    // The routing decision, including the maintenance tunnel. See
+    // `activation_tunnel::hub_client_for` — the preference is set by a previous
+    // call that produced no HTTP response at all, which is what a network that
+    // blocks the hub by name does.
+    let hub_client = crate::locus::activation_tunnel::hub_client_for(&hub, crate::locus::hub::Timeout::Activation).await;
     if hub_client.diagnosis().is_some() {
         // Once per process is enough; the diagnosis is a property of the
         // machine, not of this request. The warn names the store, so a support
@@ -371,6 +375,16 @@ where
     let response = match hub_client.client().post(&url).json(&body).send().await {
         Ok(response) => response,
         Err(error) => {
+            // No HTTP status at all means nothing answered. That is the one signal
+            // the maintenance tunnel is for, and it is checked BEFORE the
+            // classifier below because a TLS-inspecting appliance truncates the
+            // stream: it arrives as a decode error, not a reset, so
+            // `Failure::classify` reports `Transport` and the older tunnel retry
+            // never fires on the network this exists for.
+            if let Some(response) = retry_over_maintenance(&error, path, &hub, &body).await {
+                return parse_hub_response(response).await;
+            }
+
             // Before giving up, consider that the network may be blocking the hub
             // BY NAME. A reset during the handshake or a refusal are the two
             // signatures of exactly that — a filtering appliance tears the flow
@@ -410,6 +424,52 @@ where
         }
     };
 
+    parse_hub_response(response).await
+}
+
+/// One retry of `path` through the maintenance route, when this failure calls for
+/// it.
+///
+/// Extracted from `post_json`'s error arm for two reasons that are the same
+/// reason: the arm already reads the hub's answer, classifies the failure and
+/// may fall back to the activation tunnel, and adding the maintenance branch
+/// inline pushed the function past this crate's cognitive-complexity limit. Doing
+/// it here also gives the rule one home, so the three call sites cannot drift.
+///
+/// Returns `None` when this failure is not one the route should carry — a hub
+/// that ANSWERED (any status) is reachable, and switching routes would only make
+/// a working call slower.
+async fn retry_over_maintenance<B: Serialize + Sync>(
+    error: &reqwest::Error,
+    path: &str,
+    hub: &str,
+    body: &B,
+) -> Option<reqwest::Response> {
+    if !crate::locus::activation_tunnel::note_failure_and_decide_retry(error) {
+        return None;
+    }
+    let url = format!("{hub}{path}");
+    tracing::warn!(
+        target: "locus::activation_tunnel",
+        "the direct connection to the hub produced no response; retrying {path} through the maintenance tunnel"
+    );
+    let retry = crate::locus::activation_tunnel::hub_client_for(hub, crate::locus::hub::Timeout::Activation).await;
+    let sent = retry.client().post(&url).json(body).send().await;
+    if crate::locus::activation_tunnel::log_retry_outcome(&sent) {
+        sent.ok()
+    } else {
+        None
+    }
+}
+
+/// Reads a hub response body and parses it.
+///
+/// Extracted so the maintenance-route retry parses through exactly the same rules
+/// as the direct route: a 4xx still carries a JSON `message`, so the body is read
+/// and parsed regardless of status, and only an unreadable body becomes an error.
+/// A second parse path is how two routes start disagreeing about what the hub
+/// said.
+async fn parse_hub_response<T: serde::de::DeserializeOwned>(response: reqwest::Response) -> Result<T> {
     let status = response.status();
     let text = response
         .text()

@@ -168,12 +168,55 @@ pub fn build_profile(config: &TierConfig, udp_relay: bool) -> TierProfile {
     }
 }
 
+/// The host the plan's outbound dials.
+///
+/// # Why this is sometimes an address
+///
+/// The hub names the plan's server with a **hostname** (`server_config` carries
+/// `DOMAIN`; see `server/scripts/seed-pb.py`). On a network that filters that name
+/// — the school network this product exists for — a tunnel dialling it cannot be
+/// established at all, because the name is blocked before anything is sent.
+///
+/// Once a hub call has produced no response, the session is known to be on such a
+/// network, and the plan outbound is pointed at the hub's **address** instead:
+/// arrows not blocked, no name on the wire, no TLS to inspect. That is the same
+/// situation as a tunnel formed before joining the network, which demonstrably
+/// survives — the port was never the thing being blocked.
+///
+/// # Why substitution and not a chained dial
+///
+/// Chaining the plan outbound through the maintenance relay works, but the plan
+/// connection then *depends* on it: when the relay is stopped (which is what
+/// happens at TUN-up) the established TCP is severed and the plan tunnel dies
+/// mid-session. It also encapsulates the plan stream inside the free tier, which
+/// halves throughput on the plan a student paid for. Substituting the host has
+/// neither problem and is one field.
+///
+/// # What does not change
+///
+/// Credentials. They stay in [`TierConfig`], are sent to the same port by the same
+/// cipher, and are never written anywhere new. Only the dialled host differs.
+fn dial_server(config: &TierConfig) -> String {
+    // Logged every time the profile is built, which is once per connect — not on
+    // a poll, so it cannot flood. It names WHICH host was chosen and why, because
+    // a support log that says only "connected" cannot distinguish a plan tunnel
+    // dialling the name from one dialling the address.
+    if crate::locus::activation_tunnel::prefer_maintenance() {
+        let addr = crate::locus::contract::activation_tunnel_addr();
+        tracing::info!("[plan] server={addr} (prefer_maintenance)");
+        addr.to_owned()
+    } else {
+        tracing::info!("[plan] server={} (default)", config.server);
+        config.server.clone()
+    }
+}
+
 /// Builds one shadowsocks outbound.
 fn shadowsocks_proxy(name: &str, config: &TierConfig, port: u16, udp: bool) -> Value {
     let mut proxy = Mapping::new();
     insert(&mut proxy, "name", Value::String(name.into()));
     insert(&mut proxy, "type", Value::String("ss".into()));
-    insert(&mut proxy, "server", Value::String(config.server.clone()));
+    insert(&mut proxy, "server", Value::String(dial_server(config)));
     insert(&mut proxy, "port", Value::Number(port.into()));
     insert(&mut proxy, "cipher", Value::String(config.method.clone()));
     insert(&mut proxy, "password", Value::String(config.password.clone()));
@@ -253,6 +296,12 @@ fn insert(map: &mut Mapping, key: &str, value: Value) {
 mod tests {
     use super::*;
 
+    /// The routing preference is process-wide and shared with
+    /// `activation_tunnel`'s tests, so its ONE lock lives beside the flag. A
+    /// second guard here would serialise these tests against each other and not
+    /// against the other module's — which is a split lock, and it failed that way.
+    use crate::locus::activation_tunnel::preference_guard;
+
     fn tcp_only_tier() -> TierConfig {
         TierConfig {
             server: "networkingguides.duckdns.org".into(),
@@ -271,6 +320,146 @@ mod tests {
             method: "2022-blake3-aes-256-gcm".into(),
             uot_port: 8446,
         }
+    }
+
+    /// Address substitution is the whole of item 9: one field, both outbounds.
+    ///
+    /// **Shown failing:** change `dial_server` to return `config.server.clone()`
+    /// unconditionally and this test fails on the first assertion. Re-run it when
+    /// touching `dial_server` — the substitution is invisible in the connect flow
+    /// until the network blocks the name, which no CI runner does.
+    ///
+    /// The plan's server normally comes from the hub as a HOSTNAME. On a network
+    /// that filters it, a tunnel dialling that name cannot be established, so once
+    /// a hub call has produced no response the outbound is pointed at the hub's
+    /// address instead. Credentials and ports are untouched — this asserts that.
+    #[test]
+    fn the_plan_dials_the_address_once_the_session_prefers_the_maintenance_route() {
+        // The flag is process-wide, so it is set and read inside one test and
+        // never asserted in its absence by another: a test that asserted the
+        // DEFAULT would depend on execution order, which is the flake shape this
+        // crate has already paid for.
+        let _serialised = preference_guard();
+        let config = strike_tier();
+
+        crate::locus::activation_tunnel::remember_prefer_maintenance();
+
+        let switched = build_profile(&config, true);
+        let switched_yaml: serde_yaml_ng::Value = serde_yaml_ng::from_str(&switched.yaml).expect("valid yaml");
+        let expected = crate::locus::contract::activation_tunnel_addr();
+        // BOTH proxies: the plan's TCP outbound and its UoT outbound share one
+        // builder, so a substitution that covered only one would leave game
+        // traffic dialling a blocked name.
+        for (index, label) in [(0usize, "plan"), (1usize, "uot")] {
+            let server = switched_yaml["proxies"][index]["server"].as_str().unwrap_or_default();
+            assert_eq!(
+                server, expected,
+                "the {label} outbound must dial the hub's address once the session has seen a transport failure"
+            );
+            assert!(
+                server.parse::<std::net::Ipv4Addr>().is_ok(),
+                "the {label} outbound must dial an ADDRESS, not a name — got {server:?}"
+            );
+        }
+
+        // Credentials and ports are the plan's, unchanged: substitution moves the
+        // host and nothing else.
+        assert_eq!(switched_yaml["proxies"][0]["password"].as_str(), Some(config.password.as_str()));
+        assert_eq!(switched_yaml["proxies"][0]["port"].as_u64(), Some(u64::from(config.server_port)));
+
+    }
+
+    /// The same one-field rule, in the direction that must never change: without
+    /// the preference, the plan dials exactly the name the hub sent.
+    ///
+    /// Asserted in its own test so the two directions are independent — the
+    /// preference is process-wide, and a single test asserting both would depend
+    /// on `cargo test`'s ordering to observe the unset state.
+    #[test]
+    fn the_plan_dials_the_hubs_name_by_default() {
+        // Cleared first so this test observes the default whatever ran before it.
+        // It is the one place the flag is forced off, and it asserts what the
+        // default means rather than that it is currently set.
+        let _serialised = preference_guard();
+        crate::locus::activation_tunnel::forget_prefer_maintenance_for_tests();
+
+        let config = strike_tier();
+        let direct = build_profile(&config, true);
+        let direct_yaml: serde_yaml_ng::Value = serde_yaml_ng::from_str(&direct.yaml).expect("valid yaml");
+        assert_eq!(
+            direct_yaml["proxies"][0]["server"].as_str(),
+            Some(config.server.as_str()),
+            "with no transport failure the plan must dial the name the hub gave it"
+        );
+    }
+
+    /// The substituted document must be accepted by the ENGINE, not just by us.
+    ///
+    /// This crate's own rule (AGENTS.md): "a config can pass every test and still
+    /// be refused by the engine". Address substitution changes the `server` of
+    /// both outbounds, so the document a student would actually run is rendered
+    /// here and handed to the real sidecar. Skipped when the engine is absent, in
+    /// the same shape as the other engine tests.
+    #[test]
+    fn the_engine_accepts_the_substituted_document() {
+        use std::io::Write as _;
+
+        let _serialised = preference_guard();
+        crate::locus::activation_tunnel::remember_prefer_maintenance();
+        // A REAL SS2022 key, unlike the human-readable fixtures the other tests
+        // use: the engine decodes the password before it looks at anything else,
+        // so "strike-secret" is refused for being illegal base64 rather than for
+        // being the wrong host. 32 bytes, base64 — the length the cipher requires.
+        let mut tier = strike_tier();
+        tier.password = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=".into();
+        let profile = build_profile(&tier, true);
+        crate::locus::activation_tunnel::forget_prefer_maintenance_for_tests();
+
+        let dir = std::env::temp_dir().join(format!("locus-tier-subst-{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        let path = dir.join("config.yaml");
+        let mut file = std::fs::File::create(&path).expect("write the generated config");
+        file.write_all(profile.yaml.as_bytes()).expect("write config bytes");
+        drop(file);
+
+        let exe = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("sidecar")
+            .join("verge-mihomo-x86_64-unknown-linux-gnu");
+        if !exe.is_file() {
+            // A SILENT skip is the defect the other engine suites' `skip()` helper
+            // exists to prevent: a test that cannot run reads exactly like one that
+            // passed. CI installs the sidecar and sets `LOCUS_REQUIRE_LIVE_ENGINE`,
+            // so there a missing engine FAILS; a contributor without it is told.
+            if std::env::var_os("LOCUS_REQUIRE_LIVE_ENGINE").is_some() {
+                panic!(
+                    "SKIP was requested to be a failure (LOCUS_REQUIRE_LIVE_ENGINE is set): the engine \
+                     sidecar is not present at {}",
+                    exe.display()
+                );
+            }
+            eprintln!("SKIP: the engine sidecar is not present at {}", exe.display());
+            return;
+        }
+
+        let output = std::process::Command::new(&exe)
+            .arg("-t")
+            .arg("-d")
+            .arg(&dir)
+            .arg("-f")
+            .arg(&path)
+            .output()
+            .expect("run the engine's config test");
+        let text = format!(
+            "{}{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(
+            output.status.success(),
+            "the engine refused the substituted document:\n{text}\n--- document ---\n{}",
+            profile.yaml
+        );
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// The generated document must be valid YAML, or the core refuses to start

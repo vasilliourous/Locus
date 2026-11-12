@@ -4,18 +4,21 @@
 audience:    human-operator
 status:      live
 authoritative-for: the tier table, what each tier is in the code, and the free tier's design
-verified-against: server/modules/04-tc.sh, server/modules/02-shadowsocks.sh, docs/state.toml
+verified-against: server/modules/04-tc.sh, server/modules/02-shadowsocks.sh, server/scripts/seed-pb.py, docs/state.toml
 ```
 
-The product now has **two tiers**: a permanent **free** tier with a data
-allowance, and **one** paid tier. This file describes what each one is in the
-code, what changed from the legacy model, and the free tier's design in full.
+The product now has **three tiers**: a permanent **free** tier with a data
+allowance, a **Budget** tier at $2, and **Full** at $5. This file describes what
+each one is in the code, what changed from the legacy model, and the free tier's
+design in full.
 
-> **There is no ladder any more, and that is the decision.** The three-tier
-> ladder ($0/$4/$7) was replaced by a single paid plan at $5. The reasoning is
-> in §4.2.4 and [`05-pricing.md`](05-pricing.md); the short version is that the
-> two paid tiers were never different enough to be worth the confusion, and the
-> only thing a student ever actually wanted to buy was *the fast one*.
+> **A ladder again, but built the other way round.** The legacy ladder ($0/$4/$7)
+> failed because its two paid rungs shared one endpoint and differed by a number
+> (§4.2.4). It was replaced by a single $5 plan, and on 2026-11-12 a second paid
+> rung was re-added as **Budget** — deliberately *not* a reborn Stealth: its own
+> TCP port, its own UoT listener, its own password, its own cap (§4.2.5). What
+> makes a rung worth selling here is that it is a different endpoint, not a
+> different number on the same one.
 
 ---
 
@@ -24,14 +27,18 @@ code, what changed from the legacy model, and the free tier's design in full.
 | Plan | TCP port | UDP (UoT) | Hard cap (tc) | Kernel | Data | What the student gets |
 |---|:--:|:--:|:--:|---|---|---|
 | **Free** | 8443 | ✓ 8447 | **1 Mbps** (both TCP and UDP) | BBR | 10 GB/mo; intended to slow after that — **no further slowdown is applied today** (§4.4.5) | Chat, browsing, **and light gaming** (Roblox, Minecraft). |
+| **Budget** | 8448 | ✓ 8449 | **25 Mbps** (TCP and UDP) | BBR | Unmetered | Comfortable everyday use: video, a household's browsing, and games at a rate they run at rather than crawl at. |
 | **Full** | 8445 | ✓ 8446 | **100 Mbps** TCP; UDP uncapped | BBR | Unmetered | Everything, **including heavy FPS titles** and 4K streaming. |
 
-> **UDP is on both plans; the rate is the difference.** That is the whole ladder
-> now. The free plan carries UDP-over-TCP on its own listener (8447) with its own
-> credentials, capped at the hub to the same 1 Mbps as its TCP tunnel; the paid
-> plan carries it on 8446, uncapped, behind a 100 Mbps TCP tunnel. A student on
-> Free can play Roblox or Minecraft at 1 Mbps — badly, but it works, which is the
-> point — and a student who wants a competitive FPS needs the 100× rate.
+> **UDP is on every plan; the rate is the difference.** That is the whole ladder
+> now. Each plan carries UDP-over-TCP on its **own** listener with its **own**
+> credentials — 8447 on Free, 8449 on Budget, 8446 on Full — because a sing-box
+> inbound is bound to one password, so sharing a listener would mean handing one
+> plan another's credential. Each listener is shaped to its own plan's rate, so
+> UDP is never a way around the ceiling. A student on Free can play Roblox or
+> Minecraft at 1 Mbps — badly, but it works, which is the point; Budget is the
+> rung for someone who wants video and games to be comfortable without 4K; a
+> student who wants a competitive FPS at full rate buys Full.
 
 Source of truth for the caps: `server/modules/04-tc.sh` (the `apply_tc_now` and
 `create_tc_service` calls); for the UoT listener,
@@ -41,12 +48,13 @@ as `free_allowance_mb` (`server/pb_hooks/heartbeat.pb.js`); both are held in
 agreement by `check-consistency.sh` §23, which since this change holds the
 **paid** tier's cap and UoT endpoint to the same standard (§4.7).
 
-> **Both UDP listeners are separate, and that is a credential requirement.**
-> A sing-box shadowsocks inbound is bound to **one** password, so serving both
+> **All three UDP listeners are separate, and that is a credential requirement.**
+> A sing-box shadowsocks inbound is bound to **one** password, so serving two
 > plans from one listener is impossible without handing one plan the other's
-> credential. The free listener therefore serves `ECO_PASS` on 8447 and the paid
-> one serves `STRIKE_PASS` on 8446. It also allows them to be shaped
-> independently, which is the security half of this change (§4.10).
+> credential. The free listener therefore serves `ECO_PASS` on 8447, Budget
+> serves `BUDGET_PASS` on 8449 and Full serves `STRIKE_PASS` on 8446. It also
+> allows them to be shaped independently, which is the security half of this
+> change (§4.10).
 >
 > **The paid tier is called `strike` in the database and `Full` on the card.**
 > Its endpoint, its password and its systemd units all keep the `strike` name
@@ -132,7 +140,11 @@ that Stealth and Strike were **the same plan at two rates**:
 | UDP | ✗ | ✓ (UoT on 8446) |
 | Cap | 100 Mbps | 200 Mbps |
 
-The **only** structural difference was the UDP-over-TCP endpoint. The 200 Mbps
+The **structural** difference was the UDP-over-TCP endpoint: a Stealth student
+had no UDP path at all. On top of that sat a rate difference (the table above),
+which in isolation would have been "the same plan at two rates" — and that, not
+the UDP, is what made the pair hard to justify once the rate was not a selling
+point. See §4.2.5 for the decision that reversed the merge on different terms. The 200 Mbps
 cap was pure positioning: this directory's own numbers say no game needs it
 (Valorant ~5 Mbps, Fortnite ~20 Mbps — §4.3), so the second paid tier charged $3
 for a number no student could use, to separate itself from a tier that did the
@@ -155,21 +167,83 @@ Three consequences, and each is a reason this is the better product:
 > counting, and the whole of §4.4. Free was already the funnel; this change only
 > makes the thing at the top of the funnel one product instead of two.
 
+> **Superseded in part on 2026-11-12.** A second paid rung was re-added as
+> **Budget**, at $2. It is not a reversion of this decision — read §4.2.5 for why
+> a rung built this way is not the pair §4.2.4 dissolved.
+
+### 4.2.5 Budget is added as a third tier — and it is not a reborn Stealth
+
+**Decision (2026-11-12): three tiers — Free, Budget ($2), Full ($5).**
+
+The reason the two paid tiers failed was *not* that a middle rung is wrong. It is
+that Stealth and Strike shared one endpoint, one shape and one cap vocabulary and
+differed by a number, so there was no product question between them, only an
+arithmetic one. Budget answers a different question — **"do I want this to be
+comfortable, without paying for games at full rate?"** — and it is built so that
+it cannot collapse into Full by a config edit:
+
+| Property | Free | **Budget** | Full |
+|---|---|---|---|
+| Price | $0 | **$2** | $5 |
+| On-box name (`tier` row, service, config) | `eco` / `free` | **`budget`** | `strike` |
+| TCP port | 8443 | **8448** | 8445 |
+| UoT (UDP-over-TCP) | 8447 | **8449** | 8446 |
+| Password | `ECO_PASS` | **`BUDGET_PASS`** | `STRIKE_PASS` |
+| tc class | `1:10`, `1:20` | **`1:40`, `1:50`** | `1:30` |
+| Rate | 1 Mbps | **25 Mbps** | 100 Mbps |
+| Data | 10 GB/mo allowance | **Unmetered** | Unmetered |
+
+Four choices inside that table, each with a reason:
+
+- **Fresh ports, not Stealth's 8444.** §4.5/§4.6's rule is "reuse the slot, rename
+  nothing on the box" — and it is exactly the wrong rule here. 8444's unit and
+  config are *skip-if-exists* and survive a redeploy (§14.8), so a Budget service
+  placed on 8444 would either collide with them or silently inherit their
+  password. Fresh ports cannot inherit anything. **8444 stays dark** and the
+  operator step that removes it is unchanged.
+- **Its own UoT listener and password.** One listener cannot serve two plans
+  (§4.1), and a UoT endpoint on a plan that hands out its own credential is the
+  only way Budget's games stay Budget's games.
+- **Unmetered.** A 25 Mbps plan with an allowance would need the client-side
+  counter on a second tier and would make a paying student see a usage bar. The
+  cost exposure is *rate*, not volume (§4.4.6), and 25 Mbps is a quarter of Full's
+  ceiling per user.
+- **Shaped UDP.** Full leaves 8446 unshaped because the plan sells low latency
+  (§4.10's asymmetry). Budget sells comfort, not latency, so its UDP is capped to
+  the same 25 Mbit as its TCP — otherwise UDP would be a way around the plan's
+  own ceiling.
+
+> **The honest risk.** A 25 Mbps unmetered plan is the first paying plan whose
+> exposure is *rate rather than price*, and nobody has measured its cost at
+> adoption. It is recorded in [`14-risks.md`](14-risks.md) §14.11, not asserted
+> here.
+
 ---
 
 ## 4.3 What still makes the plans work together
 
-The differentiator is **rate**, and only rate.
+Free is the funnel, Budget is the everyday plan, Full is the gaming plan. The
+differentiator is **rate**, in three steps rather than two.
 
 - **Free exists to place the app on the device.** It is deliberately usable
   but constrained — enough to prove it works *and enough to play the games a
   13-year-old actually plays badly*, not enough to live on. Its job is installs,
   and installs are what make the next block-window matter
   ([`13-competition.md`](13-competition.md#135-the-competitive-question-that-matters)).
-- **Full is the product.** 100 Mbps unmetered for $5 is the whole paid offer.
-  What it sells over Free is not a capability but a *rate*: 100× the throughput,
-  which is the difference between "the game connects" and "the game is worth
-  playing".
+- **Budget is the everyday plan.** 25 Mbps unmetered for $2 is the rung for a
+  student who wants video that does not buffer and a game that runs properly, and
+  who is not buying a competitive-shooter plan. It is a *comfort* rung: it is
+  above the rate at which a household's browsing and streaming become the
+  bottleneck, and below the rate Full's low-latency UDP is sold on.
+- **Full is the product.** 100 Mbps unmetered for $5 is the whole paid offer at
+  the top. What it sells over the rungs below is not a capability but a *rate*:
+  100× the throughput over Free, 4× over Budget, which is the difference between
+  "the game connects" and "the game is worth playing".
+- **The 100 Mbps cap is not a limitation to overcome.** It is far above what any
+  game or a household's worth of streaming needs (Valorant ~5 Mbps, Fortnite
+  ~20 Mbps), and it exists to stop one user saturating the droplet. It is the
+  same rate Stealth charged $4 for; the merge did not lower what a paid student
+  gets, it lowered the count of things they have to choose between.
 - **The 100 Mbps cap is not a limitation to overcome.** It is far above what any
   game or a household's worth of streaming needs (Valorant ~5 Mbps, Fortnite
   ~20 Mbps), and it exists to stop one user saturating the droplet. It is the
@@ -433,6 +507,13 @@ places (see the `bound_this_device` incident in
 [`../reference/FIXES.md`](../reference/FIXES.md)), so the hub keeps emitting
 `tier: "strike"` and the *label* is the thing that changes.
 
+> **Read §4.6 with §4.2.5 next to it.** 8444 is still retired and still dark; the
+> 2026-11-12 change did **not** re-open it. What came back is a third rung on
+> *new* ports and a *new* name, so none of the "a merge removes it from the code
+> but not from the box" exposure above is re-created. The operator step in §4.7
+> item 1 — remove the old `shadowsocks-stealth` unit and config — is still owed,
+> and still the only way 8444 stops serving.
+
 ---
 
 ## 4.7 What this merge costs at deploy time
@@ -521,11 +602,16 @@ roughly one full-time stream, which is affordable and visible.
 > and an unbounded bill. `check-consistency.sh` §27(h) asserts the 8447 class
 > exists for exactly this reason, and fails the build if it is removed.
 
+**Budget is the same rule, applied to a paid rung.** Its listener (8449) carries a
+25 Mbit class of its own rather than riding Full's unshaped UDP, because Budget is
+sold on comfort at a rate, not on latency — so UDP must not be a route around the
+25 Mbps it sells.
+
 ---
 
 ## 4.11 Related reading
 
-- Why there is one paid tier, and why $5 → [`05-pricing.md`](05-pricing.md)
+- Why three rungs, and what each costs → [`05-pricing.md`](05-pricing.md)
 - What free costs to run → [`06-unit-economics.md`](06-unit-economics.md)
 - How free feeds growth → [`11-growth.md`](11-growth.md)
 - The tier-separation risk → [`14-risks.md`](14-risks.md)

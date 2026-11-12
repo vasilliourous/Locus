@@ -101,7 +101,7 @@ const fill = (template: string, used: string, total: string): string =>
  *
  * Deliberately separate from {@link usageDisplay} so the component's text and
  * the bar's colour come from the same classification — the failure mode this
- * avoids is a green bar under a message saying "throttled".
+ * avoids is a healthy-looking bar under a message saying "throttled".
  *
  * `copy` is required rather than defaulted: a missing translation must be a
  * compile error or a visible placeholder, never a silently English string in a

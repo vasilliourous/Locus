@@ -354,11 +354,10 @@ paths := []string{
      - Speed bar (progress towards tier cap)
      - Settings accordion (tier, version, hub URL)
 
-3. **Theme** (see `UI-AESTHETICS.md` for full spec):
-   - Dark background (`#0D0D0F`)
-   - Purple accent (`#A855F7`)
+3. **Theme** (see `UI-AESTHETICS.md` for the layout; colour is `/COLOURS.md`'s):
+   - Dark background with a single accent
    - System font, no custom graphics
-   - Tier badges: Eco (grey), Stealth (purple), Strike (gold)
+   - Tier badges: Eco, Stealth, Strike — distinguishable by glyph and label
 
 4. **Tier badge:**
    ```go

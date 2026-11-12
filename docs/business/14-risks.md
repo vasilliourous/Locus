@@ -173,6 +173,32 @@ building.
 
 ---
 
+## 14.11 Budget is the first paid plan whose binding limit is cost, not price
+
+| | |
+|---|---|
+| **Likelihood** | **Unmeasured.** A 25 Mbps unmetered plan is generous by rate; whether it is generous by *bytes* depends on adoption and nobody has measured it. |
+| **Impact** | Medium — a transfer-allowance overage is a bill, not an outage. |
+| **Mitigation** | The 25 Mbps cap on **both** of Budget's ports (8448 and its UDP listener) means one Budget student cannot exceed a quarter of Full's ceiling; the allowance itself is the thing to watch. |
+
+Budget ([`04-tiers.md`](04-tiers.md#425-budget-is-added-as-a-third-tier--and-it-is-not-a-reborn-stealth))
+is unmetered, so unlike the free plan there is no client-side counter between a
+heavy student and the droplet's transfer allowance. What bounds it is the rate:
+`tc` enforces 25 Mbps on 8448 and on Budget's own UoT listener, server-side,
+because both are shaped.
+
+**What this is not.** It is not a claim that Budget is affordable — that is a
+world fact about the deployed system, and pricing it needs real usage data
+([`16-metrics.md`](16-metrics.md)). **What it is:** the exposure is bounded per
+user by a number the hub enforces, and the aggregate is a monitoring question
+rather than a design one.
+
+**Action:** watch aggregate egress once Budget sells, the same way §14.2 asks for
+the free tier. If it grows past the transfer allowance, the fix is a tighter rate
+or a Budget allowance — both are config, not code — not removing the plan.
+
+---
+
 ## 14.10 What the risks have in common
 
 Four of the original six are solved by *the same project*: the ability to change what
@@ -190,3 +216,9 @@ rather than left implicit.
 something from the code but not from the box.** Any future retirement of a tier
 follows the same recipe — the tree stops creating it, and a human has to stop
 the running one.
+
+§14.11 is the first *addition* rather than a retirement, and it is here to be
+read beside §14.2: the free plan's exposure is volume from a large population,
+and Budget's is rate from a smaller one. Neither is frightening; both are the
+kind of thing that is only ever discovered by watching, which is why both name a
+monitoring action rather than a mitigation that has been done.

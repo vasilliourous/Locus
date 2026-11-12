@@ -141,13 +141,14 @@ onMounted(load)
       outbound when <strong>UDP relay</strong> is on <em>and</em> a
       <code>uot_port</code> is set.
       <br /><br />
-      Only use this for <strong>the paid tier</strong> (the <code>strike</code>
-      row, shown to students as <strong>Full</strong>), and only when a sing-box UoT
-      listener is running on this server (normally 8446) — install it with
+      Only use this for <strong>a paid tier</strong> — the <code>strike</code>
+      row (shown as <strong>Full</strong>, 8446) or the <code>budget</code> row
+      (shown as <strong>Budget</strong>, 8449) — and only when a sing-box UoT
+      listener is running on this server — install it with
       <code>enable-uot.sh</code>; see <code>docs/business/04-tiers.md</code> §4.1
       for the live endpoint table (the archived plan that built it is
       <code>docs/archive/GAMING-UDP.md</code>). Do not point
-      it at the ordinary shadowsocks-rust ports (8443/8445): those do not
+      it at the ordinary shadowsocks-rust ports (8443/8445/8448): those do not
       implement sing-box's UDP-over-TCP and will refuse the connections.
       <br /><br />
       <strong>Hub address to offer</strong> lets you move this fleet off a
@@ -165,7 +166,8 @@ onMounted(load)
       <br /><br />
       Confirm the listener is actually up before setting the port:
       <code>systemctl status sing-box-uot-strike</code> /
-      <code>sing-box-uot-eco</code> and <code>ss -lntup | grep -E '8446|8447'</code>
+      <code>sing-box-uot-eco</code> / <code>sing-box-uot-budget</code> and
+      <code>ss -lntup | grep -E '8446|8447|8449'</code>
       (each must listen on <em>UDP</em> as well as TCP). A port advertised with
       nothing listening breaks UDP — game and voice traffic — while TCP and DNS
       keep working, so the failure looks like "some things work, some don't"

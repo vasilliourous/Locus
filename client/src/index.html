@@ -10,23 +10,20 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Locus</title>
     <style>
-      /* Locus palette, duplicated here on purpose.
-         This document is parsed before any bundle runs, so it cannot import the
-         theme module — and it is what paints the very first frame. Leaving
-         Verge's grey here would show a flash of another product's colours before
-         the app sits on its own background. Keep these in step with
-         `src/pages/_theme.tsx` (LOCUS_COLORS / LOCUS_LIGHT); `theme-colors.test.ts`
-         fails if they drift. */
+      /* The first paint, before any bundle runs. This document cannot import the
+         theme module, so it carries the grounds by value — see /COLOURS.md §1
+         for the three paint layers that must agree, and §2 for the values.
+         `theme-colors.test.ts` fails if these drift from the palette. */
       :root {
-        --bg-color: #edf1ef;
-        --text-color: #1b2a23;
+        --bg-color: #ececec;
+        --text-color: #151515;
         color-scheme: light;
       }
 
       @media (prefers-color-scheme: dark) {
         :root {
-          --bg-color: #0d1512;
-          --text-color: #e4ede7;
+          --bg-color: #141414;
+          --text-color: #e8e8e8;
           color-scheme: dark;
         }
       }

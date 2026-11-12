@@ -194,11 +194,12 @@ fi
 # honour ENABLE_UOT=0 in its own summary while the modules that actually act on
 # it (02-shadowsocks, 08-firewall, 06-pocketbase/seed-pb) still saw the default
 # and enabled the feature — a silently half-applied opt-out.
-: "${ENABLE_UOT:=1}"          # 1 = install Strike UDP-over-TCP (:8446)
-: "${UOT_PORT:=8446}"           # the PAID plan's UDP-over-TCP listener
+: "${ENABLE_UOT:=1}"          # 1 = install the per-plan UDP-over-TCP listeners
+: "${UOT_PORT:=8446}"           # the PAID plan's UDP-over-TCP listener (Full)
 : "${UOT_PORT_FREE:=8447}"      # the FREE plan's UDP-over-TCP listener (capped 1 Mbps)
+: "${UOT_PORT_BUDGET:=8449}"    # the BUDGET plan's UDP-over-TCP listener (capped 25 Mbps)
 : "${SKIP_CONSOLE:=0}"        # 1 = skip deploying the admin console
-export ENABLE_UOT UOT_PORT UOT_PORT_FREE SKIP_CONSOLE
+export ENABLE_UOT UOT_PORT UOT_PORT_FREE UOT_PORT_BUDGET SKIP_CONSOLE
 
 # ── Shadowsocks cipher (must be forwarded, not just exported up-chain) ──
 # Module 00 defines SS_METHOD/SS_KEY_BYTES and exports them, but run_module runs
@@ -434,8 +435,9 @@ done
 
 # Start services and verify.
 #
-# ONE UoT UNIT PER PLAN (2026-10): `sing-box-uot-strike` (:8446, paid) and
-# `sing-box-uot-eco` (:8447, free). This list still named the single retired
+# ONE UoT UNIT PER PLAN (2026-10): `sing-box-uot-strike` (:8446, paid),
+# `sing-box-uot-eco` (:8447, free) and `sing-box-uot-budget` (:8449, added
+# 2026-11-12). This list still named the single retired
 # `sing-box-uot` unit after the per-plan split, so a full deploy logged
 #   "sing-box-uot failed to start"
 # on a hub where UDP was in fact working, and then failed the smoke test on a
@@ -446,9 +448,12 @@ done
 # `tc-eco-udp-cap` is listed with `tc-eco-cap` because the free plan's UDP
 # carries the same 1 Mbps ceiling (04-tc.sh), and both must be applied after a
 # reboot.
-SERVICES="shadowsocks-eco shadowsocks-strike tc-eco-cap tc-eco-udp-cap tc-strike-cap"
+# `tc-budget-cap` / `tc-budget-udp-cap` follow the same rule for Budget's
+# 25 Mbps (04-tc.sh): the UDP one is listed because Budget's UDP is SHAPED, so a
+# reboot that lost it would leave an unshaped route around the plan's rate.
+SERVICES="shadowsocks-eco shadowsocks-strike shadowsocks-budget tc-eco-cap tc-eco-udp-cap tc-strike-cap tc-budget-cap tc-budget-udp-cap"
 if [ "${ENABLE_UOT:-1}" = "1" ]; then
-    SERVICES="${SERVICES} sing-box-uot-strike sing-box-uot-eco"
+    SERVICES="${SERVICES} sing-box-uot-strike sing-box-uot-eco sing-box-uot-budget"
 fi
 for svc in $SERVICES; do
     if systemctl start "$svc" 2>/dev/null; then
@@ -635,14 +640,16 @@ log " Service Summary"
 log "═══════════════════════════════════════════"
 log "   Domain:        ${DOMAIN}"
 log "   Free port:     8443 (BBR, 1 Mbps tc)      [row: eco/free]"
+log "   Budget port:   8448 (BBR+UDP, 25 Mbps tc) [row: budget]"
 log "   Full port:     8445 (BBR+UDP, 100 Mbps tc) [row: strike]"
 log "   Retired:       8444 (Stealth) — on an upgraded box, remove the old unit:"
 log "                  systemctl disable --now shadowsocks-stealth"
 if [ "${ENABLE_UOT:-1}" = "1" ]; then
 log "   UoT (paid):    ${UOT_PORT:-8446} (TCP+UDP, UDP-over-TCP) — uncapped"
 log "   UoT (free):    ${UOT_PORT_FREE:-8447} (TCP+UDP, UDP-over-TCP) — 1 Mbps cap"
+log "   UoT (budget):  ${UOT_PORT_BUDGET:-8449} (TCP+UDP, UDP-over-TCP) — 25 Mbps cap"
 else
-log "   Full UoT:      disabled (ENABLE_UOT=0)"
+log "   All UoT:       disabled (ENABLE_UOT=0)"
 fi
 log "   PocketBase:    https://${DOMAIN}/_/"
 log "   Admin console: https://${DOMAIN}/admin/"

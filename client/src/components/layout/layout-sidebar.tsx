@@ -30,10 +30,10 @@ export const LayoutSidebar = (props: LayoutSidebarProps) => {
   const { t } = useTranslation()
   const theme = useTheme()
   const { verge, mutateVerge, patchVerge } = useVerge()
-  // Both SVGs are `fill: currentColor` now, so the dark/light pair is no longer
-  // two colours but two *glyph weights*: the dark variant is the solid mark and
-  // the light one the outlined mark, which is a legibility choice about the
-  // background rather than about hue. The colour comes from the theme.
+  // The SVGs are `fill: currentColor`, so the dark/light pair is two *glyph
+  // weights*, not two colours: the dark variant is the solid mark and the light
+  // one the outlined mark — a legibility choice about the background. The colour
+  // comes from the theme. Marks: `/COLOURS.md` §8.
   const iconMark = isDark ? iconDark : iconLight
   const [menuUnlocked, setMenuUnlocked] = useState(false)
   const [menuContextPosition, setMenuContextPosition] =
@@ -126,22 +126,14 @@ export const LayoutSidebar = (props: LayoutSidebarProps) => {
     <div className="layout-content__left">
       {/* Logo.
           //
-          // Both marks are painted in the theme's accent, and neither is a
-          // per-theme asset: the SVGs were converted to `fill: currentColor`, so
-          // the colour arrives from CSS rather than from nine copies of the same
-          // file. That is the durable form of "recolour the logo per theme" — a
-          // duplicated asset per theme is a file that can be forgotten, and the
-          // one thing this wordmark used to do was ignore the theme entirely
-          // (`fill={isDark ? 'white' : 'black'}`, which the SVG's own `.st1`
-          // class overrode anyway, so it never changed at all).
+          // Both marks follow the theme through `currentColor` rather than a
+          // per-theme asset — a duplicated asset per theme is a file that gets
+          // forgotten. `color` rather than `fill`: the imported components
+          // resolve `currentColor` from the inherited `color`, so one declaration
+          // drives the shield and the wordmark together.
           //
-          // The accent is safe here by construction: the registry test asserts
-          // every theme's accent clears 3:1 against both its page and its
-          // surface, which is the floor for a non-text UI mark.
-          //
-          // `color` rather than `fill`: `SvgIcon` and the imported component
-          // both resolve `currentColor` from the inherited `color`, so one
-          // declaration drives the shield and the wordmark together. */}
+          // The one thing this wordmark must not do is ignore the theme, which
+          // it did for its whole early life through a hardcoded `fill`. */}
       <div className="the-logo" data-tauri-drag-region="false">
         <div
           data-tauri-drag-region="true"

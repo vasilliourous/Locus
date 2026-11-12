@@ -429,7 +429,9 @@ pub async fn beat(credential: &Credential, fingerprint: &str) -> BeatOutcome {
     // The shared client, so a machine whose OS certificate store cannot verify
     // the hub still heartbeats. See `locus::hub` for why a hand-built client
     // fails on Windows.
-    let hub_client = crate::locus::hub::client(&hub, crate::locus::hub::Timeout::Heartbeat).await;
+    // The routing decision, including the maintenance tunnel — see
+    // `activation_tunnel::hub_client_for`.
+    let hub_client = crate::locus::activation_tunnel::hub_client_for(&hub, crate::locus::hub::Timeout::Heartbeat).await;
     if hub_client.diagnosis().is_some() {
         tracing::warn!(target: "locus::hub", "{}", hub_client.describe());
     }
@@ -443,6 +445,14 @@ pub async fn beat(credential: &Credential, fingerprint: &str) -> BeatOutcome {
     {
         Ok(response) => response,
         Err(error) => {
+            // No HTTP status at all: nothing answered. The retry replaces the
+            // failed attempt exactly once, and its response is read through
+            // `read_beat` — the same rules as the direct path below, so the two
+            // routes cannot diverge in how they read the hub's answer.
+            if let Some(response) = retry_beat_over_maintenance(&error, hub.as_str(), &body).await {
+                return read_beat(response).await;
+            }
+
             // A reset during the handshake — or a refusal — means the network is
             // blocking the hub by NAME. The tunnel presents none, so it is worth
             // one attempt; and only those failures, because a DNS failure, a
@@ -493,6 +503,47 @@ pub async fn beat(credential: &Credential, fingerprint: &str) -> BeatOutcome {
         }
     };
 
+    read_beat(response).await
+}
+
+/// One retry of the heartbeat through the maintenance route, when this failure
+/// calls for it.
+///
+/// Returns `None` when the route should not be used (the hub ANSWERED, whatever
+/// the status) or when it was used and also failed — in both cases the call site
+/// reports the original failure, which is the one that describes the network.
+///
+/// Extracted from `beat`'s error arm: that arm already consults the classifier and
+/// may fall back to the activation tunnel, and the extra branch inline pushed the
+/// function past this crate's cognitive-complexity limit.
+async fn retry_beat_over_maintenance<B: serde::Serialize + Sync>(
+    error: &reqwest::Error,
+    hub: &str,
+    body: &B,
+) -> Option<reqwest::Response> {
+    if !crate::locus::activation_tunnel::note_failure_and_decide_retry(error) {
+        return None;
+    }
+    tracing::warn!(
+        target: "locus::activation_tunnel",
+        "the direct heartbeat produced no response; retrying through the maintenance tunnel"
+    );
+    let retry = crate::locus::activation_tunnel::hub_client_for(hub, crate::locus::hub::Timeout::Heartbeat).await;
+    let sent = retry.client().post(format!("{hub}/api/heartbeat")).json(body).send().await;
+    if crate::locus::activation_tunnel::log_retry_outcome(&sent) {
+        sent.ok()
+    } else {
+        None
+    }
+}
+
+/// Turns a heartbeat response into an outcome.
+///
+/// Extracted so the direct route and the maintenance route read the hub's answer
+/// through exactly the same rules — a second parse path is how two routes start
+/// disagreeing about what the hub said, which is the defect class this module
+/// keeps paying for.
+async fn read_beat(response: reqwest::Response) -> BeatOutcome {
     let status = response.status();
     let code = status.as_u16();
     let text = match response.text().await {
