@@ -64,7 +64,6 @@ export interface CodeCheck {
   message: string
 }
 
-
 export const locusStatus = () => invoke<LocusStatus>('locus_status')
 
 /** Offline checksum check. No network — safe to call on every keystroke. */
@@ -113,7 +112,6 @@ export const locusCheckSubscription = () =>
 
 export const locusUpdateStagingDir = () =>
   invoke<string>('locus_update_staging_dir')
-
 
 /**
  * Brings the tunnel up, and waits for the core to actually be ready.
@@ -188,4 +186,3 @@ export const locusDismissUpdate = () => invoke<void>('locus_dismiss_update')
  * computer and the message says so.
  */
 export const locusSignOut = () => invoke<SignOutResult>('locus_sign_out')
-

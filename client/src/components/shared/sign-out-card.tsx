@@ -20,10 +20,7 @@ import {
   graceState,
   SIGN_OUT_RESULT_MS,
 } from '@/pages/sign-out-timer'
-import {
-  locusSignOut,
-  type SignOutResult,
-} from '@/services/locus'
+import { locusSignOut, type SignOutResult } from '@/services/locus'
 import { errorDetail } from '@/services/notice-service'
 
 /**
@@ -80,7 +77,8 @@ export const SignOutCard = ({ onSignedOut }: { onSignedOut: () => void }) => {
   // Derived rather than stored: "a sign-out is running" is true exactly when the
   // window has closed and neither outcome has arrived yet. Storing it meant two
   // renders per keystroke of state that is a pure function of the others.
-  const busy = startedAt !== null && windowState.kind === 'elapsed' && !result && !failure
+  const busy =
+    startedAt !== null && windowState.kind === 'elapsed' && !result && !failure
 
   // Tick only while the window is open. A `setInterval` that runs for the life of
   // the page is a timer nobody stopped; this one exists exactly as long as the
@@ -237,11 +235,7 @@ export const SignOutCard = ({ onSignedOut }: { onSignedOut: () => void }) => {
         //
         // `cancel` clears `startedAt`, which returns this to `idle` — so "Cancel"
         // and "Escape" close it and nothing was signed out.
-        open={
-          windowState.kind !== 'idle' &&
-          !result &&
-          !failure
-        }
+        open={windowState.kind !== 'idle' && !result && !failure}
         onClose={(_event, reason) => {
           // Escape and a backdrop click both mean "I did not mean this". Honouring
           // them as Cancel is the behaviour a student expects; refusing to close

@@ -7,19 +7,21 @@ import {
   shouldAnnounceWarning,
   usageDisplay,
   usageSummary,
-  type UsageCopy
+  type UsageCopy,
 } from './usage-bar-model'
 
 /** The English templates, as the component supplies them. */
 const COPY: UsageCopy = {
   used: '{{used}} of {{total}} used',
   nearlyOut: '{{used}} of {{total}} used — nearly out of free data',
-  throttled: '{{used}} of {{total}} used — free data is spent for this month'
+  throttled: '{{used}} of {{total}} used — free data is spent for this month',
 }
 
 const MIB = 1024 * 1024
 
-const metered = (over: Partial<Extract<AllowanceStatus, { state: 'metered' }>> = {}) =>
+const metered = (
+  over: Partial<Extract<AllowanceStatus, { state: 'metered' }>> = {},
+) =>
   ({
     state: 'metered',
     usedBytes: 0,
@@ -27,7 +29,7 @@ const metered = (over: Partial<Extract<AllowanceStatus, { state: 'metered' }>> =
     percent: 0,
     warning: false,
     throttled: false,
-    ...over
+    ...over,
   }) as AllowanceStatus
 
 describe('formatBytes', () => {
@@ -97,9 +99,9 @@ describe('usageSummary', () => {
         usedLabel: '5.0 GB',
         allowanceLabel: '5.0 GB',
         warning: false,
-        throttled: true
+        throttled: true,
       },
-      COPY
+      COPY,
     )
     // The banner must not promise a speed the app does not enforce. Measured
     // 2026-11-01: this engine accepts `rate-limit`/`max-rate` on outbounds and
@@ -119,9 +121,9 @@ describe('usageSummary', () => {
         usedLabel: '4.3 GB',
         allowanceLabel: '5.0 GB',
         warning: true,
-        throttled: false
+        throttled: false,
       },
-      COPY
+      COPY,
     )
     expect(text).toContain('nearly out')
   })
@@ -134,9 +136,9 @@ describe('usageSummary', () => {
         usedLabel: '500 MB',
         allowanceLabel: '5.0 GB',
         warning: false,
-        throttled: false
+        throttled: false,
       },
-      COPY
+      COPY,
     )
     expect(text).toBe('500 MB of 5.0 GB used')
   })
@@ -148,7 +150,7 @@ describe('usageSummary', () => {
     const german: UsageCopy = {
       used: '{{used}} von {{total}} benutzt',
       nearlyOut: '{{used}} von {{total}} benutzt — fast aufgebraucht',
-      throttled: '{{used}} von {{total}} benutzt — gedrosselt'
+      throttled: '{{used}} von {{total}} benutzt — gedrosselt',
     }
     const text = usageSummary(
       {
@@ -157,9 +159,9 @@ describe('usageSummary', () => {
         usedLabel: '5.0 GB',
         allowanceLabel: '5.0 GB',
         warning: false,
-        throttled: true
+        throttled: true,
       },
-      german
+      german,
     )
     expect(text).toBe('5.0 GB von 5.0 GB benutzt — gedrosselt')
   })

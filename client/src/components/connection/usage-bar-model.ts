@@ -107,7 +107,10 @@ const fill = (template: string, used: string, total: string): string =>
  * compile error or a visible placeholder, never a silently English string in a
  * student's own language.
  */
-export const usageSummary = (display: UsageDisplay, copy: UsageCopy): string => {
+export const usageSummary = (
+  display: UsageDisplay,
+  copy: UsageCopy,
+): string => {
   if (display.kind === 'none') return ''
   const used = display.usedLabel
   const total = display.allowanceLabel

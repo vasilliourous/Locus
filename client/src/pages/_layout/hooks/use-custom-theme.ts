@@ -13,11 +13,7 @@ import {
   LOCUS_COLORS,
   LOCUS_LIGHT,
 } from '@/pages/_theme'
-import {
-  DECORATIONS,
-  resolveTheme,
-  themeDefaultFor,
-} from '@/pages/_themes'
+import { DECORATIONS, resolveTheme, themeDefaultFor } from '@/pages/_themes'
 import { useSetThemeMode, useThemeMode } from '@/services/states'
 
 const CSS_INJECTION_SCOPE_ROOT = '[data-css-injection-root]'
@@ -346,7 +342,9 @@ export const useCustomTheme = () => {
       const backgroundColor =
         effectiveMode === 'light' ? LOCUS_LIGHT.background : dt.background_color
       const selectColor =
-        effectiveMode === 'light' ? LOCUS_LIGHT.surfaceHover : LOCUS_COLORS.surfaceHover
+        effectiveMode === 'light'
+          ? LOCUS_LIGHT.surfaceHover
+          : LOCUS_COLORS.surfaceHover
       const scrollColor = alpha(
         effectiveMode === 'light'
           ? defaultTheme.primary_text
@@ -354,7 +352,9 @@ export const useCustomTheme = () => {
         0.5,
       )
       const dividerColor = alpha(
-        effectiveMode === 'light' ? defaultTheme.primary_text : LOCUS_COLORS.textPrimary,
+        effectiveMode === 'light'
+          ? defaultTheme.primary_text
+          : LOCUS_COLORS.textPrimary,
         0.08,
       )
       rootEle.style.setProperty('--divider-color', dividerColor)
@@ -372,7 +372,9 @@ export const useCustomTheme = () => {
       )
       rootEle.style.setProperty(
         '--scrollbar-bg',
-        effectiveMode === 'light' ? LOCUS_LIGHT.background : LOCUS_COLORS.surface,
+        effectiveMode === 'light'
+          ? LOCUS_LIGHT.background
+          : LOCUS_COLORS.surface,
       )
       rootEle.style.setProperty(
         '--scrollbar-thumb',

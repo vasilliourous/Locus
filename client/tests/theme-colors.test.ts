@@ -215,7 +215,8 @@ describe('theme registry', () => {
 
     // The `hasTheme` rule, restated as an assertion because it lives in a hook
     // this suite cannot mount. A non-empty id means "a theme is selected".
-    const hasTheme = (id: string | undefined): boolean => typeof id === 'string' && id.length > 0
+    const hasTheme = (id: string | undefined): boolean =>
+      typeof id === 'string' && id.length > 0
     expect(hasTheme('')).toBe(false)
     expect(hasTheme(undefined)).toBe(false)
     expect(hasTheme(DEFAULT_THEME_ID)).toBe(true)
@@ -257,18 +258,12 @@ describe('theme registry', () => {
     // textSecondary to `#B9AE9C` (~2.1:1): the second assertion goes red.
     const failures: string[] = []
     for (const spec of specs) {
-      const onSurface = contrast(
-        spec.palette.textPrimary,
-        spec.palette.surface,
-      )
+      const onSurface = contrast(spec.palette.textPrimary, spec.palette.surface)
       const onBackground = contrast(
         spec.palette.textPrimary,
         spec.palette.background,
       )
-      const labels = contrast(
-        spec.palette.textSecondary,
-        spec.palette.surface,
-      )
+      const labels = contrast(spec.palette.textSecondary, spec.palette.surface)
       if (onSurface < 4.5) {
         failures.push(`${spec.id}: textPrimary/surface ${onSurface.toFixed(2)}`)
       }
@@ -291,7 +286,10 @@ describe('theme registry', () => {
     const failures: string[] = []
     for (const spec of specs) {
       const onSurface = contrast(spec.palette.accent, spec.palette.surface)
-      const onBackground = contrast(spec.palette.accent, spec.palette.background)
+      const onBackground = contrast(
+        spec.palette.accent,
+        spec.palette.background,
+      )
       if (onSurface < 3) {
         failures.push(`${spec.id}: accent/surface ${onSurface.toFixed(2)}`)
       }
@@ -339,7 +337,9 @@ describe('theme registry', () => {
       // theme's figure and above "identical"; it catches a copy-paste where
       // surface was left equal to background.
       if (surfaceStep < 1.03) {
-        failures.push(`${spec.id}: surface/background ${surfaceStep.toFixed(3)}`)
+        failures.push(
+          `${spec.id}: surface/background ${surfaceStep.toFixed(3)}`,
+        )
       }
       if (borderVsSurface < 1.15) {
         failures.push(
@@ -793,7 +793,9 @@ describe('pop-up theming', () => {
     ).toEqual([])
     // Guard on the guard: the strip must still leave the real comparisons in,
     // or the assertion above passes on a file that has no colours at all.
-    expect(hook.match(/effectivemode === 'light'/g)?.length ?? 0).toBeGreaterThan(3)
+    expect(
+      hook.match(/effectivemode === 'light'/g)?.length ?? 0,
+    ).toBeGreaterThan(3)
   })
 
   it('the dialog paper rule is not exempt from it', () => {

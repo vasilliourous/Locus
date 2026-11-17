@@ -39,10 +39,13 @@ export const UsageBar = ({ allowance }: { allowance: AllowanceStatus }) => {
           alignItems: 'baseline',
           justifyContent: 'space-between',
           gap: 1,
-          mb: 0.5
+          mb: 0.5,
         }}
       >
-        <Typography variant="caption" sx={{ fontWeight: 600, letterSpacing: '0.02em' }}>
+        <Typography
+          variant="caption"
+          sx={{ fontWeight: 600, letterSpacing: '0.02em' }}
+        >
           {t('home.components.connection.freeData')}
         </Typography>
         <Typography variant="caption" color="text.secondary">
@@ -62,7 +65,7 @@ export const UsageBar = ({ allowance }: { allowance: AllowanceStatus }) => {
         sx={{
           height: 6,
           borderRadius: '3px',
-          '& .MuiLinearProgress-bar': { borderRadius: '3px' }
+          '& .MuiLinearProgress-bar': { borderRadius: '3px' },
         }}
       />
 
@@ -72,7 +75,9 @@ export const UsageBar = ({ allowance }: { allowance: AllowanceStatus }) => {
           worse than saying it when the reader next pauses. */}
       <Typography
         variant="caption"
-        color={throttled ? 'error' : warning ? 'warning.main' : 'text.secondary'}
+        color={
+          throttled ? 'error' : warning ? 'warning.main' : 'text.secondary'
+        }
         role="status"
         aria-live="polite"
         sx={{ display: 'block', mt: 0.5 }}
@@ -80,7 +85,7 @@ export const UsageBar = ({ allowance }: { allowance: AllowanceStatus }) => {
         {usageSummary(display, {
           used: t('home.components.connection.freeDataUsed'),
           nearlyOut: t('home.components.connection.freeDataNearlyOut'),
-          throttled: t('home.components.connection.freeDataThrottled')
+          throttled: t('home.components.connection.freeDataThrottled'),
         })}
       </Typography>
 

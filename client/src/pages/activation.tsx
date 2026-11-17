@@ -275,7 +275,10 @@ const ActivationScreen = ({ onActivated }: Props) => {
             One line, from the backend's own verdict (`LocusStatus.bootstrapping`),
             never inferred here. */}
         {status?.bootstrapping && (
-          <Typography variant="caption" sx={{ mb: 2, color: LOCUS_COLORS.textSecondary }}>
+          <Typography
+            variant="caption"
+            sx={{ mb: 2, color: LOCUS_COLORS.textSecondary }}
+          >
             Using the Locus backup route to reach the server.
           </Typography>
         )}
@@ -429,7 +432,12 @@ const ActivationScreen = ({ onActivated }: Props) => {
 
         <Typography
           variant="caption"
-          sx={{ display: 'block', mt: 3, mb: 2, color: LOCUS_COLORS.textSecondary }}
+          sx={{
+            display: 'block',
+            mt: 3,
+            mb: 2,
+            color: LOCUS_COLORS.textSecondary,
+          }}
         >
           Nothing on your card? The code is 15 characters and never contains{' '}
           <strong>0</strong>, <strong>O</strong>, <strong>1</strong> or{' '}

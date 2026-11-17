@@ -186,7 +186,9 @@ describe('connection phase from backend status', () => {
    * a device with no code is at the activation gate whatever route it has.
    */
   test('an unactivated device stays unactivated even when the relay is carrying it', () => {
-    expect(phaseFromStatus(status(false, false, false, true))).toBe('unactivated')
+    expect(phaseFromStatus(status(false, false, false, true))).toBe(
+      'unactivated',
+    )
   })
 
   /**

@@ -11,8 +11,13 @@ import { HttpsProxyAgent } from 'https-proxy-agent'
 import { extract } from 'tar'
 
 import { resolveServiceRelease } from './service-release.mjs'
-import { log_debug, log_error, log_info, log_success, log_warn } from './utils.mjs'
-
+import {
+  log_debug,
+  log_error,
+  log_info,
+  log_success,
+  log_warn,
+} from './utils.mjs'
 
 /** Prepares platform resources, caching versions and unchanged files unless `--force` is used. */
 
@@ -142,7 +147,10 @@ function vendoredInputFor(file) {
 /// prevent. It warns loudly instead, because the resources case is legitimate
 /// until that gap closes.
 function declaredButAbsent(file) {
-  return SIDECAR_LOCK?.vendored?.['resources'] !== undefined && !vendoredInputFor(file)
+  return (
+    SIDECAR_LOCK?.vendored?.['resources'] !== undefined &&
+    !vendoredInputFor(file)
+  )
 }
 
 /// The locked sha256 for a geo database filename, or undefined.
@@ -784,12 +792,12 @@ async function resolveResource(binInfo) {
       if (pinnedHash) {
         const actual = await calculateFileHash(targetPath)
         if (actual === pinnedHash) {
-          log_success(`"${file}" already exists and matches its pin, skipping download`)
+          log_success(
+            `"${file}" already exists and matches its pin, skipping download`,
+          )
           return
         }
-        log_warn(
-          `"${file}" on disk does not match its pin — re-downloading`,
-        )
+        log_warn(`"${file}" on disk does not match its pin — re-downloading`)
       } else {
         log_success(`"${file}" already exists, skipping download (UNPINNED)`)
         return

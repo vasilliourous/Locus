@@ -69,7 +69,8 @@ const ConnectionPage = () => {
   // Rendered only when the backend reports a blocker AND the attempt produced no
   // error of its own: an error is about the attempt that just happened, and it is
   // more specific than a standing machine state.
-  const blocker = error === null ? blockerNotice(status?.connectBlocker ?? null) : null
+  const blocker =
+    error === null ? blockerNotice(status?.connectBlocker ?? null) : null
 
   // Whether this screen owes the student a route to a human. The rule lives in
   // `connect-notice.ts` beside `connectNotice` so it can be tested; the states it

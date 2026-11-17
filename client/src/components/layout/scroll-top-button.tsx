@@ -16,11 +16,9 @@ export const ScrollTopButton = ({ onClick, show, sx }: Props) => {
           position: 'absolute',
           bottom: '20px',
           right: '20px',
-          backgroundColor: (theme) =>
-            alpha(theme.palette.text.primary, 0.1),
+          backgroundColor: (theme) => alpha(theme.palette.text.primary, 0.1),
           '&:hover': {
-            backgroundColor: (theme) =>
-              alpha(theme.palette.text.primary, 0.2),
+            backgroundColor: (theme) => alpha(theme.palette.text.primary, 0.2),
           },
           visibility: show ? 'visible' : 'hidden',
           ...sx,

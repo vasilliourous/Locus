@@ -18,9 +18,18 @@ describe('the sign-out confirmation window', () => {
     const t0 = 1_000_000
     expect(graceState(t0, t0)).toEqual({ kind: 'counting', remaining: 3 })
     expect(graceState(t0, t0 + 1)).toEqual({ kind: 'counting', remaining: 3 })
-    expect(graceState(t0, t0 + 1000)).toEqual({ kind: 'counting', remaining: 2 })
-    expect(graceState(t0, t0 + 2000)).toEqual({ kind: 'counting', remaining: 1 })
-    expect(graceState(t0, t0 + 2999)).toEqual({ kind: 'counting', remaining: 1 })
+    expect(graceState(t0, t0 + 1000)).toEqual({
+      kind: 'counting',
+      remaining: 2,
+    })
+    expect(graceState(t0, t0 + 2000)).toEqual({
+      kind: 'counting',
+      remaining: 1,
+    })
+    expect(graceState(t0, t0 + 2999)).toEqual({
+      kind: 'counting',
+      remaining: 1,
+    })
     expect(graceState(t0, t0 + SIGN_OUT_GRACE_MS)).toEqual({ kind: 'elapsed' })
   })
 
@@ -55,7 +64,9 @@ describe('the sign-out confirmation window', () => {
     const t0 = 1_000_000
     expect(canStillCancel(graceState(t0, t0))).toBe(true)
     expect(canStillCancel(graceState(t0, t0 + 1500))).toBe(true)
-    expect(canStillCancel(graceState(t0, t0 + SIGN_OUT_GRACE_MS - 1))).toBe(true)
+    expect(canStillCancel(graceState(t0, t0 + SIGN_OUT_GRACE_MS - 1))).toBe(
+      true,
+    )
     expect(canStillCancel(graceState(t0, t0 + SIGN_OUT_GRACE_MS))).toBe(false)
   })
 

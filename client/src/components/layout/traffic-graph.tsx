@@ -101,8 +101,7 @@ export function TrafficGraph({ ref }: { ref?: Ref<TrafficRef> }) {
     // A palette with a missing role should not happen. The fallbacks keep the
     // graph drawable rather than throwing, and read the same roles the palette
     // would — so a graph drawn without one is dimmer, never a different colour.
-    const refLineColor =
-      divider || alpha(text.primary, 0.12)
+    const refLineColor = divider || alpha(text.primary, 0.12)
     const upLineColor = secondary.main || alpha(text.primary, 0.35)
     const downLineColor = primary.main || alpha(text.primary, 0.55)
 

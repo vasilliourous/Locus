@@ -172,7 +172,9 @@ describe('when the connection screen offers the support route', () => {
     expect(connectionNeedsSupport('disconnected', false, lapsed, true)).toBe(
       true,
     )
-    expect(connectionNeedsSupport('disconnected', true, active, true)).toBe(true)
+    expect(connectionNeedsSupport('disconnected', true, active, true)).toBe(
+      true,
+    )
     expect(connectionNeedsSupport('disconnected', false, unknown, false)).toBe(
       true,
     )
@@ -185,9 +187,9 @@ describe('when the connection screen offers the support route', () => {
    */
   test('a working session does not show the block', () => {
     expect(connectionNeedsSupport('connected', false, active, true)).toBe(false)
-    expect(
-      connectionNeedsSupport('connected', false, activeUrgent, true),
-    ).toBe(false)
+    expect(connectionNeedsSupport('connected', false, activeUrgent, true)).toBe(
+      false,
+    )
   })
 
   /**
@@ -197,7 +199,9 @@ describe('when the connection screen offers the support route', () => {
    * told to enter their code — burying the instruction they actually need.
    */
   test('a state that has not been read, or has nothing set up, is not a failure', () => {
-    expect(connectionNeedsSupport('checking', false, unknown, false)).toBe(false)
+    expect(connectionNeedsSupport('checking', false, unknown, false)).toBe(
+      false,
+    )
     expect(connectionNeedsSupport('unactivated', false, unknown, false)).toBe(
       false,
     )

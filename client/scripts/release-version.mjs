@@ -135,7 +135,11 @@ async function updatePackageVersion(newVersion) {
     // that was already correct — alarming, and indistinguishable from a real
     // failure. Say which one it is.
     if (updatedData === data) {
-      if (new RegExp(`^\\s*"version"\\s*:\\s*"${versionWithoutV}"`, 'm').test(data)) {
+      if (
+        new RegExp(`^\\s*"version"\\s*:\\s*"${versionWithoutV}"`, 'm').test(
+          data,
+        )
+      ) {
         console.log(
           `[INFO]: package.json is already at ${versionWithoutV} — no change`,
         )
@@ -248,7 +252,11 @@ async function updateTauriConfigVersion(newVersion) {
     // Already at this version, or the field is genuinely absent — see the note
     // in `updatePackageVersion`.
     if (updatedData === data) {
-      if (new RegExp(`^\\s*"version"\\s*:\\s*"${versionWithoutV}"`, 'm').test(data)) {
+      if (
+        new RegExp(`^\\s*"version"\\s*:\\s*"${versionWithoutV}"`, 'm').test(
+          data,
+        )
+      ) {
         console.log(
           `[INFO]: tauri.conf.json is already at ${versionWithoutV} — no change`,
         )
