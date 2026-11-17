@@ -169,6 +169,22 @@ that mistake, and it cost the fleet a manual reinstall. The extraction command a
 its verification live in [`../../.locus-keys/README.md`](../../.locus-keys/README.md)
 and `server/scripts/locus-key-extract.sh`.
 
+### The fresh-clone guarantee
+
+**Delete the directory, `git clone`, supply the passphrase — and keep working.**
+Nothing needs to be requested from another person or another machine, and no
+secret is stored outside the repository except the passphrase itself.
+
+This was verified by cloning into an empty directory and running the workflow from
+[`SESSION.md`](SESSION.md): 684 Rust tests, 117 frontend tests, `tsc`, eslint,
+biome and all 49 consistency sections pass **without the passphrase**, and the
+signing key extracts and verifies **with** it. The per-task breakdown is in
+[`SESSION.md`](SESSION.md) §"What a fresh clone can do, and with what".
+
+The one thing a clone cannot reproduce is the passphrase. That is deliberate:
+if the passphrase were recoverable from the repository, the ciphertext would be
+decoration. Keep it in a password manager.
+
 ---
 
 ## One-time setup

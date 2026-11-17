@@ -101,21 +101,28 @@ Ubuntu-only system packages:
 sudo apt-get install -y libxslt1.1 libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf
 ```
 
-### Download the Mihomo Core Binary (Automatic)
+### Prepare the Build Inputs (Automatic, Offline)
 
 ```bash
 pnpm run prebuild
-pnpm run prebuild --force  # Re-fetch every input, replacing anything that does not match its pin
+pnpm run prebuild --force  # Re-verify every input, replacing anything that does not match its pin
 ```
 
-The engines and the privilege-service bundle are **committed** under
-`vendor/build-inputs/`, so `prebuild` copies them into
-`src-tauri/sidecar/` and verifies each against its sha256 in
-`server/data/sidecar.lock.json`. Only the four geo databases are still
-downloaded. If a pin check fails, do not delete the lock entry to get past it —
-see [`../docs/operate/VENDORED-BUILD-INPUTS.md`](../docs/operate/VENDORED-BUILD-INPUTS.md),
+**All twelve build inputs are committed** under `vendor/build-inputs/` — the two
+mihomo engines, the privilege-service bundle and the four geo databases — so
+`prebuild` copies them into `src-tauri/sidecar/` and `src-tauri/resources/` and
+verifies each against its sha256 in `server/data/sidecar.lock.json`. **It does not
+need the network.** If a pin check fails, do not delete the lock entry to get past
+it — see [`../docs/operate/VENDORED-BUILD-INPUTS.md`](../docs/operate/VENDORED-BUILD-INPUTS.md),
 which also covers where a new vendored file goes and how to prove the build reads
 the committed copy rather than the network.
+
+> **Run this before `cargo test`, not just before `pnpm build`.** The Rust build
+> script requires `src-tauri/sidecar/<service-binary>` to exist, and `cargo` does
+> not invoke `prebuild` — so a fresh clone fails with
+> `resource path 'sidecar/clash-verge-service-…' doesn't exist`. See
+> [`../docs/operate/SESSION.md`](../docs/operate/SESSION.md) §3 for the full
+> ordering, including the `dist/` requirement below.
 
 ### Run the Development Server
 

@@ -562,6 +562,112 @@ else
     ok ".secrets.env (plaintext bundle) is not tracked"
 fi
 
+# ── 5d. A fresh clone can build, and the page that says how is accurate ──
+#
+# WHY. The goal is that deleting this directory and re-cloning loses nothing: the
+# passphrase is the only thing a clone cannot reproduce. Two build steps break
+# that silently, because `cargo` does not run them and its failure message names
+# neither:
+#
+#   * `pnpm run prebuild` stages `src-tauri/sidecar/` from vendor/. Without it the
+#     Rust build script dies on "resource path 'sidecar/clash-verge-service-…'
+#     doesn't exist".
+#   * `pnpm web:build` produces `../dist`, which `frontendDist` names. Without it
+#     the tauri macro panics on a missing path — even for `cargo test`.
+#
+# Both were hit on a real clone while writing docs/operate/SESSION.md. Documenting
+# them is not enough on its own: a reader who skips the page gets the raw cargo
+# error, and a reader whose page has drifted gets advice that no longer applies.
+# So this asserts the two prerequisites are NAMED in SESSION.md, and re-derives
+# the frontendDist claim from tauri.conf.json rather than restating it.
+SESSION_DOC="$REPO/docs/operate/SESSION.md"
+if [ -f "$SESSION_DOC" ]; then
+    # The commands, as a reader would type them. Both are required.
+    missing=""
+    grep -q 'prebuild' "$SESSION_DOC" || missing="$missing prebuild"
+    grep -q 'web:build' "$SESSION_DOC" || missing="$missing web:build"
+    if [ -z "$missing" ]; then
+        ok "docs/operate/SESSION.md names both build prerequisites (prebuild, web:build)"
+    else
+        bad "docs/operate/SESSION.md does not name:${missing} — a fresh clone fails at cargo with an error naming neither"
+    fi
+    # And that the prerequisite ORDER is stated, because running cargo first is
+    # the mistake: the page must come before the gate list, not after it.
+    prebuild_line=$(grep -n 'prebuild' "$SESSION_DOC" | head -1 | cut -d: -f1)
+    cargo_line=$(grep -n 'cargo test --manifest-path' "$SESSION_DOC" | head -1 | cut -d: -f1)
+    if [ -n "$prebuild_line" ] && [ -n "$cargo_line" ] && [ "$prebuild_line" -lt "$cargo_line" ]; then
+        ok "SESSION.md introduces prebuild before the cargo gate it unblocks"
+    else
+        bad "SESSION.md lists 'cargo test' before 'prebuild' — the order a reader follows is the order it fails in"
+    fi
+else
+    bad "docs/operate/SESSION.md is missing — nothing tells a fresh clone what to run"
+fi
+# The frontendDist path the doc describes must be the one the config declares.
+# A hardcoded "../dist" in prose would drift the moment the build moves; this
+# reads the config and fails if the two ever disagree.
+declared_dist=$(python3 - "$REPO/client/src-tauri/tauri.conf.json" <<'PYEOF'
+import json, sys
+try:
+    conf = json.load(open(sys.argv[1]))
+    print(conf["build"]["frontendDist"].lstrip("./"))
+except Exception:
+    print("")
+PYEOF
+)
+if [ -n "$declared_dist" ] && grep -qF "$declared_dist" "$SESSION_DOC" 2>/dev/null; then
+    ok "SESSION.md's frontendDist claim ($declared_dist) matches tauri.conf.json"
+elif [ -z "$declared_dist" ]; then
+    bad "could not read build.frontendDist from tauri.conf.json"
+else
+    bad "SESSION.md does not mention '$declared_dist', the frontendDist tauri.conf.json declares — the page is describing a build that no longer exists"
+fi
+
+# ── 5e. The extraction route works from a clone, not just from this machine ──
+#
+# WHY. The whole point of the bundle model is that a fresh clone plus the
+# passphrase is sufficient. That claim dies quietly if the extraction path depends
+# on a file OUTSIDE the repository — a `~/.locus-secrets/` copy, a hardcoded home
+# directory, an absolute path from the machine it was written on. Such a script
+# works perfectly for its author and fails for everyone else, which is the worst
+# kind of working.
+#
+# So: the script must resolve everything relative to its own location, and must
+# name nothing outside the checkout. HOME-relative paths are the specific trap —
+# they are how "it works on my machine" gets committed.
+EXTRACT="$REPO/server/scripts/locus-key-extract.sh"
+if [ -f "$EXTRACT" ]; then
+    # Absolute home paths, `~/`, and `$HOME` would all mean the route depends on
+    # this machine. `$HOME` was MISSED by the first version of this check, which
+    # only looked for `~/` — so appending `KEY_BAK="$HOME/..."` passed. A guard
+    # that cannot see the most common form of the thing it looks for is worse than
+    # none, because it reports OK.
+    machine_paths=$(grep -nE '(\$HOME|\$\{HOME\}|~\/|/home/[a-z]|/Users/[A-Za-z])' "$EXTRACT" 2>/dev/null \
+                    | grep -vE '^[0-9]+:\s*#' || true)
+    if [ -z "$machine_paths" ]; then
+        ok "locus-key-extract.sh names no machine-local path (portable to a clone)"
+    else
+        bad "locus-key-extract.sh references a machine-local path — it will work for its author and fail for a clone:"
+        printf '%s\n' "$machine_paths" | head -5 | sed 's/^/         /'
+    fi
+    # It must resolve the repo from its own location, not from $PWD: a reader may
+    # run it as `./server/scripts/...` from the root or from anywhere else.
+    if grep -q 'BASH_SOURCE' "$EXTRACT"; then
+        ok "locus-key-extract.sh resolves the repo from its own path, not the caller's cwd"
+    else
+        bad "locus-key-extract.sh does not use BASH_SOURCE — it will resolve paths against the caller's cwd"
+    fi
+    # And it must not print the key. A script that extracts a secret and echoes it
+    # puts the key in shell history, scrollback and CI logs.
+    if grep -qE 'echo[^|]*"\$(key_b64|TMP_KEY)"' "$EXTRACT" 2>/dev/null; then
+        bad "locus-key-extract.sh echoes the key material"
+    else
+        ok "locus-key-extract.sh never echoes the key material"
+    fi
+else
+    bad "server/scripts/locus-key-extract.sh is missing"
+fi
+
 # ─────────────────────────────────────────────────────────────
 # 6. PocketBase hook traps.
 #

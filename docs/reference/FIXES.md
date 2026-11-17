@@ -24,7 +24,92 @@ commercial gaps, [`../business/17-not-built.md`](../business/17-not-built.md).
 
 ---
 
-## THE LINUX BUILD READ THE HUB'S MODULE FROM A DIRECTORY IT IS NEVER IN (2026-11-10, unreleased)
+## A FRESH CLONE COULD NOT RUN `cargo test`, AND NOTHING SAID WHICH STEP WAS MISSING (2026-11-18, unreleased)
+
+- **What broke.** The goal was that deleting the directory and re-cloning loses
+  nothing but the passphrase. A clone was made and the workflow followed, and
+  `cargo test` failed twice in a row with errors that name neither the cause nor
+  the fix:
+
+  ```
+  Error: resource path `sidecar/clash-verge-service-x86_64-unknown-linux-gnu` doesn't exist
+  message: The `frontendDist` configuration is set to `"../dist"` but this path doesn't exist
+  ```
+
+- **Cause.** Two build steps are prerequisites that `cargo` does not run.
+  `pnpm run prebuild` stages `src-tauri/sidecar/` from the vendored inputs, and
+  `pnpm web:build` produces `../dist`, which the tauri macro validates even when
+  only tests are being built. Both were documented in `client/CONTRIBUTING.md` and
+  neither was in the place a new session looks.
+
+- **Fix.** `client/CONTRIBUTING.md` now says to run `prebuild` before `cargo test`,
+  not just before `pnpm build`, and no longer claims the geo databases are
+  downloaded (they have been vendored since 2026-11-03 — the same stale sentence
+  §39 now guards against). The ordering lives in
+  [`docs/operate/SESSION.md`](../operate/SESSION.md) §2 with both error strings
+  quoted, so the next person can search for the message they actually saw.
+
+- **Guards, each shown to fail.** `check-consistency.sh` §5d asserts `SESSION.md`
+  names both commands, that it introduces `prebuild` *before* the `cargo` gate it
+  unblocks (a reader follows the page in order), and that the `frontendDist` path
+  the page describes is the one `tauri.conf.json` declares — re-read from the
+  config, not restated, so the pair cannot drift. Verified by deleting both
+  command names from the page and watching all three go red.
+
+- **The rule.** *A prerequisite that lives only in a document is run in the order
+  the reader discovers it, which is the order it fails in.* The page and the gate
+  list are checked against each other for ordering, because "it is written down
+  somewhere" and "it is run first" are different claims.
+
+---
+
+## THE ONLY COPY OF THE UPDATE-SIGNING KEY WAS IN A GITIGNORED DIRECTORY, TWICE OVER (2026-11-18, unreleased)
+
+- **What broke.** `.locus-keys/` held the minisign private key that signs every
+  client update, and the directory is gitignored. Losing the working tree on
+  2026-10-16 took the key with it; it survived only because an unencrypted copy
+  happened to still sit on the deployed host, and the fleet still paid a manual
+  reinstall. The same shape then recurred from a filesystem incident.
+
+  `secrets-encrypt.sh` had already made this exact argument for the operator
+  bundle — its header records that the old age *keypair* was lost with the
+  gitignored tree and recovered only from a box that might have been deleted — and
+  moved to a passphrase for it. The signing key had not followed.
+
+- **Cause.** A gitignored directory was treated as the key's *home* rather than as
+  a cache of it. Nothing in the repository said otherwise, and nothing checked.
+
+- **Fix.** The rule now: **a secret that is not in git is not backed up.**
+  `LOCUS_UPDATE_KEY_B64` in the committed `server/secrets.env.age` is the durable
+  copy; `.locus-keys/` is emptied after every signing session and is *empty after a
+  clone by design*, so the recovery path is the path used daily rather than one
+  discovered broken. `server/scripts/locus-key-extract.sh` is the only route to
+  the key, and it verifies what it extracted before writing it.
+
+- **A guard defect found while writing it.** The script first derived the public
+  half with `minisign -G`. That flag *generates a new keypair* and overwrites the
+  file passed to `-s` — so the check would have verified a freshly-minted key that
+  no client trusts, and passed. It is `-R` that recreates a public key from a
+  secret key. The same `-G` sits in `release-gate.sh` step 5 for the same purpose;
+  it rarely reaches that branch because it reads the `.pub` sibling first, which is
+  the only reason it has not misfired.
+
+- **Guards, each shown to fail.** §5c asserts the README names both the bundle and
+  the script by exact path, that the script exists and is executable, and that the
+  plaintext `.secrets.env` is never tracked. §5e asserts the extraction script
+  names no machine-local path (`~/`, `$HOME`, an absolute home), resolves the repo
+  from `BASH_SOURCE`, and never echoes key material. The README check's first
+  version searched for the substring `secrets.env.age`, so mutating the prose while
+  leaving a markdown link's href intact **passed** — it now requires both whole
+  tokens. The `$HOME` form was likewise missed by the first path check.
+
+- **The rule.** *A guard that cannot see the most common form of the thing it looks
+  for is worse than none, because it reports OK.* Both half-blind guards here were
+  found by deliberately breaking the input, not by reading them.
+
+---
+
+
 
 - **What broke.** `Build (linux)` failed in `Install sing-box` with
   `sed: can't read server/modules/02-shadowsocks.sh: No such file or directory`,
