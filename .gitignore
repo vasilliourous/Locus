@@ -14,6 +14,14 @@
 # This is a backstop, not a hiding place: a root SSH password sat here in a 644
 # file (2026-11-04) and only stayed out of git because nobody ran `git add -A`.
 # It now lives in server/secrets.env.age as VPS_PW.
+#
+# THIS PATH SHOULD NOT EXIST. It is ignored so that a transient working copy
+# cannot be committed while you are editing it, NOT because keeping one is fine.
+# The documented flow is: decrypt to a temp file, edit, re-encrypt, `shred -u`.
+# A `.secrets.env` left sitting in the repo root is a full plaintext bundle in a
+# path that survives every copy of the tree — which is how the 2026-10-16 loss
+# turned into a full credential reset. If you find one, check the archive is
+# current (`server/scripts/secrets-decrypt.sh --check`) and shred it.
 sshplain*
 *passworddeleteafterencryption*
 .secrets.env

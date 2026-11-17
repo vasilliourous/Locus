@@ -92,7 +92,7 @@ negative cases are recorded here.
 | **Public key (as configured)** | `dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXkgNERBOUI0OEYzOTI1MUNFRgpSV1R2SENVNWo3U3BUY1p3VnpKbjg1MkpVZEw0dnVMUEJWRC91RXBjTU1ibmx6dWxZeENKZjZoRgo=` |
 | **Underlying minisign key** | `RWTvHCU5j7SpTcZwVzJn852JUdL4vuLPBVD/uEpcMMbnlzulYxCJf6hF` |
 | **Where it lives** | `client/src-tauri/tauri.conf.json` → `plugins.updater.pubkey` |
-| **Secret key** | `.locus-keys/locus_update.key` (gitignored) |
+| **Secret key** | `LOCUS_UPDATE_KEY_B64` in `server/secrets.env.age` — the durable copy. `.locus-keys/locus_update.key` is a per-session cache extracted from it. |
 | **Where it must go** | GitHub Actions secret `LOCUS_UPDATE_KEY`, **and** an offline copy you control, **and** a passphrase-encrypted backup inside `server/secrets.env.age` |
 | Key ID | `4DA9B48F39251CEF` (shown in the `.pub` comment line) |
 
@@ -148,6 +148,25 @@ production database credentials.
 ```sh
 git check-ignore -v .locus-keys/locus_update.key
 ```
+
+### The working copy is a cache, extracted per session
+
+`.locus-keys/locus_update.key` is **not kept between sessions** and an empty
+`.locus-keys/` is the normal state after a clone. The durable copy is
+`LOCUS_UPDATE_KEY_B64` in `server/secrets.env.age`. To sign anything locally:
+
+```sh
+export LOCUS_SECRETS_PASSPHRASE_FILE=decryptionkeyforsecretsdeleteafteruse.txt
+./server/scripts/locus-key-extract.sh           # writes 0700 / 0600, verifies the key ID
+#  ... sign ...
+./server/scripts/locus-key-extract.sh --remove  # drop the cache again
+```
+
+Why it works this way: the directory is gitignored, so on 2026-10-16 it vanished
+with the working tree and took the key with it. Making the cache empty by default
+means the *recovery* route is the route used every day, so it is exercised rather
+than discovered broken. [`../../.locus-keys/README.md`](../../.locus-keys/README.md)
+owns the detail.
 
 ---
 
@@ -252,10 +271,12 @@ are stored against the **repository**, and **none** of the following carry them:
 | Transferring ownership | **Yes** — same repository, new owner |
 
 So after a copy or a fresh repo, `LOCUS_UPDATE_KEY` must be re-set by hand
-**before the first `v*` tag**, or the tag fails at signing. The key file itself is
-gitignored (`.locus-keys/`), so a copy of the tree does not carry it either — it
-lives in the offline copy at `~/.locus-secrets/locus_update.key`, the Actions
-secret, and the passphrase bundle below.
+**before the first `v*` tag**, or the tag fails at signing. The key file is not in
+git — and `.locus-keys/` is deliberately emptied every session, so a copy of the
+tree carries neither the key nor a stale copy of it. The durable sources are the
+offline copy at `~/.locus-secrets/locus_update.key`, the Actions secret, and the
+passphrase bundle; `server/scripts/locus-key-extract.sh` rebuilds the cache from
+the bundle in one command.
 
 The **same key must be used**, not a freshly generated one: the matching public
 half is compiled into every already-installed client, and a new key produces

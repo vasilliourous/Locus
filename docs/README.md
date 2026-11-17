@@ -55,6 +55,7 @@ bulk-delete `codes` or `code_events`; revoke with Suspend, move with Unbind.*
 
 | Document | `status` | What it is |
 |---|---|---|
+| [`operate/SESSION.md`](operate/SESSION.md) | live | **Starting a working session** — checkout → dependencies → secrets → signing key → the gates. Read this first on a fresh clone. |
 | [`operate/DEPLOY.md`](operate/DEPLOY.md) | live | Deploying the hub to a VPS, from scratch or to a new host. |
 | [`operate/OPS.md`](operate/OPS.md) | live | Running it: health checks, backups, restore, the things you do at 2am. |
 | [`operate/POCKETBASE-SETUP.md`](operate/POCKETBASE-SETUP.md) | live | PocketBase specifics, including the admin console at `/admin/`. |

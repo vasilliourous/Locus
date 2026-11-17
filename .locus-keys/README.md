@@ -1,51 +1,94 @@
-# `.locus-keys/` — what this directory holds, and what it is worth
+# `.locus-keys/` — a cache, not a home
 
-**This file is committed. The keys beside it are not** — the whole directory is
-ignored by [`.gitignore`](../.gitignore) (`.locus-keys/`), so a fresh clone has
-this directory and nothing in it. That is why the file you are reading exists: a
-directory that appears to hold a secret and explains nothing is how a secret gets
-deleted by someone tidying up.
+**This directory is empty after a clone, and that is the intended state.** The
+only committed file here is this README.
 
-## The two files
+The signing key used to live here, and that is what cost the fleet a manual
+reinstall on 2026-10-16: the directory is gitignored, so it vanished with the
+working tree, and the key survived only because an unencrypted copy happened to
+still be on the deployed host. **A secret that lives only in a gitignored
+directory is not backed up.**
 
-| File | What it is | Can it be replaced? |
+So the arrangement is now:
+
+| Copy | Where | Recoverable? |
 |---|---|---|
-| `locus_update.key` | The **minisign private key** that signs every updater artifact. | **No.** |
-| `locus_update.pub` | Its public half. The same string `client/src-tauri/tauri.conf.json` publishes in `plugins.updater.pubkey`. | Yes — regenerating it alone does nothing. |
+| **Durable** | `LOCUS_UPDATE_KEY_B64` in [`server/secrets.env.age`](../server/secrets.env.age) (committed) | **Yes** — clone + passphrase |
+| CI | GitHub Actions secret `LOCUS_UPDATE_KEY` | No — Actions secrets are write-only by design |
+| Offline | `~/.locus-secrets/locus_update.key`, outside the repo | Yes |
+| **Cache** | `locus_update.key` in this directory | **Don't care** — regenerated every session |
 
-**`locus_update.key` is the single most dangerous file to lose in this
-repository.** Every installed client verifies updates against the public key
-compiled into it and the Tauri updater has no bypass. Lose the private key and no
-already-installed client can ever be updated again — the fleet is stranded on
-whatever version it is running, and a new build cannot reach it.
+## Extracting the key (every session that signs)
 
-> **Before generating a replacement, read
-> [`docs/operate/RELEASE-RECOVERY.md`](../docs/operate/RELEASE-RECOVERY.md).**
-> Generating a new keypair is not recovery: it changes the key ID the updater
-> trusts, so the clients that need the fix are precisely the ones that cannot be
-> told about it.
+`.locus-keys/locus_update.key` is **not kept between sessions.** Rehydrate it
+from the bundle when you need to sign, and remove it when you are done:
 
-## How it is checked
+```sh
+# 1. Put the passphrase somewhere the script can read it (or let it prompt).
+#    This is the same passphrase secrets-decrypt.sh uses.
+export LOCUS_SECRETS_PASSPHRASE_FILE=decryptionkeyforsecretsdeleteafteruse.txt
 
-`server/scripts/release-gate.sh` step 5 compares the key ID in `locus_update.pub`
-with the ID decoded from the published pubkey in `tauri.conf.json`, and fails when
-they differ — `CI would sign with a key the updater rejects.` The two currently
-agree on key ID `4DA9B48F39251CEF`.
+# 2. Verify the bundle's key is the one the client trusts, writing nothing.
+./server/scripts/locus-key-extract.sh --check
 
-The key is **not** in this directory on CI. Actions builds sign with the
-`LOCUS_UPDATE_KEY` repository secret, which is the same key, base64-encoded. A
-fresh clone has no such secret and every signed build fails until it is set — this
-is recorded as a trap in the root [`AGENTS.md`](../AGENTS.md).
+# 3. Extract it. Writes .locus-keys/ as 0700 and both files as 0600.
+./server/scripts/locus-key-extract.sh
+
+# ...sign what you need to sign...
+
+# 4. Remove the cache. This is not optional housekeeping; it is the point.
+./server/scripts/locus-key-extract.sh --remove
+```
+
+The script does three things worth knowing about, and they are the reason to use
+it rather than `base64 -d` by hand:
+
+1. **It refuses to write on a wrong passphrase.** Nothing is left behind.
+2. **It verifies the extracted key is the key the client trusts**, by deriving
+   the public half with `minisign -R` and comparing its key ID against
+   `plugins.updater.pubkey` in `tauri.conf.json`. A key that signs correctly but
+   is the *wrong* key produces updates every installed client refuses, and
+   nothing fails until a student tries to update — so this check is the one that
+   actually protects the fleet.
+3. **It asserts the file modes** (0700 / 0600) rather than inheriting a `umask`.
 
 ## Handling rules
 
-- **Never `git add -f` anything here.** Check `git ls-files .locus-keys` — it
-  must print only this README.
-- **Keep the directory `0700` and both keys `0600`.** Nothing enforces it; it is
-  the one thing between the signing key and every other process on the machine.
-- **Back the private key up somewhere offline**, separately from this checkout,
-  and record where in the operator's own vault — not in this repository.
-- The plaintext operator secrets are a *different* secret, with a different home:
-  `server/secrets.env.age` (committed ciphertext) is decrypted by
-  `server/scripts/secrets-decrypt.sh` with a passphrase. Losing the passphrase is
-  recoverable from the deployed host; losing this key is not.
+- **Never `git add -f` anything here except this README.** `git ls-files
+  .locus-keys/` must print exactly `.locus-keys/README.md`; `check-consistency.sh`
+  §5b fails the build if it prints anything else.
+- **Never treat the file here as the backup.** If you find yourself copying it
+  somewhere "just in case", the thing to do instead is confirm
+  `LOCUS_UPDATE_KEY_B64` in the bundle is current — that is the copy that
+  survives.
+- **Never generate a replacement keypair to fix a missing key.** Generating is not
+  recovery: it changes the key ID the updater trusts, so the clients that need the
+  fix are precisely the ones that cannot be told about it. Read
+  [`docs/operate/RELEASE-RECOVERY.md`](../docs/operate/RELEASE-RECOVERY.md) first.
+- **The public half is not secret.** It is published in `tauri.conf.json`; it
+  lives here only so a signing session has both halves in the place `minisign`
+  expects.
+
+## How it is checked
+
+- `server/scripts/locus-key-extract.sh --check` — re-derives the public half and
+  compares key IDs. Fails loudly on a stale bundle entry or a rotated pubkey.
+- `server/scripts/release-gate.sh` step 5 — the same comparison for the on-disk
+  file, and the gate that fails a release rather than signing with a wrong key.
+- `server/scripts/check-consistency.sh` §5b — asserts this README is the only
+  tracked file here, that it names the bundle, and that the extraction script
+  exists; §5c asserts the plaintext `.secrets.env` is never tracked.
+
+The two published and bundled copies currently agree on key ID
+`4DA9B48F39251CEF`, shipped from `3.3.0`.
+
+## The other secret, and its different home
+
+The **operator secrets** are a separate secret with a separate file:
+`server/secrets.env.age` (committed ciphertext), decrypted by
+`server/scripts/secrets-decrypt.sh` with the same passphrase. Nothing about them
+belongs in this directory.
+
+> **Losing the passphrase is unrecoverable**, and it takes this key with it. Keep
+> it in a password manager, not only on the box you are about to lose. See
+> [`docs/operate/SECRETS-MANAGEMENT.md`](../docs/operate/SECRETS-MANAGEMENT.md).

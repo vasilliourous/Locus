@@ -16,6 +16,7 @@ procedure; each rule links to the file that owns it.
 
 | If you are… | Read first |
 |---|---|
+| **Starting a working session** | [`docs/operate/SESSION.md`](docs/operate/SESSION.md) — the checkout→secrets→signing we have |
 | **Cutting a release** | [`docs/operate/RELEASING.md`](docs/operate/RELEASING.md) — the order is not optional |
 | **Diagnosing a defect** | [`docs/reference/DEBUGGING-METHOD.md`](docs/reference/DEBUGGING-METHOD.md) — and check [`docs/reference/FIXES.md`](docs/reference/FIXES.md) §1, it may already be known-unverified |
 | **Writing any fact into a document** | [`docs/operate/CLAIMS.md`](docs/operate/CLAIMS.md) — data vs world claim |

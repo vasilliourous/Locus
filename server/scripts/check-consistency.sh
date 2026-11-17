@@ -509,6 +509,59 @@ else
     bad "a private key in .locus-keys/ is NOT ignored — check the .gitignore carve"
 fi
 
+# ── 5c. The extractable key never becomes a dependency, and never a backup ──
+#
+# WHY. `.locus-keys/` is DELIBERATELY EMPTY after a clone: the signing key is a
+# build input extracted from `server/secrets.env.age` per session (see
+# .locus-keys/README.md and OPERATE/SECRETS-MANAGEMENT.md). The 2026-10-16 loss
+# happened because that directory was treated as the key's home rather than as a
+# cache, so when the working tree went the key went with it. Two things keep that
+# from recurring, and neither is a sentence in a document:
+#
+#   1. No tracked file may READ the key as though it were always present. A build
+#      that assumes `.locus-keys/locus_update.key` exists fails on a fresh clone,
+#      which is precisely the state that must be the normal one. The CI signing
+#      step writes the key to a runner-temp path from the Actions secret instead,
+#      so the working copy is never on the critical path.
+#   2. The rebuild recipe must exist and say where the key comes from, because a
+#      cache that cannot be refilled is a backup that has already failed.
+#
+# This does NOT decrypt the bundle — CI has no passphrase, and a guard that
+# needed one would be skipped on the only machine that runs it. What it asserts
+# is recomputable from the checkout: the README is present and names the bundle,
+# and the key directory carries no tracked file other than it (5b, above).
+if [ -f "$REPO/.locus-keys/README.md" ]; then
+    # BOTH facts are required, and they are checked as whole tokens rather than
+    # as one substring. A first version of this check only looked for
+    # `secrets.env.age` anywhere in the file — so mutating the prose but leaving
+    # the markdown link's href intact PASSED, which is a guard reporting on a
+    # document that no longer said the thing. Verified by breaking it.
+    readme_ok=1
+    grep -qF '`server/secrets.env.age`' "$REPO/.locus-keys/README.md" 2>/dev/null || readme_ok=0
+    grep -qF 'locus-key-extract.sh' "$REPO/.locus-keys/README.md" 2>/dev/null || readme_ok=0
+    if [ "$readme_ok" = 1 ]; then
+        ok ".locus-keys/README.md names the bundle AND the extraction script by exact path"
+    else
+        bad ".locus-keys/README.md must name BOTH 'server/secrets.env.age' (as code) and 'locus-key-extract.sh' — it is the only text a clone sees before the directory fills"
+    fi
+else
+    bad ".locus-keys/README.md is missing — a clone gets an empty directory that explains nothing"
+fi
+# The extraction script must exist and be executable: the README's recipe is a
+# citation, and a cited command that is not there is the defect 5b records.
+if [ -x "$REPO/server/scripts/locus-key-extract.sh" ]; then
+    ok "server/scripts/locus-key-extract.sh exists and is executable"
+else
+    bad "server/scripts/locus-key-extract.sh is missing or not executable — the README cites it"
+fi
+# The plaintext bundle must NOT be tracked: it is the pre-encryption copy, and
+# committing it would put every credential in git in the clear.
+if (cd "$REPO" && git ls-files --error-unmatch .secrets.env >/dev/null 2>&1); then
+    bad ".secrets.env is TRACKED — the plaintext bundle must never be in git; only server/secrets.env.age"
+else
+    ok ".secrets.env (plaintext bundle) is not tracked"
+fi
+
 # ─────────────────────────────────────────────────────────────
 # 6. PocketBase hook traps.
 #

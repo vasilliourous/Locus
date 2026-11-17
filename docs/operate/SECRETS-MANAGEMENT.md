@@ -148,6 +148,27 @@ backup.** The passphrase model trades a little security for recoverability:
 > assume an attacker has all the time they want. Use a generated multi-word or
 > 20+ character random passphrase, not something you invented.
 
+### What is in a gitignored file, and what is not
+
+The rule this project follows: **a secret that is not in git is not backed up.**
+Gitignored files are caches and working copies; they are never the only copy of
+anything you cannot regenerate. Every secret lives in `server/secrets.env.age`.
+
+| Path | What it is | If it is lost |
+|---|---|---|
+| `server/secrets.env.age` | **The durable copy of every secret.** Committed ciphertext. | Recoverable from git — that is the point |
+| `server/secrets.env.age` **passphrase** | Gitignored, e.g. `decryptionkeyforsecretsdeleteafteruse.txt` | **Unrecoverable, and it takes every secret with it.** Keep it in a password manager as well |
+| `.locus-keys/locus_update.key` | Cache of the update-signing key, extracted per session | Harmless — re-extract from the bundle |
+| `.secrets.env` | A plaintext working copy during an edit | **Should not exist.** The flow is decrypt → edit → re-encrypt → `shred -u` |
+
+The update-signing key is stored in the bundle as `LOCUS_UPDATE_KEY_B64`
+(and as the `LOCUS_UPDATE_KEY` Actions secret for CI, which is write-only and
+therefore not a backup). `.locus-keys/` is emptied after each signing session
+precisely so that nobody mistakes it for the key's home — the 2026-10-16 loss was
+that mistake, and it cost the fleet a manual reinstall. The extraction command and
+its verification live in [`../../.locus-keys/README.md`](../../.locus-keys/README.md)
+and `server/scripts/locus-key-extract.sh`.
+
 ---
 
 ## One-time setup

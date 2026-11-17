@@ -13,7 +13,7 @@ repair is the expensive one:
 
 | Symptom | You have lost | Go to |
 |---|---|---|
-| `.locus-keys/` is empty and you need to sign | the **private key file** — it may still be in the bundle | §2 — recover |
+| `.locus-keys/` is empty and you need to sign | nothing — an empty cache is the normal state | §2 — refill it |
 | CI fails at signing with *"LOCUS_UPDATE_KEY is not set"* | the **Actions secret**, but the key file exists | §3 — re-set |
 | Clients download an update and refuse it: *"created with a different key"* | nothing — they are on an **old key** | §4 — reinstall |
 | §2 cannot produce a key the fleet trusts | the **key itself** | §5 — rotate, the last resort |
@@ -39,11 +39,16 @@ It must exist in **three** places. The 2026-10-16 loss had only the first:
 | Offline | `~/.locus-secrets/locus_update.key` (outside the repo), plus a password-manager copy | Yes |
 | Encrypted, in-repo | `LOCUS_UPDATE_KEY_B64` in `server/secrets.env.age` | Yes, with the bundle passphrase |
 
-The working copy CI equivalents are generated into the **repo root's**
-`.locus-keys/`, which is gitignored (`.gitignore` line 92, verified with
-`git check-ignore -v .locus-keys/locus_update.key`). That directory is a build
-input, never a backup — it disappears with the working tree, which is the failure
-this file exists to prevent.
+The working copy is generated into the **repo root's** `.locus-keys/`, which is
+gitignored (verified with `git check-ignore -v .locus-keys/locus_update.key`).
+That directory is a **cache, never a backup**: it is emptied after every signing
+session on purpose, so that "the key is missing" is the *normal* state rather than
+a symptom. §2 refills it in one command.
+
+**Treat its absence as expected.** Because the cache is emptied deliberately, an
+empty `.locus-keys/` tells you nothing about whether the key is lost. Ask the
+bundle instead — `server/scripts/locus-key-extract.sh --check` answers "is the
+key still recoverable, and is it the right one" without writing anything.
 
 The current key is `4DA9B48F39251CEF`, shipped from `3.3.0`. The key ID is in the
 comment line of the `.pub`; the value compiled into the client is in
@@ -53,7 +58,8 @@ comment line of the `.pub`; the value compiled into the client is in
 > **Check before believing a key is lost.** The key file is gitignored
 > (`.locus-keys/`), is resolved from the **repo root** (not `client/` — a copy
 > there is silently ignored), and CI writes it to `$RUNNER_TEMP` from the secret,
-> which never survives the job. `ls -l .locus-keys/` first.
+> which never survives the job. Run `locus-key-extract.sh --check` before
+> concluding anything.
 
 ---
 
@@ -61,38 +67,44 @@ comment line of the `.pub`; the value compiled into the client is in
 
 Do this **before** §3. If the key can be recovered, nothing else needs to change.
 
+**This is no longer a procedure — it is a single command.** Every session that
+signs extracts the key from the bundle, because `.locus-keys/` is a cache and not
+a home (see [`.locus-keys/README.md`](../../.locus-keys/README.md)). Recovery and
+routine use are therefore the *same* action, which is deliberate: a recovery
+route that is exercised only when something is already broken is a route nobody
+has tested.
+
 ```sh
-# 1. Decrypt the bundle to a private temp file. Needs the passphrase;
-#    there is no non-interactive prompt — see SECRETS-MANAGEMENT.md.
-LOCUS_SECRETS_PASSPHRASE_FILE=~/locus-passphrase \
-  server/scripts/secrets-decrypt.sh > /tmp/.secrets.env
+# 1. Point at the passphrase (or let the script prompt for it).
+export LOCUS_SECRETS_PASSPHRASE_FILE=~/locus-passphrase
 
-# 2. Pull out ONLY the key line, base64-decoded. The value is base64 of the
-#    WHOLE key file (comment line + payload), so -d restores the file, not a key.
-grep '^LOCUS_UPDATE_KEY_B64=' /tmp/.secrets.env | cut -d= -f2- | base64 -d \
-  > .locus-keys/locus_update.key
-shred -u /tmp/.secrets.env
+# 2. Verify the bundle's key is the one the client trusts. Writes nothing.
+server/scripts/locus-key-extract.sh --check
 
-# 3. The file must end in exactly one newline, or minisign rejects it later.
-[ -n "$(tail -c1 .locus-keys/locus_update.key)" ] && echo >> .locus-keys/locus_update.key
-
-# 4. PROVE it is the right key. A recovered blob that decodes can still be the
-#    wrong key or a truncated one, so round-trip a signature through it.
-printf 'recovery probe\n' > /tmp/probe.txt
-minisign -S -s .locus-keys/locus_update.key -m /tmp/probe.txt
-minisign -V -p .locus-keys/locus_update.pub -m /tmp/probe.txt
+# 3. Extract it: .locus-keys/ becomes 0700, both files 0600.
+server/scripts/locus-key-extract.sh
 ```
 
-`Signature and comment signature verified` is the pass condition. Note this only
-proves the private and public halves are a matching pair — **not** that they are
-the pair the fleet trusts. For that, compare the `.pub` against the value compiled
-into the client: base64-decode `plugins.updater.pubkey` from
-`tauri.conf.json` and diff it with `.locus-keys/locus_update.pub`
-(`client/docs/SIGNING.md` §3 explains the base64-of-the-whole-file encoding). If
-they differ, this key cannot update the fleet and §5 is the only path.
+The script refuses to write on a wrong passphrase, and it will not write a key
+whose ID disagrees with `plugins.updater.pubkey` in `tauri.conf.json` — a key that
+signs correctly but is the *wrong* key produces updates every installed client
+refuses, and nothing fails until a student tries to update.
 
-If that compare fails, the bundle holds a key the fleet cannot verify: stop, and
-go to §5 only as a deliberate decision.
+> **What the script replaced, and why the old recipe was dangerous.** It used to be
+> a hand-run sequence: decrypt the bundle, `grep` out `LOCUS_UPDATE_KEY_B64`,
+> `base64 -d` it into place, then append a newline if the file did not end in one.
+> That last step was the tell — the manual route could produce a key that decodes
+> fine and that `minisign` later rejects, and the only way to catch it was to
+> round-trip a probe signature by hand. Worse, the newline rule was a property of
+> *how the value was stored*, not of the key, so any change to the bundle's
+> encoding would have silently started producing subtly-wrong keys. The script
+> writes the bytes it decoded and verifies by re-deriving the public half, so there
+> is no format trivia left to get wrong.
+
+**If the script reports the bundle's key does not match** `tauri.conf.json`, stop
+and decide deliberately: either the bundle entry is stale (put the right key in
+and re-encrypt) or the pubkey was rotated without re-encrypting. Only §5 — a
+deliberate, fleet-breaking rotation — changes which key the clients trust.
 
 ---
 
