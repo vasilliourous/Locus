@@ -10,9 +10,9 @@ guard:       server/scripts/check-consistency.sh §39, server/scripts/test-contr
 
 The client build needs eight binaries and four databases that are not source.
 They are pinned by sha256 in [`sidecar.lock.json`](../../server/data/sidecar.lock.json),
-and as of **2026-10-29 the eight binaries are also committed**, under
-`vendor/build-inputs/`. The four databases are pinned but **not** mirrored — see
-"What is not vendored yet", which is the honest half of this page.
+and **all twelve are committed**, under `vendor/build-inputs/`: the eight
+binaries since 2026-10-29 (§2), the four databases since 2026-11-03 (§4). What
+that leaves unprotected is one archive, named in §4's closing paragraphs.
 
 ---
 
@@ -53,6 +53,7 @@ reason the trade looked cheaper than it is.
 | `verge-mihomo` | all four | 229.7 MiB | `externalBin` in `tauri.conf.json`, so every platform bundles it. A stable GitHub release asset is the more durable upstream, but it is still an upstream. |
 | `verge-mihomo-alpha` | all four | 229.3 MiB | Published as a single **rolling** prerelease: MetaCubeX deletes the previous build the moment a new one lands. All four, because one is what lost the other three. |
 | `clash-verge-service` | `x86_64-unknown-linux-gnu` | 5.7 MiB | The privileged helper the client installs. Its upstream is stable, so this is not an outage measure: without it `--check` reports the three binaries as `MISSING` on a tree with no download directory — a check that fails on a correct tree, which is how a check stops being read. |
+| `resources` | all four files | 33.1 MiB | The geo databases. Mirrored on 2026-11-03 **after** the five-outage table above — they were the first thing to 404 and the last thing to be committed. §4 has the story and the measurements. |
 
 The layout mirrors the lock's `vendored` keys exactly, so a reader can go from a
 lock entry to the bytes without guessing:
@@ -62,7 +63,7 @@ vendor/build-inputs/
   verge-mihomo/           verge-mihomo-<triple>[.exe]
   verge-mihomo-alpha/     verge-mihomo-alpha-<triple>[.exe]
   clash-verge-service/    clash-verge-service{,-install,-uninstall}-<triple>
-  resources/              NOT PRESENT — see §4
+  resources/              ASN.mmdb  Country.mmdb  geoip.dat  geosite.dat
 ```
 
 `prebuild.mjs` **copies** a vendored group into its normal build location

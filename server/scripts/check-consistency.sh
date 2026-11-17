@@ -482,6 +482,33 @@ else
     printf '%s\n' "$colon_paths" | head -10 | sed 's/^/         /'
 fi
 
+# ── 5b. The signing-key directory carries a README and nothing else ──
+#
+# WHY. `.locus-keys/` holds the minisign private key that every installed client
+# verifies updates against, so the directory is gitignored — which also means a
+# clone gets an EMPTY directory, with nothing in it to say what it is for or why
+# deleting its contents is unrecoverable. The README is carved back out of that
+# ignore so a clone can read the warning.
+#
+# An earlier comment in `.gitignore` CITED a check here that did not exist. That
+# is the defect FIXES.md 2026-10-01 records ("a guard cited in six documents did
+# not exist"), so it is written rather than re-described: this asserts the carve
+# is effective (the README is trackable) and that nothing else in the directory
+# can ever be staged (no other file is trackable). Both directions, because a
+# carve that silently stopped working would look exactly like one that works.
+locus_key_tracked=$(cd "$REPO" && git ls-files .locus-keys/ 2>/dev/null)
+if [ "$locus_key_tracked" = ".locus-keys/README.md" ]; then
+    ok ".locus-keys/ carries exactly its README, and no key is trackable"
+else
+    bad ".locus-keys/ tracked contents are '${locus_key_tracked:-nothing}'; expected exactly '.locus-keys/README.md'"
+fi
+# The negative half: a key file placed there must still be ignored.
+if [ -f "$REPO/.locus-keys/README.md" ] && (cd "$REPO" && git check-ignore -q .locus-keys/locus_update.key 2>/dev/null); then
+    ok "a private key in .locus-keys/ remains ignored"
+else
+    bad "a private key in .locus-keys/ is NOT ignored — check the .gitignore carve"
+fi
+
 # ─────────────────────────────────────────────────────────────
 # 6. PocketBase hook traps.
 #
@@ -5375,10 +5402,13 @@ echo "39. The downloaded build inputs match their pinned hashes"
 # finding §39 used to emit, and it means the bytes a build ships are the bytes in
 # the repository rather than whatever a download produced that morning.
 #
-# The four geo databases are still fetched: their 2026-10-28 asset IDs 404 and
-# the bytes those IDs named cannot be recovered from upstream, so `resources` is
-# declared vendored and empty. docs/operate/VENDORED-BUILD-INPUTS.md §4 owns
-# that gap and what would close it.
+# The four geo databases are now mirrored too, as of 2026-11-03: they live in
+# `vendor/build-inputs/resources/` and are committed, because their 2026-10-28
+# asset IDs 404'd and `resources` spent a week declared vendored and empty. The
+# paragraph here said "still fetched ... declared vendored and empty" for two
+# weeks after that changed, which is the same class of stale sentence this script
+# exists to catch — and the reason the check below exists rather than a comment.
+# docs/operate/VENDORED-BUILD-INPUTS.md §4 owns the story.
 # ─────────────────────────────────────────────────────────────
 sidecar_report=$(python3 "$SCRIPTS/sidecar-lock.py" --check 2>&1)
 sidecar_status=$?
@@ -5449,12 +5479,13 @@ if [ ! -d "$VENDOR_ROOT" ]; then
     fi
 else
     vendor_report=$(python3 - "$VENDOR_ROOT" "$VENDOR_LOCK" <<'PYEOF'
-import json, os, subprocess, sys
+import json, os, re, subprocess, sys
 from pathlib import Path
 
 root = Path(sys.argv[1])
 lock = json.loads(Path(sys.argv[2]).read_text())
 vendored = lock.get("vendored", {})
+sorted_resources = " ".join(sorted(lock.get("resources", {})))
 
 # `-z` gives NUL-separated paths. Splitting on a literal NUL is a mistake worth
 # naming: the escape here previously became a REAL NUL byte in this file, which
@@ -5512,6 +5543,42 @@ for p in sorted(root.rglob("*")):
     if repo_rel(p) not in tracked:
         problems.append("UNTRACKED\t%s is in the vendor tree but untracked — either add it deliberately or remove it" % p)
 
+# ── The doc this guard is cited from has to agree with the lock ──
+#
+# docs/operate/VENDORED-BUILD-INPUTS.md declares this script as its guard, and
+# for two weeks after the geo databases were committed its §2 layout block said
+# `resources/  NOT PRESENT` while §4 said they were committed and the bytes were
+# there. Nothing noticed, because §39b only ever looked at `vendor/`. A document
+# is one of the things a guard can hold to the truth when the truth is a list, so
+# this compares the doc's layout block with the lock's own `resources` keys.
+#
+# It checks AGREEMENT, not prose: the four filenames in the block must be exactly
+# the four keys in the lock. A repin that adds a fifth database fails here until
+# the block is updated, which is the intended amount of friction.
+doc = repo_root / "docs/operate/VENDORED-BUILD-INPUTS.md"
+if sorted_resources and doc.is_file():
+    text = doc.read_text()
+    # ANCHORED TO THE FENCE, NOT TO THE FIRST MENTION. `text.find("vendor/build-inputs/")`
+    # lands on the intro paragraph, which names the directory in prose — the first
+    # version of this check did exactly that, scanned the wrong 1000 characters,
+    # and reported "lists nothing" on a CORRECT tree. A false BAD is how a guard
+    # stops being read, so the anchor is the fenced block that contains the line.
+    fence_start = text.find("```text\nvendor/build-inputs/")
+    if fence_start != -1:
+        fence_end = text.find("```", fence_start + len("```text\n"))
+        if fence_end != -1:
+            block = text[fence_start:fence_end]
+    if not block:
+        problems.append("DOC\t%s has no vendor/build-inputs/ layout block to check" % doc.name)
+    else:
+        declared = set(re.findall(r"[A-Za-z0-9_]+\.(?:mmdb|dat)", block))
+        expected = set(sorted_resources.split())
+        if declared != expected:
+            problems.append(
+                "DOC\t%s's layout block lists %s but the lock pins %s — the block is what a reader trusts instead of checking"
+                % (doc.name, sorted(declared) or "nothing", sorted(expected))
+            )
+
 print("\n".join(dict.fromkeys(problems)))
 PYEOF
 )
@@ -5521,6 +5588,7 @@ PYEOF
         while IFS= read -r line; do
             case "$line" in
                 UNTRACKED*) bad "vendored input: ${line#UNTRACKED	}" ;;
+                DOC*) bad "vendored input: ${line#DOC	}" ;;
                 *) [ -n "$line" ] && bad "vendored input: $line" ;;
             esac
         done <<EOF

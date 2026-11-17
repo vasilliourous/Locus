@@ -133,6 +133,15 @@ whale.txt
 # file — the public key belongs in tauri.conf.json, the private key in CI
 # secrets and offline custody.
 .locus-keys/
+# WHY THE README IS CARVED BACK OUT. The whole directory is ignored because the
+# update-signing private key lives in it, and a clone therefore gets an EMPTY
+# .locus-keys/ with nothing to explain it. The one thing that directory must carry
+# is the reason not to delete its contents — see .locus-keys/README.md. A negative
+# rule alone would have made the committed copy powerless: the first ignore got
+# there first, and `git status` reported the README as ignored rather than as a
+# new file. §5 of check-consistency.sh asserts nothing in this directory but the
+# README can ever be tracked.
+!.locus-keys/README.md
 .icon-backup/
 
 # Secrets (encrypted is fine; plaintext never)

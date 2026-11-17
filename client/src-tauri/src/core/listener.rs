@@ -550,14 +550,31 @@ fn is_bind_conflict(error: &io::Error) -> bool {
         return true;
     }
 
+    // WHY THIS IS SPLIT BY PLATFORM RATHER THAN WRITTEN AS A TAIL EXPRESSION.
+    // The obvious form is
+    //
+    //     #[cfg(windows)]
+    //     { use …WSAEACCES; error.raw_os_error() == Some(WSAEACCES) }
+    //     #[cfg(not(windows))]
+    //     false
+    //
+    // and it is what this function was. clippy 1.100 rejects it as
+    // `needless_bool` — on non-Windows the block above it is compiled out, so
+    // the body reads `if … { return true } false`. An earlier attempt at a fix
+    // wrote the answer to a binding for both arms, which is correct but fails
+    // `unused_mut` on Linux, where the Windows block that mutates it is gone.
     #[cfg(windows)]
     {
         use windows_sys::Win32::Networking::WinSock::WSAEACCES;
 
-        error.raw_os_error() == Some(WSAEACCES)
+        return error.raw_os_error() == Some(WSAEACCES);
     }
+
     #[cfg(not(windows))]
-    false
+    {
+        let _ = error;
+        false
+    }
 }
 
 #[cfg(windows)]
@@ -704,7 +721,7 @@ const fn transport_name(transport: ListenerTransport) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::{
-        ListenerBindScope, ListenerProbe, ListenerProbeOutcome, ListenerTransport, probe_listener,
+        ListenerBindScope, ListenerProbe, ListenerProbeOutcome, ListenerTransport, is_bind_conflict, probe_listener,
         probe_proxy_port_change,
     };
     use serde_json::json;
@@ -720,6 +737,35 @@ mod tests {
 
     fn mapping(yaml: &str) -> anyhow::Result<Mapping> {
         Ok(serde_yaml_ng::from_str(yaml)?)
+    }
+
+    /// A real `EADDRINUSE` is a conflict on every platform, including the one
+    /// where the Windows-only branch below is compiled out.
+    ///
+    /// This exists because the non-Windows arm of `is_bind_conflict` is just
+    /// `false`, and a shape clippy once rejected got rewritten around. The
+    /// rewrite is only safe if the early return still fires — otherwise a
+    /// listener probe would report "port free" on a port it cannot bind, which
+    /// is a wrong readiness answer rather than a lint. It is written against a
+    /// real second bind rather than a constructed `io::Error` so it fails if the
+    /// platform's kind for an occupied port ever stops being `AddrInUse`.
+    #[test]
+    fn an_occupied_port_is_a_bind_conflict() {
+        let held = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).expect("bind an ephemeral port");
+        let address = held.local_addr().expect("the bound address");
+        let error = TcpListener::bind(address).expect_err("a second bind on the same port must fail");
+
+        assert_eq!(error.kind(), std::io::ErrorKind::AddrInUse);
+        assert!(is_bind_conflict(&error), "EADDRINUSE must read as a conflict");
+    }
+
+    /// The counterpart: an error that is not `EADDRINUSE` is not a conflict, so
+    /// the function cannot silently become `true` for anything.
+    #[test]
+    fn an_unrelated_error_is_not_a_bind_conflict() {
+        let error = std::io::Error::other("not a port problem");
+
+        assert!(!is_bind_conflict(&error));
     }
 
     /// The wildcard claim only reaches conflicts through the enumerated guards.
