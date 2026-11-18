@@ -228,6 +228,15 @@ routerAdd("POST", "/api/activate", function(e) {
         if (!isNaN(expMs) && expMs > 0 && expMs < Date.now()) {
             return e.json(410, {code:410, message:"Code expired"});
         }
+        // ── Suspension, and why it is ALSO re-checked below ──
+        //
+        // This check answers a new activation. The re-issue arm further down
+        // answers a student re-entering their own redeemed code, and it is a
+        // SECOND route to the same tier config — so a suspension that only
+        // guarded here would be bypassed by re-activating. It is checked again
+        // immediately before that arm returns, deliberately, because the two
+        // arms are edited independently and the second one is the one a
+        // suspended student would actually reach.
         if (rec.getBool("suspended")) return e.json(403, {code:403, message:"Code suspended"});
 
         // ── Redeemed already? ──
@@ -243,6 +252,12 @@ routerAdd("POST", "/api/activate", function(e) {
         // refreshes stale connection parameters rather than keeping whatever was
         // cached before (see FIXES.md).
         if (alreadyRedeemed(rec)) {
+            // Re-asserted here, not just at the top: this arm RETURNS a tier
+            // config, which is the whole entitlement. One check on the way in
+            // is not enough when the arm that hands out the goods is the one a
+            // suspended student uses to get back in — and it is 3 lines away
+            // from an `edit` that would not obviously need to keep it.
+            if (rec.getBool("suspended")) return e.json(403, {code:403, message:"Code suspended"});
             var tierVal2 = rec.getString("tier").replace(/[^a-zA-Z0-9_]/g, "_");
             // findFirstRecordByFilter (NOT findRecordsByFilter — see the
             // rate-limit note above; the list variant returns nothing here).
@@ -277,6 +292,26 @@ routerAdd("POST", "/api/activate", function(e) {
         // one field, written once, and `alreadyRedeemed` above is the only reader
         // — there is no device, no fingerprint and no index to keep in step.
         rec.set("activated_at", new Date().toISOString());
+        // The FIRST-redemption marker, written once and never overwritten.
+        //
+        // `activated_at` cannot answer "is this code already someone's?" after
+        // an operator RELEASE clears it: the console then shows a code that has
+        // already been issued as plain "available", which is how a code gets
+        // handed to a second student while the first still holds a card. This
+        // field survives a release, so the console can say "issued before" and
+        // an operator can find the code that was double-sold.
+        //
+        // Written in the SAME save as `activated_at` on purpose: two writes to
+        // one record would be two chances to record only one of them.
+        // `alreadyRedeemed` is still the reader of `activated_at` alone — this
+        // is an operator signal and changes no behaviour for the student.
+        if (!rec.get("first_seen_at")) {
+            rec.set("first_seen_at", new Date().toISOString());
+            // Truncated, like every other fingerprint this hub stores. It is
+            // corroboration for an operator, not a device index: nothing reads
+            // it back to make a decision.
+            rec.set("first_seen_fingerprint", fp.substring(0, 16) + "****");
+        }
         $app.dao().saveRecord(rec);
 
         // Clean rate limiting

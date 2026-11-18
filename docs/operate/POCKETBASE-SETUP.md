@@ -75,11 +75,24 @@ In PocketBase admin UI, go to **Settings → Collections** and create these:
 | `unbind_reason` | text (plain) | ❌ | ❌ | Why the binding was released |
 | `label` | text (plain) | ❌ | ❌ | Operator-facing label |
 | `notes` | text (plain) | ❌ | ❌ | Free-form operator notes |
+| `released_at` | datetime | ❌ | ❌ | Last time a student **signed out** of this code. Audit only — changes no entitlement |
+| `release_count` | number | ❌ | ❌ | How many times a student has signed out of it |
+| `first_seen_at` | datetime | ❌ | ❌ | When the code was **first** redeemed. **Survives an operator Release** — this is what tells "never issued" from "issued once, re-released" |
+| `first_seen_fingerprint` | text (plain) | ❌ | ❌ | Truncated hash of the machine that made that first activation. Corroboration only — nothing compares it |
 
 > `unbound_at` / `unbind_reason` were *written by `admin_unbind.pb.js` for
 > months* before the columns existed — PocketBase silently discards unknown
 > fields, so the audit trail looked implemented and recorded nothing. Any
 > hand-built collection must include them.
+>
+> The four rows above are the same hazard a second time: `released_at`/
+> `release_count` are written by `device_release.pb.js` and were unverified on the
+> live hub ([`../reference/STILL-OPEN.md`](../reference/STILL-OPEN.md) §"The
+> student sign-out"), and `first_seen_at`/`first_seen_fingerprint` are new with
+> this change. **`seed-pb.py` must be re-run and PocketBase restarted after
+> `hooks-sync.sh`**, or every one of these writes is silently discarded — a
+> release hook that appears to succeed and records nothing.
+
 
 **API rules:**
 ```

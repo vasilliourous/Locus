@@ -459,6 +459,25 @@ routerAdd("POST", "/api/admin/console", function(e) {
                     suspended: susp2,
                     expires_at: expRaw ? String(expRaw) : "",
                     activated_at: redeemedAt,
+                    // ── What the code has DONE, as opposed to what it is now ──
+                    //
+                    // These three exist because `status: "available"` was
+                    // ambiguous in the one case an operator most needs it. A
+                    // released code and a freshly minted one both read
+                    // "available", and only one of them has already been handed
+                    // to a paying student — which is how the same code gets sold
+                    // twice. `first_seen_at` survives a release, so it is the
+                    // distinction; `released_at`/`release_count` are the
+                    // student's own sign-outs (see device_release.pb.js).
+                    //
+                    // `release_count > 0` is the answer to "has this student
+                    // been moving machines, or is this key being shared?" — the
+                    // question the sign-out endpoint was built to answer and
+                    // that no console view was showing.
+                    first_seen_at: rec.getString("first_seen_at") || "",
+                    first_seen_fingerprint: rec.getString("first_seen_fingerprint") || "",
+                    released_at: rec.getString("released_at") || "",
+                    release_count: rec.get("release_count") || 0,
                     middleman: rec.getString("middleman") || "",
                     label: rec.getString("label") || "",
                     notes: rec.getString("notes") || "",
@@ -740,10 +759,79 @@ routerAdd("POST", "/api/admin/console", function(e) {
             if (!recS) return bad(404, "Code not found");
             var wantSuspend = action === "codes.suspend";
             recS.set("suspended", wantSuspend);
+            // ── Clearing the reason matters as much as setting it ──
+            //
+            // `suspended_reason` is shown to the STUDENT on the kick-out screen,
+            // so leaving it behind after an unsuspend would keep a reinstated
+            // student on a page explaining why they were cut off. Cleared with the
+            // flag, in the same write.
+            recS.set("suspended_reason", wantSuspend ? String(body.reason || "").trim() : "");
             $app.dao().saveRecord(recS);
             logEvent(target, wantSuspend ? "suspended" : "unsuspended",
                      String(body.reason || ""), "");
             return ok({code: target, suspended: wantSuspend});
+        }
+
+        // ─────────────────────────────────────────────────────────────
+        // codes.kick — suspend, with a reason the student is shown
+        //
+        // ── Why this exists when `codes.suspend` already does ──
+        //
+        // The operator's question was "how do I actually kick someone out?". The
+        // answer used to be "suspend, and wait up to five minutes" — and when it
+        // worked, the student found out by opening an app that had quietly lost
+        // its button, with no explanation anywhere.
+        //
+        // So this is not a second way to suspend. It is the same state change
+        // with the two things the operator was missing:
+        //
+        //   1. A REASON the student will see, verbatim, on the kick-out screen.
+        //      Free text, because the honest answer varies ("chargeback", "key
+        //      shared with three devices", "mistaken suspension, sorry").
+        //   2. An audit row that says a human decided this, not a lapsed date.
+        //
+        // The client half is already there: `suspended` is refused on the
+        // heartbeat, the client keeps its code (so this is REVERSIBLE), shows the
+        // kick-out screen, and is returned to normal by an unsuspend with no
+        // re-entry and no restart.
+        //
+        // Rate-limit safety: nothing here is reachable by a student. The action
+        // requires the admin token like every other console route.
+        // ─────────────────────────────────────────────────────────────
+        if (action === "codes.kick") {
+            var targetK = canonical(body.code);
+            if (!targetK) return bad(400, "code is required");
+            var reasonK = String(body.reason || "").trim();
+            // Refused rather than defaulted. A kick-out with no reason leaves the
+            // student on a screen that says "contact support" about a decision
+            // nobody wrote down, which is the support conversation this exists to
+            // avoid — and it cannot be reconstructed later from the audit row
+            // because the student has already asked.
+            if (!reasonK) return bad(400, "a reason is required — the student is shown it");
+            if (reasonK.length > 200) {
+                return bad(400, "keep the reason under 200 characters; it is displayed in full");
+            }
+            var recK = null;
+            try { recK = $app.dao().findFirstRecordByData("codes", "code", targetK); } catch (nfK) { recK = null; }
+            if (!recK) return bad(404, "Code not found");
+
+            recK.set("suspended", true);
+            recK.set("suspended_reason", reasonK);
+            $app.dao().saveRecord(recK);
+            logEvent(targetK, "kicked", reasonK, "");
+
+            // The student does not learn this until their client's next beat.
+            // Said plainly rather than implied, because an operator who expects
+            // the tunnel to drop instantly will otherwise conclude it failed — and
+            // the honest bound is the heartbeat interval, not "immediately".
+            return ok({
+                code: targetK,
+                suspended: true,
+                reason: reasonK,
+                note: "The device is cut off at its next heartbeat (within about five "
+                    + "minutes while connected). Its code is kept, so unsuspending "
+                    + "restores access without the student re-entering anything.",
+            });
         }
 
         // ─────────────────────────────────────────────────────────────
@@ -773,6 +861,12 @@ routerAdd("POST", "/api/admin/console", function(e) {
             // recorded nothing. They are part of the schema now.
             recU.set("unbound_at", nowISO());
             recU.set("unbind_reason", reason);
+            // `first_seen_at` is DELIBERATELY left alone. Releasing a code puts
+            // it back into the pool for a different student, and that is the
+            // operator's decision — but it does not un-issue it. Erasing the
+            // first-redemption marker here would make a re-issued code
+            // indistinguishable from a fresh one, and the operator who released
+            // it would lose the only record that it had ever been sold.
             $app.dao().saveRecord(recU);
             logEvent(targetU, "unbound", reason, prevAt.substring(0, 16));
             return ok({code: targetU, previous_fingerprint: prevAt.substring(0, 16)});

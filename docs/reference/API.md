@@ -252,12 +252,47 @@ way out (`server/pb_hooks/heartbeat.pb.js`), frozen because deployed clients rea
 | Status | Code | Message | Meaning |
 |:------:|:----:|---------|---------|
 | 400 | 400 | "Missing code" | No `code` in the request body |
-| 403 | 403 | "Account suspended — contact your middleman" | Code is suspended |
+| 403 | 403 | `"Account suspended — "` + the operator's reason | Code is suspended |
 | 404 | 404 | "Code not found" | Code doesn't exist or is unparseable |
 
 > **Expiry is enforced on every heartbeat, not just at activation.** A code that
 > passes its `expires_at` stops working here even on a device that is already
 > bound, which is what makes the 7-day grace period bounded.
+
+> ### The suspension 403 carries two extra keys, and they are ADDITIVE
+>
+> ```json
+> {
+>   "code": 403,
+>   "message": "Account suspended — chargeback",
+>   "suspended": true,
+>   "suspended_reason": "chargeback"
+> }
+> ```
+>
+> The `message` prefix `Account suspended — ` is **frozen**: the client classifies
+> a 403 by the substring `suspended`, and deployed builds that cannot be updated
+> depend on it. The operator's own `suspended_reason` is **appended**, never
+> substituted. A hub that replaced the sentence would make every deployed client
+> report a suspension as some other, wrong refusal.
+>
+> `suspended` and `suspended_reason` are for clients that would rather switch on a
+> flag than parse a sentence — the kick-out screen renders the reason in its own
+> layout. An older client ignores both and falls back to the message, which is why
+> adding them is safe.
+>
+> ### Suspension is REVERSIBLE, and that is a contract
+>
+> The client **keeps** `codes.activated_at`, its stored code, tier and expiry when
+> this 403 arrives. That is deliberate: an unsuspend then restores the session with
+> no re-entry and no restart, which is what makes a kick-out an operator action
+> rather than a support call. Every **other** refusal (404 unknown, 410 expired)
+> still clears the credential client-side, because there is nothing to come back
+> to.
+>
+> The trade, stated: a suspended device holds a live bearer credential on disk. It
+> cannot be used (the tunnel is down and the heartbeat loop is stopped), and a
+> sign-out still removes it entirely. See `locus::store::record_suspension`.
 
 ---
 
@@ -378,6 +413,24 @@ attempts.
 | `not_found` | blocked | No such code |
 | *anything else* | **ready** | Unknown status — proceed to `/api/activate`, which is the authority |
 
+> ### `ready` is advisory, and the message must not be reassuring on its own
+>
+> The client shows `message` and then calls `/api/activate` **regardless of
+> `ready`** for every status above except the four blocked ones. So the lookup is
+> not a gate and cannot become one — `/api/activate` is the authority, and a
+> client that refused on a lookup would strand every reinstalling student.
+>
+> That makes the message load-bearing in a way the status is not. For
+> `bound_this_device` it must state that the code **is already in use**, then what
+> re-activating does for the caller, in that order. It used to say only
+> *"entering it again will restore your access"*, and the activation screen
+> printed it under the same *"Ready — this code gives you the X tier"* heading an
+> untouched code gets — so a code that was already someone's was
+> indistinguishable from an unclaimed one, to the student holding it and to an
+> operator testing whether the hub checks. The message was right about what
+> happens next and silent about the thing being asked. Pinned by
+> `a_redeemed_code_says_it_is_already_in_use` in `activation_contract.rs`.
+
 > ### `bound_this_device` is a FROZEN NAME, and `already_used` must not be sent
 >
 > A redeemed code reports `bound_this_device`. The name is a leftover from the
@@ -477,6 +530,27 @@ sign-out has already happened and is unaffected).
 (monotonic), and one `code_events` row with `event = "signed_out"`. The log line
 and the event row record the code **prefix** and a truncated fingerprint only —
 a code is a bearer credential and logs are things people paste.
+
+> ### "The student signed out and the code was not released" — that is the design
+>
+> This endpoint does **not** put the code back into the pool, and the report that
+> it should is answered here rather than in the code, because the answer is a
+> decision, not an omission. Clearing `activated_at` on a sign-out would mean:
+>
+> 1. **A student can reset their own paid term.** `expires_at` is computed from
+>    `activated_at` on the next first redemption, so sign-out → sign-in mints a
+>    fresh term for free.
+> 2. **Anyone holding the code can free it.** The only credential on this route is
+>    possession of the code, which is printed on a card and held in middleman
+>    stock. A card photo would be enough to release a paying student's code out
+>    from under them.
+>
+> What the operator actually needs from a sign-out is *to tell it apart from a
+> shared key*, and that is what `released_at`/`release_count` are for. They are
+> surfaced in the console (`Codes` view: a `signed out ×N` badge, and the release
+> dialog states the sign-out history rather than offering to undo it). Releasing
+> the code remains a separate, deliberate operator action — see `codes.unbind`
+> below, and note it is **not** how you move a student to a new laptop.
 
 **Error responses:**
 

@@ -27,6 +27,7 @@
 
 pub mod apply;
 pub mod install;
+pub mod poll;
 pub mod signal;
 pub mod version;
 

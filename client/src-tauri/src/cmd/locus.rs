@@ -89,6 +89,21 @@ fn cancelled_outcome() -> ConnectionResult {
 pub struct LocusStatus {
     /// Whether this device has a code bound and accepted.
     pub activated: bool,
+
+    /// Whether an operator has SUSPENDED this code, with the credential kept.
+    ///
+    /// # Why this is not implied by `activated`
+    ///
+    /// A suspension deliberately KEEPS the code, so `activated` stays `true` — and
+    /// the gate branches on `activated`. Without this field a suspended device
+    /// renders the normal connection screen and the student is told nothing; the
+    /// only surface that would say otherwise is the subscription badge, which is a
+    /// warning strip inside the app they should not be in at all.
+    ///
+    /// So this is the field that puts a kicked-out student on the kick-out screen,
+    /// and — with `refusal_reason` — the field that lets it explain why and offer
+    /// the one thing that helps: waiting, or contacting their middleman.
+    pub suspended: bool,
     /// A code is stored but could not be a Locus code, so it was not used.
     ///
     /// Reported so the Account screen can say *why* it is offering activation
@@ -571,6 +586,10 @@ pub async fn locus_status() -> LocusStatus {
 
     LocusStatus {
         activated: activation.is_some(),
+        // Read from the persisted flag, not derived from `activation`: a
+        // suspension keeps the code, so `activated` is true in exactly the case
+        // this field exists for.
+        suspended: store::is_suspended(&verge_data),
         stored_code_damaged,
         tier: activation.as_ref().map(|a| a.tier.clone()),
         device_id: store::redact(&fingerprint),
@@ -1550,12 +1569,48 @@ pub struct UpdateStatus {
 pub async fn locus_update_status() -> UpdateStatus {
     let verge = Config::verge().await;
     let data = verge.latest_arc();
-    let offered = data.locus_update_offered.clone();
     let no_offer_reason = data.locus_update_check_reason.clone();
+    let current = env!("CARGO_PKG_VERSION");
+
+    // ── An offer for the version we are already running is not an offer ──
+    //
+    // After an in-place update the stored offer survives: the install cleared it
+    // only on the success path, and on Windows the installer exits the process
+    // before that line is reached at all — so the very next launch re-opens the
+    // dialog for the build the student is now running, and pressing Update answers
+    // "no update is available". That is the reported symptom, exactly.
+    //
+    // Compared here rather than trusted from the hub, because this is the one
+    // place the running version is known: the hub cannot know whether the update
+    // it advertised has already been applied.
+    let offered = match data.locus_update_offered.as_deref() {
+        Some(offered) if !offered.is_empty() => {
+            match crate::locus::update::rejection_reason(offered, current) {
+                // Anything not strictly newer than what is running is spent. The
+                // same gate the install path applies, so the prompt cannot offer
+                // something the installer would refuse.
+                Some(reason) => {
+                    logging!(
+                        debug,
+                        Type::System,
+                        "[locus] a recorded update offer is no longer applicable: {reason}"
+                    );
+                    // Best-effort: the status command is read during start-up and
+                    // must not fail over bookkeeping. Clearing it stops the prompt
+                    // reappearing; if it fails, the offer is inert anyway because
+                    // this same check runs next time.
+                    let _ = store::clear_update_offer().await;
+                    None
+                }
+                None => Some(offered.to_owned()),
+            }
+        }
+        _ => None,
+    };
 
     UpdateStatus {
-        current_version: env!("CARGO_PKG_VERSION").to_owned(),
-        offered_version: offered.map(Into::into),
+        current_version: current.to_owned(),
+        offered_version: offered,
         no_offer_reason: no_offer_reason.map(Into::into),
         // Same default as the gate itself (`unwrap_or(true)`), so the status
         // never disagrees with the behaviour it describes.
@@ -1619,15 +1674,44 @@ pub async fn locus_install_update(app: tauri::AppHandle) -> CmdResult<()> {
             } else {
                 super::coded_error("LOCUS_UPDATE_CHECK_FAILED", detail)
             }
-        })?
-        .ok_or_else(|| {
+        })?;
+
+    // ── "Nothing to install" is an ANSWER, not an error to be retried ──
+    //
+    // This is the reported loop: the dialog asks to install, the student presses
+    // Update, and it answers "no update is available" — then asks again on the
+    // next launch. `None` here means the hub has nothing STRICTLY NEWER than
+    // `current`, which is the normal state after the app was updated while the
+    // offer was still recorded (and on Windows the installer exits the process
+    // before the install path can clear anything, so it is the COMMON state
+    // there).
+    //
+    // The offer used to be cleared only after `install()` returned successfully,
+    // so every path that did not reach that line — this one, a dismissal, a crash
+    // mid-download — left it in place to be asked about again. Clearing it here,
+    // at the one place that knows the offer is spent, is what ends the loop.
+    //
+    // Best-effort: the honest sentence below is the point, and failing to write
+    // bookkeeping must not replace it with a storage error.
+    let Some(pending) = pending else {
+        logging!(
+            warn,
+            Type::System,
+            "[locus] update install requested but nothing is newer than the running {current}; \
+             clearing the stale offer"
+        );
+        if let Err(error) = store::clear_update_offer().await {
             logging!(
                 warn,
                 Type::System,
-                "[locus] update install requested but the hub offers nothing to install"
+                "[locus] could not clear the stale update offer: {error:#}"
             );
-            super::coded_error("LOCUS_UPDATE_NONE", "No update is available to install.")
-        })?;
+        }
+        return Err(super::coded_error(
+            "LOCUS_UPDATE_NONE",
+            "This device is already up to date. The update prompt has been cleared.",
+        ));
+    };
 
     let installed_version = pending.version().to_owned();
 

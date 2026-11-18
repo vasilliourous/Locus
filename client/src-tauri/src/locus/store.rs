@@ -382,6 +382,67 @@ pub async fn clear_entitlement() -> Result<()> {
     saved
 }
 
+/// Records that the hub has SUSPENDED this code, keeping everything undoable.
+///
+/// # Why this is not [`clear_entitlement`]
+///
+/// A suspension is the one refusal an operator can take back. `clear_entitlement`
+/// deletes the code from `verge.yaml` and removes the machine-scoped mirror, so
+/// unsuspending a device could only ever mean "re-enter your code on every
+/// machine" — which for a student who no longer has the card is a dead end, and
+/// for an operator correcting a mistake is a support call. So a suspension is
+/// recorded as a STATE, with the credential left in place:
+///
+///   * the code, tier and expiry stay exactly as they were;
+///   * `locus_suspended` is set, which is what the gate and the UI read;
+///   * the heartbeat loop is stopped by the caller, so nothing keeps working.
+///
+/// The next successful beat clears it ([`clear_suspension`]), so unsuspending
+/// restores the session with no re-entry and no restart.
+///
+/// # The credential left on disk
+///
+/// A suspended device therefore still holds a bearer credential. That is the
+/// explicit trade, and it is bounded on both sides: the tunnel is down and the
+/// loop is stopped, so the code cannot be USED while suspended; and a sign-out
+/// ([`crate::locus::signout`]) still goes through [`clear_entitlement`] and
+/// removes it entirely. A device left suspended forever is a device whose owner
+/// was cut off — the operator's decision, visible in the console, not a leak.
+pub async fn record_suspension(reason: &str) -> Result<()> {
+    save_verge(|draft| {
+        draft.locus_suspended = Some(true);
+        draft.locus_refusal_reason = Some(reason.to_owned().into());
+        // The account is not confirmed healthy, and saying otherwise would let a
+        // suspended device render a green "last checked" line.
+        draft.last_heartbeat_ok = None;
+    })
+    .await
+}
+
+/// Clears a suspension, after the hub says the account is in good standing.
+///
+/// Called from the successful-beat path, which is the ONLY event that means the
+/// operator has let this code back in. Deliberately separate from
+/// [`clear_refusal`]: that one runs on a fresh activation, where the previous
+/// account's history is being replaced, and this one runs when the SAME code
+/// comes back to life.
+pub async fn clear_suspension() -> Result<()> {
+    save_verge(|draft| {
+        draft.locus_suspended = None;
+        draft.locus_refusal_reason = None;
+    })
+    .await
+}
+
+/// Whether this device is currently suspended by an operator.
+///
+/// Read by [`crate::cmd::locus_status`] and, through it, by the gate that decides
+/// between the kick-out screen and the normal app.
+#[must_use]
+pub fn is_suspended(verge: &IVerge) -> bool {
+    verge.locus_suspended.unwrap_or(false)
+}
+
 /// Clears the per-device state that belongs to a signed-out student, not to the
 /// machine.
 ///

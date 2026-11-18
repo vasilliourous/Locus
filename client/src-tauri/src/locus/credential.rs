@@ -80,10 +80,41 @@ pub fn credential_path_in(dir: &Path) -> PathBuf {
 /// does not yield a non-empty code. The caller then falls back to `verge.yaml`,
 /// so a permissions problem or a torn write degrades to "no mirror" rather than
 /// failing startup.
+///
+/// # The signed-out marker is checked HERE, on the read
+///
+/// This is not redundant with the same check in [`write_code`], and the difference
+/// is the whole point of the marker: a write can be refused while a copy is
+/// already on disk, and `verge.yaml` can be missing for its own reasons. A device
+/// that has signed out must not adopt its code back from the mirror on the next
+/// launch — that is a resurrection of the credential the student asked to remove,
+/// and it survives an uninstall, which is exactly the property the mirror exists
+/// for and exactly what makes it dangerous here.
+///
+/// A stale mirror can genuinely be left behind: the marker protects the window
+/// between `remove_code()` and a launch that never completed, and on any platform
+/// where `remove_code` failed. Refusing the read makes every one of those cases
+/// fail closed.
 #[must_use]
 pub fn read_code() -> Option<String> {
-    let dir = credential_store_dir()?;
-    read_code_file(&credential_path_in(&dir))
+    read_code_with(&credential_store_dir()?)
+}
+
+/// [`read_code`] against a specific directory, so the marker rule is testable.
+///
+/// Split out for the same reason [`read_code_file`] and [`write_code_file`] are:
+/// the real function resolves a machine-scoped path a unit test must not touch,
+/// and the last attempt to test the marker without this split asserted on a local
+/// helper instead of the function — which stayed green while the function itself
+/// was never wired up. A test that cannot reach the decision is not a guard.
+#[must_use]
+pub fn read_code_with(dir: &Path) -> Option<String> {
+    // Checked here rather than in `read_code` so there is exactly one place that
+    // decides, and it is the place the tests drive.
+    if signed_out_marker_in(dir).exists() {
+        return None;
+    }
+    read_code_file(&credential_path_in(dir))
 }
 
 /// Reads a code from a specific file. Pure I/O, so it can be tested against a
@@ -319,6 +350,58 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// The signed-out marker must also block a READ, not just a write.
+    ///
+    /// # The defect this closes
+    ///
+    /// `write_code` consulted the marker and `read_code` did not, and
+    /// `is_signed_out()` was declared, documented — and called from nowhere in the
+    /// crate. So the guard that stops a signed-out device re-adopting its code
+    /// protected the narrow window between `remove_code()` and a launch, and a
+    /// mirror left on disk for ANY other reason was adopted straight back in:
+    /// `store::read()` is `config_code(verge).or(mirrored_code)`, so once
+    /// `verge.yaml` was cleared, the mirror was the thing that answered.
+    ///
+    /// The previous test here asserted on a local `marker_blocks` helper, so it
+    /// stayed green while the real function read a copy the helper never touched.
+    /// This one drives the behaviour through the same predicate the function uses,
+    /// and asserts the file is genuinely present first — a guard that passes
+    /// because the file was never written is not a guard.
+    #[test]
+    fn the_signed_out_marker_also_blocks_a_read_of_the_mirror() {
+        let dir = scratch("signed-out-read");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("mkdir");
+
+        assert!(write_code_file(&dir, "RQ-ZVY6-7NSD-X9X2-T"));
+
+        // PRECONDITION: without the marker the code is readable. If this ever
+        // stops holding, the rest of the test proves nothing.
+        assert_eq!(
+            read_code_file(&credential_path_in(&dir)).as_deref(),
+            Some("RQ-ZVY6-7NSD-X9X2-T"),
+            "the code must be readable before the marker exists, or this test is vacuous"
+        );
+
+        std::fs::write(signed_out_marker_in(&dir), "1\n").expect("marker");
+
+        // The file is STILL ON DISK — that is the state the bug produced — and the
+        // read must now refuse it.
+        assert!(
+            credential_path_in(&dir).exists(),
+            "the mirror must still exist for this to be the real scenario"
+        );
+        assert_eq!(
+            read_code_with(&dir),
+            None,
+            "a signed-out device must not adopt its code back from the mirror, \
+             even when the mirror file is still present"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Writing then reading the same directory must round-trip.
     #[test]
     fn a_written_code_reads_back() {
         let dir = scratch("roundtrip");

@@ -24,6 +24,11 @@ const status = (
   bootstrapping = false,
 ): LocusStatus => ({
   activated,
+  // `phaseFromStatus` never reads a suspension either: the gate in `main.tsx`
+  // routes a suspended device to the kick-out screen BEFORE any connection
+  // phase is computed, so this fixture only ever describes a device that reached
+  // the connection screen. `false` keeps it a possible status.
+  suspended: false,
   // `phaseFromStatus` never reads this: a damaged sign-in is an Account-screen
   // fact, not a connection phase. Set to the value it always has when
   // `activated` is true — false — so the fixture stays a possible status.

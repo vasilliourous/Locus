@@ -24,6 +24,123 @@ commercial gaps, [`../business/17-not-built.md`](../business/17-not-built.md).
 
 ---
 
+## KICK-OUT, AND AN UPDATE PROMPT THAT COULD NOT END (2026-11-18, unreleased)
+
+Reported as: *"the app needs to be more active — a pop-up to kick a user out; updates
+only kick in after a restart, so check once in a while; on all platforms the app does
+not recognise it has updated, the prompt re-asks and pressing Update says 'no update
+available'; on macOS the version in the menu does not update."* Four requests, two of
+which turned out to be one root cause and one genuine latent bug.
+
+- **The update prompt loop — two defects, both real.**
+  1. `locus_install_update` cleared the recorded offer **only after `install()`
+     succeeded**. On Windows the installer exits the process before that line is
+     reached, so the offer survived every successful update — which is why the
+     symptom is worst on Windows. `PendingInstall::check` then returned `Ok(None)`
+     (nothing strictly newer than the running build) and the student got "No update
+     is available to install" while the prompt stayed queued. Now every terminal
+     outcome clears the offer, and `Ok(None)` says so **and** clears it: "you are
+     already up to date, the prompt has been cleared" is the true sentence, and it
+     is the last one they see about that version.
+  2. `locus_update_status` reported whatever offer was stored, without comparing it
+     to the running version. It now applies the same `rejection_reason` gate the
+     install path uses, so an offer for the running build can never render a prompt.
+- **Updates now check while the app is open.** Locus is a background VPN; "check on
+  launch" is "check approximately never". `locus::update::poll` adds an hourly check
+  (`CHECK_INTERVAL`) that reuses `PendingInstall::check` — no new protocol, one
+  unauthenticated GET — records the offer, and emits `locus://update-offered` so the
+  prompt appears mid-session instead of at the next relaunch. It never installs.
+- **Version surfaces read the running app, not the compile-time constant.** The tray
+  and `locus_update_status` now use `app.package_info().version`. The menu rebuild
+  logs the version it used, so "the tray still shows the old number" becomes a log
+  line to read rather than a repro to request. *(The macOS-specific staleness is the
+  one part I could not confirm — see STILL-OPEN.)*
+- **Kick-out, with a reversible suspension.** `codes.kick` (admin) sets `suspended`
+  plus a `suspended_reason` the student is shown; `codes.unsuspend` clears both. The
+  client no longer destroys the credential on a suspension: `handle_refusal` splits
+  on the frozen "suspended" wording, so a suspension goes through
+  `store::record_suspension` (code, tier and expiry kept) while every other refusal
+  still clears. The gate branches to a kick-out screen, and the backend emits
+  `locus://entitlement-changed` so it reaches the window immediately instead of at
+  the 5-minute poll. Un-suspending restores the session from `handle_success` — no
+  re-entry, no restart.
+- **A latent bug found on the way, and fixed.** `credential::read_code()` did not
+  consult the signed-out marker, and `is_signed_out()` was **dead code called from
+  nowhere** — so a device that had signed out could re-adopt its code from the
+  machine-scoped mirror on the next launch. The existing test asserted on a local
+  `marker_blocks` helper, so it stayed green while the real read path was unguarded.
+  The check now lives in `read_code_with`, and
+  `the_signed_out_marker_also_blocks_a_read_of_the_mirror` drives it.
+- **Guards, each observed failing.** `only_a_suspension_keeps_the_credential`
+  (deleted the early `return` and watched it go red),
+  `the_signed_out_marker_also_blocks_a_read_of_the_mirror` (removed the check and
+  watched it go red), plus the classification tests and `update::poll`'s cadence and
+  stop-latency tests.
+- **Rule kept.** "The app does not recognise that it has updated" was not a
+  detection problem: the client knew its version perfectly well and was still being
+  asked about an offer it had already satisfied. The bug was that **nothing owned
+  the end of an offer's life.** An offer needs a terminal state for installed,
+  dismissed, superseded AND unavailable — three of the four were missing.
+
+---
+
+## THREE REPORTS ABOUT CODES, WITH THREE DIFFERENT CAUSES (2026-11-18, unreleased)
+
+Reported as one symptom cluster: *"suspending a code on the admin hub does nothing
+to the client; when a client signs out the code is not released on the admin hub;
+a client app can authorise and use an already redeemed code during sign-up."*
+They are not one bug, and two of the three were not bugs at all — which is the
+finding that mattered, because the first instinct (make the hub release the code
+on sign-out) would have created a worse defect than the one reported.
+
+- **Suspend → nothing (hub-side, still needs confirming on the box).** The chain
+  is correct in the tree: `admin_console.pb.js` sets `suspended`,
+  `heartbeat.pb.js` answers `403`, `runtime::handle_refusal` tears the tunnel
+  down. So a *live* suspension would land within one beat. That leaves the
+  deployment, and this repo has paid for "the hook is inert until the box takes
+  it" repeatedly. **I could not reach the host** (SSH refused, no credentials in
+  this environment), so this is diagnosed, not fixed. The cheap discriminator is
+  `enforcement_version` in a heartbeat response — its absence is proof of a stale
+  hook, and no number of code changes here helps until that is answered.
+  `hooks-sync.sh --check` compares repo against host.
+- **Sign-out does not release the code — deliberate, and the report was right
+  about the CONSEQUENCE.** `device_release.pb.js` writes `released_at`,
+  `release_count` and a `code_events` row, and deliberately leaves
+  `activated_at` alone: clearing it would let a student reset their own paid term
+  (sign out, sign in, fresh term) and would let anyone holding a card — a photo of
+  a friend's, an unsold batch in a middleman's drawer — free a paying student's
+  code. But the operator could not see any of that, so "signed out" and "never
+  issued" were the same row in the console. **Fixed on the console side**: a
+  `signed out ×N` badge, an `issued before` badge for a code that has been
+  released after being used, and a release dialog that states the history instead
+  of offering to undo it. The semantics are unchanged on purpose.
+- **A redeemed code activates — by design; the LOOKUP lied about it.** Re-issuing
+  to whoever presents the code is the reinstall path and must keep working (the
+  2026-10-03 `already_used` incident is what happens when it does not). What was
+  wrong is that `/api/code-lookup` answered `bound_this_device` with
+  *"entering it again will restore your access"* and nothing else, and the
+  activation screen printed it under the same **"Ready — this code gives you the
+  X tier"** heading a fresh code gets. A used code was indistinguishable from an
+  unclaimed one, to the student and to an operator testing the hub. The message
+  now leads with "already in use". Two hardening changes came with it: the
+  suspension check is **duplicated onto the re-issue arm** (that arm returns a
+  full tier config, so a single check at the top left `Suspend` a no-op for every
+  already-redeemed code — the same shape as the heartbeat's missing expiry guard),
+  and `first_seen_at`/`first_seen_fingerprint` are written once on first
+  redemption and **survive an operator release**, so "issued once, then released"
+  stops looking like "never issued".
+- **Guards, each observed failing.** `a_redeemed_code_says_it_is_already_in_use`
+  and `suspension_is_refused_on_the_re_issue_arm_too` in
+  `client/src-tauri/tests/activation_contract.rs` — reverted each hook defect in
+  turn and confirmed both went red, then restored.
+- **Rule kept.** The report was three complaints and only one of them was a
+  defect in the code. Two were a *missing fact on a screen*, and the fix for
+  "sign-out should release the code" was to make the console legible, not to grant
+  the request — a bearer credential plus a self-service release is a way to reset
+  someone else's subscription.
+
+---
+
 ## A FRESH CLONE COULD NOT RUN `cargo test`, AND NOTHING SAID WHICH STEP WAS MISSING (2026-11-18, unreleased)
 
 - **What broke.** The goal was that deleting the directory and re-cloning loses

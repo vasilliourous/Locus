@@ -89,6 +89,7 @@ async fn resolve_setup() {
         init_auto_lightweight_boot(),
         init_auto_backup(),
         init_locus_heartbeat(),
+        async { init_locus_update_poll() },
     );
 
     Handle::refresh_clash();
@@ -155,6 +156,26 @@ async fn init_auto_lightweight_boot() {
 
 async fn init_auto_backup() {
     logging_error!(Type::Setup, AutoBackupManager::global().init().await);
+}
+
+/// Starts the periodic update check.
+///
+/// Deliberately NOT inside [`init_locus_heartbeat`], and not gated on activation.
+///
+/// Two different reasons for the same placement:
+///
+///  * An **unactivated** device is the one most in need of an update — it cannot
+///    connect, cannot reach the hub through the tunnel, and an update is the only
+///    thing that can fix a broken build. The check itself is unauthenticated
+///    (`/api/update`), so there is nothing to be entitled to.
+///  * Locus is a background VPN. "Check on launch" is approximately "check
+///    never", because the app stays open for days — see
+///    [`crate::locus::update::poll`] for the cadence and its reasoning.
+///
+/// `handle` is available here; the heartbeat needs none because it is reached
+/// through a stored credential rather than a live window.
+fn init_locus_update_poll() {
+    crate::locus::update::poll::start(Handle::app_handle().clone());
 }
 
 /// Resumes the heartbeat for an already-activated device.

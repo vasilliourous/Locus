@@ -48,28 +48,74 @@ export const UpdatePrompt = () => {
   const [progress, setProgress] = useState<UpdateProgress | null>(null)
   const [error, setError] = useState<string | null>(null)
 
-  // Read the offer once on mount.
+  // Read the offer on mount, AND subscribe for new ones.
   //
-  // Read from STORAGE, not the hub: the offer was recorded when a heartbeat
-  // delivered it, and re-asking the hub at start-up would delay the first paint
-  // behind a network call. `offeredVersion` being null means nothing has been
-  // offered yet — not that we are up to date — so it simply shows nothing.
+  // Read from STORAGE, not the hub: the offer was recorded when a heartbeat (or
+  // the periodic check) delivered it, and re-asking the hub at start-up would
+  // delay the first paint behind a network call. `offeredVersion` being null
+  // means nothing has been offered yet — not that we are up to date — so it
+  // simply shows nothing.
+  //
+  // # Why the subscription, not just the mount read
+  //
+  // This used to read exactly once. Locus is a background VPN: the window is
+  // started with the app and then left alone for days, so a read on mount meant
+  // an offer that arrived ten seconds later was never shown until the student
+  // happened to relaunch — which people do not do. The backend now emits
+  // `locus://update-offered` when a check records a NEW offer
+  // (`locus::update::poll`), and this is the half that turns it into a dialog.
+  //
+  // The listener re-reads status rather than trusting the payload: the event
+  // carries a version, but the prompt's contract is the stored offer, and one
+  // source of truth is what stops the two disagreeing.
   useEffect(() => {
     let cancelled = false
-    locusUpdateStatus()
-      .then((status) => {
-        if (cancelled) return
-        if (status.offeredVersion) {
-          setOffered(status.offeredVersion)
-          setOpen(true)
-        }
+
+    const read = () =>
+      locusUpdateStatus()
+        .then((status) => {
+          if (cancelled) return
+          // The backend already refuses to report an offer that is not newer
+          // than the running build, so this is a belt-and-braces check on the
+          // same rule. It matters because a prompt for the version already
+          // running is the exact loop being fixed: pressing Update on it
+          // answered "no update available" and the prompt came back.
+          const stale =
+            !!status.offeredVersion &&
+            status.offeredVersion === status.currentVersion
+          if (status.offeredVersion && !stale) {
+            setOffered(status.offeredVersion)
+            setOpen(true)
+          } else {
+            // An offer that is no longer there is one the student has already
+            // installed, or one the backend found to be spent. Drop the prompt
+            // rather than leaving a dialog for a version that is not on offer.
+            setOffered(null)
+            setOpen(false)
+          }
+        })
+        .catch(() => {
+          // No prompt if we cannot read the state. Failing to *offer* an update
+          // is harmless; a broken dialog on launch is not.
+        })
+
+    void read()
+
+    let unlisten: (() => void) | undefined
+    void (async () => {
+      const { listen } = await import('@tauri-apps/api/event')
+      const stop = await listen('locus://update-offered', () => {
+        void read()
       })
-      .catch(() => {
-        // No prompt if we cannot read the state. Failing to *offer* an update is
-        // harmless; a broken dialog on launch is not.
-      })
+      // A fast unmount can resolve this after cleanup, in which case nothing
+      // would ever remove the listener.
+      if (cancelled) stop()
+      else unlisten = stop
+    })()
+
     return () => {
       cancelled = true
+      unlisten?.()
     }
   }, [])
 

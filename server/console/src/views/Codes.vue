@@ -24,6 +24,18 @@ interface CodeRow {
   term_kind?: string
   /** Whole days until expiry (rounded up), or null when there is no expiry. */
   days_remaining?: number | null
+  /**
+   * When this code was FIRST redeemed. Survives an operator release, so it is
+   * the difference between "never issued" and "issued once, then released" —
+   * which `status: 'available'` alone cannot express.
+   */
+  first_seen_at?: string
+  /** Truncated hash of the machine that made that first activation. */
+  first_seen_fingerprint?: string
+  /** When a student last signed out of this code (device_release.pb.js). */
+  released_at?: string
+  /** How many times a student has signed out of it. */
+  release_count?: number
 }
 
 const codes = ref<CodeRow[]>([])
@@ -189,6 +201,48 @@ async function generate() {
   }
 }
 
+/**
+ * Kick a student out, with a reason they will read.
+ *
+ * # Why this is separate from Suspend
+ *
+ * `codes.suspend` stays for the plain case and for an older console. This one
+ * requires a reason, because the reason is DISPLAYED to the student on their
+ * kick-out screen: a suspension they cannot explain is a support call to whoever
+ * sold them the code, asking about a decision nobody wrote down.
+ *
+ * The note the operator sees after confirming is the other half. "Kicked out"
+ * sounds instantaneous and is not: the device is cut off at its next heartbeat,
+ * which is up to about five minutes while it is connected. Saying so stops an
+ * operator from concluding the action failed and doing it again.
+ */
+async function kickOut(row: CodeRow) {
+  const reason = window.prompt(
+    `Kick ${row.code} out?\n\n` +
+      `The student's tunnel is stopped and their app shows a "signed out of Locus" ` +
+      `screen carrying YOUR reason below — so write it for them, not for us.\n\n` +
+      `The code is KEPT on their computer: unsuspending restores their access ` +
+      `without them re-entering anything or restarting the app.\n\n` +
+      `They are cut off at the next check-in (within about 5 minutes while connected).`,
+    '',
+  )
+  // An empty reason is refused rather than defaulted — the server refuses it too,
+  // so offering it here would only turn a policy into a failed request.
+  if (reason === null) return
+  if (!reason.trim()) {
+    toast.err('A reason is required — the student sees it')
+    return
+  }
+  const res = await call('codes.kick', { code: row.code, reason: reason.trim() })
+  if (res.ok) {
+    toast.ok(`Kicked ${row.code} out — cut off at its next check-in`)
+    await load()
+    if (detail.value?.code === row.code) await openDetail(row)
+  } else {
+    toast.err(res.message || res.transportError || 'Kick-out failed')
+  }
+}
+
 async function setSuspended(row: CodeRow, suspend: boolean) {
   const res = await call('codes.' + (suspend ? 'suspend' : 'unsuspend'), { code: row.code })
   if (res.ok) {
@@ -200,12 +254,39 @@ async function setSuspended(row: CodeRow, suspend: boolean) {
 }
 
 async function unbind(row: CodeRow) {
+  // ── Why the sign-out note is in here ──
+  //
+  // "A student signed out and the code was not released" is a report that
+  // resolves to this dialog, and the operator needs to leave it knowing two
+  // things: that releasing is NOT how you handle a student moving machines, and
+  // that this code has already been in someone's hands.
+  //
+  // The sign-out itself is recorded (`released_at`/`release_count`) and changes
+  // no entitlement, on purpose — `device_release.pb.js` explains why clearing
+  // `activated_at` on a sign-out would let anybody holding a card reset a paying
+  // student's term. So the console says what the sign-out means rather than
+  // offering a button that does it.
+  const signedOut = row.release_count
+    ? `\n\nNOTE: a student has signed out of this code ${row.release_count} time(s), ` +
+      `most recently ${row.released_at ? row.released_at.slice(0, 16).replace('T', ' ') : 'at an unknown time'}. ` +
+      `That is already recorded and needs no action — signing out deliberately ` +
+      `does not free the code, because doing so would let anyone holding the card ` +
+      `reset the paying student's term.`
+    : ''
+  const reissued = row.first_seen_at
+    ? `\n\nNOTE: this code was ALREADY issued once (${row.first_seen_at.slice(0, 10)}` +
+      `${row.first_seen_fingerprint ? `, machine ${row.first_seen_fingerprint}` : ''}). ` +
+      `If that student still holds the card, releasing it does not take the code ` +
+      `back from them — it hands the SAME code to a second person.`
+    : ''
   const reason = window.prompt(
     `Release ${row.code}?\n\n` +
       `A code is single-use and is NOT tied to a device. Releasing it clears the ` +
       `used stamp so a DIFFERENT student can activate it.\n\n` +
       `You do not need this to move a student to a new laptop — they simply enter ` +
-      `the same code again and it restores their access.`,
+      `the same code again and it restores their access.` +
+      signedOut +
+      reissued,
     'Re-issued to a different student',
   )
   if (reason === null) return
@@ -676,7 +757,34 @@ watch(
             <div v-if="row.label" class="muted" style="font-size: 11px">{{ row.label }}</div>
           </td>
           <td>{{ row.tier }}</td>
-          <td><span class="badge" :class="row.status">{{ row.status }}</span></td>
+          <td>
+            <span class="badge" :class="row.status">{{ row.status }}</span>
+            <!-- A code that has been issued before but is free NOW. This is the
+                 one state `status` cannot express, and it is the state that
+                 double-sells a code: releasing a redeemed code puts it back into
+                 the pool, and the row then reads exactly like a fresh one. -->
+            <span
+              v-if="row.status === 'available' && row.first_seen_at"
+              class="badge issued"
+              :title="`This code was already issued once, on ${row.first_seen_at.slice(0, 10)} (
+                ${row.first_seen_fingerprint || 'machine not recorded'}), and then released.
+                Handing it to another student ends the first student's access.`"
+            >
+              issued before
+            </span>
+            <!-- Sign-outs. Not an error — a student moving to a new computer
+                 legitimately signs out. What it answers is the OTHER report:
+                 repeated sign-outs on one code with its term still running is
+                 what a shared key looks like from here. -->
+            <span
+              v-if="row.release_count"
+              class="badge signed-out"
+              :title="`Signed out ${row.release_count} time(s) on a device, most recently
+                ${row.released_at ? row.released_at.slice(0, 16).replace('T', ' ') : 'unknown'}.`"
+            >
+              signed out ×{{ row.release_count }}
+            </span>
+          </td>
           <td class="muted">{{ row.middleman || '—' }}</td>
           <!-- Expiry shows the DATE and the days left. A worklist is worked by
                urgency, and "3 days" is the fact the operator acts on; the date
@@ -700,7 +808,16 @@ watch(
               <button class="tiny primary" @click="renew(row)">Renew</button>
               <button v-if="row.redeemed" class="tiny" @click="unbind(row)">Release</button>
               <button class="tiny" @click="editExpiry(row)">Expiry</button>
-              <button v-if="!row.suspended" class="tiny danger" @click="setSuspended(row, true)">Suspend</button>
+              <!-- Kick out is the operator's real control: suspend plus a reason
+                   the student is shown. Suspend stays, unlabelled as the quieter
+                   option, for a bounce that needs no explanation. -->
+              <button
+                v-if="!row.suspended"
+                class="tiny danger"
+                title="Stop this student's tunnel now, and tell them why"
+                @click="kickOut(row)"
+              >Kick out</button>
+              <button v-if="!row.suspended" class="tiny" @click="setSuspended(row, true)">Suspend</button>
               <button v-else class="tiny" @click="setSuspended(row, false)">Reactivate</button>
               <button
                 class="tiny danger"

@@ -281,6 +281,38 @@ collections = [
         # answers. `code_events` carries the full history; this is the latest.
         {"name":"released_at","type":"date"},
         {"name":"release_count","type":"number"},
+        # ── When this code was FIRST redeemed, and which machine did it ──
+        #
+        # `activated_at` is not enough to answer "is this code already in
+        # someone's hands?". An operator RELEASE clears it (putting the code back
+        # into the pool), after which the console shows an indistinguishable
+        # "available". `first_seen_at` is written once, on the first redemption,
+        # and is only cleared by a deliberate operator action — never as a side
+        # effect of releasing the code.
+        #
+        # `first_seen_fingerprint` is the corroborating hash of the machine that
+        # made that first activation. It is NOT a binding: nothing compares it,
+        # and nothing refuses an activation because of it (see activation.pb.js
+        # for why a device binding is the wrong answer — it stranded every
+        # reinstalling student). It exists so that an operator holding two
+        # conflicting reports about one code has a fact instead of a guess.
+        #
+        # Deliberately a TRUNCATED fingerprint, stored the way the `code_events`
+        # rows store it: a full fingerprint is a device correlator, and these
+        # columns exist to answer an operator's question, not to build an
+        # identity index.
+        {"name":"first_seen_at","type":"date"},
+        {"name":"first_seen_fingerprint","type":"text"},
+        # ── Why an operator suspended this code, in their own words ──
+        #
+        # Shown VERBATIM to the student on the kick-out screen. An operator's
+        # sentence is an instruction ("contact your middleman", "chargeback"), not
+        # a description, and paraphrasing it would drop the only actionable part.
+        #
+        # Cleared by `codes.unsuspend`, in the same write as the flag — a
+        # reinstated student must not stay on a page explaining a withdrawal that
+        # has been undone.
+        {"name":"suspended_reason","type":"text"},
     ]),
     # ── device_bindings / device_identities — REMOVED ──
     #

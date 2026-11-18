@@ -70,6 +70,11 @@ routerAdd("POST", "/api/admin/unbind-code", function(e) {
         record.set("activated_at", null);
         record.set("unbound_at", new Date().toISOString());
         record.set("unbind_reason", reason);
+        // `first_seen_at`/`first_seen_fingerprint` are deliberately NOT cleared:
+        // a release returns the code to the pool, it does not un-issue it. The
+        // console uses the surviving marker to tell "never activated" from
+        // "already sold once and released", and this endpoint must record the
+        // release the same way its console sibling does.
         $app.dao().saveRecord(record);
 
         return e.json(200, {

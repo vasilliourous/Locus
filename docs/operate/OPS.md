@@ -228,7 +228,8 @@ Every console page is a POST to `/api/admin/console` with an `action`:
 | **`codes.renew`** | **Extend a code's term after a payment** (`code`, `term_days` override, `price`, `middleman`) |
 | **`codes.set-term`** | Set how long one purchase lasts, **without moving the expiry** (`code`, `term_days`) |
 | **`codes.rebind`** | **Retired.** Codes are not tied to a device; returns `410` explaining that a student simply re-enters their code on a new machine |
-| `codes.suspend` / `codes.unsuspend` | Toggle suspension |
+| `codes.kick` | **Kick a student out**, with a reason they are shown (`code`, `reason` — required) |
+| `codes.suspend` / `codes.unsuspend` | Toggle suspension without a student-facing reason |
 | `codes.unbind` | Release a used code back to unused, so a different student can activate it (`code`, `reason`) |
 | `codes.expire` | Set or clear an **absolute** expiry (`code`, `expires_at`) |
 | `codes.update` | Edit `middleman` / `label` / `notes` |
@@ -239,6 +240,28 @@ Every console page is a POST to `/api/admin/console` with an `action`:
 | `tiers.list` / `tiers.update` | Read / edit tier connection settings |
 | `releases.get` / `releases.set` | Read the current release / turn it on or off |
 | `releases.fetchLink` / `releases.publish` | Mint a one-shot fetch link / publish a fetched release |
+
+> **`codes.kick` vs `codes.suspend`.** Both stop a device; they differ in what the
+> student is told. `codes.kick` requires a `reason` and is the one to reach for —
+> the sentence is displayed verbatim on the student's kick-out screen, so write it
+> for them ("chargeback", "this key is on three devices"). `codes.suspend` is the
+> quieter toggle for a bounce that needs no explanation, and leaves no reason on
+> screen.
+>
+> Four things are worth knowing before using either:
+>
+> - **The cut-off is at the device's next heartbeat** — within about five minutes
+>   while it is connected, and immediately if it is mid-beat. It is not
+>   instantaneous, so do not press the button twice.
+> - **The code is kept on their machine**, on purpose. `codes.unsuspend` restores
+>   access with no re-entry and no restart. A kick-out is reversible; a **Release**
+>   is not.
+> - **Do not use `codes.kick` to move a student to a new laptop.** They re-enter
+>   their own code and that restores their access; suspending them is a different
+>   act with a different meaning.
+> - **A suspended device still holds its credential on disk.** It cannot be used
+>   (tunnel down, loop stopped), and a student sign-out still removes it — see
+>   [`../reference/API.md`](../reference/API.md) §"Suspension is REVERSIBLE".
 
 > **The term model.** A code carries a term (`term_days`) measured from
 > **activation**, materialised into `expires_at` when a device activates, and

@@ -1419,6 +1419,119 @@ Recording these so they are not re-investigated:
 
 ---
 
+## Kick-out and the update poll — verified in the tree, one question needs a log
+
+**Added 2026-11-18.** Four requests (`FIXES.md`, same date). Every Rust gate and both
+frontend builds are green in this checkout; none of it has been run end to end.
+
+**Verified in the tree (each new guard observed failing first):**
+
+- `cargo test --lib` (706), `cargo test --test activation_contract` (17),
+  `clippy --all-targets --features clippy -- -D warnings`, `cargo fmt --check`;
+  frontend `tsc --noEmit` and `vite build`; `bash check-consistency.sh` all sections.
+- That a suspension keeps the credential and every other refusal does not —
+  `only_a_suspension_keeps_the_credential`, `both_frozen_suspension_sentences_are_recognised`,
+  `other_refusals_are_not_treated_as_suspensions`.
+- That a signed-out device cannot re-adopt its code from the mirror —
+  `the_signed_out_marker_also_blocks_a_read_of_the_mirror`, driven through the real
+  predicate. This one **found a live bug**: `read_code()` never checked the marker and
+  `is_signed_out()` was called from nowhere.
+- The update poll's cadence, its first-check offset, and that a stop resolves
+  immediately rather than waiting out the hour (`locus::update::poll::tests`).
+- That `locus_update_status` refuses to offer the running version, and that a spent
+  offer is cleared — by construction plus `gen-ts-contract.py`, which caught the
+  missing TypeScript field and the fixture that predated it.
+
+**NOT verified:**
+
+1. **The macOS tray version.** The report is that macOS keeps the old number after an
+   update while Windows does not. Both surfaces now read
+   `app.package_info().version` and the menu rebuild logs it, but **I could not
+   confirm the cause** — the two plausible ones (the version captured at menu
+   construction, and the menu not being rebuilt at all on macOS) produce the same
+   symptom and need a different fix. What closes it: update on macOS, then grep the
+   log for `building tray menu with version`. If the line shows the NEW number, the
+   menu was rebuilt with correct data and the fault is in the tray item not
+   re-rendering on that platform. If it shows the OLD number or is absent, the
+   rebuild is not firing and the fix is in the trigger, not the value.
+2. **That the whole kick-out path works on a real device** — suspend→screen,
+   unsuspend→restored, in both cases within one check-in. Needs a code, a running
+   client, and `locus_check_subscription` to force the beat.
+3. **That `codes.kick` and `suspended_reason` are live on the hub.** New column in
+   `seed-pb.py`; until it is re-run and PocketBase restarted, `recK.set("suspended_reason", ...)`
+   writes a column the schema lacks and PocketBase **silently discards it** — the
+   kick-out would work and the reason would vanish, leaving the student on a screen
+   with the generic sentence. This is the `unbound_at` failure a third time; check
+   one code's reason in the console after deploying.
+4. **That the hourly poll does not interact badly with the 5-minute heartbeat.** Both
+   read `/api/update`, they are independent, and the poll only announces a CHANGE —
+   but the combination has not been observed over hours on a real connection.
+
+> **Ships by `hooks-sync.sh` + `seed-pb.py` + `deploy-console.sh`, plus a client
+> release** — unlike the previous entry, this one touches the client binary
+> (the gate, the kick-out screen and the poll), so it cannot be deployed alone.
+
+---
+
+## Suspend, sign-out, and redeemed codes — verified in the tree, NOT on the hub
+
+**Added 2026-11-18.** Three reports (`FIXES.md`, same date). What is verified, and
+what is not, because the difference decides whether you should deploy or diagnose.
+
+**Verified in this checkout:**
+
+- The contract guards — `a_redeemed_code_says_it_is_already_in_use` and
+  `suspension_is_refused_on_the_re_issue_arm_too` — each **observed failing**
+  against the hook defect it names, then restored. `cargo test --lib` (697),
+  `cargo test --test activation_contract` (17), `cargo clippy --all-targets
+  --features clippy -- -D warnings`, `cargo fmt --check` all green; console
+  `tsc --noEmit` and `vite build` green; `bash check-consistency.sh` all sections
+  pass.
+- That the hub reachable from this environment serves most of the hooks I
+  touch: against the live hub with a
+  deliberately invalid code, `/api/code-lookup` answered `400` (its own
+  fingerprint check, not a Caddy 404), `/api/heartbeat` answered
+  `404 Code not found`, and `/api/release-entitlement` answered
+  `404 Nothing to release`. So those three hooks **are** deployed. This is a
+  liveness check only: it proves the route reaches a handler, not that the handler
+  is the revision in this repo.
+
+**NOT verified — and the first item is the one the report depends on:**
+
+1. **That the suspended-code heartbeat check is live.** `admin_console.pb.js`,
+   `activation.pb.js`, `code_lookup.pb.js` and `device_release.pb.js` are all
+   confirmed reachable; **`heartbeat.pb.js` is not**, because exercising it needs a
+   real code and I have none. The suspension enforcement that reaches a
+   `CONNECTED` client lives ONLY there. What would settle it: `hooks-sync.sh
+   --check`, then a heartbeat response carrying `enforcement_version: 4`. A
+   response without that key is a stale hook, and no client-side or console
+   change can compensate.
+2. **That `first_seen_at` / `first_seen_fingerprint` exist on the live `codes`
+   collection.** They are new in `seed-pb.py`. Until it is re-run and PocketBase
+   restarted, `activation.pb.js` writes two columns the schema lacks — which
+   PocketBase **silently discards**. The write catches nothing, so an activation
+   succeeds and records nothing. Same failure the collection already paid for once
+   with `unbound_at`/`unbind_reason`. `released_at`/`release_count` were already
+   in `seed-pb.py` but are in the same unverified state (see the sign-out section
+   below).
+3. **That the console renders the new fields at all** — `codes.list` must return
+   them. The Vue reads `row.first_seen_at` and `row.release_count`, and an absent
+   key renders as `undefined`, which hides the badge: the console would look
+   correct and say nothing, which is the failure mode this work exists to remove.
+   Check one redeemed-and-released code in the Codes view after deploying
+   `admin_console.pb.js`.
+4. **That a suspension reaches a connected client within one beat.** Needs a real
+   code, a running client, and `locus_check_subscription` to force the beat rather
+   than waiting one interval.
+
+> **Nothing here required touching the client binary** except one fallback
+> sentence in `locus/activation.rs`, which only renders if the hub sends a status
+> without a message. The fixes are hub hooks, the console, and the schema — so
+> they ship by `hooks-sync.sh` + `seed-pb.py` + `deploy-console.sh`, not by a
+> release.
+
+---
+
 ## The student sign-out: built and green in the tree, never run on the hub
 
 **Added 2026-11-04.** "Sign out on this device" (Account page) forgets the key

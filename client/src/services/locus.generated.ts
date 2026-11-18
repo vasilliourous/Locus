@@ -30,6 +30,22 @@ export interface LocusStatus {
    */
   activated: boolean
   /**
+   * Whether an operator has SUSPENDED this code, with the credential kept.
+   *
+   * # Why this is not implied by `activated`
+   *
+   * A suspension deliberately KEEPS the code, so `activated` stays `true` — and
+   * the gate branches on `activated`. Without this field a suspended device
+   * renders the normal connection screen and the student is told nothing; the
+   * only surface that would say otherwise is the subscription badge, which is a
+   * warning strip inside the app they should not be in at all.
+   *
+   * So this is the field that puts a kicked-out student on the kick-out screen,
+   * and — with `refusal_reason` — the field that lets it explain why and offer
+   * the one thing that helps: waiting, or contacting their middleman.
+   */
+  suspended: boolean
+  /**
    * A code is stored but could not be a Locus code, so it was not used.
    *
    * Reported so the Account screen can say *why* it is offering activation

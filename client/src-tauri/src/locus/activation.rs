@@ -312,9 +312,24 @@ fn classify_lookup(response: &LookupResponse) -> CodeCheck {
         LookupStatus::Ok | LookupStatus::Unbound => (true, "Ready to activate"),
         // Already redeemed: still activatable, because re-activating restores
         // the student's own access. The screen says so rather than refusing.
+        //
+        // `ready` stays `true` and must: the lookup is advisory and
+        // `/api/activate` is the authority, which re-issues the entitlement to
+        // whoever presents the code (see `activation.pb.js` — there is no device
+        // identity left to check against, so refusing here would strand every
+        // reinstalling student).
+        //
+        // The FALLBACK text says "already in use" first, because the hub's own
+        // message is used in preference to it and the hub's sentence is the one
+        // that must not mislead. The original fallback described the recovery
+        // ("entering it again will restore your access") and never said the code
+        // was in use at all — so an operator testing whether a hub checks
+        // redeemed codes read the reassurance as "the hub thinks this is
+        // unused", which is the opposite of what it had just checked. Both
+        // halves are stated now, in the order the student needs them.
         LookupStatus::AlreadyUsed => (
             true,
-            "This code is already activated — entering it again will restore your access",
+            "This code is already in use — if it is yours, re-activating restores your access",
         ),
         LookupStatus::Suspended => (false, "This code has been suspended"),
         LookupStatus::Expired => (false, "This code has expired"),

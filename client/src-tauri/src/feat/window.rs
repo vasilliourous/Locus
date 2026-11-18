@@ -122,6 +122,11 @@ pub async fn quit() -> clash_verge_signal::ShutdownOutcome {
     // update. Stopping first makes the exit path's config write the last word.
     crate::locus::runtime::stop();
 
+    // The periodic update check holds a task and an `AppHandle`, and it wakes on
+    // a stop rather than waiting out its hour — so this is immediate, not a
+    // up-to-60-minute delay on quit.
+    crate::locus::update::poll::stop();
+
     Config::apply_all_and_save_file().await;
 
     let cleanup_result = clean_async().await;

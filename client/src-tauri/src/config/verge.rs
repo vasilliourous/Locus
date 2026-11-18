@@ -347,6 +347,18 @@ pub struct IVerge {
     /// seeing the reason their old code was refused.
     pub locus_refusal_reason: Option<String>,
 
+    /// Whether an operator has suspended this code, with the credential kept.
+    ///
+    /// Distinct from `locus_refusal_reason` being set, which covers every
+    /// refusal. This is the one refusal that is REVERSIBLE: the code, tier and
+    /// expiry are all still stored, so clearing this flag restores the session
+    /// without the student re-entering anything. See
+    /// `locus::store::record_suspension` for the trade that makes it safe.
+    ///
+    /// `None` (not `false`) when absent, so an older config file is "not
+    /// suspended" rather than needing a migration.
+    pub locus_suspended: Option<bool>,
+
     /// The version the hub has offered this device, if any.
     ///
     /// Persisted rather than kept in memory because the offer arrives on a

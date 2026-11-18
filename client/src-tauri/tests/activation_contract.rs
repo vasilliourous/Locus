@@ -338,6 +338,111 @@ fn the_lookup_enum_degrades_unknown_statuses_safely() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// A redeemed code must be DESCRIBED as redeemed, on both sides
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// A redeemed code's message must say it is already in use — not only that
+/// re-activating is safe.
+///
+/// # The report this closes
+///
+/// "A client app can authorise and use an already redeemed code during sign-up."
+/// The hub does check `activated_at`, and it does the right thing: the code is
+/// re-issued to whoever presents it, because there is no device identity left to
+/// check against and refusing would strand every reinstalling student. What was
+/// wrong was the SCREEN. The lookup answered `bound_this_device` with the
+/// sentence "This code has already been activated — entering it again will
+/// restore your access", the activation page rendered it under the heading
+/// "Ready — this code gives you the X tier", and that is verbatim what an
+/// untouched code shows. A person holding a code that was not theirs had no way
+/// to tell that it had already been claimed, and neither did an operator testing
+/// whether the hub checks.
+///
+/// So the message has to carry both facts, and this asserts the FIRST one — the
+/// one that was missing. The wire NAME (`bound_this_device`) is pinned above and
+/// must not move; the `ready` flag must stay `true`; only the sentence changes.
+#[test]
+fn a_redeemed_code_says_it_is_already_in_use() {
+    let hook = lookup_hook();
+    let start = hook
+        .find(r#"resp.status = "bound_this_device""#)
+        .expect("the hook must still report a redeemed code as `bound_this_device`");
+    let arm = &hook[start..];
+    let end = arm.find("return e.json(200, resp);").expect("the arm must return");
+    let arm = &arm[..end];
+
+    let message_line = arm
+        .lines()
+        .find(|line| line.contains("resp.message ="))
+        .unwrap_or_else(|| panic!("the redeemed-code arm sets no message at all: {arm}"));
+
+    // `already in use` / `already been used` / `already activated` all say the
+    // code is taken. The regression was a message that said ONLY what
+    // re-activating does for the caller, so the check is for a phrase about the
+    // code's state, not for one exact wording.
+    let states_the_code_is_taken = [
+        "already in use",
+        "already been used",
+        "already activated",
+        "already redeemed",
+    ]
+    .iter()
+    .any(|phrase| message_line.to_lowercase().contains(phrase));
+
+    assert!(
+        states_the_code_is_taken,
+        "the redeemed-code lookup message no longer tells the student the code is \
+         already in use. It said only that re-activating restores access, which \
+         reads exactly like a fresh code — that is how 'a client can use an \
+         already redeemed code' looked like the hub not checking at all. Message \
+         was: {message_line}"
+    );
+
+    assert!(
+        !message_line.contains(r#"resp.message = "Ready"#),
+        "the redeemed-code arm says the code is Ready, which is the sentence an \
+         UNTOUCHED code gets. The two states must not read the same."
+    );
+}
+
+/// Suspension must be refused on the RE-ISSUE path too, not only at the top.
+///
+/// `/api/activate` has two arms that return a tier config: the first redemption,
+/// and the re-issue for a code that `alreadyRedeemed`. The suspension check at
+/// the top of the handler guards the first; the second is the arm a suspended
+/// student actually reaches, because they hold a code that is already stamped.
+///
+/// This is the same class of defect as the heartbeat one recorded in that file's
+/// header ("activation had the guard, and heartbeat did not"): the guard exists,
+/// in the right place for the author who added it, and the second route to the
+/// same goods was not in view. The check is duplicated deliberately, and this
+/// test is what notices if one copy is deleted.
+#[test]
+fn suspension_is_refused_on_the_re_issue_arm_too() {
+    let hook = read_code(&repo_root().join("server/pb_hooks/activation.pb.js"));
+
+    let reissue = hook
+        .find("if (alreadyRedeemed(rec)) {")
+        .expect("`alreadyRedeemed` must still gate the re-issue arm");
+    // The arm ends where the first-redemption comment begins.
+    let tail = &hook[reissue..];
+    let arm_end = tail
+        .find("First redemption")
+        .or_else(|| tail.find("var nowMs = Date.now();"))
+        .expect("could not find the end of the re-issue arm");
+    let arm = &tail[..arm_end];
+
+    assert!(
+        arm.contains("getBool(\"suspended\")"),
+        "the re-issue arm no longer checks `suspended`. That arm RETURNS a tier \
+         config — the entire entitlement — so a suspended code could be \
+         re-entered by its holder and handed working credentials, making the \
+         console's Suspend button a no-op for every already-redeemed code, which \
+         is most of them."
+    );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Guard against the drift this file was written to fix
 // ─────────────────────────────────────────────────────────────────────────────
 

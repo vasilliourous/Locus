@@ -169,6 +169,13 @@ tr.dim { opacity: .55; }
 .badge.bound { background: #1c1c1c; color: var(--text); }
 .badge.suspended { background: #1c1c1c; color: var(--danger); }
 .badge.expired { background: #262626; color: var(--warn); }
+/* Issued once and released: free to hand out, but not new. Warn, not danger —
+   re-issuing is a legitimate act, and an operator is entitled to do it knowing
+   what it costs the previous holder. */
+.badge.issued { background: #262626; color: var(--warn); }
+/* A student signed out. Informational: moving to a new computer looks like this.
+   The pattern an operator acts on is a COUNT, which is why the badge carries it. */
+.badge.signed-out { background: #1c1c1c; color: var(--muted); }
 
 .muted { color: var(--muted); }
 .spacer { flex: 1; }

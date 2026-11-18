@@ -85,7 +85,32 @@ routerAdd("POST", "/api/heartbeat", function(e) {
             return e.json(410, {code:410, message:"Code expired"});
         }
 
-        if (record.getBool("suspended")) return e.json(403, {code:403, message:"Account suspended — contact your middleman"});
+        // ── Suspension, with the operator's own sentence when there is one ──
+        //
+        // The MESSAGE is a frozen contract: the client classifies a 403 by looking
+        // for the substring "suspended", and deployed builds that cannot be updated
+        // depend on it. So the operator's reason is appended, never substituted —
+        // "Account suspended — <their words>". Dropping the frozen prefix would
+        // make every deployed client report a suspension as some other refusal.
+        //
+        // The client also reads `suspended` and `suspended_reason` below, which is
+        // what its kick-out screen renders. Anything that predates those keys
+        // ignores them and falls back to the message, which is why this is
+        // additive rather than a replacement.
+        if (record.getBool("suspended")) {
+            var operatorNote = String(record.get("suspended_reason") || "").trim();
+            var suspendMsg = "Account suspended — contact your middleman";
+            if (operatorNote) suspendMsg = "Account suspended — " + operatorNote;
+            return e.json(403, {
+                code: 403,
+                message: suspendMsg,
+                // Explicit, for a client that would rather switch on a flag than
+                // parse a sentence. `suspended_reason` is the raw operator text so
+                // the screen can show it in its own layout.
+                suspended: true,
+                suspended_reason: operatorNote
+            });
+        }
 
         var response = {status:"ok", server_time:new Date().toISOString()};
 

@@ -203,10 +203,31 @@ routerAdd("POST", "/api/code-lookup", function(e) {
         var at = rec.get("activated_at");
         if (at !== null && at !== undefined && String(at).trim() !== "") {
             resp.status = "bound_this_device";
-            resp.message = "This code has already been activated — entering it again will restore your access";
+            // The student is told TWO things, in this order: that the code is
+            // already in use, and what that means for them.
+            //
+            // The second half is the reassurance the returning student needs
+            // and was the only thing said before. The FIRST half was missing,
+            // and its absence is what made "a client can use a redeemed code"
+            // look like a hub that had not checked at all: the screen showed
+            // "Ready — this code gives you the X tier", which is word for word
+            // what it shows for an untouched code. It could not have been
+            // clearer that the code was unclaimed.
+            //
+            // The message is NOT what gates anything — the client proceeds to
+            // /api/activate either way, and the server is the authority. This is
+            // so the person holding a code that is not theirs sees that before
+            // spending an activation attempt, instead of after.
+            resp.message = "This code is already in use. If it is yours, re-activating restores your access — if you were given it, it has already been claimed";
             return e.json(200, resp);
         }
 
+        // A first-use code. Also true when an operator RELEASED a code: that is
+        // the pool the code is supposed to go back into, and the release is the
+        // deliberate act. `first_seen_at` is what tells the console the
+        // difference between "never issued" and "issued once, then released";
+        // the student-facing status is the same for both because the code is
+        // genuinely available to whoever holds it.
         resp.status = "unbound";
         resp.message = "Ready to activate";
         return e.json(200, resp);

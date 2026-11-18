@@ -20,6 +20,7 @@ import { SUBSCRIPTION_POLL_MS as ENTITLEMENT_POLL_MS } from './hooks/use-subscri
 import { hideInitialOverlay } from './pages/_layout/utils/initial-loading-overlay'
 import { router } from './pages/_routers'
 import ActivationScreen from './pages/activation'
+import SuspendedScreen from './pages/suspended'
 import { AppDataProvider } from './providers/app-data-provider'
 import { WindowProvider } from './providers/window'
 import { subscribeEntitlementRefresh } from './services/entitlement-refresh'
@@ -56,6 +57,14 @@ const initializeApp = (initialThemeMode: 'light' | 'dark') => {
   // is a much easier property to hold than "every page remembers to check".
   const Shell = () => {
     const [activated, setActivated] = useState<boolean | null>(null)
+    // The kick-out state, kept alongside `activated` rather than folded into it.
+    //
+    // `activated` means "a code is stored", and a SUSPENSION deliberately keeps
+    // the code — so `activated` stays true for a device an operator has kicked
+    // out. Branching on it alone would render the normal app for that device,
+    // which is the bug this exists to prevent. The two are separate facts and are
+    // stored separately.
+    const [suspended, setSuspended] = useState(false)
 
     // Remove the initial loading overlay once this component has painted.
     //
@@ -90,6 +99,7 @@ const initializeApp = (initialThemeMode: 'light' | 'dark') => {
             // device that no longer had one. The only way a student saw it was to
             // close and reopen the app, which is why that became the workaround.
             setActivated(status.activated)
+            setSuspended(status.suspended)
           })
           .catch(() => {
             // If we cannot read the state, assume NOT activated — but only on
@@ -115,10 +125,31 @@ const initializeApp = (initialThemeMode: 'light' | 'dark') => {
       // than a prop.
       const unsubscribe = subscribeEntitlementRefresh(() => void read())
 
+      // ...and when the BACKEND says the account changed, which is the only way a
+      // kick-out reaches this screen in time to matter.
+      //
+      // The five-minute interval above is right for a change nobody is waiting
+      // for. It is wrong for a suspension: an operator has just cut this student
+      // off, and leaving them connected until the next poll means the admin action
+      // appears to have done nothing — the report that started this work. The
+      // backend emits `locus://entitlement-changed` from the refusal and
+      // reinstatement paths; this re-reads status rather than trusting the
+      // payload, so a missed event delays the screen instead of making it lie.
+      let unlisten: (() => void) | undefined
+      void (async () => {
+        const { listen } = await import('@tauri-apps/api/event')
+        const stop = await listen('locus://entitlement-changed', () => {
+          void read()
+        })
+        if (cancelled) stop()
+        else unlisten = stop
+      })()
+
       return () => {
         cancelled = true
         window.clearInterval(timer)
         unsubscribe()
+        unlisten?.()
       }
     }, [])
 
@@ -136,6 +167,22 @@ const initializeApp = (initialThemeMode: 'light' | 'dark') => {
           <CircularProgress size={28} />
         </Box>
       )
+    }
+
+    // ── The kick-out screen, BEFORE the activation gate ──
+    //
+    // Order matters and is the whole reason this is not folded into `!activated`.
+    // A suspended device still holds its code (that is what makes unsuspending
+    // work), so `activated` is true and the activation gate would NOT catch it.
+    // And it must not: showing a code prompt to a suspended student would invite
+    // them to re-enter a code that is already saved, and the hub would refuse it
+    // for the same reason.
+    //
+    // What they get instead says what happened and who to ask — and, because the
+    // state is reversible, they are returned here by the backend the moment an
+    // operator reinstates the code.
+    if (suspended) {
+      return <SuspendedScreen />
     }
 
     if (!activated) {

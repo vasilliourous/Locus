@@ -21,9 +21,11 @@
 //!   * a **config refresh** is applied through the same path activation uses, so
 //!     there is one route from "the hub said something changed" to "the core is
 //!     running it";
-//!   * a **suspension or expiry** clears the entitlement and takes the tunnel
-//!     down, because a device the hub has refused must not keep a tunnel up on
-//!     the strength of a stale local record;
+//!   * a **suspension** stops the tunnel and the loop and records a REVERSIBLE
+//!     state — the code is kept, so unsuspending restores the session;
+//!   * any **other refusal** (unknown code, expiry) clears the entitlement,
+//!     because a device the hub has refused must not keep a tunnel up on the
+//!     strength of a stale local record;
 //!   * an **update signal** is recorded, not acted on. Installing is the
 //!     student's decision, and doing it silently mid-session would kill their
 //!     connection without asking.
@@ -32,6 +34,20 @@ use crate::locus::heartbeat::{BeatOutcome, Credential, HeartbeatLoop};
 use crate::locus::{apply, store};
 use clash_verge_logging::{Type, logging};
 use std::sync::Mutex;
+use tauri::Emitter as _;
+
+/// The event that tells a live window the ACCOUNT state changed.
+///
+/// The frontend used to learn about a refusal only from its own 5-minute poll
+/// (`SUBSCRIPTION_POLL_MS`). That is a defensible cadence for a warning badge and
+/// an indefensible one for "your access has been withdrawn": a student kicked out
+/// at 10:00 kept working until 10:05. This event closes that, and it is the
+/// backend's only channel to the gate besides `locus_status`.
+///
+/// Carries a short reason label (`"suspended"`, `"refused"`, `"reinstated"`) for
+/// logging and for the UI to log; the authoritative state is always re-read from
+/// `locus_status`, so a missed event delays the screen rather than making it lie.
+pub const ENTITLEMENT_CHANGED_EVENT: &str = "locus://entitlement-changed";
 
 /// Holds the running loop, if any.
 static RUNNING: Mutex<Option<HeartbeatLoop>> = Mutex::new(None);
@@ -415,8 +431,56 @@ fn offered_version_to_record<'a>(
     Some(version)
 }
 
+/// Leaves the suspended state, if this device was in it.
+///
+/// # Why an unsuspension is detected HERE
+///
+/// A successful beat is the hub saying this code is in good standing again, which
+/// is the only event that means an operator undid a kick-out. Clearing the flag is
+/// what lets the gate hand the student back their normal app without re-entering
+/// the code, and it costs nothing when there was no suspension — the flag is
+/// already absent and this returns immediately.
+///
+/// Split out of [`handle_success`] because it is one self-contained decision with
+/// its own failure modes, and inlining it pushed that function past the complexity
+/// ceiling — a fair signal that it did not belong there.
+async fn leave_suspension_if_reinstated() {
+    if !store::is_suspended(&crate::config::Config::verge().await.latest_arc()) {
+        return;
+    }
+
+    logging!(
+        info,
+        Type::Config,
+        "[locus] the hub has reinstated this code; leaving the suspended state"
+    );
+
+    if let Err(error) = store::clear_suspension().await {
+        logging!(warn, Type::Config, "[locus] could not clear the suspension: {error:#}");
+    }
+
+    // Restart the loop `handle_refusal` stopped, from the record that was just
+    // cleared. Without this the flag would be gone and nothing would ever beat
+    // again, so the NEXT suspension would go unnoticed indefinitely — the original
+    // bug, restored by the fix for it.
+    //
+    // `start` validates the stored credential and no-ops without one, so this
+    // cannot resurrect a loop for a device that has no code.
+    let verge = crate::config::Config::verge().await;
+    if let Some(activation) = store::read(&verge.latest_arc()) {
+        start(activation);
+    }
+
+    // Tell the window, so the kick-out page is replaced now rather than at the
+    // next 5-minute poll. A reinstatement the student has to wait for is
+    // indistinguishable from one that did not work.
+    let _ = crate::core::handle::Handle::app_handle().emit(ENTITLEMENT_CHANGED_EVENT, "reinstated");
+}
+
 /// A successful beat: record it, then act on anything the hub changed.
 async fn handle_success(response: &crate::locus::heartbeat::HeartbeatResponse) {
+    leave_suspension_if_reinstated().await;
+
     let now = chrono::Utc::now().timestamp();
     if let Err(error) = store::record_heartbeat_success(now).await {
         logging!(
@@ -588,11 +652,45 @@ async fn apply_refreshed_config(config: &crate::locus::contract::TierConfig, udp
     }
 }
 
+/// Whether a refusal message means "an operator suspended this code".
+///
+/// # Why this keys on the message, and why that is acceptable HERE
+///
+/// The hub answers a suspension with a 403 whose body carries the sentence, and
+/// the client has no other channel for the distinction — the status code is
+/// shared with every other refusal. That is the same fragile coupling
+/// `activation_contract.rs` already pins for the activation path, and the wording
+/// is frozen for exactly this reason.
+///
+/// The consequence of getting it WRONG is deliberately mild in one direction: a
+/// message we fail to recognise falls through to the destructive path, which is
+/// the pre-existing behaviour — the device is refused and its code cleared. The
+/// failure mode is "we did not get the nicer, reversible behaviour", never "a
+/// refusal was ignored". The opposite mistake (treating a non-suspension as one)
+/// is guarded by the substring being specific to the two sentences the hub emits.
+#[must_use]
+fn is_suspension(reason: &str) -> bool {
+    reason.to_ascii_lowercase().contains("suspended")
+}
+
 /// The hub has definitively refused this device: suspended, expired, or unknown.
 ///
 /// Tears the entitlement down and stops the tunnel. Leaving it up would keep
 /// working on the strength of a stale local record, which is precisely what
 /// suspension exists to prevent.
+///
+/// # A suspension is reversible, and nothing else is
+///
+/// Both branches stop the tunnel and the loop; the difference is what happens to
+/// the CREDENTIAL:
+///
+///   * **Suspended** — the code is kept, along with the tier and expiry, and a
+///     flag is set. An operator unsuspending this code restores the session on
+///     the next beat with no re-entry and no restart. Deleting the code here would
+///     make "undo" mean "find your card again", on every machine.
+///   * **Anything else** (unknown code, expiry, a credential the hub will not
+///     accept) — the code is cleared, because there is nothing to come back to.
+///     A code the hub does not recognise is not going to start being recognised.
 async fn handle_refusal(reason: &str) {
     logging!(warn, Type::Config, "[locus] the hub refused this device: {reason}");
 
@@ -611,6 +709,24 @@ async fn handle_refusal(reason: &str) {
     // beat, so by the time the student looks at the app the only remaining
     // evidence is whatever was written here. Order matters: a crash between the
     // two leaves an explained refusal, never an unexplained one.
+    if is_suspension(reason) {
+        // `record_suspension` writes the reason too, so it is not called twice.
+        if let Err(error) = store::record_suspension(reason).await {
+            logging!(warn, Type::Config, "[locus] could not record the suspension: {error:#}");
+        }
+        // The credential is deliberately left in place — see `record_suspension`.
+        logging!(
+            info,
+            Type::Config,
+            "[locus] suspended: the code is kept so unsuspending restores the session"
+        );
+        // The window must show this NOW. Without the event the kick-out page waits
+        // for the gate's 5-minute poll, which on a background app is the whole
+        // working day.
+        let _ = crate::core::handle::Handle::app_handle().emit(ENTITLEMENT_CHANGED_EVENT, "suspended");
+        return;
+    }
+
     if let Err(error) = store::record_refusal(reason).await {
         logging!(
             warn,
@@ -622,6 +738,10 @@ async fn handle_refusal(reason: &str) {
     if let Err(error) = store::clear_entitlement().await {
         logging!(warn, Type::Config, "[locus] could not clear the entitlement: {error:#}");
     }
+
+    // Same reason as the suspension arm: the gate polls, and a withdrawal the
+    // student has to notice by waiting is a withdrawal they can act on meanwhile.
+    let _ = crate::core::handle::Handle::app_handle().emit(ENTITLEMENT_CHANGED_EVENT, "refused");
 }
 
 #[cfg(test)]
@@ -637,6 +757,97 @@ mod tests {
     }
 
     /// A refusal is a definitive statement about the device, so it must be the
+    /// Both frozen suspension sentences must be recognised as a suspension.
+    ///
+    /// These are the exact strings the hub emits (`heartbeat.pb.js` and
+    /// `activation.pb.js`), and the client keys on the substring "suspended" to
+    /// decide between the REVERSIBLE path (keep the code) and the destructive one
+    /// (clear it). Getting this wrong the safe way — failing to recognise one —
+    /// degrades to the old destructive behaviour; getting it wrong the other way
+    /// would keep a dead code forever, which is why the substring is narrow.
+    #[test]
+    fn both_frozen_suspension_sentences_are_recognised() {
+        for reason in [
+            "Account suspended — contact your middleman",
+            "Code suspended",
+            // The kick-out path appends the operator's own words.
+            "Account suspended — chargeback",
+        ] {
+            assert!(
+                is_suspension(reason),
+                "{reason:?} is the hub's suspension wording and must take the \
+                 reversible path, or unsuspending cannot restore the session"
+            );
+        }
+    }
+
+    /// Every other refusal must stay destructive.
+    ///
+    /// An unknown or expired code is not coming back, so keeping its credential on
+    /// disk would leave a bearer token that can never authenticate — the exact
+    /// state `clear_entitlement` exists to remove.
+    #[test]
+    fn other_refusals_are_not_treated_as_suspensions() {
+        for reason in [
+            "Code expired",
+            "Code not found",
+            "the hub refused this device (401)",
+            "Account is on hold",
+        ] {
+            assert!(
+                !is_suspension(reason),
+                "{reason:?} is not a suspension; treating it as reversible would \
+                 keep a credential the hub will never accept"
+            );
+        }
+    }
+
+    /// A suspension must not reach `clear_entitlement`, and a non-suspension must.
+    ///
+    /// Asserted on the source because the branch needs a running app and a real
+    /// hub to execute — the same trade `signout.rs` makes for its call order. This
+    /// is the property the whole feature depends on: the credential surviving is
+    /// what makes an unsuspend a one-click repair instead of "find your card".
+    #[test]
+    fn only_a_suspension_keeps_the_credential() {
+        let source = include_str!("runtime.rs");
+        let start = source
+            .find("async fn handle_refusal")
+            .expect("handle_refusal must exist");
+        let body = &source[start..];
+        let end = body.find("#[cfg(test)]").unwrap_or(body.len());
+        let body = &body[..end];
+
+        let suspension_guard = body
+            .find("if is_suspension(reason) {")
+            .expect("the reversible path must be guarded by `is_suspension`");
+        let clearing = body
+            .find("store::clear_entitlement()")
+            .expect("the destructive path must still exist");
+
+        assert!(
+            suspension_guard < clearing,
+            "the suspension branch must be decided BEFORE the entitlement is \
+             cleared. If the clear moves above the guard, an operator's kick-out \
+             destroys the code and unsuspending can never restore the session — \
+             the student is sent back to a card they may not have."
+        );
+
+        // The suspension arm returns rather than falling through, so the clear
+        // below cannot run on a suspension path.
+        let arm = &body[suspension_guard..clearing];
+        assert!(
+            arm.contains("return;"),
+            "the suspension arm does not return, so it falls through into \
+             `clear_entitlement` and the reversible behaviour is lost"
+        );
+        assert!(
+            arm.contains("record_suspension"),
+            "the suspension arm no longer records the suspension, so the client \
+             could not tell a kick-out from any other refusal"
+        );
+    }
+
     /// branch that tears down. This pins the classification rather than the
     /// effect, because the effect needs a running app.
     #[test]

@@ -321,7 +321,8 @@ impl Tray {
         let tun_text = clash_verge_i18n::t!("tray.tooltip.tun");
         let profile_text = clash_verge_i18n::t!("tray.tooltip.profile");
 
-        let v = env!("CARGO_PKG_VERSION");
+        let current = app_handle.package_info().version.to_string();
+        let v = current.as_str();
         let reassembled_version = v.split_once('+').map_or_else(
             || v.into(),
             |(main, rest)| format!("{main}+{}", rest.split('.').next().unwrap_or("")),
@@ -668,7 +669,20 @@ async fn create_tray_menu(
 
     let show_outbound_modes_inline = verge_settings.tray_inline_outbound_modes.unwrap_or(false);
 
-    let version = env!("CARGO_PKG_VERSION");
+    // The version shown in the tray, read from the RUNNING app rather than from
+    // the compile-time constant.
+    //
+    // `app.package_info().version` is the version of the binary that is actually
+    // executing — which for an app updated in place is the same string today, but
+    // is the honest source: it is what the bundle and the About box report, so
+    // the tray cannot disagree with them even if a build is ever produced where
+    // `CARGO_PKG_VERSION` and the packaged metadata diverge.
+    //
+    // Logged on every rebuild so "the tray still shows the old number after an
+    // update" is answerable from a log line instead of a repro: the line proves
+    // whether the menu was rebuilt at all, and with what.
+    let version = app_handle.package_info().version.to_string();
+    logging!(debug, Type::Tray, "building tray menu with version {version}");
 
     let hotkeys = create_hotkeys(&verge_settings.hotkeys);
 
