@@ -478,6 +478,19 @@ still an operator action nobody has taken.
 - That the deployed hub is running this module at all — `setup.sh` deploys from
   `/root/server/` and has not re-run.
 
+> **CORRECTED 2026-11-19: the reasoning below reads a plaintext `GET` as a verdict
+> on the port, and that is not what it is.** Measured from INSIDE the school
+> network: plaintext to `:8443`/`:8453` gets the filter's own `503` page, **but an
+> opaque Shadowsocks stream on those same ports completes** — this module's exact
+> generated config reached the hub and `POST /api/activate` answered `400`
+> (PocketBase's invalid-code answer), while the plan port carried
+> `https://example.com` to `http=200`. The appliance classifies what it can
+> **read**; a stream it cannot read passes. So the reset described below is
+> evidence about **plaintext** on `:8453`, not evidence that the tunnel cannot
+> form. A24 in [`../operate/CLAIMS.md`](../operate/CLAIMS.md) §5 is the
+> measurement, and `MAINTENANCE-TUNNEL.md` §8 carries the remaining open question
+> (why the *app* still fails where a hand-built config succeeds).
+
 > **Measured from an uncensored network on 2026-11-09, and it is a NEW warning.**
 > The 2026-11-06 timeout is superseded, and by something worse than a timeout.
 > From an ordinary residential connection, `curl -v http://<hub>:8453/api/activate`

@@ -454,7 +454,11 @@ async fn retry_over_maintenance<B: Serialize + Sync>(
         target: "locus::activation_tunnel",
         "the direct connection to the hub produced no response; retrying {path} through the maintenance tunnel"
     );
-    let retry = crate::locus::activation_tunnel::hub_client_for(hub, crate::locus::hub::Timeout::Activation).await;
+    // `_retry`, not `hub_client_for`: this is the one call site allowed to START a
+    // maintenance engine. Reading only a warm one meant a cold launch found none and
+    // retried direct into the same failure — see `maintenance_proxy_or_start`.
+    let retry =
+        crate::locus::activation_tunnel::hub_client_for_retry(hub, crate::locus::hub::Timeout::Activation).await;
     let sent = retry.client().post(&url).json(body).send().await;
     if crate::locus::activation_tunnel::log_retry_outcome(&sent) {
         sent.ok()

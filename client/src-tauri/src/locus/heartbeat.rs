@@ -528,7 +528,10 @@ async fn retry_beat_over_maintenance<B: serde::Serialize + Sync>(
         target: "locus::activation_tunnel",
         "the direct heartbeat produced no response; retrying through the maintenance tunnel"
     );
-    let retry = crate::locus::activation_tunnel::hub_client_for(hub, crate::locus::hub::Timeout::Heartbeat).await;
+    // `_retry`, not `hub_client_for`: this call site may START a maintenance engine.
+    // A heartbeat on a device that dropped its plan tunnel is exactly when an engine
+    // may have been stopped at TUN-up and never restarted.
+    let retry = crate::locus::activation_tunnel::hub_client_for_retry(hub, crate::locus::hub::Timeout::Heartbeat).await;
     let sent = retry
         .client()
         .post(format!("{hub}/api/heartbeat"))

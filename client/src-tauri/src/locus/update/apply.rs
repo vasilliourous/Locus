@@ -388,7 +388,15 @@ async fn retry_download_over_maintenance(
         target: "locus::activation_tunnel",
         "the direct update download produced no response; retrying through the maintenance tunnel"
     );
-    let retry = crate::locus::activation_tunnel::hub_client_for(hub, crate::locus::hub::Timeout::Download).await;
+    // `_retry`, not `hub_client_for`: this call site may START a maintenance engine.
+    //
+    // Fixed 2026-11-19, and it was the last of the three retry sites to be missed.
+    // `hub_client_for` reads only a WARM engine, so an update on a device that had
+    // not otherwise provoked a start failed while a heartbeat on the same machine
+    // would have succeeded — for no reason a student could observe. The download is
+    // also the call that REPAIRS a blocked device, so of the three it is the one
+    // that most needs to be able to start the route it is retrying over.
+    let retry = crate::locus::activation_tunnel::hub_client_for_retry(hub, crate::locus::hub::Timeout::Download).await;
     let sent = retry.client().get(url).send().await;
     if !crate::locus::activation_tunnel::log_retry_outcome(&sent) {
         return Err(anyhow::anyhow!(

@@ -384,12 +384,38 @@ rate limit that mirrors Caddy's.
 
 **NOT verified, and not verifiable from a checkout:**
 
-- **That 8453 is reachable from the school network.** Nothing has run there since
-  the port was opened. Note that an earlier timeout on this port was misread as
-  censorship when the cause was `ufw default deny incoming` with no rule for it —
-  the port was never open, so the network was never asked.
-- **That the appliance tolerates an opaque stream on that port.** Reachability is
-  not tolerance.
+- **That 8453 is reachable from the school network.** **Answered on 2026-11-19,
+  and the answer is YES for an opaque stream.** A plaintext `GET` to `:8453`
+  returns `HTTP/1.1 503` carrying the appliance's own *"category of high-risk"*
+  page, so plaintext is blocked — but that is the appliance reading something it
+  can understand, not a closed path. Driving this tunnel's exact generated config
+  (`ss` / `2022-blake3-aes-256-gcm` / the hub address / `:8443`) through the
+  vendored `verge-mihomo` **from that network** reached the hub: `/api/health`
+  came back `403` from the path filter (decrypted, path refused — correct) and
+  `POST /api/activate` came back **`400`**, PocketBase's own invalid-code answer.
+  The plan port behaved identically: `:8445` carried `https://example.com` to
+  **`http=200`**. See A24 in [`../operate/CLAIMS.md`](../operate/CLAIMS.md) §5.
+- **That the appliance tolerates an opaque stream on that port.** **Answered on
+  2026-11-19, and the answer is YES.** The premise this tunnel was built on —
+  *"the block is a property of whether a name is exposed, so a Shadowsocks stream
+  presents no name and gets through"* (`ACTIVATION-TUNNEL.md` §1.3,
+  `MAINTENANCE-TUNNEL.md` §2) — **holds.** The appliance classifies what it can
+  READ (plaintext here, TLS there) and answers in place on the ports it has
+  classified; a stream it cannot read passes through even on those same ports.
+  That is exactly why the two engine runs above succeed where the plaintext
+  `GET`s on the identical ports do not.
+  **An earlier revision of this entry said the opposite and was wrong.** It
+  tested plaintext `GET`s and inferred the destination was unreachable — the same
+  error as "an earlier timeout was misread as censorship" below.
+- **Why the APP fails where a hand-built config succeeds.** The open defect, and
+  it is a client-side one: the tunnel works from that network when driven by
+  hand, and a raw-address Shadowsocks profile in Clash Verge Rev works, but the
+  app does not form the connection. Candidates and the measurement that settles
+  each are in `MAINTENANCE-TUNNEL.md` §8 — the first is whether the shipped build
+  carries `LOCUS_FREE_TIER_KEY` at all, which until 2026-11-19 nothing reported
+  (`build_stamp()` named only the activation key; it now names both, guarded by
+  `the_build_stamp_reports_the_maintenance_tunnel_too`, shown failing against the
+  old line).
 - **That a device could have used it at all, before 2026-11-06.** Three defects
   each independently made the tunnel inert: `Failure::Refused` did not trigger the
   fallback (and a filtering appliance answers either way depending on how far it

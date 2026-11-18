@@ -400,8 +400,16 @@ pub fn run() -> std::process::ExitCode {
                 //
                 // Nothing routes through it yet — `hub_client_for` decides that
                 // per call, and this session has not seen a failure.
+                // Driven through the supervisor, not `warm_maintenance` directly
+                // (2026-11-19). Calling `warm_maintenance` here bypassed the state
+                // machine entirely: the engine could be started without the
+                // supervisor ever entering `Carrying`, so the first poll saw
+                // `Warming` with an engine already up. `supervise(false)` is the
+                // honest description of what is known at startup — nothing has been
+                // proven yet — and it starts the engine because that is what
+                // `Warming` does.
                 AsyncHandler::spawn(|| async {
-                    crate::locus::activation_tunnel::warm_maintenance().await;
+                    crate::locus::activation_tunnel::supervise(false).await;
                 });
 
                 if let Err(e) = app_init::setup_autostart(app) {

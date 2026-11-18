@@ -171,6 +171,26 @@ pub fn activation_tunnel_available() -> bool {
     BOOTSTRAP_KEY.is_some_and(|key| !key.is_empty())
 }
 
+/// Whether this build carries the **maintenance** tunnel's key.
+///
+/// The companion to [`activation_tunnel_available`], and deliberately separate:
+/// the two tunnels use different credentials against different listeners, and a
+/// build can have one and not the other. Nothing reported that before 2026-11-19 —
+/// `Bootstrap::maintenance()` simply returned `None` and the routing rule took the
+/// direct branch, which on a censored network is indistinguishable from the
+/// network refusing everything. See `build_stamp`.
+#[must_use]
+pub fn maintenance_tunnel_available() -> bool {
+    option_env!("LOCUS_FREE_TIER_KEY").is_some_and(|key| !key.is_empty())
+}
+
+/// What the build script said about the free-tier key.
+///
+/// Same two-way agreement as [`BOOTSTRAP_KEY_PRESENT`], and for the same reason:
+/// a cached rebuild whose environment changed without this crate being rebuilt is
+/// the one condition where the source and the build script disagree.
+const FREE_TIER_KEY_PRESENT: &str = env!("LOCUS_FREE_TIER_KEY_PRESENT");
+
 /// One line describing this build's bootstrap capability, for the support log.
 ///
 /// The key is never rendered — only whether one was compiled in, and whether the
@@ -183,10 +203,30 @@ pub fn activation_tunnel_available() -> bool {
 pub fn build_stamp() -> String {
     let key_in_build = activation_tunnel_available();
     let build_script_says = BOOTSTRAP_KEY_PRESENT == "1";
+    // The maintenance tunnel's key, on the SAME line since 2026-11-19.
+    //
+    // Why it belongs here rather than in its own message: on the network these
+    // exist for, the two failures are indistinguishable to a student and were
+    // previously indistinguishable in a log too. Measured 2026-11-19 — the
+    // maintenance tunnel DOES work from the school network when driven by hand, so
+    // "no key in this build" is a real, presently-possible explanation for the app
+    // failing where a hand-built config succeeds, and nothing said so.
+    let maintenance_in_build = maintenance_tunnel_available();
+    let maintenance_script_says = FREE_TIER_KEY_PRESENT == "1";
+    let maintenance = if maintenance_in_build == maintenance_script_says {
+        if maintenance_in_build {
+            "available"
+        } else {
+            "NOT COMPILED IN"
+        }
+    } else {
+        "INCONSISTENT BUILD — rebuild before shipping it"
+    };
     if key_in_build == build_script_says {
         format!(
-            "activation tunnel: {}, listener port {} → filter port {}",
+            "activation tunnel: {}, maintenance tunnel: {}, listener port {} → filter port {}",
             if key_in_build { "available" } else { "NOT COMPILED IN" },
+            maintenance,
             TUNNEL_PORT,
             FILTER_PORT
         )
@@ -194,7 +234,7 @@ pub fn build_stamp() -> String {
         format!(
             "activation tunnel: INCONSISTENT BUILD — key present={key_in_build}, build script \
              reported {BOOTSTRAP_KEY_PRESENT}. The tunnel is {} in this binary; rebuild before \
-             shipping it.",
+             shipping it. (maintenance tunnel: {maintenance})",
             if key_in_build { "usable" } else { "unusable" }
         )
     }
@@ -722,26 +762,80 @@ fn render_config(forward_port: u16, targets: &[Target], key: &str, destination_p
 /// it to fail, and do it again after `Backoff` — repeatedly, for the life of the
 /// session, on a student's machine.
 ///
-/// One failed attempt is a property of the network, not of that request, so it is
-/// remembered: a second attempt in the same process is skipped and the caller
-/// reports its original failure. Session-scoped on purpose — a process restart is
-/// a reasonable moment to re-test, and a stale "it did not work" that never
-/// expired would disable the feature for a student who later moved networks.
+/// A failed attempt IS a property of the network, so attempts are counted rather
+/// than acted on immediately — see [`TUNNEL_MAX_ATTEMPTS`] for why one failure was
+/// the wrong threshold. Session-scoped: a process restart is a reasonable moment to
+/// re-test.
+/// How many failed attempts this session has spent, and when the last one was.
 ///
-/// One static, read and written by both accessors below. Two `OnceLock`s would
-/// initialise independently and the flag would never be observed as set — the
-/// spawn-every-beat bug this exists to prevent, wearing a disable flag.
-fn tunnel_failed_flag() -> &'static std::sync::atomic::AtomicBool {
-    static FAILED: std::sync::OnceLock<std::sync::atomic::AtomicBool> = std::sync::OnceLock::new();
-    FAILED.get_or_init(|| std::sync::atomic::AtomicBool::new(false))
+/// # Why a counter replaced a boolean (2026-11-19)
+///
+/// This used to be one flag: the first failed attempt disabled the tunnel for the
+/// rest of the process. The reasoning — "one failure is a property of the network,
+/// not of that request" — is right about the *network* and wrong about the
+/// *session*, for a reason specific to what this tunnel is for:
+///
+///   * A student on the school network mistypes a code. The lookup fails, the
+///     tunnel records a failure, and the **correction** they type next is refused
+///     before it is attempted. They see the same error twice and conclude the app
+///     is broken, on the one network where this is the only route.
+///   * The engine can fail to start for reasons that are transient and local — a
+///     cold page cache, a slow disk — and those are exactly the conditions on a
+///     school laptop.
+///
+/// So the rule is now: retry, but a bounded number of times and not in a tight
+/// loop. [`TUNNEL_MAX_ATTEMPTS`] failures disable it for the session as before; a
+/// success clears the count. A heartbeat loop cannot spin, because attempts only
+/// accumulate and reset on success.
+fn tunnel_failure_state() -> &'static tokio::sync::Mutex<(u8, Instant)> {
+    static STATE: std::sync::OnceLock<tokio::sync::Mutex<(u8, Instant)>> = std::sync::OnceLock::new();
+    STATE.get_or_init(|| tokio::sync::Mutex::new((0, Instant::now())))
 }
 
+/// Failures allowed in one session before the tunnel is given up on.
+///
+/// Three, not one: enough for a mistyped code to be corrected and for one transient
+/// engine-start failure, few enough that a network which genuinely refuses the
+/// bootstrap cannot spawn an engine per beat for the life of the session.
+const TUNNEL_MAX_ATTEMPTS: u8 = 3;
+
+/// How long after the last failure a retry becomes available again.
+///
+/// The backoff, separate from the attempt cap: three failures in ten seconds is a
+/// broken network, three failures spread over a minute is a student correcting a
+/// typo. Both are allowed to differ.
+const TUNNEL_RETRY_BACKOFF: Duration = Duration::from_secs(20);
+
 fn tunnel_already_failed() -> bool {
-    tunnel_failed_flag().load(std::sync::atomic::Ordering::Relaxed)
+    // `try_lock` so this stays callable from a non-async context and never blocks a
+    // request behind another. A contended lock means another call is mid-failure,
+    // which is itself a reason to answer "yes, it has failed".
+    let Ok(state) = tunnel_failure_state().try_lock() else {
+        return true;
+    };
+    let (attempts, last) = *state;
+    attempts >= TUNNEL_MAX_ATTEMPTS && last.elapsed() < TUNNEL_RETRY_BACKOFF
 }
 
 fn remember_tunnel_failure() {
-    tunnel_failed_flag().store(true, std::sync::atomic::Ordering::Relaxed);
+    if let Ok(mut state) = tunnel_failure_state().try_lock() {
+        state.0 = state.0.saturating_add(1);
+        state.1 = Instant::now();
+    }
+}
+
+/// Clears the failure count after a call that succeeded.
+///
+/// The other half of the bounded-retry rule. Without it the counter only ever
+/// climbs, so three failures spread across a long session — a typo, a sleep/wake,
+/// a Wi-Fi change — would eventually disable the tunnel for a network that had been
+/// working. Resetting on success makes the cap mean "three in a row", which is the
+/// thing that actually indicates a broken network.
+fn forget_tunnel_failure() {
+    if let Ok(mut state) = tunnel_failure_state().try_lock() {
+        state.0 = 0;
+        state.1 = Instant::now();
+    }
 }
 
 /// How long a running bootstrap engine is kept for the next call.
@@ -915,6 +1009,27 @@ pub(crate) fn preference_guard() -> std::sync::MutexGuard<'static, ()> {
     GUARD.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
+/// The retry decision with the transport-failure half supplied, for a test.
+///
+/// [`should_retry_over_maintenance`] takes a `&reqwest::Error`, which a test cannot
+/// construct without performing a failing request — and this rule must be testable
+/// without the network, because the condition it exists for (no engine warm yet) is
+/// exactly the one a unit test can arrange and a network test cannot. Passing the
+/// `no_status` half in directly keeps the rule itself in one place: this is the
+/// same expression, not a parallel copy.
+#[cfg(test)]
+pub(crate) fn should_retry_over_maintenance_for_tests(no_status: bool) -> bool {
+    no_status && maintenance_tunnel_available()
+}
+
+/// Clears the bounded-retry counter. **Tests only**, for the same reason
+/// [`forget_prefer_maintenance_for_tests`] exists: the state is process-wide and
+/// `cargo test` shares one process across concurrent tests.
+#[cfg(test)]
+pub(crate) fn clear_tunnel_failures_for_tests() {
+    forget_tunnel_failure();
+}
+
 /// Clears the preference. **Tests only.**
 ///
 /// The flag is process-wide and set for the life of the process by design, so a
@@ -939,22 +1054,135 @@ pub fn maintenance_proxy() -> Option<String> {
     slot.as_ref().map(Tunnel::proxy_address)
 }
 
+/// The maintenance engine's SOCKS URL, **starting one if none is warm.**
+///
+/// # Why this exists, and what it fixes (2026-11-19)
+///
+/// [`maintenance_proxy`] answers one question — "is one warm *right now*" — and it
+/// answers `None` in three different situations that the old routing code treated
+/// identically:
+///
+///   * this build has no free-tier key;
+///   * the engine has not started yet;
+///   * the engine was stopped at TUN-up.
+///
+/// The retry path only ever read it, never started it. So a student who submits a
+/// code before the background warm has finished — the normal case on a cold launch,
+/// where the warm is racing a 60 MB sidecar load — reaches
+/// `retry_over_maintenance`, finds `None`, and sends the retry **direct**, where it
+/// fails with exactly the failure that triggered it. The log then shows a retry
+/// that failed for no stated reason, and the student sees the same error as before.
+///
+/// This measured as a real possibility on 2026-11-19: the tunnel demonstrably
+/// carries enrolment from the school network when the config is driven by hand, so
+/// "the app cannot" is a defect of this path, not of the network.
+///
+/// Starting on demand is deliberately the *retry's* behaviour and not the startup
+/// path's: [`warm_maintenance`] still runs at setup so the engine is usually already
+/// there, and this only pays the 60 MB load in the case where waiting was not an
+/// option. It cannot block the failure it is handling for longer than
+/// [`STARTUP_TIMEOUT`], and a failure to start is reported rather than swallowed.
+pub async fn maintenance_proxy_or_start() -> Option<String> {
+    if let Some(proxy) = maintenance_proxy() {
+        return Some(proxy);
+    }
+
+    // No key means no amount of waiting will help; say so rather than spending the
+    // startup timeout discovering it.
+    if Bootstrap::maintenance().is_none() {
+        tracing::warn!(
+            target: "locus::activation_tunnel",
+            "the maintenance tunnel cannot be started: this build carries no free-tier key \
+             (see build_stamp at startup), so the retry was not attempted"
+        );
+        return None;
+    }
+
+    // A real hub call needs a route, and a student who has just moved networks (home
+    // to school, or the reverse) must not be refused because the budget was spent on
+    // the previous one. The cap exists to stop a tight background loop, not to
+    // refuse a foreground request, so this path resets it.
+    //
+    // The background loop still stops after `MAINTENANCE_START_ATTEMPTS`; the
+    // difference is that a retry only happens when there is an actual request to
+    // carry, which is the event that tells us the network may have changed.
+    clear_failed_starts();
+
+    tracing::info!(
+        target: "locus::activation_tunnel",
+        "no maintenance engine was warm at the moment it was needed; starting one now"
+    );
+    if !warm_maintenance().await {
+        tracing::warn!(
+            target: "locus::activation_tunnel",
+            "the maintenance engine could not be started, so the retry did not happen"
+        );
+        return None;
+    }
+    maintenance_proxy()
+}
+
+/// Why the maintenance engine must not be started right now, if it must not.
+///
+/// Returns the reason for the log, or `None` when starting is appropriate. Every
+/// refusal is a *state*, not an error:
+///
+///   * **already warm** — nothing to do, and starting a second would replace a
+///     working listener;
+///   * **draining** — a handover is stopping the engine on purpose. Starting here
+///     would fight it: the drain would kill the process this just spawned;
+///   * **budget spent** — a network that refuses the bootstrap attempted a start on
+///     every warm call before this existed: roughly every 25 s for the life of the
+///     session, each costing the 10 s `STARTUP_TIMEOUT`. That was bounded in *rate*
+///     but not in *total*, so a student's laptop kept loading a 60 MB binary
+///     forever. A few attempts cover a transient local failure (cold page cache, a
+///     slow disk); a network that refuses the bootstrap will refuse it on the fourth
+///     as surely as on the first.
+#[must_use]
+fn refusal_to_start() -> Option<String> {
+    if maintenance_proxy().is_some() {
+        return Some("an engine is already warm; not starting a second".to_owned());
+    }
+    if is_draining() {
+        return Some("a handover is draining the maintenance engine; not starting another".to_owned());
+    }
+    if start_attempts_exhausted() {
+        return Some(format!(
+            "the maintenance engine has failed to start {MAINTENANCE_START_ATTEMPTS} times this \
+             session; not trying again until a hub call retries on demand"
+        ));
+    }
+    if Bootstrap::maintenance().is_none() {
+        return Some("no free-tier key in this build; direct only".to_owned());
+    }
+    None
+}
+
 /// Starts the maintenance engine and holds it, unless one is already warm.
 ///
 /// Returns whether a maintenance route exists afterwards. Called from app setup
 /// and again when the tunnel drops; both are "make sure one is running", so this
 /// is idempotent rather than a start/stop pair with its own state.
 pub async fn warm_maintenance() -> bool {
-    // Cheap check first: a warm engine needs no lock beyond this.
-    if maintenance_proxy().is_some() {
-        return true;
+    // Every reason not to start, in one place. Extracted so this function stays
+    // within the crate's cognitive-complexity budget and so the refusals read as a
+    // list rather than as a chain of early returns interleaved with the work.
+    //
+    // The answer is NOT simply "false on refusal". This function returns whether a
+    // ROUTE EXISTS, and one refusal — "already warm" — means yes. Collapsing the
+    // two made a functioning engine report failure, which `maintenance_proxy_or_start`
+    // reads as "the start did not happen" and logs as such. The distinction is one
+    // line and was wrong in the first version of this refactor.
+    if let Some(reason) = refusal_to_start() {
+        tracing::debug!(target: "locus::activation_tunnel", "{reason}");
+        return maintenance_proxy().is_some();
     }
 
     let Some(bootstrap) = Bootstrap::maintenance() else {
-        // Once per warm attempt, which is once per status poll while the tunnel is
-        // down — hence `debug`, not `warn`. A build without the key is a normal
-        // branch build, and a warn would train readers to ignore the tag.
-        tracing::debug!("[maintenance] no key, direct only");
+        // Unreachable in practice — `refusal_to_start` already excludes it — but
+        // kept as the total form rather than an `expect`: a build without the key is
+        // a normal branch build, and a panic here would be a worse failure than the
+        // silent direct route.
         return false;
     };
 
@@ -963,12 +1191,52 @@ pub async fn warm_maintenance() -> bool {
 
     let mut slot = maintenance_slot().lock().await;
     if slot.is_some() {
-        // Another caller won the race. Theirs is already serving, so drop this
-        // one rather than replacing a working listener with a second.
+        // Another caller won the race. Theirs is already serving, so drop this one
+        // rather than replacing a working listener with a second.
+        //
+        // `started` is moved out of scope here and its `Drop` kills the child, so
+        // the losing engine is not leaked — that is what makes returning early
+        // safe. And the answer is `true` because a route genuinely exists: the
+        // OTHER caller's engine is in the slot and serving.
         return true;
     }
     *slot = started;
     log_warm(slot.as_ref())
+}
+
+/// Start attempts allowed in one session.
+///
+/// Three, matching `TUNNEL_MAX_ATTEMPTS` on the request path. A start costs
+/// `STARTUP_TIMEOUT` (10 s) plus the engine load, so this bounds a refusing network
+/// to about 30 s of wasted work rather than an unbounded sequence of them.
+pub const MAINTENANCE_START_ATTEMPTS: u8 = 3;
+
+fn start_attempt_counter() -> &'static std::sync::atomic::AtomicU8 {
+    static COUNT: std::sync::OnceLock<std::sync::atomic::AtomicU8> = std::sync::OnceLock::new();
+    COUNT.get_or_init(|| std::sync::atomic::AtomicU8::new(0))
+}
+
+fn start_attempts_exhausted() -> bool {
+    start_attempt_counter().load(std::sync::atomic::Ordering::SeqCst) >= MAINTENANCE_START_ATTEMPTS
+}
+
+/// Records one FAILED start attempt.
+///
+/// Success is deliberately not recorded. A working engine must never inch the
+/// session towards the cap, or a student who reconnects three times would disable a
+/// route that was working perfectly — the same mistake the old "one failure
+/// disables the session" flag made, one level down.
+fn record_failed_start() {
+    start_attempt_counter().fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+}
+
+/// Clears the failure count after a start that succeeded.
+///
+/// The other half of the bounded rule, for the same reason as
+/// `forget_tunnel_failure`: the cap means "three failures in a row", not "three
+/// ever".
+fn clear_failed_starts() {
+    start_attempt_counter().store(0, std::sync::atomic::Ordering::SeqCst);
 }
 
 /// Starts an engine without holding the slot, reporting failure rather than
@@ -976,8 +1244,14 @@ pub async fn warm_maintenance() -> bool {
 /// outcome a caller branches on.
 async fn start_quietly(bootstrap: &Bootstrap) -> Option<Tunnel> {
     match Tunnel::start_with(bootstrap).await {
-        Ok(tunnel) => tunnel,
+        Ok(tunnel) => {
+            // A start that worked resets the budget, so the cap cannot accumulate
+            // across a session in which the route mostly works.
+            clear_failed_starts();
+            tunnel
+        }
         Err(error) => {
+            record_failed_start();
             tracing::warn!(
                 target: "locus::activation_tunnel",
                 "could not start the maintenance tunnel: {error:#}"
@@ -999,14 +1273,476 @@ fn log_warm(slot: Option<&Tunnel>) -> bool {
     true
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// The supervisor
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// When the maintenance engine may be stopped, as a state machine.
+///
+/// # Why this exists (2026-11-19)
+///
+/// The lifecycle used to be a two-branch `if` evaluated on every status poll:
+/// ready → stop, otherwise → warm. That is unstable for a reason that is easy to
+/// miss, because the signal it reads is *good*: `probe::decide` reaches
+/// `Readiness::Ready` only on evidence that a payload moved (a completed egress
+/// round trip, or bytes on the Core's `/traffic` stream) — Core-up is explicitly
+/// not evidence.
+///
+/// The problem is that `Ready` is **instantaneous**. It is recomputed per poll
+/// from the *current* sample, and returns to `Connecting` the moment a sample
+/// shows no bytes — which a page that finished loading, or a lull between two
+/// requests, produces routinely. So one unlucky sample stopped the engine, the
+/// next poll restarted it, and a student on the network this exists for watched
+/// the only route to the hub cycle on and off.
+///
+/// The states and the reasons for each transition are in
+/// `docs/reference/TUNNEL-SUPERVISOR.md` §3. The short version: `Ready` must be
+/// **sustained** for [`TUNNEL_HOLD`] before the engine is stopped, and stopping is
+/// a distinct state so that "traffic resumed mid-handover" can cancel it without
+/// having touched the engine at all.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Supervised {
+    /// No engine; one is being started, or the last start failed.
+    Warming,
+    /// Engine up, the plan tunnel has not proven itself. Carries all app traffic.
+    Carrying,
+    /// Engine STILL up, but `Ready` has held long enough to start the handover.
+    /// The engine is not stopped until this state is reached, and it survives any
+    /// poll on which `Ready` is lost.
+    Handover,
+    /// Engine stopped; the plan tunnel carries the app's traffic.
+    Stopped,
+}
+
+/// How long `Ready` must persist before the engine is stopped.
+///
+/// Chosen against the two poll intervals: 10 s is an order of magnitude longer
+/// than the 750 ms connecting poll, so a single sample cannot cause a transition,
+/// and shorter than the 15 s idle poll, so a handover completes within one tick.
+///
+/// This is a reasoned value, not a measured one. If the handover still cycles on
+/// the school network, this constant is the thing to change — and only after a log
+/// shows the cycle, so the number is not adjusted to hide some other fault.
+pub const TUNNEL_HOLD: Duration = Duration::from_secs(10);
+
+/// What the supervisor reads on each poll. Pure inputs, so the machine is
+/// testable without a Core, a network or an engine.
+#[derive(Debug, Clone, Copy)]
+pub struct Observations {
+    /// The plan tunnel is carrying traffic *right now* (`Readiness::Ready`).
+    pub ready_now: bool,
+    /// An engine is warm.
+    pub engine_up: bool,
+}
+
+/// The supervisor's own state, separate from the engine's.
+#[derive(Debug, Clone, Copy)]
+pub struct Supervisor {
+    state: Supervised,
+    /// When `ready_now` first became true in the current run of true samples.
+    ready_since: Option<Instant>,
+}
+
+impl Supervisor {
+    /// A supervisor at startup: nothing warm, nothing proven.
+    #[must_use]
+    pub const fn new() -> Self {
+        Self {
+            state: Supervised::Warming,
+            ready_since: None,
+        }
+    }
+
+    /// The current state, for reporting.
+    #[must_use]
+    pub const fn state(self) -> Supervised {
+        self.state
+    }
+
+    /// Feeds one poll, and answers with the action to take.
+    ///
+    /// # The rule, in one place
+    ///
+    /// The timestamp of a true `ready_now` is tracked across calls, so the hold is
+    /// measured against **elapsed wall time**, not a sample count: a count would
+    /// mean a different real duration at the 750 ms connecting interval than at
+    /// the 15 s idle one, which is precisely the kind of hidden coupling that made
+    /// the old rule unstable.
+    ///
+    /// A false sample **clears** the timestamp, so the hold must be earned
+    /// consecutively. That is what makes a flapping `Ready` harmless: it can never
+    /// accumulate ten seconds' worth of scattered trues.
+    pub fn observe(&mut self, seen: Observations, now: Instant) -> Action {
+        if !seen.ready_now {
+            self.ready_since = None;
+        } else if self.ready_since.is_none() {
+            self.ready_since = Some(now);
+        }
+
+        let held = self
+            .ready_since
+            .is_some_and(|since| now.duration_since(since) >= TUNNEL_HOLD);
+
+        // Every arm returns its own action, so each transition reads as one
+        // statement rather than as a fall-through to a shared tail. The alternative —
+        // a single `Action` at the bottom — is what clippy flags as "all match arms
+        // end with the same expression", and it is genuinely worse here: the action
+        // IS the difference between the arms.
+        match self.state {
+            Supervised::Warming | Supervised::Stopped => {
+                if seen.engine_up {
+                    // An engine is already up (the on-demand retry can start one
+                    // before the first poll after a failure). Adopt it rather than
+                    // replacing a working listener with a second.
+                    self.state = Supervised::Carrying;
+                    return Action::Keep;
+                }
+                // The plan tunnel is proven and nothing is warm, so nothing needs
+                // starting. Without this, a device that launches while already
+                // connected would start an engine the next poll stops.
+                if held {
+                    self.state = Supervised::Stopped;
+                    return Action::None;
+                }
+                Action::Start
+            }
+            Supervised::Carrying => {
+                if held {
+                    // The hold is met: begin the handover. The engine stays up,
+                    // because this is not a decision to stop yet.
+                    self.state = Supervised::Handover;
+                    return Action::BeginHandover;
+                }
+                Action::Keep
+            }
+            Supervised::Handover => {
+                if !seen.ready_now {
+                    // Traffic was flowing and has stopped again, or the sample that
+                    // opened the handover was the only true one. Cancel WITHOUT
+                    // having stopped the engine — the transition this state exists
+                    // to make possible.
+                    self.state = Supervised::Carrying;
+                    return Action::Keep;
+                }
+                if held {
+                    self.state = Supervised::Stopped;
+                    return Action::Stop;
+                }
+                Action::Keep
+            }
+        }
+    }
+}
+
+impl Default for Supervisor {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// The process's supervisor, and the only place its state is stored.
+///
+/// A mutex rather than an atomic because the state is a struct with a timestamp:
+/// two atomics would let a reader observe the state from one poll and the timestamp
+/// from another, which is a torn read of exactly the pair the hold rule needs to be
+/// consistent.
+fn supervisor_slot() -> &'static tokio::sync::Mutex<Supervisor> {
+    static SLOT: std::sync::OnceLock<tokio::sync::Mutex<Supervisor>> = std::sync::OnceLock::new();
+    SLOT.get_or_init(|| tokio::sync::Mutex::new(Supervisor::new()))
+}
+
+/// The supervisor's current state, for the status report.
+pub async fn supervised_state() -> Supervised {
+    supervisor_slot().lock().await.state()
+}
+
+/// Whether a detached drain is running.
+///
+/// Read by the next poll so a second `Stop` while one is draining does not start a
+/// second drain on the same slot.
+fn drain_running_flag() -> &'static std::sync::atomic::AtomicBool {
+    static FLAG: std::sync::OnceLock<std::sync::atomic::AtomicBool> = std::sync::OnceLock::new();
+    FLAG.get_or_init(|| std::sync::atomic::AtomicBool::new(false))
+}
+
+/// Starts the engine on a detached task, so no poll ever waits for it.
+///
+/// The re-entrancy guard is `warm_maintenance`'s own slot check plus
+/// `is_draining`; a second dispatch while the first is still loading finds the slot
+/// empty and starts a SECOND engine. That is prevented here by a flag rather than
+/// left to a race between two detached tasks.
+fn dispatch_start() {
+    fn starting_flag() -> &'static std::sync::atomic::AtomicBool {
+        static FLAG: std::sync::OnceLock<std::sync::atomic::AtomicBool> = std::sync::OnceLock::new();
+        FLAG.get_or_init(|| std::sync::atomic::AtomicBool::new(false))
+    }
+
+    if starting_flag()
+        .compare_exchange(
+            false,
+            true,
+            std::sync::atomic::Ordering::SeqCst,
+            std::sync::atomic::Ordering::SeqCst,
+        )
+        .is_err()
+    {
+        return;
+    }
+
+    tauri::async_runtime::spawn(async move {
+        let started = warm_maintenance().await;
+        starting_flag().store(false, std::sync::atomic::Ordering::SeqCst);
+        if !started {
+            tracing::debug!(
+                target: "locus::activation_tunnel",
+                "the detached maintenance start did not produce an engine"
+            );
+        }
+    });
+}
+
+/// Drains and stops on a detached task, so no poll ever waits for it.
+fn dispatch_drained_stop() {
+    if drain_running_flag()
+        .compare_exchange(
+            false,
+            true,
+            std::sync::atomic::Ordering::SeqCst,
+            std::sync::atomic::Ordering::SeqCst,
+        )
+        .is_err()
+    {
+        // A drain is already in flight. The next poll will see the engine gone.
+        return;
+    }
+
+    tauri::async_runtime::spawn(async move {
+        stop_maintenance_drained().await;
+        drain_running_flag().store(false, std::sync::atomic::Ordering::SeqCst);
+    });
+}
+
+/// Feeds one observation to the supervisor and performs the action it asks for.
+///
+/// **This is the whole lifecycle**, replacing the two-branch `if` in `cmd/locus.rs`.
+/// Returning the state keeps the caller's report and the decision it just made
+/// reading from the same observation, rather than from two independently timed
+/// reads.
+///
+/// The engine actions are performed here rather than returned to the caller: the
+/// decision and its effect belong together, or a future caller can act on a stale
+/// decision while a poll has already moved the machine on.
+pub async fn supervise(ready_now: bool) -> Supervised {
+    let engine_up = maintenance_proxy().is_some();
+
+    // The lock is held only across the decision, never across the engine start or
+    // stop: both are slow (a 60 MB process), and holding it would make every
+    // concurrent status poll wait for them.
+    let (action, state) = {
+        let mut supervisor = supervisor_slot().lock().await;
+        let action = supervisor.observe(Observations { ready_now, engine_up }, Instant::now());
+        (action, supervisor.state())
+    };
+
+    // **Nothing here may block the caller for longer than a status poll.**
+    //
+    // `supervise` runs inside `locus_status`, which the UI polls every 750 ms while
+    // a connect settles. A `Start` costs the engine load (up to `STARTUP_TIMEOUT`)
+    // and a drained `Stop` costs up to `DRAIN_TIMEOUT` (45 s) — so awaiting either
+    // here would stall the status command, and with it the button, for as long as
+    // the engine takes. That is a worse student-visible fault than the handover it
+    // was meant to make graceful.
+    //
+    // Both are therefore DISPATCHED and not awaited. Each is already idempotent
+    // (`warm_maintenance` checks the slot, the drain sets a flag the next poll
+    // reads), so a second poll arriving mid-flight is a no-op rather than a second
+    // engine.
+    match action {
+        Action::Start => {
+            dispatch_start();
+        }
+        Action::BeginHandover => {
+            // Deliberately does NOT stop the engine. The next polls decide, and a
+            // sample showing traffic again returns to `Carrying` with the engine
+            // never having been touched.
+            tracing::info!(
+                target: "locus::activation_tunnel",
+                "the plan tunnel has carried traffic for {}s; beginning the maintenance handover",
+                TUNNEL_HOLD.as_secs()
+            );
+        }
+        Action::Stop => {
+            tracing::info!(
+                target: "locus::activation_tunnel",
+                "handover complete: the plan tunnel is carrying traffic, draining and stopping the \
+                 maintenance engine"
+            );
+            // Drained, never the hard stop: a hub request in flight — an update
+            // download can hold the stream for up to 600 s — must not be killed by a
+            // handover it has nothing to do with. Dispatched, not awaited, so the
+            // drain cannot stall the status poll that started it.
+            dispatch_drained_stop();
+        }
+        Action::Keep | Action::None => {}
+    }
+
+    state
+}
+
+/// What the caller must do after [`Supervisor::observe`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Action {
+    /// Make sure an engine is running.
+    Start,
+    /// Leave the engine exactly as it is.
+    Keep,
+    /// Announce that the handover has begun. The engine is NOT stopped.
+    BeginHandover,
+    /// Stop the engine now — the plan tunnel has carried traffic for the hold.
+    Stop,
+    /// Nothing to do; the plan tunnel is proven and no engine is needed.
+    None,
+}
+
 /// Stops the maintenance engine, if one is running.
 ///
 /// Called when the plan tunnel is proven to carry traffic: the tunnel now carries
 /// everything, so a second route through the free tier would be a second copy of
 /// the same traffic at a worse rate.
+///
+/// # This is a HARD stop, and callers should prefer [`stop_maintenance_drained`]
+///
+/// It takes the engine out of the slot and drops it, and `Tunnel::drop` sends
+/// `kill()` to the child — SIGKILL. A request already handed to that SOCKS listener
+/// dies with it. Kept public because there are paths (app shutdown, a test) where
+/// that is exactly what is wanted; the lifecycle path uses the drained form.
 pub async fn stop_maintenance() {
     let mut slot = maintenance_slot().lock().await;
     *slot = None;
+}
+
+/// Stops the engine only once no request is using it, waiting up to
+/// [`DRAIN_TIMEOUT`].
+///
+/// # Why the hard stop was a defect (2026-11-19)
+///
+/// `Tunnel::drop` kills the child. With no drain, a handover that landed during a
+/// hub call cut that call off mid-stream — and the window is not small: the
+/// per-request ceiling is 30 s for activation, 15 s for a heartbeat and **600 s for
+/// an update download** (`timeout_seconds`). So a student who started an update and
+/// then watched the plan tunnel come up could have the download killed at any
+/// point in ten minutes, with the failure surfacing as a transport error that then
+/// triggers a *retry* — which, since the engine is now gone, starts a new one. A
+/// handover that caused a restart is the cycle this whole supervisor exists to
+/// prevent.
+///
+/// The rule: stop accepting new work, let what is in flight finish, then stop.
+/// New work is refused by [`gated_proxy`], which returns `None` for the whole
+/// duration so a caller goes direct rather than into a listener about to close.
+///
+/// # On timeout
+///
+/// A request that outlives [`DRAIN_TIMEOUT`] is abandoned and the engine stopped
+/// anyway. The alternative — waiting indefinitely — lets one hung download hold a
+/// 60 MB process on a student's machine for its full 600 s ceiling, which is
+/// worse. The abandoned request fails exactly as it would have under the old hard
+/// stop, so the timeout is not a new failure mode; it is the old one, bounded.
+pub async fn stop_maintenance_drained() {
+    // Refuse new work FIRST, and do it before the wait: a caller that arrives
+    // during the drain must not be handed a listener that is about to close.
+    set_draining(true);
+
+    let deadline = Instant::now() + DRAIN_TIMEOUT;
+    while in_flight_count() > 0 && Instant::now() < deadline {
+        tokio::time::sleep(DRAIN_POLL).await;
+    }
+
+    let outstanding = in_flight_count();
+    if outstanding > 0 {
+        tracing::warn!(
+            target: "locus::activation_tunnel",
+            outstanding,
+            "stopping the maintenance engine with {outstanding} request(s) still in flight after \
+             {}s; they will fail as they would have without the drain",
+            DRAIN_TIMEOUT.as_secs()
+        );
+    }
+
+    // The flag is cleared by a guard, not a trailing statement: a panic anywhere
+    // above (a poisoned lock, a task cancelled mid-await) would otherwise leave
+    // `draining` set forever, and every later request would take the direct route
+    // for the life of the process — the route silently disabled by the mechanism
+    // meant to hand it over cleanly. That is the same class of failure as the
+    // one-failure latch this work already removed, and it must not be reintroduced
+    // one level down.
+    let _clear = ClearDrainingOnDrop;
+
+    let mut slot = maintenance_slot().lock().await;
+    *slot = None;
+}
+
+/// Clears the draining flag when it goes out of scope, panic or not.
+struct ClearDrainingOnDrop;
+
+impl Drop for ClearDrainingOnDrop {
+    fn drop(&mut self) {
+        set_draining(false);
+    }
+}
+
+/// How long a drain waits for in-flight requests before stopping anyway.
+///
+/// Longer than the activation (30 s) ceiling, so an enrolment in progress is never
+/// cut; shorter than the 600 s download ceiling, so one hung update cannot pin a
+/// 60 MB process. A download that is still running at 45 s is abandoned — see
+/// [`stop_maintenance_drained`] for why that is the right trade.
+pub const DRAIN_TIMEOUT: Duration = Duration::from_secs(45);
+
+/// How often the drain re-checks the in-flight count.
+const DRAIN_POLL: Duration = Duration::from_millis(100);
+
+fn draining_flag() -> &'static std::sync::atomic::AtomicBool {
+    static FLAG: std::sync::OnceLock<std::sync::atomic::AtomicBool> = std::sync::OnceLock::new();
+    FLAG.get_or_init(|| std::sync::atomic::AtomicBool::new(false))
+}
+
+fn set_draining(draining: bool) {
+    draining_flag().store(draining, std::sync::atomic::Ordering::SeqCst);
+}
+
+/// Whether a handover has begun and the engine must take no new requests.
+#[must_use]
+pub fn is_draining() -> bool {
+    draining_flag().load(std::sync::atomic::Ordering::SeqCst)
+}
+
+fn in_flight_counter() -> &'static std::sync::atomic::AtomicUsize {
+    static COUNTER: std::sync::OnceLock<std::sync::atomic::AtomicUsize> = std::sync::OnceLock::new();
+    COUNTER.get_or_init(|| std::sync::atomic::AtomicUsize::new(0))
+}
+
+fn in_flight_count() -> usize {
+    in_flight_counter().load(std::sync::atomic::Ordering::SeqCst)
+}
+
+/// Marks one request as using the maintenance engine, for the life of the guard.
+///
+/// A guard rather than a pair of calls: an early `return` or a `?` in the request
+/// path would otherwise leak the count, and a leaked count means the drain waits
+/// for its full timeout on every handover.
+struct InFlight;
+
+impl InFlight {
+    fn enter() -> Self {
+        in_flight_counter().fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        Self
+    }
+}
+
+impl Drop for InFlight {
+    fn drop(&mut self) {
+        in_flight_counter().fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+    }
 }
 
 /// The hub client a call should use **first**, given this session's routing
@@ -1029,25 +1765,123 @@ pub async fn stop_maintenance() {
 /// goes direct at full speed even though the session still prefers maintenance —
 /// the flag records what the network did, not what the route is.
 pub async fn hub_client_for(hub: &str, timeout: crate::locus::hub::Timeout) -> crate::locus::hub::HubClient {
-    let proxy = if prefer_maintenance() {
-        match maintenance_proxy() {
-            Some(url) => match reqwest::Proxy::all(&url) {
-                Ok(proxy) => Some(proxy),
-                Err(error) => {
-                    tracing::warn!(
-                        target: "locus::activation_tunnel",
-                        "the maintenance proxy URL could not be used ({error:#}); using direct"
-                    );
-                    None
-                }
-            },
-            None => None,
-        }
-    } else {
-        None
+    let proxy = match proxy_if_warm() {
+        Some(url) => match reqwest::Proxy::all(&url) {
+            Ok(proxy) => Some(proxy),
+            Err(error) => {
+                tracing::warn!(
+                    target: "locus::activation_tunnel",
+                    "the maintenance proxy URL could not be used ({error:#}); using direct"
+                );
+                None
+            }
+        },
+        None => None,
     };
 
     crate::locus::hub::client_with_proxy(hub, timeout, proxy).await
+}
+
+/// The same client, but **starts a maintenance engine if none is warm.**
+///
+/// The retry path's constructor, and the reason it is a separate function rather
+/// than a flag on [`hub_client_for`]: the direct call must never pay a 60 MB engine
+/// load on a network that does not need it, and the retry has already established
+/// that it does. Keeping them apart makes that asymmetry visible at the call site
+/// instead of hidden in a boolean.
+pub async fn hub_client_for_retry(hub: &str, timeout: crate::locus::hub::Timeout) -> crate::locus::hub::HubClient {
+    let proxy = match maintenance_proxy_or_start().await {
+        Some(url) => match reqwest::Proxy::all(&url) {
+            Ok(proxy) => Some(proxy),
+            Err(error) => {
+                tracing::warn!(
+                    target: "locus::activation_tunnel",
+                    "the maintenance proxy URL could not be used ({error:#}); using direct"
+                );
+                None
+            }
+        },
+        None => None,
+    };
+
+    crate::locus::hub::client_with_proxy(hub, timeout, proxy).await
+}
+
+/// The warm maintenance proxy, whenever the route should be used for a hub call.
+///
+/// # The rule, and why it is two conditions rather than one (2026-11-19)
+///
+/// `prefer_maintenance()` alone was too narrow. It is set only *after* a direct
+/// call has already failed with no HTTP status — so the very first hub call of a
+/// session always went direct, discovered the block by failing, and then switched.
+/// On a network that blocks the domain by category that discovery is guaranteed
+/// and costs a round trip every launch.
+///
+/// The second condition is the requirement stated plainly: **if a maintenance
+/// engine is up, the app's hub traffic goes through it.** The supervisor
+/// (`Supervised::Carrying` / `Handover`) is what decides whether an engine is up;
+/// while one is, it is carrying the app's traffic without exception, and there is
+/// no reason to make a request take the route that is known to fail first.
+///
+/// This deliberately does NOT widen what the tunnel carries to the student's own
+/// traffic. Before a plan tunnel exists there is nothing to carry it, and the free
+/// tier is capped at 1 Mbps — routing a student's browsing through it would be a
+/// worse connection than none. See `TUNNEL-SUPERVISOR.md` §3.3.
+fn proxy_if_warm() -> Option<String> {
+    gated_proxy(prefer_maintenance())
+}
+
+/// The warm proxy, refusing while a handover drain is in progress.
+///
+/// # Why the gate is here and not at the call sites
+///
+/// Three call sites read this, and a gate duplicated three times is three places
+/// for "did we check draining?" to drift — the same argument that put the retry
+/// rule in one function. Putting it at the bottom means a new caller cannot forget
+/// it, which matters because the failure it prevents (a request handed to a
+/// listener that is about to be killed) is silent and looks like a network fault.
+///
+/// `prefer` is passed in rather than read, because `prefer_maintenance()` is a
+/// session-level fact while draining is a moment-level one; the two are ANDed here
+/// so the distinction stays visible.
+fn gated_proxy(prefer: bool) -> Option<String> {
+    // The warm proxy is read ONCE. Reading it twice — once to test and once to
+    // return — is how a gate ends up admitting a request the second read no longer
+    // supports, and it also made the function untestable: with no engine in a test
+    // process the two branches returned `None` either way, so an assertion here
+    // passed whether or not the gate existed. `admit` takes the proxy as a value
+    // so the gate itself can be exercised without an engine.
+    let warm = maintenance_proxy();
+    admit(prefer, warm, is_draining())
+}
+
+/// The gate, as a pure function of its three inputs.
+///
+/// Separated from [`gated_proxy`] so a test can supply a warm proxy it does not
+/// have. Reading the process's real slot made the interesting case untestable: no
+/// engine in a test binary means every branch returns `None`, and a guard written
+/// against that passes even when the gate is removed —
+/// which is exactly what happened the first time this was written.
+fn admit(prefer: bool, warm: Option<String>, draining: bool) -> Option<String> {
+    if draining {
+        // Deliberately silent: this is the NORMAL path during a handover, and a log
+        // line per request would bury the one line that says it started.
+        return None;
+    }
+    // Two independent reasons to use a warm engine, and both are real:
+    //
+    //   * `prefer` — this session has seen a transport failure, so the route is
+    //     known to be needed;
+    //   * the slot is warm — the supervisor keeps an engine up while the plan
+    //     tunnel is unproven, and while it is up it carries the app's hub traffic
+    //     without exception (the 2026-11-19 requirement).
+    //
+    // The second is why `warm` is matched rather than consumed: its presence is
+    // itself the signal.
+    if !prefer && warm.is_none() {
+        return None;
+    }
+    warm
 }
 
 /// Whether this failure is one the maintenance route should carry.
@@ -1063,7 +1897,18 @@ pub async fn hub_client_for(hub: &str, timeout: crate::locus::hub::Timeout) -> c
 /// [`crate::locus::hub::Failure::classify`] would report `Transport` and the older
 /// tunnel retry never fires on the network this exists for.
 pub fn should_retry_over_maintenance(error: &reqwest::Error) -> bool {
-    error.status().is_none() && maintenance_proxy().is_some()
+    // Deliberately NOT `maintenance_proxy().is_some()` any more (2026-11-19).
+    //
+    // That extra clause looked like a cheap guard — "do not promise a retry we
+    // cannot perform" — and it was the defect. It asked whether an engine was warm
+    // *at this instant*, which on a cold launch is no, so the single transport this
+    // network needs was refused before anything could start it. The engine is
+    // started on demand now (`maintenance_proxy_or_start`), so the question is
+    // whether this build CAN form the route, not whether it happens to be warm.
+    //
+    // A build with no key still answers false, which is right: no retry, and the
+    // startup stamp is what explains why.
+    error.status().is_none() && maintenance_tunnel_available()
 }
 
 /// Records the outcome and answers whether this failure should be retried over
@@ -1167,6 +2012,12 @@ where
         .build()
         .context("could not build the activation tunnel HTTP client")?;
 
+    // Counted for the drain in `stop_maintenance_drained`, for the whole life of
+    // this request. The guard is dropped on every path out of this function,
+    // including the `?`s below, so a failed request cannot leak the count and make
+    // the next handover wait out its full timeout.
+    let _in_flight = InFlight::enter();
+
     let url = format!("{}{path}", tunnel.http_base);
     let response = match client.post(&url).json(body).send().await {
         Ok(response) => response,
@@ -1189,6 +2040,12 @@ where
         .text()
         .await
         .with_context(|| format!("the activation tunnel returned an unreadable response ({status})"))?;
+
+    // The stream carried a real message from the hub, so the network allows this
+    // transport. Clearing the count is what makes the cap mean "three IN A ROW":
+    // without it the failures accumulate across a whole session and eventually
+    // disable a route that has been working.
+    forget_tunnel_failure();
 
     serde_json::from_str(&text).with_context(|| {
         format!("the activation tunnel returned something that is not a Locus response ({status}): {text}")
@@ -1655,6 +2512,11 @@ mod tests {
     #[tokio::test]
     async fn the_maintenance_engine_stops_and_restarts_across_a_lifecycle_transition() {
         let _serialised = slot_guard().await;
+        // Start from a KNOWN state (2026-11-19). The attempt budget and the drain
+        // flag are process-wide, so a test that leaves either set makes this one
+        // fail for reasons that have nothing to do with the lifecycle it checks.
+        clear_failed_starts();
+        set_draining(false);
 
         // No free-tier key in a test build, so a real engine cannot start. The
         // assertion is therefore on the slot, which is what both the lifecycle and
@@ -1718,11 +2580,25 @@ mod tests {
         );
     }
 
-    #[test]
-    fn there_is_no_maintenance_proxy_until_an_engine_is_held() {
-        // Nothing started it in this binary's test process, so the honest answer
-        // is `None`. If a future change starts one implicitly, this fails and the
-        // routing rule's "cold" branch loses its only coverage.
+    #[tokio::test]
+    async fn there_is_no_maintenance_proxy_until_an_engine_is_held() {
+        // The slot must be SERIALISED, not merely observed (2026-11-19). This test
+        // used to assert a cold slot with no lock, on the reasoning that "nothing
+        // started one in this process". That is true only if nothing else is
+        // running — and `cargo test` runs concurrently, so a test that warms the
+        // slot made this fail for a reason that had nothing to do with the property
+        // it checks. Clearing first makes the precondition explicit rather than
+        // assumed, which is the same fix the slot's other users already needed.
+        let _serialised = slot_guard().await;
+        // `stop_maintenance`, NOT `drop_warm_engine`. They clear different slots:
+        // `drop_warm_engine` clears `tunnel_slot` (the activation engine) while this
+        // test is about `maintenance_slot`. Using the wrong one left the fake engine
+        // from `install_fake_warm_engine` in place and made this assertion fail for a
+        // reason unrelated to what it checks — which is how the leak above was found.
+        stop_maintenance().await;
+        // Nothing held, so the honest answer is `None`. If a future change starts an
+        // engine implicitly, this fails and the routing rule's "cold" branch loses
+        // its only coverage.
         assert_eq!(
             maintenance_proxy(),
             None,
@@ -1738,6 +2614,540 @@ mod tests {
         let _serialised = preference_guard();
         forget_prefer_maintenance_for_tests();
         assert!(!prefer_maintenance(), "a fresh session must try direct first");
+    }
+
+    /// The build stamp must name BOTH tunnels, not just the activation one.
+    ///
+    /// # Why this is a test and not just a log line
+    ///
+    /// Added 2026-11-19. The stamp reported the activation key alone, so a build
+    /// could ship with the activation tunnel working and the maintenance tunnel
+    /// dead — and the support log would say "available", which is TRUE ABOUT THE
+    /// WRONG TUNNEL. On the network both exist for, that is the difference between
+    /// "this network blocks us" and "this build cannot", and it read as the former.
+    ///
+    /// Measured the same day: the maintenance tunnel DOES work from that network
+    /// when driven by hand through the generated config. So the app failing where a
+    /// hand-built config succeeds is a live possibility, and this line is the fact
+    /// that settles it.
+    ///
+    /// The assertion is on the WORD, not on the value: the value depends on whether
+    /// a test binary carries the key, which is not something a test can control.
+    /// What must never regress is that the maintenance tunnel is reported at all.
+    #[test]
+    fn the_build_stamp_reports_the_maintenance_tunnel_too() {
+        let stamp = build_stamp();
+        assert!(
+            stamp.contains("maintenance tunnel:"),
+            "the build stamp must name the maintenance tunnel, or a build without its key is \
+             indistinguishable from a network that refuses everything. Got: {stamp}"
+        );
+        assert!(
+            stamp.contains("activation tunnel:"),
+            "the activation tunnel must still be reported. Got: {stamp}"
+        );
+    }
+
+    /// **The retry must not be refused just because no engine is warm yet.**
+    ///
+    /// Added 2026-11-19, and this is the defect that could strand a student on the
+    /// one network the feature exists for. The old rule was
+    /// `error.status().is_none() && maintenance_proxy().is_some()` — a cheap guard
+    /// meaning "do not promise a retry we cannot perform". It asked whether an
+    /// engine was warm *at that instant*. On a cold launch the warm is still racing
+    /// a 60 MB sidecar load, so the answer was no, the retry was skipped, the
+    /// request went direct, and it failed with exactly the failure that triggered
+    /// it. The student saw the original error twice.
+    ///
+    /// The assertion is that the decision depends on the BUILD, not on the clock.
+    /// It is written to fail against the old conjunct: force the slot empty, and the
+    /// old code answers `false` where this demands `true`.
+    ///
+    /// FALSIFIED before keeping: re-adding `&& maintenance_proxy().is_some()` makes
+    /// this red. Verified by running it that way.
+    #[tokio::test]
+    async fn a_retry_is_decided_by_the_build_not_by_whether_an_engine_is_warm() {
+        let _serialised = slot_guard().await;
+        // Arrange the condition that broke: nothing warm.
+        drop_warm_engine().await;
+        assert!(
+            maintenance_proxy().is_none(),
+            "arranging this test requires an empty slot — another test leaked a warm engine"
+        );
+
+        // The property under test is that the two answers are INDEPENDENT when the
+        // build carries a key. A build without one legitimately refuses, which the
+        // startup stamp explains.
+        if maintenance_tunnel_available() {
+            assert!(
+                should_retry_over_maintenance_for_tests(true),
+                "a transport failure must be retryable even with no engine warm, or a cold \
+                 launch can never use the only transport a censored network allows"
+            );
+        } else {
+            assert!(
+                !should_retry_over_maintenance_for_tests(true),
+                "a build with no free-tier key must not promise a retry it cannot perform"
+            );
+        }
+    }
+
+    /// **One failed attempt must not disable the tunnel for the whole session.**
+    ///
+    /// Added 2026-11-19. The old rule was a single boolean: the first failure set
+    /// it, and every later `post` refused before doing anything. On the school
+    /// network that meant a mistyped activation code — whose lookup fails, setting
+    /// the flag — disabled the CORRECTION the student typed next. They saw the same
+    /// error twice and had to restart the app to get a third attempt, on the one
+    /// network where this is the only route to the hub.
+    ///
+    /// This pins the bounded rule: fewer than [`TUNNEL_MAX_ATTEMPTS`] failures leaves
+    /// the tunnel usable, and a success clears the count so the cap means "three in
+    /// a row" rather than "three ever".
+    ///
+    /// FALSIFIED before keeping: restoring the boolean (disable on first failure)
+    /// makes the first assertion red.
+    #[tokio::test]
+    async fn a_first_failure_does_not_disable_the_tunnel_for_the_session() {
+        // Serialised: this touches the process-wide failure counter.
+        let _serialised = slot_guard().await;
+        clear_tunnel_failures_for_tests();
+
+        assert!(!tunnel_already_failed(), "a fresh session must be able to try");
+        remember_tunnel_failure();
+        assert!(
+            !tunnel_already_failed(),
+            "one failure must not disable the tunnel — a mistyped code would lock out the \
+             correction the student types next"
+        );
+
+        // Reaching the cap DOES disable it, so a refusing network cannot spawn an
+        // engine per heartbeat for the life of the session.
+        for _ in 1..TUNNEL_MAX_ATTEMPTS {
+            remember_tunnel_failure();
+        }
+        assert!(
+            tunnel_already_failed(),
+            "reaching TUNNEL_MAX_ATTEMPTS must stop the retries"
+        );
+
+        // And a success re-opens it, so the cap cannot accumulate across a session.
+        forget_tunnel_failure();
+        assert!(
+            !tunnel_already_failed(),
+            "a successful call must clear the count, or three failures spread over a day would \
+             eventually disable a working route"
+        );
+    }
+
+    // ── The supervisor's transitions ──
+    //
+    // Pure: `Supervisor::observe` takes the two booleans and an `Instant`, so every
+    // transition can be driven at a fake clock with no Core, no engine and no
+    // network. That is deliberate — the defect these guard is a *timing* defect, and
+    // a test that needed a real 10-second wait would either be slow or be written
+    // with a shortened constant, which would stop testing the shipped value.
+
+    fn at(base: Instant, millis: u64) -> Instant {
+        base + Duration::from_millis(millis)
+    }
+
+    /// **A flapping `Ready` must never stop the engine.**
+    ///
+    /// This is the defect the supervisor exists for, and the shape of the assertion
+    /// is the point: the old rule acted on ONE true sample, so a run of scattered
+    /// trues — a page finishing, a lull, a load — stopped and restarted the only
+    /// route to the hub.
+    ///
+    /// Driven at the real poll cadence: many true/false samples, none of them
+    /// contiguous for `TUNNEL_HOLD`, spread over far longer than `TUNNEL_HOLD` in
+    /// wall time. A sample-COUNT rule would pass this and still be wrong; an
+    /// elapsed-time rule with a non-clearing timestamp would also pass this and
+    /// still be wrong. Only clearing the timestamp on a false sample passes, which
+    /// is what makes this a real guard rather than a restatement.
+    #[test]
+    fn a_flapping_ready_signal_never_stops_the_engine() {
+        let base = Instant::now();
+        let mut supervisor = Supervisor::new();
+        // Get to Carrying first: an engine exists and the plan tunnel is unproven.
+        supervisor.observe(
+            Observations {
+                ready_now: false,
+                engine_up: true,
+            },
+            at(base, 0),
+        );
+        assert_eq!(supervisor.state(), Supervised::Carrying);
+
+        // 60 s of alternating samples at 750 ms — the connecting poll interval.
+        for i in 1..=80u64 {
+            let ready_now = i % 2 == 0;
+            let action = supervisor.observe(
+                Observations {
+                    ready_now,
+                    engine_up: true,
+                },
+                at(base, i * 750),
+            );
+            assert_ne!(
+                action,
+                Action::Stop,
+                "a flapping Ready stopped the engine at sample {i} ({ready_now}); scattered true \
+                 samples must never accumulate into a handover"
+            );
+            assert_eq!(
+                supervisor.state(),
+                Supervised::Carrying,
+                "a flapping Ready must never leave Carrying at sample {i}"
+            );
+        }
+    }
+
+    /// `Ready` held for `TUNNEL_HOLD` does stop it, and stops it exactly once.
+    #[test]
+    fn a_sustained_ready_signal_completes_the_handover() {
+        let base = Instant::now();
+        let mut supervisor = Supervisor::new();
+        supervisor.observe(
+            Observations {
+                ready_now: false,
+                engine_up: true,
+            },
+            at(base, 0),
+        );
+
+        // The run of true samples STARTS here. The hold is measured from the first
+        // true sample of the run, not from when the test started looking — which is
+        // the property a sample-COUNT rule gets wrong and this one gets right.
+        let almost = u64::try_from(TUNNEL_HOLD.as_millis()).expect("hold fits") - 1;
+        assert_eq!(
+            supervisor.observe(
+                Observations {
+                    ready_now: true,
+                    engine_up: true
+                },
+                at(base, 0)
+            ),
+            Action::Keep,
+            "the first true sample begins the run and cannot itself satisfy the hold"
+        );
+        assert_eq!(
+            supervisor.observe(
+                Observations {
+                    ready_now: true,
+                    engine_up: true
+                },
+                at(base, almost)
+            ),
+            Action::Keep,
+            "the handover must not begin before TUNNEL_HOLD has elapsed"
+        );
+
+        // The hold is met: begin, without stopping.
+        assert_eq!(
+            supervisor.observe(
+                Observations {
+                    ready_now: true,
+                    engine_up: true
+                },
+                at(base, almost + 2)
+            ),
+            Action::BeginHandover,
+            "reaching TUNNEL_HOLD must begin the handover"
+        );
+        assert_eq!(supervisor.state(), Supervised::Handover);
+
+        // And the stop happens on the next poll, once, from Handover.
+        assert_eq!(
+            supervisor.observe(
+                Observations {
+                    ready_now: true,
+                    engine_up: true
+                },
+                at(base, almost + 1000)
+            ),
+            Action::Stop,
+            "the handover must finish with exactly one Stop"
+        );
+        assert_eq!(supervisor.state(), Supervised::Stopped);
+    }
+
+    /// **Traffic resuming mid-handover cancels it with the engine never touched.**
+    ///
+    /// The transition that proves no traffic was dropped, and the reason `Handover`
+    /// is a state rather than a timer inside `Carrying`: a timer would have to be
+    /// cancelled by the same function that set it, and the cancel path would be
+    /// implicit. Here the cancel is an explicit, asserted edge.
+    #[test]
+    fn traffic_resuming_mid_handover_cancels_it_without_stopping() {
+        let base = Instant::now();
+        let mut supervisor = Supervisor::new();
+        supervisor.observe(
+            Observations {
+                ready_now: false,
+                engine_up: true,
+            },
+            at(base, 0),
+        );
+        let hold = u64::try_from(TUNNEL_HOLD.as_millis()).expect("hold fits");
+
+        // The run starts at t=0, so the hold is satisfied by `hold` milliseconds of
+        // consecutive true samples.
+        supervisor.observe(
+            Observations {
+                ready_now: true,
+                engine_up: true,
+            },
+            at(base, 0),
+        );
+        supervisor.observe(
+            Observations {
+                ready_now: true,
+                engine_up: true,
+            },
+            at(base, hold),
+        );
+        assert_eq!(supervisor.state(), Supervised::Handover);
+
+        // The plan tunnel stalls before the stop could be taken.
+        let action = supervisor.observe(
+            Observations {
+                ready_now: false,
+                engine_up: true,
+            },
+            at(base, hold + 500),
+        );
+        assert_eq!(
+            action,
+            Action::Keep,
+            "cancelling a handover must not stop or start anything"
+        );
+        assert_eq!(
+            supervisor.state(),
+            Supervised::Carrying,
+            "a stalled plan tunnel must return to Carrying with the engine still up"
+        );
+    }
+
+    /// An engine already warm is adopted rather than restarted.
+    ///
+    /// The on-demand retry (`maintenance_proxy_or_start`) can start one before the
+    /// first poll after a failure. Without this, `Warming` would ask for a `Start`
+    /// on top of a perfectly good engine and replace a working listener.
+    #[test]
+    fn an_engine_already_running_is_adopted_not_restarted() {
+        let mut supervisor = Supervisor::new();
+        assert_eq!(
+            supervisor.observe(
+                Observations {
+                    ready_now: false,
+                    engine_up: true
+                },
+                Instant::now()
+            ),
+            Action::Keep,
+            "a warm engine must be adopted, not started again"
+        );
+        assert_eq!(supervisor.state(), Supervised::Carrying);
+    }
+
+    /// A proven plan tunnel with no engine needs no engine.
+    ///
+    /// The edge that would otherwise start an engine the next poll stops: a device
+    /// that launches while already connected.
+    #[test]
+    fn a_proven_plan_tunnel_without_an_engine_starts_nothing() {
+        let base = Instant::now();
+        let mut supervisor = Supervisor::new();
+        let hold = u64::try_from(TUNNEL_HOLD.as_millis()).expect("hold fits");
+        // The run starts at t=0, then persists past the hold.
+        supervisor.observe(
+            Observations {
+                ready_now: true,
+                engine_up: false,
+            },
+            at(base, 0),
+        );
+        assert_eq!(
+            supervisor.observe(
+                Observations {
+                    ready_now: true,
+                    engine_up: false
+                },
+                at(base, hold)
+            ),
+            Action::None,
+            "a plan tunnel that is already carrying traffic needs no maintenance engine"
+        );
+        assert_eq!(supervisor.state(), Supervised::Stopped);
+    }
+
+    // ── The drain ──
+
+    /// **New requests must go direct during a drain, not into a closing listener.**
+    ///
+    /// Before this, `stop_maintenance` dropped the engine and `Drop` sent
+    /// SIGKILL. A request handed to that SOCKS port in the same moment died
+    /// mid-stream, and — worse — a transport failure now triggers a retry, which
+    /// starts a NEW engine, which the next poll stops again. A handover that causes
+    /// a restart is the cycle the whole supervisor exists to prevent.
+    ///
+    /// FALSIFIED: removing the `is_draining()` guard in `gated_proxy` makes this
+    /// red on the first assertion.
+    #[test]
+    fn a_draining_engine_takes_no_new_requests() {
+        let _serialised = preference_guard();
+        set_draining(false);
+        assert!(!is_draining());
+
+        // A WARM proxy is supplied explicitly. The first version of this test used
+        // `gated_proxy`, which reads the process's real (empty) slot — so every
+        // branch returned `None` and the assertion passed even with the gate
+        // deleted. That is the failure mode this file's own rules warn about, so it
+        // is recorded here rather than quietly fixed.
+        let warm = Some("socks5h://127.0.0.1:9999".to_owned());
+
+        assert_eq!(
+            admit(true, warm.clone(), false),
+            warm,
+            "a warm engine with a preference must be used — the positive case the gate must not break"
+        );
+        assert_eq!(
+            admit(false, warm.clone(), false),
+            warm,
+            "a warm engine is used even without a recorded failure: while it is up it carries the \
+             app's hub traffic without exception"
+        );
+        assert_eq!(admit(false, None, false), None, "no engine means no route");
+
+        assert_eq!(
+            admit(true, warm.clone(), true),
+            None,
+            "DURING A DRAIN a caller must go direct, not be handed a listener about to be killed — \
+             even when the session prefers the route"
+        );
+        assert_eq!(
+            admit(false, warm, true),
+            None,
+            "a drain refuses new work whether or not the route is preferred"
+        );
+
+        set_draining(true);
+        assert!(
+            gated_proxy(true).is_none(),
+            "the real accessor must also refuse while draining"
+        );
+        set_draining(false);
+        assert!(
+            !is_draining(),
+            "the drain must clear, or the route is disabled for the process"
+        );
+    }
+
+    /// `warm_maintenance` answers "does a route exist", not "did I start one".
+    ///
+    /// Added 2026-11-19 after a refactor got it wrong: the extraction of
+    /// `refusal_to_start` turned every refusal into `false`, including "already
+    /// warm" — so a perfectly good engine reported itself absent and
+    /// `maintenance_proxy_or_start` logged "the start did not happen" over a working
+    /// route. A status function's answer and a work function's answer are different
+    /// questions, and the refactor conflated them.
+    ///
+    /// FALSIFIED: making the refusal branch return a bare `false` makes this red.
+    #[tokio::test]
+    async fn a_warm_engine_reports_a_route_even_though_nothing_was_started() {
+        let _serialised = slot_guard().await;
+        // Arrange the only state that distinguishes the two answers. There is no
+        // engine to spawn in a test binary, so the warm slot is faked with a
+        // placeholder whose `Drop` would kill a child it does not have — see
+        // `Tunnel::child` being `None`.
+        install_fake_warm_engine().await;
+        assert!(
+            maintenance_proxy().is_some(),
+            "arranging this test requires a warm slot"
+        );
+        assert!(
+            warm_maintenance().await,
+            "a warm engine means a route EXISTS; reporting false here makes a working route look \
+             absent to every caller"
+        );
+        // The MAINTENANCE slot, not `drop_warm_engine` (which clears the activation
+        // one). Leaving the fake in place makes every later test see a warm engine.
+        stop_maintenance().await;
+        assert!(
+            maintenance_proxy().is_none(),
+            "this test must not leave a warm engine behind for the next one"
+        );
+    }
+
+    /// The in-flight counter must return to zero, including on an early exit.
+    ///
+    /// A leaked count makes every later handover wait out the full
+    /// `DRAIN_TIMEOUT` (45 s) for a request that finished long ago.
+    #[test]
+    fn the_in_flight_count_returns_to_zero_after_each_request() {
+        let base = in_flight_count();
+        {
+            let _first = InFlight::enter();
+            assert_eq!(in_flight_count(), base + 1);
+            {
+                let _second = InFlight::enter();
+                assert_eq!(in_flight_count(), base + 2);
+            }
+            assert_eq!(
+                in_flight_count(),
+                base + 1,
+                "a nested request releasing must decrement exactly once"
+            );
+        }
+        assert_eq!(
+            in_flight_count(),
+            base,
+            "the count must return to its starting value, or the next drain waits out its timeout"
+        );
+    }
+
+    /// A start that succeeded must reset the attempt budget.
+    ///
+    /// Without the reset the cap means "three failures EVER", so a student who
+    /// reconnects a few times across a session would find the route refused while
+    /// it was working perfectly — the same mistake the old one-failure latch made.
+    #[test]
+    fn a_successful_start_clears_the_attempt_budget() {
+        clear_failed_starts();
+        for _ in 0..MAINTENANCE_START_ATTEMPTS {
+            record_failed_start();
+        }
+        assert!(
+            start_attempts_exhausted(),
+            "reaching the cap must stop background attempts"
+        );
+
+        clear_failed_starts();
+        assert!(
+            !start_attempts_exhausted(),
+            "a successful start must reset the budget, or the cap becomes 'three ever'"
+        );
+    }
+
+    /// The budget must actually be reached — a guard that can never trip is not a cap.
+    #[test]
+    fn the_start_budget_is_reachable_and_bounded() {
+        clear_failed_starts();
+        assert!(!start_attempts_exhausted());
+        for expected in 1..MAINTENANCE_START_ATTEMPTS {
+            record_failed_start();
+            assert!(
+                !start_attempts_exhausted(),
+                "attempt {expected} must not exhaust a budget of {MAINTENANCE_START_ATTEMPTS}"
+            );
+        }
+        record_failed_start();
+        assert!(
+            start_attempts_exhausted(),
+            "the budget of {MAINTENANCE_START_ATTEMPTS} must be exhaustible"
+        );
+        clear_failed_starts();
     }
 
     /// A response WITH a status is not a transport failure: the hub answered, so
@@ -1776,6 +3186,19 @@ mod tests {
         );
     }
 
+    /// Puts a warm `Tunnel` in the maintenance slot without spawning anything.
+    ///
+    /// `child: None` is what makes this free: `Drop` has nothing to kill, so a test
+    /// can occupy the slot and later clear it. Shared by the tests that need to
+    /// distinguish "a route exists" from "I started one".
+    async fn install_fake_warm_engine() {
+        let mut slot = maintenance_slot().lock().await;
+        *slot = Some(Tunnel {
+            child: None,
+            forward_port: 17998,
+        });
+    }
+
     #[test]
     fn the_tunnel_targets_plain_http_on_the_bootstrap_port() {
         let tunnel = Tunnel {
@@ -1802,8 +3225,8 @@ mod tests {
     ///
     /// `pages/activation.tsx` calls `/api/code-lookup` and then `/api/activate`.
     /// The lookup's own comment says its failure is advisory — the screen goes on
-    /// to activate regardless. But `post` set the session-wide `tunnel_failed_flag`
-    /// on any transport failure, so a lookup that timed out made `post` refuse the
+    /// to activate regardless. But `post` recorded a session-wide failure on any
+    /// transport failure, so a lookup that timed out made `post` refuse the
     /// activation before starting an engine. The one call that enrols the student
     /// was disabled by the one whose answer nothing depends on.
     ///

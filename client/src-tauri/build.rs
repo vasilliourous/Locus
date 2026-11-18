@@ -55,15 +55,27 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // client that simply has no maintenance tunnel, never a broken build.
     match std::env::var("LOCUS_FREE_TIER_KEY") {
         Ok(key) if !key.is_empty() => {
-            // No `_PRESENT` companion, unlike the activation key above: that one
-            // exists because `build_stamp()` renders it for a support log and the
-            // *absence* of the tunnel is invisible in the artifact. Here a missing
-            // key is visible where it matters — `Bootstrap::maintenance()` returns
-            // `None` and the routing rule takes the direct branch — so a second
-            // constant would have no reader.
+            // The `_PRESENT` companion, added 2026-11-19. This key used to lack
+            // one, on the reasoning that a missing key was "visible where it
+            // matters — `Bootstrap::maintenance()` returns `None` and the routing
+            // rule takes the direct branch". That reasoning is exactly the defect
+            // the ACTIVATION key's companion was added to fix: the *silence* is
+            // the problem. On the network this tunnel exists for, "returns None"
+            // and "the network blocks us" produce the same thing a student sees —
+            // nothing — and the same thing a support log said — nothing. Measured
+            // 2026-11-19: the tunnel works from the school network when driven by
+            // hand, so a build without this key is now indistinguishable from a
+            // network fault with no way to tell them apart from the artifact.
+            //
+            // Same shape as above, for the same reason: `build_stamp()` renders it
+            // and the startup line becomes the one fact that separates "this build
+            // cannot" from "this network will not".
             println!("cargo:rustc-env=LOCUS_FREE_TIER_KEY={key}");
+            println!("cargo:rustc-env=LOCUS_FREE_TIER_KEY_PRESENT=1");
         }
-        _ => {}
+        _ => {
+            println!("cargo:rustc-env=LOCUS_FREE_TIER_KEY_PRESENT=0");
+        }
     }
     println!("cargo:rerun-if-env-changed=LOCUS_FREE_TIER_KEY");
 

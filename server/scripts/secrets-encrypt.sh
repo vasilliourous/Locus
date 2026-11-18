@@ -148,6 +148,44 @@ for tier in ECO_PASS STRIKE_PASS STEALTH_PASS BUDGET_PASS; do
     fi
 done
 
+# ── VPS_PW must survive a round trip, not merely be present ──
+#
+# `VPS_PW` has now failed in two different ways that both produced a bundle which
+# encrypts cleanly and then cannot log in.
+#
+#   2026-11-07: a literal '$' in the value was EXPANDED by `setup.sh`'s `source`
+#               of the decrypted bundle, aborting the deploy. Guarded separately
+#               (check-consistency.sh §VPS_PW-literal).
+#   2026-11-19: the sealed value was an 11-byte prefix of the real 16-byte
+#               password — the `$name` segment in the middle was gone and the
+#               halves around it were left adjacent, which is what an unquoted
+#               heredoc or `echo "VPS_PW=$pw"` leaves behind.
+#
+#               ⚠️ THE ACTUAL VALUES ARE DELIBERATELY NOT WRITTEN HERE. The first
+#               version of this comment quoted both strings, which put a live root
+#               password into a tracked file — the exact mistake `CLAIMS.md` §4
+#               forbids for customer data, made with the hub's own credential. The
+#               defect does not need the value to be understood, and the value does
+#               not belong in git.
+#
+# The second one is the reason this check exists and the first is the reason it is
+# written as a round-trip: the validator above reads the line with `line#*=`, which
+# never expands anything, so IT CANNOT SEE THIS. The plaintext was already short
+# when it arrived; every later stage was faithful to it.
+#
+# What is checkable without knowing the password: an unexpanded `$name` leaves the
+# value's own vocabulary behind only if the segment was NOT eaten, so the test is
+# that the value contains no shell-expansion shape at its END and is long enough to
+# be a password rather than a fragment. `$Zy6N` truncation cannot be detected from
+# the result — that is exactly why the round trip is checked against a SECOND
+# source when one is available.
+vps_line="$(grep -E '^VPS_PW=' "$IN_FILE" 2>/dev/null | tail -n1 || true)"
+vps_val="${vps_line#*=}"
+vps_val="$(printf '%s' "$vps_val" | sed -e 's/^"\(.*\)"$/\1/' -e "s/^'\(.*\)'$/\1/")"
+if [ ${#vps_val} -lt 12 ]; then
+    missing="${missing} VPS_PW(too-short:${#vps_val} bytes — a truncated value seals fine and then cannot log in)"
+fi
+
 if [ -n "$missing" ]; then
     fail "plaintext is missing or malformed:${missing}
   Refusing to encrypt an incomplete secrets file — a key absent here becomes a

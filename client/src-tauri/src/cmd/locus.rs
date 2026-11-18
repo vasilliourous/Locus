@@ -521,18 +521,23 @@ pub async fn locus_status() -> LocusStatus {
     // a tunnel that died on its own. This command is polled continuously, so it is
     // where a transition can actually be noticed.
     //
-    // Two branches, no state machine: the plan tunnel is carrying traffic, so stop
-    // the maintenance engine; or it is not, so make sure one is running. Both calls
-    // are idempotent, so a repeated poll costs an atomic read.
+    // A state machine, not a two-branch `if` (2026-11-19). The old shape was
+    // `if ready { stop } else { warm }`, and it cycled on the school network for a
+    // reason worth keeping: `Readiness::Ready` is a GOOD signal — it means a payload
+    // moved, not merely that the Core is up — but it is recomputed per poll from the
+    // current sample, so it returns to `Connecting` the moment a sample shows no
+    // bytes. One unlucky sample stopped the only route to the hub; the next poll
+    // restarted it.
     //
-    // TUN-down is OPPORTUNISTIC, not prompt: the idle poll is 15 s
-    // (`use-connection.ts:84`), and nothing auto-reconnects, so the tunnel is
-    // re-warmed on the next poll rather than at the instant it drops.
-    if readiness.is_ready() {
-        crate::locus::activation_tunnel::stop_maintenance().await;
-    } else {
-        crate::locus::activation_tunnel::warm_maintenance().await;
-    }
+    // `supervise` requires `Ready` to be SUSTAINED for `TUNNEL_HOLD` before the
+    // engine is stopped, and gives the stop its own state so that traffic resuming
+    // mid-handover cancels it with the engine never touched. The states, the
+    // constants and the reasoning are in `docs/reference/TUNNEL-SUPERVISOR.md`.
+    //
+    // TUN-down is still OPPORTUNISTIC, not prompt: the idle poll is 15 s
+    // (`use-connection.ts:84`), and nothing auto-reconnects, so the engine is
+    // re-warmed within one poll of a drop rather than at the instant it happens.
+    crate::locus::activation_tunnel::supervise(readiness.is_ready()).await;
 
     // Read for the report, after readiness has been decided: `observe_readiness`
     // is what starts and feeds the stream, so reading it here means the field
@@ -574,12 +579,23 @@ pub async fn locus_status() -> LocusStatus {
         connected: core_is_running(&crate::core::runstate::RUN_STATE.state()),
         ready: readiness.is_ready(),
         core_up: readiness.is_core_up(),
-        // Both halves: the session must PREFER the route (a direct call produced
-        // no response) and an engine must be warm to carry it. Reading only the
-        // preference would claim a route exists when the plan tunnel is up and the
-        // relay has been stopped.
+        // The session PREFERS the route: a direct hub call produced no HTTP
+        // response, and the free-tier key is compiled in.
+        //
+        // This used to also require `maintenance_proxy().is_some()` — a warm
+        // engine — on the reasoning that reading only the preference "would claim
+        // a route exists when the plan tunnel is up and the relay has been
+        // stopped". That is still true of a stopped relay, but it made the screen
+        // lie in the window this feature exists for: on a cold launch the engine is
+        // starting on demand (2026-11-19, `maintenance_proxy_or_start`), and for
+        // those seconds the student saw NO explanation while the app was in fact
+        // using the backup route. A caption that appears only after the slow part
+        // is a caption that appears when it is no longer needed.
+        //
+        // `maintenance_tunnel_available()` keeps the half that matters: a build
+        // without the key must never claim a route it cannot form.
         bootstrapping: crate::locus::activation_tunnel::prefer_maintenance()
-            && crate::locus::activation_tunnel::maintenance_proxy().is_some(),
+            && crate::locus::activation_tunnel::maintenance_tunnel_available(),
         subscription,
         last_confirmed_at: verge_data.last_heartbeat_ok,
         traffic_flowing,
