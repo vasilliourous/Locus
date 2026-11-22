@@ -7034,7 +7034,6 @@ banner_report=$(grep -oE '^# [0-9]+[a-z]?\. ' "$REPO/server/scripts/check-consis
     comm -23 /tmp/locus_hdr.$$ /tmp/locus_echo.$$ \
       | awk '{printf "%s\t%s\n", "NOBANNER", $0}' )
 rm -f /tmp/locus_hdr.$$ /tmp/locus_echo.$$
-
 if [ -z "$banner_report" ]; then
     ok "every numbered '#' section header has a matching echo banner"
 else
@@ -7126,6 +7125,46 @@ for block in blocks:
     for route in re.findall(r'(?:GET|POST|PUT|DELETE)\s+(/[A-Za-z0-9/_.-]*)', body):
         if route and route != '/':
             sections.add(route)
+
+# ── HEAD GUARDS: NAME THE FAILING EXTRACTOR, NOT THE DOCUMENT ──
+#
+# Added 2026-11-22 (audit F-20). Without these, a scanner that returned nothing
+# reported as the REVERSE complaint: `served` empty surfaced as "API.md documents
+# N routes and no hook or named service serves it" — nine lines blaming the
+# document when the fault was the regex. A guard whose failure message points at
+# the wrong file is the F-12/F-08 defect class in a new place.
+#
+# They run AFTER both sets are built, because a set that is not computed yet
+# cannot be tested — the first draft sat above the `sections` loop and raised
+# `NameError: name 'sections' is not defined`, which the shell reported as a
+# Python traceback and a green §50. That is itself the defect: a broken scanner
+# whose failure looked like a pass one line up.
+#
+# `NON_HOOK` has no guard on purpose: it is a literal dict in this heredoc, not a
+# parse of anything. Five hand-written keys cannot come back empty, and a guard
+# over a literal is the always-passes shape §29 warns about.
+if not served:
+    print("BAD\tthe routerAdd extraction returned nothing — the scanner is broken, not the hooks")
+if not sections:
+    print("BAD\tthe API.md section scan returned nothing — the scanner is broken, not the document")
+
+# ── EXTRACTOR SELF-TEST ──
+#
+# Same pattern as §29's "a guard that always passes ... reads exactly like one that
+# passed". The guards above catch an EMPTY result; they cannot tell a working
+# scanner from one that silently matches the wrong thing. So the extractor runs
+# over a fixture with known contents and must return exactly them.
+_FIXTURE = '''
+routerAdd("POST", "/api/alpha", function (e) { return e.json(200, {}); })
+routerAdd("GET", "/api/beta", function(e) { return e.json(200, {}); })
+routerAdd("GET", "/api/alpha", function (e) {})
+'''
+_expect = {'/api/alpha', '/api/beta'}
+_got = {route for _method, route in
+        re.findall(r'routerAdd\(\s*"([A-Z]+)"\s*,\s*"([^"]+)"', _FIXTURE)}
+if _got != _expect:
+    print("BAD\tthe routerAdd scanner is not reading what it claims: fixture expected "
+          "%s, extracted %s" % (sorted(_expect), sorted(_got)))
 
 for route in sorted(served - sections):
     print("BAD\tthe hooks serve %s and API.md has no section for it" % route)
