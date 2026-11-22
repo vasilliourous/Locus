@@ -23,22 +23,20 @@ pub struct IVerge {
 
     pub language: Option<String>,
 
-    /// `light` or `dark` or `system`
-    pub theme_mode: Option<String>,
-
-    /// The selected named theme, e.g. `default-dark` or `midnight`.
-    ///
-    /// Deliberately a plain `String` and NOT an enum with serde variants: an id
-    /// this build does not know must survive a round-trip rather than fail to
-    /// deserialise, because the registry is the client's and a file can be edited
-    /// by hand. An unknown or absent id is resolved to the default theme by
-    /// `resolveTheme` in `src/pages/_themes.ts` -- never an error.
-    ///
-    /// `None` means "no theme selected", which is every install upgrading from a
-    /// version before themes existed, and it behaves exactly as `theme_mode`
-    /// alone did. See `docs/reference/THEMES.md` section 2.
-    pub theme_id: Option<String>,
-
+    // `theme_mode` and `theme_id` were removed on 2026-11-19, together with the
+    // theme registry, the light appearance and the theme hook. Locus has one
+    // permanent appearance (/COLOURS.md section 0), so there is no mode and no
+    // theme to store.
+    //
+    // They are gone from the struct rather than kept and ignored, because a field
+    // nobody reads is a field the next reader assumes is load-bearing. This is
+    // safe on upgrade: `IVerge` derives `Deserialize` with no
+    // `deny_unknown_fields`, so a `verge.yaml` written by an older build still
+    // carrying either key simply ignores it. Nothing migrates the stored choice
+    // -- that is the documented cost of the decision, not an oversight.
+    //
+    // FROZEN NAMES NOTE: neither was a wire name. They live in a local file, not
+    // in the hub contract, so removing them does not strand a deployed client.
     pub tray_event: Option<String>,
 
     pub env_type: Option<String>,
@@ -357,7 +355,36 @@ pub struct IVerge {
     ///
     /// `None` (not `false`) when absent, so an older config file is "not
     /// suspended" rather than needing a migration.
+    ///
+    /// **It is only meaningful while a code is held.** A stored `true` with no
+    /// activation behind it used to render the kick-out screen for a device that
+    /// was not signed in — a screen with no controls, by design — and the only
+    /// way out was wiping the app's data. The writers keep the pair consistent
+    /// (`locus::store::clear_entitlement` clears this) and
+    /// `locus::store::is_suspended` refuses the impossible pair on read, so the
+    /// UI never has to defend against it.
     pub locus_suspended: Option<bool>,
+
+    /// Which version of the hub's enforcement logic last answered this device.
+    ///
+    /// **This is how a stale hub hook becomes visible instead of mysterious.**
+    /// `heartbeat.pb.js` sends `enforcement_version`, and the hooks that live on
+    /// the box are deployed from `/root/server/` rather than from this repository
+    /// — so "is the kick-out fix actually live?" was a question only someone with
+    /// shell access could answer. A suspension the hub never enforces looks
+    /// exactly like a suspension that was never set.
+    ///
+    /// Recorded on every successful beat. `None` means no beat has delivered a
+    /// value yet; a value BELOW [`crate::locus::contract::ENFORCEMENT_VERSION`]
+    /// means the hub predates this client, so the client's enforcement features
+    /// (suspension) cannot work no matter what the console shows. That is a
+    /// deployment fact, not a student's problem, and saying so plainly is the
+    /// difference between a support call and a support call fixable in one line.
+    ///
+    /// The number never gates anything client-side: refusing service to a student
+    /// because the operator's box is behind would be a worse defect than the one
+    /// it reports.
+    pub locus_hub_enforcement: Option<u32>,
 
     /// The version the hub has offered this device, if any.
     ///
@@ -586,12 +613,6 @@ impl IVerge {
             app_log_max_count: Some(8),
             clash_core: Some("verge-mihomo".into()),
             language: Some(clash_verge_i18n::system_language().into()),
-            theme_mode: Some("system".into()),
-            // No `theme_id` in the template on purpose: a fresh install uses
-            // `theme_mode`, and the resolver falls back to `default-dark` when no
-            // theme is selected. Writing a default here would make the field
-            // non-`None` on every install and blur the "unset means legacy
-            // behaviour" property the upgrade path depends on.
             #[cfg(not(target_os = "windows"))]
             env_type: Some("bash".into()),
             #[cfg(target_os = "windows")]
@@ -677,8 +698,6 @@ impl IVerge {
         patch!(app_log_max_count);
 
         patch!(language);
-        patch!(theme_mode);
-        patch!(theme_id);
         patch!(tray_event);
         patch!(env_type);
         patch!(start_page);

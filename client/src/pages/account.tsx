@@ -1,13 +1,12 @@
 import {
-  Brightness4Outlined,
   CheckCircleOutlined,
   ErrorOutlineRounded,
   LanguageOutlined,
   MemoryOutlined,
-  PaletteOutlined,
   PowerSettingsNewOutlined,
   RefreshOutlined,
   ScheduleOutlined,
+  TuneOutlined,
 } from '@mui/icons-material'
 import {
   Box,
@@ -34,7 +33,6 @@ import { useI18n } from '@/hooks/use-i18n'
 import { useSubscription } from '@/hooks/use-subscription'
 import { useVerge } from '@/hooks/use-verge'
 import { cardSx } from '@/pages/_surfaces'
-import { isThemeId as isValidThemeId, THEMES, THEME_IDS } from '@/pages/_themes'
 import { requestEntitlementRefresh } from '@/services/entitlement-refresh'
 import { supportedLanguages } from '@/services/i18n'
 import { locusUpdateStatus, type UpdateStatus } from '@/services/locus'
@@ -45,9 +43,10 @@ import { showNotice } from '@/services/notice-service'
  *
  * Settings live here rather than behind a separate tab because there are only
  * four a student should touch, and a whole destination for four rows is worse
- * than folding them in. The distinction that matters: language, theme, start-at-
- * login and update-checking are *preferences*; core choice, TUN, system proxy,
- * ports and DNS are *internals* Locus decides, and have no UI at all.
+ * than folding them in. The distinction that matters: language, start-at-login
+ * and update-checking are *preferences*; core choice, TUN, system proxy, ports
+ * and DNS are *internals* Locus decides, and have no UI at all. Appearance is
+ * not a preference either: Locus has one permanent look (`/COLOURS.md` §0).
  */
 const AccountPage = () => {
   const { t } = useTranslation()
@@ -367,6 +366,30 @@ const AccountPage = () => {
           {t('home.components.connection.account.deviceIdHint')}
         </Typography>
 
+        {/* The one deployment fact a student can report and an operator can act on.
+
+            "An operator suspended my device and it kept working" has two
+            indistinguishable causes: the console never set the flag, or the hub is
+            running hooks old enough to ignore it. The hub answers this on every
+            heartbeat and nothing used to read the answer, so the operator was left
+            comparing a file tree against a live server while the student was told
+            nothing at all.
+
+            Shown ONLY when the hub is behind. `unreported` renders nothing: a device
+            that has not reached the hub yet knows nothing, and inventing a warning
+            from silence would teach students to ignore this row. */}
+        {status?.hubEnforcement.kind === 'stale' && (
+          <Typography
+            variant="caption"
+            color="warning.main"
+            sx={{ display: 'block', mt: 1 }}
+          >
+            {t('home.components.connection.account.hubBehind', {
+              hub: status.hubEnforcement.hub,
+            })}
+          </Typography>
+        )}
+
         {/* The support route, on the page that holds the two things a report
             needs: the Device ID and the app version. A student who opens Account
             is usually there to quote something to someone, and this is where
@@ -399,7 +422,7 @@ const AccountPage = () => {
       {/* ── Preferences ──────────────────────────────────────────────────── */}
       <Paper elevation={0} sx={{ p: 2, ...cardSx(theme) }}>
         <SectionTitle
-          icon={<Brightness4Outlined fontSize="small" />}
+          icon={<TuneOutlined fontSize="small" />}
           title={t('home.components.connection.account.preferences')}
         />
 
@@ -421,96 +444,6 @@ const AccountPage = () => {
             ))}
           </Select>
         </Box>
-
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, py: 1 }}>
-          <Brightness4Outlined
-            fontSize="small"
-            sx={{ color: 'text.secondary' }}
-          />
-          <Typography variant="body2" sx={{ flexGrow: 1 }}>
-            {t('home.components.connection.account.appearance')}
-          </Typography>
-          {/* Reads and writes `verge.theme_mode`, which is the stored preference
-              and supports "system". `useThemeMode()` is the RESOLVED value
-              (light or dark only), so using it here would silently drop the
-              "follow the system" choice and rewrite it on the next edit. */}
-          <Select
-            size="small"
-            value={verge?.theme_mode ?? 'system'}
-            onChange={(e) =>
-              void patchVerge({ theme_mode: e.target.value }).catch(onError)
-            }
-            sx={{ minWidth: 140 }}
-          >
-            <MenuItem value="system">
-              {t('home.components.connection.account.themeSystem')}
-            </MenuItem>
-            <MenuItem value="light">
-              {t('home.components.connection.account.themeLight')}
-            </MenuItem>
-            <MenuItem value="dark">
-              {t('home.components.connection.account.themeDark')}
-            </MenuItem>
-          </Select>
-        </Box>
-
-        {/* The theme picker.
-            A *second* control next to Appearance rather than a replacement for
-            it, deliberately. `theme_mode` above is the stored light/dark/system
-            preference and still governs the app when no theme is selected; a
-            theme carries its own mode and supersedes it while one is set. The two
-            are kept separate because merging them is a migration question (what
-            does an existing "Dark" choice become?) and not a prerequisite for
-            themes to work — see `docs/reference/THEMES.md` §2 and §7.
-
-            Writes `theme_id`, which is a string not a union: an id this build
-            does not know has to survive a round-trip, so it is narrowed at the
-            point of use by `resolveTheme`, never here. */}
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, py: 1 }}>
-          <PaletteOutlined fontSize="small" sx={{ color: 'text.secondary' }} />
-          <Typography variant="body2" sx={{ flexGrow: 1 }}>
-            {t('home.components.connection.account.theme')}
-          </Typography>
-          <Select
-            size="small"
-            value={
-              // An unset or unknown stored id shows as the theme that will
-              // actually render, so the control never claims a look the app is
-              // not showing. The empty string IS the "no theme" value here, and
-              // is distinct from "unset" only in the dropdown's own selection —
-              // `hasTheme` in `use-custom-theme` treats both the same way, so
-              // writing `''` restores "follow the system" instead of leaving the
-              // Appearance control above inert.
-              isValidThemeId(verge?.theme_id) ? verge!.theme_id! : ''
-            }
-            onChange={(e) =>
-              void patchVerge({ theme_id: e.target.value }).catch(onError)
-            }
-            sx={{ minWidth: 140 }}
-          >
-            {/* The escape hatch. Without this entry every option WRITES a theme,
-                and `hasTheme` stays true forever, so the Appearance control
-                above could never take effect again — "follow the system" was
-                reachable only by hand-editing `verge.yaml`. Recorded as a gap in
-                `STILL-OPEN.md` until this was added. */}
-            <MenuItem value="">
-              {t('home.components.connection.account.themeDefault')}
-            </MenuItem>
-            {THEME_IDS.map((id) => (
-              <MenuItem key={id} value={id}>
-                {t(THEMES[id].labelKey)}
-              </MenuItem>
-            ))}
-          </Select>
-        </Box>
-
-        <Typography
-          variant="caption"
-          color="text.secondary"
-          sx={{ display: 'block', mt: 0.5 }}
-        >
-          {t('home.components.connection.account.themeHint')}
-        </Typography>
 
         {/* "Check for updates automatically".
             Wired to `auto_check_update` — NOT `enable_auto_launch`. The row was

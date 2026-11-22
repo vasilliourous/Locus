@@ -43,6 +43,16 @@ export interface LocusStatus {
    * So this is the field that puts a kicked-out student on the kick-out screen,
    * and — with `refusal_reason` — the field that lets it explain why and offer
    * the one thing that helps: waiting, or contacting their middleman.
+   *
+   * # It is always accompanied by `activated`
+   *
+   * A suspension is a statement about a code, so it can only be true while one
+   * is held — `suspended && !activated` describes nothing. That pair was
+   * nevertheless serialised once, because removal of the code did not clear the
+   * flag, and the gate rendered a screen with no controls for a device that was
+   * signed out. `store::is_suspended` now refuses the pair on read and
+   * `store::clear_entitlement` clears the flag on write, so this field means
+   * what it says. Do not branch on `suspended` alone: test `!activated` first.
    */
   suspended: boolean
   /**
@@ -232,6 +242,26 @@ export interface LocusStatus {
    * will work".
    */
   connectBlocker: ConnectBlocker | null
+  /**
+   * Whether the hub this device talks to is new enough to enforce a suspension.
+   *
+   * # The report this exists for
+   *
+   * "I suspended a device on the console and nothing happened." The chain in
+   * this repository is correct — the console sets the flag, the heartbeat hook
+   * answers 403, the client tears the tunnel down — so when it does nothing the
+   * likely answer is that the hooks on the box predate the change. That is a
+   * deployment fact, and nothing in the product could state it: the operator was
+   * left comparing a file tree against a live server, and the student was told
+   * nothing at all because, as far as their client knew, they were not suspended.
+   *
+   * The hub already answers the question on every beat (`enforcement_version`,
+   * added for exactly this reason). This field is that answer, classified, so
+   * the Account screen can say "this server is behind" instead of leaving both
+   * parties guessing. It reports; it never gates — see
+   * [`crate::locus::contract::ENFORCEMENT_VERSION`].
+   */
+  hubEnforcement: HubEnforcement
 }
 
 /**
@@ -352,6 +382,38 @@ export interface SignOutResult {
    */
   hub: HubOutcome
 }
+
+/**
+ * Whether the hub can enforce what the console shows.
+ *
+ * A closed set for the same reason as [`ConnectBlocker`]: the UI decides where to
+ * say it and how loudly, and a free-form string would make that a string
+ * comparison.
+ */
+export type HubEnforcement =
+  /**
+   * No successful beat has reported a version yet. Unknown, not broken.
+   *
+   * Distinct from [`Self::Stale`] on purpose: a device that has never been
+   * online has not been told anything, and telling its owner the server is out
+   * of date would be a false claim about the world.
+   */
+  | { kind: 'unreported' }
+  /**
+   * The hub enforces at least what this build needs.
+   */
+  | { kind: 'current' }
+  /**
+   * The hub answered, and its enforcement logic predates this build's.
+   *
+   * The consequence in plain words: a suspension set in the console will not
+   * reach this device until the hub's hooks are redeployed. `hub` carries the
+   * number it reported so support has the fact, not the inference.
+   */
+  | {
+      kind: 'stale'
+      hub: number
+    }
 
 /**
  * A known reason a connect cannot start the core, in the student's terms.

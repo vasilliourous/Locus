@@ -58,24 +58,9 @@
         "platform": "Platform",
         "appVersion": "App version",
         "deviceIdHint": "Quote the device ID if you need support — it identifies this install without revealing anything about you.",
+        "hubBehind": "Your Locus server is running an older version of its account checks. If someone suspends your access, this device will not find out until the server is updated. Quote this number to them: {{hub}}.",
         "preferences": "Preferences",
         "language": "Language",
-        "appearance": "Appearance",
-        "themeSystem": "System",
-        "themeLight": "Light",
-        "themeDark": "Dark",
-        "theme": "Theme",
-        "themeDefault": "Default (follow system)",
-        "themeDefaultDark": "Locus",
-        "themeDefaultLight": "Locus (light)",
-        "themeSlate": "Slate",
-        "themeDawn": "Dawn",
-        "themeEmber": "Ember",
-        "themeMoss": "Moss",
-        "themeLinen": "Linen",
-        "themeSepia": "Sepia",
-        "themeContrast": "Contrast",
-        "themeHint": "Sets the look of the app. Leave it on Default to keep following the appearance setting above.",
         "autoUpdate": "Check for updates automatically",
         "on": "On",
         "off": "Off",
@@ -132,7 +117,24 @@
       "freeDataUsed": "{{used}} of {{total}} used",
       "freeDataNearlyOut": "{{used}} of {{total}} used — nearly out of free data",
       "freeDataThrottled": "{{used}} of {{total}} used — free data is spent for this month",
-      "freeDataThrottledUpgrade": "Full is faster and unmetered. Ask the person who sold you your code about upgrading."
+      "freeDataThrottledUpgrade": "Full is faster and unmetered. Ask the person who sold you your code about upgrading.",
+      "activation": {
+        "title": "Enter your code",
+        "lede": "Your code is on the card you were sold.",
+        "submit": "Activate",
+        "backupRoute": "Using the Locus backup route to reach the server.",
+        "alphabet": "The code is 15 characters and never contains 0, O, 1 or I.",
+        "codeLabel": "Activation code",
+        "codePlaceholder": "RQ-XXXX-XXXX-XXXX-X"
+      },
+      "suspended": {
+        "lapsedTitle": "Your subscription has ended",
+        "suspendedTitle": "This device has been signed out",
+        "lapsedBody": "Your code has expired, so the connection was stopped. Renewing with whoever sold you the code restores access.",
+        "suspendedBody": "An operator has suspended this code, so the connection was stopped. Your code is still saved on this computer.",
+        "lapsedAction": "Contact whoever sold you the code to renew it.",
+        "suspendedAction": "Ask them to lift the suspension. You can connect again without re-entering your code or restarting the app."
+      }
     },
     "ipInfo": {
       "errors": {

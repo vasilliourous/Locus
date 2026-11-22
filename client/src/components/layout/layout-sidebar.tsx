@@ -4,7 +4,6 @@ import { useCallback, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import iconDark from '@/assets/image/icon_dark.svg?react'
-import iconLight from '@/assets/image/icon_light.svg?react'
 import LogoSvg from '@/assets/image/logo.svg?react'
 import { useVerge } from '@/hooks/use-verge'
 import { useNavMenuOrder } from '@/pages/_layout/hooks'
@@ -19,22 +18,22 @@ import { LayoutTraffic } from './layout-traffic'
 type MenuContextPosition = { top: number; left: number }
 
 interface LayoutSidebarProps {
-  isDark: boolean
   isCollapsed: boolean
 }
 
 const SENSORS = [PointerSensor, KeyboardSensor]
 
 export const LayoutSidebar = (props: LayoutSidebarProps) => {
-  const { isDark, isCollapsed } = props
+  const { isCollapsed } = props
   const { t } = useTranslation()
   const theme = useTheme()
   const { verge, mutateVerge, patchVerge } = useVerge()
-  // The SVGs are `fill: currentColor`, so the dark/light pair is two *glyph
-  // weights*, not two colours: the dark variant is the solid mark and the light
-  // one the outlined mark — a legibility choice about the background. The colour
-  // comes from the theme. Marks: `/COLOURS.md` §8.
-  const iconMark = isDark ? iconDark : iconLight
+  // One mark, always. The SVG is `fill: currentColor`, so its colour comes from
+  // the theme's `primary.main` and no second file is needed. This used to pick
+  // between a solid and an outlined variant from the resolved light/dark mode;
+  // with one permanent appearance that choice collapsed to a constant. Marks:
+  // `/COLOURS.md` §8.
+  const iconMark = iconDark
   const [menuUnlocked, setMenuUnlocked] = useState(false)
   const [menuContextPosition, setMenuContextPosition] =
     useState<MenuContextPosition | null>(null)

@@ -17,6 +17,60 @@ re-argued; the evidence for each is a world claim in
 
 ---
 
+## The suspension fix — every gap needs the same two things: a code and a deployed hub
+
+**Added 2026-11-22.** Four defects fixed; **none of it has been run end to end.**
+The design is in [`SUSPENSION.md`](SUSPENSION.md), which is the place to read
+before touching this again — this entry is only the part that is not proven.
+
+**Verified in the tree (each new guard observed failing against the defect it
+names, then restored):**
+
+- `a_suspension_without_a_code_is_not_a_suspension` and
+  `clearing_the_entitlement_clears_the_suspension` in `locus::store`. The second
+  one first failed against *its own explanatory comment*, which is why the runtime
+  test module now has `strip_line_comments`; the guards are asserted on code, not
+  prose.
+- `a_suspension_keeps_the_heartbeat_beating` in `locus::runtime` — both halves
+  observed red: against a restored `stop()` in the suspension arm, and against a
+  restored `Refused => break` in the loop.
+- `a_hub_that_never_answered_is_not_a_hub_that_is_behind` in `cmd::locus`.
+- `gateScreen`'s five cases in `use-entitlement.test.ts` — including the pair that
+  trapped the reporter (`activated: false, suspended: true` → the activation gate).
+- All three Rust gates and every frontend gate: `cargo test` (709 lib plus the
+  integration suites), `clippy --all-targets --features clippy -- -D warnings`,
+  `cargo fmt --check`, `pnpm vitest` (117), `pnpm lint`, `tsc --noEmit`,
+  `bash check-consistency.sh`.
+
+**NOT verified:**
+
+1. **That the hub enforces a suspension at all.** Unchanged from the 2026-11-18
+   entry below, and now *measurable from the field*: an installed client records
+   `enforcement_version` on every healthy beat, and the Account page says so when
+   it is behind. What would still close it in one step is `hooks-sync.sh --check`
+   against the box, then a heartbeat response carrying `enforcement_version: 4`.
+   A build that reports `stale` on the Account page is the same fact observed from
+   the other end — the point of the change, not a substitute for it.
+2. **That suspend → torn down → unsuspend → restored happens within one check-in
+   in the field.** The client now keeps beating at `SUSPENDED_INTERVAL` while
+   suspended, which is what makes the reinstatement reachable; whether the hub's
+   403/200 pair behaves as the hook reads is unobserved here. Needs a code, a
+   running client, and `locus_check_subscription` to force the beat.
+3. **That a device suspended across a restart re-arms correctly.** `resume()` is
+   exercised only insofar as it is idempotent and no-ops without a code; the path
+   "launch → first beat refused → still watching → operator unsuspends" has not
+   been run.
+4. **That the two-minute cadence is right for the hub.** It is a load decision as
+   much as a UX one — one refused beat per suspended device per 2 min. Chosen to
+   be small, not measured against a real suspended population.
+
+> **Ships by a client release.** This one is all client: the gate, the heartbeat
+> policy, the status field and the Account caption. Nothing here waits on
+> `hooks-sync.sh` except the thing it has always waited on — whether the hub
+> enforces what the console shows.
+
+---
+
 ## `main`'s red `Build (linux)`: a harness race, fixed — one symptom still unproven
 
 **Added 2026-11-08 from the failing run; diagnosed and fixed 2026-11-09.** The
@@ -1152,7 +1206,10 @@ Confirming these needs a device, a hub, and a real uninstall. Do not read
 
 ### RESOLVED — nothing in the UI could clear a selected theme
 
-**Added 2026-10-01; closed 2026-11-01.**
+**Added 2026-10-01; closed 2026-11-01, and then superseded entirely on
+2026-11-19** when the theme layer was deleted (`/COLOURS.md` §0, §3): there is no
+selected theme to clear. The text below records the fix that shipped first,
+because the reasoning about sentinels outlived it.
 
 A theme carries its own light/dark mode and **supersedes `theme_mode` while one is
 set** (`THEMES.md` §2). The dropdown on Account only ever *wrote* a theme id —
@@ -1173,9 +1230,18 @@ exactly like a theme bug.
 That leaves the second entry below, which is unchanged: the two controls are
 still separate, and now the second one can be *cleared* rather than only set.
 
-### The theme dropdown and the `theme_mode` dropdown are separate and can disagree
+### RESOLVED by deletion — the theme dropdown and the `theme_mode` dropdown can disagree
 
-**Added 2026-10-01; partly addressed 2026-11-01.** Same change.
+**Added 2026-10-01; partly addressed 2026-11-01; closed 2026-11-19** by removing
+both controls.
+
+Both controls are gone: there is no Appearance select and no Theme select, because
+there is one permanent appearance (`/COLOURS.md` §0). The disagreement described
+below can no longer occur, and it was not solved — it was designed out. The entry
+is kept because the *reasoning* about two controls over one fact is still a good
+reason not to build a second control over this one.
+
+The original text follows.
 
 `account.tsx` has two adjacent controls in Preferences: Appearance
 (`theme_mode`, 3 options) and Theme (`theme_id`, one option per registry entry plus
@@ -1388,11 +1454,11 @@ Recording these so they are not re-investigated:
   floors, mode/palette direction and preset scope; it proves **nothing** about
   whether a theme *looks* right — `forest-glow`'s wash, the cold-start
   transition, `midnight` on an OLED panel. Eyes-only; a green suite does not
-  cover it. See [`THEMES.md`](THEMES.md) §8 and §9.
+  cover it. See [`THEMES.md`](../archive/THEMES.md) §8 and §9.
 - **`forest-glow` is only ever used against a dark palette, and nothing enforces
   it.** A future light theme naming it would pass every guard, because the preset
   test checks the decoration's *shape*, not its contrast against the palette using
-  it. See [`THEMES.md`](THEMES.md) §10 item 3.
+  it. See [`THEMES.md`](../archive/THEMES.md) §10 item 3.
 - **The lint-suppressed `recognised` binding** (fixed 2026-10-01). The right fix
   was to finish the feature: the state was never rendered, **and** nothing re-read
   the status after a successful recognition, so a returning student waited up to
@@ -1456,7 +1522,10 @@ frontend builds are green in this checkout; none of it has been run end to end.
    rebuild is not firing and the fix is in the trigger, not the value.
 2. **That the whole kick-out path works on a real device** — suspend→screen,
    unsuspend→restored, in both cases within one check-in. Needs a code, a running
-   client, and `locus_check_subscription` to force the beat.
+   client, and `locus_check_subscription` to force the beat. **Narrowed
+   2026-11-22:** the *time to restored* no longer depends on a manual check, since
+   a suspended client keeps beating every two minutes — see the entry at the top of
+   this file. The observation itself is still outstanding.
 3. **That `codes.kick` and `suspended_reason` are live on the hub.** New column in
    `seed-pb.py`; until it is re-run and PocketBase restarted, `recK.set("suspended_reason", ...)`
    writes a column the schema lacks and PocketBase **silently discards it** — the
@@ -1505,7 +1574,10 @@ what is not, because the difference decides whether you should deploy or diagnos
    `CONNECTED` client lives ONLY there. What would settle it: `hooks-sync.sh
    --check`, then a heartbeat response carrying `enforcement_version: 4`. A
    response without that key is a stale hook, and no client-side or console
-   change can compensate.
+   change can compensate. **As of 2026-11-22 the client reports this itself** —
+   `locus_status.hubEnforcement` is `stale` when the hub is behind, and the Account
+   page shows the number to quote — but the reading still has to come from a hub,
+   so the gap is narrowed, not closed.
 2. **That `first_seen_at` / `first_seen_fingerprint` exist on the live `codes`
    collection.** They are new in `seed-pb.py`. Until it is re-run and PocketBase
    restarted, `activation.pb.js` writes two columns the schema lacks — which

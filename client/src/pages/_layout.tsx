@@ -17,15 +17,10 @@ import {
 import { useI18n } from '@/hooks/use-i18n'
 import { useVerge } from '@/hooks/use-verge'
 import { useWindowDecorations } from '@/hooks/use-window'
-import { LOCUS_COLORS, LOCUS_LIGHT } from '@/pages/_theme'
-import { useThemeMode } from '@/services/states'
+import { locusTheme } from '@/services/theme'
 import getSystem from '@/utils/get-system'
 
-import {
-  useCustomTheme,
-  useLayoutEvents,
-  usePendingFailures,
-} from './_layout/hooks'
+import { useLayoutEvents, usePendingFailures } from './_layout/hooks'
 import { handleNoticeMessage } from './_layout/utils'
 
 import 'dayjs/locale/ru'
@@ -36,14 +31,10 @@ dayjs.extend(relativeTime)
 const OS = getSystem()
 
 const Layout = () => {
-  const mode = useThemeMode()
-  const isDark = mode !== 'light'
-  const { theme } = useCustomTheme()
   const { verge } = useVerge()
   const { language } = verge ?? {}
   const navCollapsed = verge?.collapse_navbar ?? false
   const { switchLanguage } = useI18n()
-  const themeReady = useMemo(() => Boolean(theme), [theme])
   const windowControlsRef = useRef<any>(null)
   const { decorated } = useWindowDecorations()
 
@@ -80,28 +71,8 @@ const Layout = () => {
     }
   }, [language, switchLanguage])
 
-  if (!themeReady) {
-    // The brief window before the custom theme resolves. Must be the same
-    // background as the native window and the document, or this placeholder
-    // itself becomes a flash of a different colour between the two.
-    return (
-      <div
-        style={{
-          width: '100vw',
-          height: '100vh',
-          background:
-            mode === 'light' ? LOCUS_LIGHT.background : LOCUS_COLORS.background,
-          transition: 'background 0.2s',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-        }}
-      ></div>
-    )
-  }
-
   return (
-    <ThemeProvider theme={theme}>
+    <ThemeProvider theme={locusTheme}>
       {/* 左侧底部窗口控制按钮 */}
       <NoticeManager position={verge?.notice_position} />
       <ServiceMigrationDialog />
@@ -162,7 +133,7 @@ const Layout = () => {
         {customTitlebar}
 
         <div className="layout-content">
-          <LayoutSidebar isDark={isDark} isCollapsed={navCollapsed} />
+          <LayoutSidebar isCollapsed={navCollapsed} />
 
           <div className="layout-content__right">
             <div className="the-bar"></div>

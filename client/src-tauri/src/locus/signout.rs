@@ -67,15 +67,23 @@ pub enum Step {
     RemoveProfile,
     /// Forget the code, the tier, the expiry, and the durable mirror.
     ForgetKey,
+    /// Tell the window, so the app leaves the student's session at once.
+    ///
+    /// Last because it is the one step that observes the finished state: the gate
+    /// re-reads `locus_status` when this fires, and firing it before [`Self::ForgetKey`]
+    /// would have it read a device that is still signed in and re-render the app the
+    /// student just left.
+    AnnounceChanged,
 }
 
 /// The sign-out sequence, as data.
-pub const ORDER: [Step; 5] = [
+pub const ORDER: [Step; 6] = [
     Step::NotifyHub,
     Step::StopHeartbeat,
     Step::StopTunnel,
     Step::RemoveProfile,
     Step::ForgetKey,
+    Step::AnnounceChanged,
 ];
 
 /// What the student is told happened on the hub side.
@@ -232,6 +240,21 @@ pub async fn sign_out() -> Result<SignOutResult> {
 
     logging!(info, Type::Config, "[locus] signed out on this device");
 
+    // Tell any live window, so the app leaves the student's session NOW.
+    //
+    // The frontend has its own signal for the sign-out it just performed
+    // (`services/entitlement-refresh.ts`), and this is not a duplicate of it: that
+    // one is a React-level notification that only exists while the renderer is
+    // mounted and subscribed, and the sign-out command can also be reached from the
+    // tray and from a future surface with no card to subscribe to it. The gate's
+    // rule is "re-read the authoritative status when the backend says the account
+    // changed", and this is the backend saying so.
+    //
+    // `"signed-out"`, never `"suspended"`: the two are different events with
+    // different screens, and this one must land on the activation gate. See
+    // `store::clear_entitlement` for the invariant that makes that automatic.
+    crate::locus::runtime::notify_entitlement_changed("signed-out");
+
     Ok(SignOutResult::with_hub(hub))
 }
 
@@ -286,11 +309,31 @@ mod tests {
     /// them failing must not leave the code on disk — so the one step that must
     /// succeed runs after the ones that are allowed to fail.
     #[test]
-    fn forgetting_the_key_is_the_last_step() {
+    fn nothing_observes_the_state_before_the_key_is_forgotten() {
+        let forget = ORDER
+            .iter()
+            .position(|step| *step == Step::ForgetKey)
+            .expect("ForgetKey is in the order");
+
+        // The original rule, and it still holds where it matters: every step that
+        // touches the machine runs before the key is forgotten, so a failure in any
+        // of them leaves the code in place.
+        assert_eq!(
+            forget,
+            ORDER.len() - 2,
+            "only the final announcement may follow the entitlement clear; anything \
+             else running after it would be operating on a device that has already \
+             forgotten what it is operating on"
+        );
+
+        // ...and the announcement is exactly the step that follows it, because the
+        // gate re-reads the status when it fires. Announced earlier, the gate would
+        // read a device that is still signed in and re-render the app the student
+        // just left — a sign-out that visibly did nothing.
         assert_eq!(
             ORDER.last().copied(),
-            Some(Step::ForgetKey),
-            "the entitlement clear must be the final stage"
+            Some(Step::AnnounceChanged),
+            "the last step must be the announcement, fired once the state is truthful"
         );
     }
 
@@ -304,7 +347,7 @@ mod tests {
             assert!(!seen.contains(&step), "{step:?} appears twice in ORDER");
             seen.push(step);
         }
-        assert_eq!(seen.len(), 5, "a step was added to `Step` but not to `ORDER`");
+        assert_eq!(seen.len(), 6, "a step was added to `Step` but not to `ORDER`");
     }
 
     /// `ORDER` describes the code, and an assertion about a description is

@@ -152,6 +152,17 @@ whale.txt
 !.locus-keys/README.md
 .icon-backup/
 
+# The design brief for the copy and identity rework (`.brief/`). Scratch: the
+# findings, the tone rules and the colour direction are written here to be READ
+# while the change is made, and the authority they describe lives in
+# /COLOURS.md, client/docs/FRONTEND.md and the locale bundles. Nothing in here
+# is a fact about the tree, so nothing here may be tracked — a document that
+# restates the palette is exactly what COLOURS.md §0 spent a release removing.
+# Explicit, because there is no generic dot-directory rule: `diag/`,
+# `.obsidian/` and `.whale/` each needed their own line for the same reason,
+# and `git add -A` is how the classes it does not cover get committed.
+.brief/
+
 # Secrets (encrypted is fine; plaintext never)
 .secrets.env
 age-key.txt

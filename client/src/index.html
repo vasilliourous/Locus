@@ -14,18 +14,13 @@
          theme module, so it carries the grounds by value — see /COLOURS.md §1
          for the three paint layers that must agree, and §2 for the values.
          `theme-colors.test.ts` fails if these drift from the palette. */
+      /* One appearance, so one set of values. The `prefers-color-scheme` block
+         that used to sit here is gone: Locus is permanently dark, and asking the
+         OS would have painted a light frame before a dark app. */
       :root {
-        --bg-color: #ececec;
-        --text-color: #151515;
-        color-scheme: light;
-      }
-
-      @media (prefers-color-scheme: dark) {
-        :root {
-          --bg-color: #141414;
-          --text-color: #e8e8e8;
-          color-scheme: dark;
-        }
+        --bg-color: #1a1b26;
+        --text-color: #c0caf5;
+        color-scheme: dark;
       }
 
       html,

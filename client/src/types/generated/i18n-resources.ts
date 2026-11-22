@@ -8,7 +8,6 @@ export interface TranslationResources {
         connection: {
           account: {
             activateForExpiry: string
-            appearance: string
             appVersion: string
             autoUpdate: string
             checkingStatus: string
@@ -23,6 +22,7 @@ export interface TranslationResources {
             expired: string
             expires: string
             expiresSoon: string
+            hubBehind: string
             language: string
             lastChecked: string
             noExpiryYet: string
@@ -40,26 +40,20 @@ export interface TranslationResources {
             refreshFailed: string
             storedCodeDamaged: string
             subscription: string
-            theme: string
-            themeContrast: string
-            themeDark: string
-            themeDawn: string
-            themeDefault: string
-            themeDefaultDark: string
-            themeDefaultLight: string
-            themeEmber: string
-            themeHint: string
-            themeLight: string
-            themeLinen: string
-            themeMoss: string
-            themeSepia: string
-            themeSlate: string
-            themeSystem: string
             thisDevice: string
             today: string
             updateBlocked: string
             updateCheckOff: string
             updateCheckOffAction: string
+          }
+          activation: {
+            alphabet: string
+            backupRoute: string
+            codeLabel: string
+            codePlaceholder: string
+            lede: string
+            submit: string
+            title: string
           }
           activeConnections: string
           blockerServiceInstallRequired: string
@@ -115,6 +109,14 @@ export interface TranslationResources {
             why: string
           }
           supportEmail: string
+          suspended: {
+            lapsedAction: string
+            lapsedBody: string
+            lapsedTitle: string
+            suspendedAction: string
+            suspendedBody: string
+            suspendedTitle: string
+          }
           takingLonger: string
           toggleHint: string
         }

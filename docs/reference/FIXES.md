@@ -2057,6 +2057,78 @@ shape: **a check that reads correct and does not do what its comment says.**
 - **Rule kept.** The cipher is defined once (§4); ten copies with nothing binding
   them is how the previous one drifted.
 
+## A SUSPENSION THAT COULD NOT BE LIFTED, AND A SIGN-OUT THAT LOOKED LIKE ONE (2026-11-22, unreleased)
+
+Reported as: *"the suspension feature does not work right and neither does the
+kick-out. Suspending a device did not kick in until I tried signing out, where it
+locked me onto the suspension page with no rescue other than wiping appdata and
+going back to the activation page."* One symptom cluster, **four** independent
+defects — and the last one is the rule that matters.
+
+- **Sign-out inherited the suspension, and the kick-out page has no controls.**
+  `store::clear_entitlement` removed the code, tier and expiry and left
+  `locus_suspended` set. Signing out of a suspended device therefore produced
+  `activated: false, suspended: true` — a pair that describes nothing, because a
+  suspension is a statement about a *code* — and the gate rendered `SuspendedScreen`,
+  which deliberately offers no sign-out, no retry and no alternative code (its remedy
+  is a conversation with the middleman). The only exit was wiping the app's data.
+  Fixed at the writer (`clear_entitlement` and `clear_device_state` both clear the
+  flag), at the reader (`store::is_suspended` refuses the pair, so a config already
+  written by an affected build cannot trap anyone), and at the gate (`gateScreen`
+  checks `!activated` **before** `suspended`, pinned by `use-entitlement.test.ts`).
+  *Sign-out and suspension are separate events and now separate code paths.*
+
+- **A suspension could be set but never lifted.** Two stops in series:
+  `handle_refusal` began with an unconditional `runtime::stop()`, and the heartbeat
+  loop itself ended on any refusal (`Refused => break`). Together they switched off
+  the one channel that could discover the operator undoing the suspension — so the
+  student sat on a screen saying "you can connect again without restarting the app",
+  and restarting was the only thing that worked. The loop now keeps beating after a
+  refusal on `SUSPENDED_INTERVAL` (2 min, fixed rather than backoff, because the
+  device's network is fine and its question is worth re-asking), and only the
+  *destructive* refusal — the one that deletes the credential — stops it any more.
+  `runtime::resume()` makes the re-arm idempotent for the device that was suspended
+  when the app quit.
+
+- **"Suspending did nothing" was unanswerable, by design.** The enforcement lives in
+  hooks deployed to the box from `/root/server/`, not in this tree, and the hub has
+  sent `enforcement_version` on every beat since the fix for exactly this reason —
+  and nothing read it. A stale deployment and a console that never set the flag were
+  the same non-event: the student was told nothing, and the operator was left
+  comparing a file tree against a live server. The client now records the version and
+  reports `HubEnforcement` in `locus_status`; the Account page says, in the student's
+  words, that the server is behind and which number to quote. It reports and never
+  gates — refusing service over a slow deploy would be a worse defect than the one it
+  reports.
+
+- **A five-minute poll was the whole app's notion of "now".** The gate re-read on a
+  timer and on two Tauri events. It now also re-reads on window focus, `pageshow`,
+  `online`, and `visibilitychange`, through one hook (`use-entitlement.ts`) that the
+  kick-out screen and the activation screen read instead of each issuing their own
+  `locusStatus()`. A failed read no longer clears a suspension — keeping what we have
+  is the safe direction, since the other one silently re-admits a device an operator
+  just kicked out.
+
+- **Guards, each observed failing.** `a_suspension_without_a_code_is_not_a_suspension`
+  and `clearing_the_entitlement_clears_the_suspension` (`store.rs`),
+  `a_suspension_keeps_the_heartbeat_beating` (`runtime.rs`),
+  `a_hub_that_never_answered_is_not_a_hub_that_is_behind` (`cmd/locus.rs`), and
+  `gateScreen`'s five cases (`use-entitlement.test.ts`). Each was reverted to the
+  defective behaviour and confirmed red before the fix was restored.
+
+- **Rule.** *A reversible state must be reachable from its own opposite.* The
+  suspension screen's entire promise is "this is temporary and you do nothing"; every
+  mechanism that could have made it permanent — a stopped heartbeat, a flag with no
+  credential behind it, a five-minute window — had to be closed, or the promise was a
+  lie told in the most convincing possible place.
+
+- **Not verified.** No device was suspended against a live hub from this environment,
+  so the end-to-end claim (suspend → tunnel down → unsuspend → restored in ≤2 min) is
+  **structural**, not observed. `hooks-sync.sh --check` against the box is still the
+  step that decides whether the live hub enforces any of it.
+
+---
+
 ## A SUSPENDED CODE SAID NOTHING, AND THE UPDATER WAS DEAD CODE (2026-09-28, third round)
 
 - **What broke.** Suspension was indistinguishable from a network failure, and the

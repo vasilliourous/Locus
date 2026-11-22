@@ -1,9 +1,11 @@
 import { Box, Button, CircularProgress, Typography, alpha } from '@mui/material'
+import { useTheme } from '@mui/material/styles'
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 
 import { SupportBlock } from '@/components/shared/support-block'
 import { useSubscription } from '@/hooks/use-subscription'
-import { LOCUS_COLORS } from '@/pages/_theme'
+import { monoFontFamily } from '@/pages/_surfaces'
 import { activationRefusal } from '@/pages/connect-notice'
 import {
   locusActivate,
@@ -64,6 +66,8 @@ interface Props {
 }
 
 const ActivationScreen = ({ onActivated }: Props) => {
+  const { t } = useTranslation()
+  const theme = useTheme()
   const [input, setInput] = useState('')
   const [phase, setPhase] = useState<Phase>('idle')
   const [error, setError] = useState<string | null>(null)
@@ -210,58 +214,42 @@ const ActivationScreen = ({ onActivated }: Props) => {
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
-        // ── The brand, stated explicitly ──────────────────────────────────
+        // ── The theme, inherited, not restated ────────────────────────────
         //
-        // This screen renders OUTSIDE `ThemeModeProvider` (see `main.tsx`): it is
-        // the pre-activation gate, so it cannot read the app theme — it gets a
-        // bare `createTheme()`. Everything here is therefore written from the
-        // Locus constants directly.
+        // This screen used to render OUTSIDE the theme provider, so it got a
+        // bare `createTheme()`: MUI's stock blue button and type scale, over a
+        // page whose colours were written from the palette constants by hand.
+        // That pairing once made every label invisible while present and
+        // correct in the DOM. `main.tsx` now mounts the provider above the
+        // activation gate, so this screen is themed like every other one and
+        // there is nothing left to state here.
         //
-        // That is not only a styling choice. The document sets
-        // `body { color: var(--text-color) }`, and pairing that with MUI's
-        // default background once made every label invisible while present and
-        // correct in the DOM. Stating the text colour and the page together makes
-        // the screen self-consistent by construction. The values are in
-        // `/COLOURS.md` §2.
-        //
-        // It is also the highest-value surface in the product: it is the first
-        // thing a student sees, and the only screen a person who has not paid
-        // yet will ever look at.
-        color: LOCUS_COLORS.textPrimary,
-        bgcolor: LOCUS_COLORS.background,
-        // A single soft green radial, per the spec's "green-black" identity.
-        // Subtle on purpose: a strong gradient behind a text input hurts
-        // legibility, and this is a screen about typing accurately.
-        backgroundImage: `radial-gradient(ellipse 80% 60% at 50% 0%, ${alpha(LOCUS_COLORS.accent, 0.1)}, transparent 70%)`,
+        // It is the highest-value surface in the product: the first thing a
+        // student sees, and the only screen a person who has not paid yet will
+        // ever look at.
+        bgcolor: 'background.default',
+        color: 'text.primary',
       }}
     >
       <Box
         sx={{ width: 420, maxWidth: 'calc(100vw - 48px)', textAlign: 'center' }}
       >
-        {/* Brand mark. The spec calls for a 48×48 shield in Locus green beside
-            the wordmark; there is no Locus asset in the repo yet, so the mark is
-            the wordmark alone for now — deliberately, rather than substituting
-            another product's logo. */}
+        {/* Brand mark. There is no Locus pictorial mark in the repo, so the mark
+            is the wordmark alone — deliberately, rather than substituting
+            another product's logo. See `/COLOURS.md` §8. */}
         <Typography
           variant="h4"
-          sx={{
-            fontWeight: 700,
-            letterSpacing: '-0.01em',
-            mb: 0.5,
-            color: LOCUS_COLORS.accent,
-          }}
+          sx={{ fontWeight: 700, letterSpacing: '-0.01em', mb: 0.5 }}
+          color="primary.main"
         >
           Locus
         </Typography>
         <Typography
           variant="body2"
-          sx={{
-            mb: 4,
-            color: LOCUS_COLORS.textSecondary,
-            letterSpacing: '0.01em',
-          }}
+          color="text.secondary"
+          sx={{ mb: 4, letterSpacing: '0.01em' }}
         >
-          Locus VPN
+          {t('home.components.connection.activation.title')}
         </Typography>
 
         {/* The maintenance tunnel, said plainly while it is carrying this
@@ -275,11 +263,8 @@ const ActivationScreen = ({ onActivated }: Props) => {
             One line, from the backend's own verdict (`LocusStatus.bootstrapping`),
             never inferred here. */}
         {status?.bootstrapping && (
-          <Typography
-            variant="caption"
-            sx={{ mb: 2, color: LOCUS_COLORS.textSecondary }}
-          >
-            Using the Locus backup route to reach the server.
+          <Typography variant="caption" color="text.secondary" sx={{ mb: 2 }}>
+            {t('home.components.connection.activation.backupRoute')}
           </Typography>
         )}
 
@@ -302,28 +287,23 @@ const ActivationScreen = ({ onActivated }: Props) => {
               px: 2,
               py: 1.5,
               borderRadius: 1.5,
-              border: `1px solid ${LOCUS_COLORS.error}`,
-              bgcolor: alpha(LOCUS_COLORS.error, 0.12),
+              border: '1px solid',
+              borderColor: 'error.main',
+              bgcolor: alpha(theme.palette.error.main, 0.12),
             }}
           >
             <Typography
               variant="body2"
-              sx={{
-                color: LOCUS_COLORS.error,
-                lineHeight: 1.5,
-                fontWeight: 500,
-              }}
+              color="error.main"
+              sx={{ lineHeight: 1.5, fontWeight: 500 }}
             >
               {refusal}
             </Typography>
           </Box>
         )}
 
-        <Typography
-          variant="body2"
-          sx={{ mb: 2.5, color: LOCUS_COLORS.textPrimary, fontWeight: 500 }}
-        >
-          Enter the activation code from your card.
+        <Typography variant="body2" sx={{ mb: 2.5, fontWeight: 500 }}>
+          {t('home.components.connection.activation.lede')}
         </Typography>
 
         <input
@@ -341,33 +321,36 @@ const ActivationScreen = ({ onActivated }: Props) => {
           spellCheck={false}
           autoComplete="off"
           autoCapitalize="characters"
-          placeholder="RQ-XXXX-XXXX-XXXX-X"
-          aria-label="Activation code"
+          placeholder={t(
+            'home.components.connection.activation.codePlaceholder',
+          )}
+          aria-label={t('home.components.connection.activation.codeLabel')}
           style={{
             width: '100%',
             boxSizing: 'border-box',
             padding: '16px 18px',
             fontSize: 20,
             letterSpacing: '0.08em',
-            fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+            fontFamily: monoFontFamily,
             textAlign: 'center',
             textTransform: 'uppercase',
-            borderRadius: 8,
-            // The verdict colours are Locus's, not MUI's defaults: this screen
-            // is outside the provider, so `theme.palette.divider` would be the
-            // LIGHT theme's divider — nearly invisible on this green-black page.
+            borderRadius: theme.shape.borderRadius,
+            // The verdict colours are the theme's status roles, read through the
+            // provider this screen now sits under. Before that it was OUTSIDE
+            // the provider, so `palette.divider` was the light theme's divider —
+            // nearly invisible on a dark page — which is why the colours were
+            // written from the constants by hand.
             border: `1px solid ${
               shownError
-                ? LOCUS_COLORS.error
+                ? theme.palette.error.main
                 : localValid
-                  ? LOCUS_COLORS.success
-                  : LOCUS_COLORS.border
+                  ? theme.palette.success.main
+                  : theme.palette.divider
             }`,
-            outline: 'none',
-            // A filled field rather than a transparent one: on the dark surface
-            // an transparent input reads as a bare underline and looks broken.
-            background: LOCUS_COLORS.surface,
-            color: LOCUS_COLORS.textPrimary,
+            // A filled field rather than a transparent one: on a dark surface a
+            // transparent input reads as a bare underline and looks broken.
+            background: theme.palette.background.paper,
+            color: theme.palette.text.primary,
             transition: 'border-color 0.15s ease-out',
           }}
         />
@@ -385,7 +368,8 @@ const ActivationScreen = ({ onActivated }: Props) => {
           {shownError && (
             <Typography
               variant="body2"
-              sx={{ color: LOCUS_COLORS.error, lineHeight: 1.4 }}
+              color="error.main"
+              sx={{ lineHeight: 1.4 }}
             >
               {shownError}
             </Typography>
@@ -393,7 +377,8 @@ const ActivationScreen = ({ onActivated }: Props) => {
           {!shownError && notice && (
             <Typography
               variant="body2"
-              sx={{ color: LOCUS_COLORS.success, lineHeight: 1.4 }}
+              color="success.main"
+              sx={{ lineHeight: 1.4 }}
             >
               {notice}
             </Typography>
@@ -406,42 +391,21 @@ const ActivationScreen = ({ onActivated }: Props) => {
           variant="contained"
           disabled={!canSubmit}
           onClick={() => void submit()}
-          sx={{
-            mt: 1,
-            py: 1.4,
-            // The primary action, in Locus green. Stated explicitly because
-            // this screen cannot read the app theme; without it the button
-            // would render in MUI's default blue on every install.
-            bgcolor: LOCUS_COLORS.accent,
-            color: LOCUS_COLORS.background,
-            fontWeight: 600,
-            textTransform: 'none',
-            fontSize: 16,
-            borderRadius: 2,
-            boxShadow: 'none',
-            transition: 'background-color 0.15s ease-out',
-            '&:hover': { bgcolor: LOCUS_COLORS.accentHover },
-            '&.Mui-disabled': {
-              bgcolor: LOCUS_COLORS.accent,
-              opacity: 0.35,
-            },
-          }}
+          sx={{ mt: 1, py: 1.4, fontWeight: 600, fontSize: 16 }}
         >
-          {busy ? <CircularProgress size={22} color="inherit" /> : 'Activate'}
+          {busy ? (
+            <CircularProgress size={22} color="inherit" />
+          ) : (
+            t('home.components.connection.activation.submit')
+          )}
         </Button>
 
         <Typography
           variant="caption"
-          sx={{
-            display: 'block',
-            mt: 3,
-            mb: 2,
-            color: LOCUS_COLORS.textSecondary,
-          }}
+          color="text.secondary"
+          sx={{ display: 'block', mt: 3, mb: 2 }}
         >
-          Nothing on your card? The code is 15 characters and never contains{' '}
-          <strong>0</strong>, <strong>O</strong>, <strong>1</strong> or{' '}
-          <strong>I</strong>.
+          {t('home.components.connection.activation.alphabet')}
         </Typography>
 
         {/* The support route, on the one screen a stuck student is guaranteed to
@@ -470,7 +434,7 @@ const ActivationScreen = ({ onActivated }: Props) => {
             // then gives the operator's address and the reply promise for
             // everyone the middleman could not help. It deliberately does not
             // mention the hub. */}
-        <SupportBlock palette="brand" />
+        <SupportBlock />
       </Box>
     </Box>
   )

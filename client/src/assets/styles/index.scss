@@ -1,5 +1,4 @@
 @use "./layout.scss";
-@use "./page.scss";
 @use "./font.scss";
 
 body {
@@ -12,21 +11,22 @@ body {
   -ms-user-select: none;
 }
 
-// Fallback values only — `use-custom-theme` overwrites every one of these on the
-// real document element at runtime.
+// Fallback values only — `services/theme.ts` overwrites every one of these on the
+// real document element at startup.
 //
 // They still matter: this is what paints in the window between the stylesheet
-// loading and the theme hook running, so a wrong value here is momentarily
+// loading and that stylesheet running, so a wrong value here is momentarily
 // visible on every launch. They mirror `src/pages/_theme.tsx`; the values are
 // `/COLOURS.md` §2, and `tests/theme-colors.test.ts` fails if they drift.
 :root {
-  --primary-main: #C4C4C4;
-  --text-primary: #e8e8e8;
-  --selection-color: #202020;
-  --scroller-color: #a6a6a6;
-  --background-color: #141414;
-  --background-color-alpha: rgba(191, 195, 199, 0.1);
+  --primary-main: #7AA2F7;
+  --text-primary: #C0CAF5;
+  --selection-color: #2F3349;
+  --scroller-color: #9AA5CE;
+  --background-color: #1A1B26;
+  --background-color-alpha: rgba(122, 162, 247, 0.1);
   --border-radius: 8px;
+  color-scheme: dark;
 }
 
 ::selection {
@@ -60,4 +60,32 @@ body {
 
 [data-dnd-dragging] {
   box-shadow: 0 6px 18px rgba(0, 0, 0, 0.32) !important;
+}
+
+// Focus is visible, app-wide.
+//
+// # Why this is a real rule now
+//
+// `use-custom-theme` used to inject a pair of declarations into a global
+// `<style>` element — but the rule's opening `* {` had been lost, so the
+// declaration sat at the top level of the stylesheet and the browser discarded
+// both lines. The app has therefore never actually had either reset, and any
+// control that expected the reset has been showing its default outline and
+// shadow all along.
+//
+// That is recorded rather than quietly "fixed": restoring
+// `box-shadow: none !important` would flatten every shadow in the product at the
+// same time as a colour change, and surfaces are already separated by a
+// one-step-up ground and a 1px border (`_surfaces.ts`). The shadow half is
+// dropped deliberately, not restored.
+//
+// The focus half is the opposite: a removed focus ring is an accessibility
+// defect (WCAG 2.4.7), and one reason the Connection screen carries a global
+// Enter/Space handler is that a keyboard user could not see which control was
+// focused. `:focus-visible` rather than `:focus`, so a mouse click does not
+// leave a ring behind.
+:focus-visible {
+  outline: 2px solid var(--primary-main);
+  outline-offset: 2px;
+  border-radius: var(--border-radius);
 }

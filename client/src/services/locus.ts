@@ -21,19 +21,23 @@ import type {
 
 // ── The wire types, generated from the Rust ──────────────────────────────────
 //
-// These nine types cross the Tauri IPC boundary and are MIRRORS of the Rust
-// types in `src-tauri/src/cmd/locus.rs`. They are generated, not hand-written:
+// These types cross the Tauri IPC boundary and are MIRRORS of the Rust types in
+// `src-tauri/src/cmd/locus.rs`. They are generated, not hand-written:
 // `server/scripts/gen-ts-contract.py` reads the Rust and emits
 // `./locus.generated.ts`, and CI fails if the committed output disagrees with
 // the Rust.
 //
 // WHY. Before this, each interface was hand-maintained beside its `invoke()`
-// call, with `check-consistency.sh` §33 asserting agreement for ONE of the nine.
-// The other eight drifted silently by construction: a field added to Rust and
-// not to TypeScript serialises and is ignored, so a feature does nothing; a
-// field read by TypeScript that Rust never sends renders as `undefined`. That is
-// the `uot_port` defect one layer in, and it is the layer that changes most
-// often — `FIXES.md` records exactly this for `udp`.
+// call, with `check-consistency.sh` §33 asserting agreement for ONE of them.
+// The rest drifted silently by construction: a field added to Rust and not to
+// TypeScript serialises and is ignored, so a feature does nothing; a field read
+// by TypeScript that Rust never sends renders as `undefined`. That is the
+// `uot_port` defect one layer in, and it is the layer that changes most often —
+// `FIXES.md` records exactly this for `udp`.
+//
+// Do not restate the count here. It was "nine" and is now thirteen; the number
+// was wrong the moment a type was added, and nothing checks it. The generator's
+// output is the list.
 //
 // The fix is not a tenth assertion. It is that there is now one side to write.
 // Change the Rust type, run `python3 server/scripts/gen-ts-contract.py --write`,
@@ -55,6 +59,13 @@ export type {
   SignOutResult,
   HubOutcome,
   ConnectBlocker,
+  // Re-exported for the same reason as the rest: a consumer should name the
+  // public surface, not reach into the generated file. `HubEnforcement` is read by
+  // the Account page (it is the one field that says the hub is deployed behind),
+  // and it was generated without a re-export — so the only way to use it was
+  // `import type … from './locus.generated'`, which is how a generated type
+  // becomes a hand-written habit.
+  HubEnforcement,
 } from './locus.generated'
 
 export interface CodeCheck {

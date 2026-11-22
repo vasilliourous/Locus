@@ -489,6 +489,28 @@ pub struct ReleaseAsset {
     pub sha256: String,
 }
 
+/// The version of the hub's enforcement logic this client expects.
+///
+/// `heartbeat.pb.js` sends `enforcement_version` on every successful beat, and the
+/// hooks that actually run live on the box are deployed from `/root/server/`,
+/// not from this checkout. So "is the kick-out fix live?" cannot be answered by
+/// reading the tree — only by asking a hub. This constant is the question, and
+/// [`crate::cmd::locus::HubEnforcement`] is how the answer becomes visible.
+///
+/// The hub's numbering, quoted from the hook itself, so the two cannot drift
+/// silently (`tests/activation_contract.rs` pins them):
+///
+/// * 2 — expiry enforced (410) + suspension (403) + `expires_at` in the response.
+/// * 3 — the free tier's advisory allowance.
+/// * 4 — the `budget` tier exists.
+///
+/// **This build needs 2**: a hub below it cannot answer 403 for a suspension, so
+/// the console's `suspend` button does nothing to a device. Nothing is GATED on
+/// this number — refusing service to a student because the operator's box is
+/// behind would be a worse defect than the one it reports. It is a diagnostic,
+/// and the client keeps working either way.
+pub const ENFORCEMENT_VERSION: u32 = 2;
+
 /// The platforms `update_config` and the release manifest use as keys.
 ///
 /// **Frozen.** These strings are the contract: the heartbeat hook interpolates

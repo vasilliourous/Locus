@@ -861,15 +861,15 @@ interface IVergeConfig {
   startup_script?: string
   start_page?: string
   clash_core?: string
-  theme_mode?: 'light' | 'dark' | 'system'
   /**
-   * The selected named theme. Typed as `string` rather than the `ThemeId` union
-   * on purpose: this value is read from a file a user can edit, so an id this
-   * build does not know is a real possibility that must parse. It is narrowed at
-   * the single point of use by `resolveTheme` (`src/pages/_themes.ts`), which
-   * falls back to the default theme for anything unusable.
+   * `theme_mode` and `theme_id` were removed on 2026-11-19.
+   *
+   * Locus has one permanent appearance (`/COLOURS.md` §0), so there is no mode
+   * and no theme to select. The fields stay out of this interface on purpose —
+   * but a `verge.yaml` written by an older build may still carry them, and
+   * `IVerge` has no `deny_unknown_fields`, so they are simply ignored on read.
+   * Nothing migrates them. Do not reintroduce either name as a setting.
    */
-  theme_id?: string
   traffic_graph?: boolean
   enable_memory_usage?: boolean
   enable_group_icon?: boolean

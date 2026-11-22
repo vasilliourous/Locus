@@ -23,58 +23,67 @@ verified-against: client/tests/theme-colors.test.ts (values + contrast floors), 
 
 ## 0. The state of colour right now
 
-**Monochrome reset, decided 2026-11-11 and not yet superseded.** Every surface
-Locus owns — the app's default appearance, its tier badge, its status roles, the
-landing page, the operator console, the native window's first frame, the wordmark
-and the application icon — is **neutral grey**. There is no brand colour.
+**Permanent Dawn, decided 2026-11-19.** Locus has exactly one appearance. There is
+no theme registry, no theme id, no light/dark switch, no user-selectable palette
+and no theme hook — the value of every colour in the app is a constant, and the
+machinery that could produce a second one has been deleted rather than disabled.
 
-The reason is a product report, not a taste: clients looking at the landing page
-read it as unfinished. Rather than iterate on a palette that was never agreed,
-every Locus-owned colour was reduced to grey so a real colour design can start
-from a neutral base instead of being tuned against a guess.
+This supersedes the **monochrome reset of 2026-11-11** (recorded in §11). That
+decision reduced every Locus-owned colour to grey so a real colour design could
+start from a neutral base. This is that design, and it is the only one.
 
-**What survived the reset, deliberately:**
+What "permanent Dawn" means concretely:
 
-- **The machinery.** Colour is data projected through one chain
-  (`§1`). Nothing in that chain was removed, so re-colouring the product is a
-  change to data, not to behaviour.
-- **The seven themes that are not Locus's own.** `slate`, `dawn`, `ember`,
-  `linen`, `sepia` and `contrast` keep the colours they were authored with, and
-  so do the three decoration presets that belong to them (`blueprint`,
-  `risograph`, `signal-noise`). They are alternative looks a student may pick;
-  they are not the brand. **`moss` and its `forest-glow` preset are neutral now**
-  because both were green — see §4.
-- **The shape.** Corner radii are not colour and were not touched.
+- **One mode: dark.** There is no light appearance. `LOCUS_LIGHT`, the
+  `prefers-color-scheme` blocks in the app, the landing page and the console, and
+  every `mode === 'light'` branch are gone. A student on a bright laptop cannot
+  choose a light UI; that is the cost of the decision, not an oversight.
+- **The OS follows the app.** The native window is painted the app's ground on
+  every system, and the title-bar hint is a constant. A light-mode machine no
+  longer gets a light frame around a dark app.
+- **Stored choices are dropped, not migrated.** An existing `verge.yaml` may still
+  carry `theme_id` or `theme_mode`; `IVerge` has no `deny_unknown_fields`, so both
+  keys are ignored on read and nothing converts them. A student who had chosen
+  `sepia` now sees Dawn.
+- **The landing page and the operator console are dark-only too** (§5, §7). A
+  light marketing page beside a permanently dark product would be two products.
+- **`theme_setting` survives** — `font_family`, `background_image`,
+  `background_opacity`, `background_blend_mode` and `css_injection` are
+  preferences, not a second palette, and they still apply. A student's own
+  background image does not create another appearance.
 
-**Status of this section:** the *decision* is a fact about the tree. Whether the
-result looks right **on a real screen is unverified** — this change was made
-against computed contrast figures and has not been rendered on a physical display
-on any of the three platforms.
+**Status of this section:** the *decision* is a fact about the tree. Its
+consequences above were read from the code, not seen on a screen.
 
 ---
 
 ## 1. How colour flows, and the one rule that must not be broken
 
-There is exactly one chain, and every surface is painted by it:
+One chain, one input, built once at module load:
 
 ```
-theme_id (stored, may be empty)
-   └─> resolveTheme(id)            _themes.ts   → a ThemeSpec { palette, shape, decoration }
-        └─> themeDefaultFor(spec)  _themes.ts   → the legacy { primary_color, … } shape
-             └─> createTheme(...)  use-custom-theme.ts → the MUI palette every component reads
+LOCUS_COLORS                     _theme.tsx   → the palette, the only one
+   └─> defaultTheme              _theme.tsx   → the legacy { primary_color, … } shape
+        └─> createTheme(...)     services/theme.ts → `locusTheme`, the MUI theme
+             └─> ThemeProvider   main.tsx     → every screen, including the gate
 ```
 
-**The rule: a future colour pass edits the palette data in `§3`–`§6` and stops
-there.** It does not edit `resolveTheme`, `themeDefaultFor`, `use-custom-theme`,
-or any component. Those are the mechanism; the palette is the input. A change to
-the mechanism to get a colour is a change that will have to be undone to get the
-next one.
+`services/theme.ts` also writes the window-chrome CSS variables
+(`--divider-color`, `--scrollbar-*`, `--background-color`, `--selection-color`)
+and the global stylesheet, once, through `applyThemeWhenReady()`. It is a function
+rather than a module side effect so importing the module has no DOM requirement —
+the palette test imports it under Node.
 
-`use-custom-theme` resolves each MUI field as `theme_setting.X || projected.X`, so
-a student who has set a custom colour keeps it. The palettes below are **defaults,
-not overrides** — the same rule the pre-reset palette shipped with.
+**The rule: a future colour pass edits `LOCUS_COLORS` and stops there.** It does
+not edit `services/theme.ts`, and it does not edit a component. A colour written
+into a component is the defect the guard in §10 catches.
 
-### The three paint layers, and why there are three values for one colour
+`theme_setting` still overrides the MUI palette field by field
+(`setting.X || defaultTheme.X`) inside the projection, so a student who set a
+custom colour keeps it. That is a preference on top of the one appearance, not a
+second appearance.
+
+### The three paint layers, and why there are still three values for one colour
 
 The window is painted three times before the app is themed, and none of the three
 can import the others:
@@ -83,172 +92,140 @@ can import the others:
 |---|---|---|
 | **1. The native window** | the OS, before any web content exists | `client/src-tauri/src/utils/resolve/window.rs` |
 | **2. The document** | HTML parsed before any bundle runs | `client/src/index.html`, then `client/src/assets/styles/index.scss` |
-| **3. The app** | the theme hook | `client/src/pages/_theme.tsx` → `_themes.ts` |
+| **3. The app** | the module-level theme | `client/src/pages/_theme.tsx` → `services/theme.ts` |
 
-All three carry the same pair of grounds (§2). They are kept in step by
-`client/tests/theme-colors.test.ts`, which reads all three files — the copies
-cannot be removed (layer 2 cannot import layer 3, and layer 1 is Rust), so the
-test is what keeps them honest. **Changing layer 3 alone shows the old colour for
-a frame on every launch.**
+There is a fourth, the pre-bundle bootstrap script
+(`client/src-tauri/src/utils/resolve/window_script.rs`), which paints before
+layer 2's stylesheet is live and cannot import anything.
+
+All four carry the same ground (§2). They are kept in step by
+`client/tests/theme-colors.test.ts`, which reads every one of them — the copies
+cannot be removed (layer 2 cannot import layer 3, layer 1 is Rust), so the test is
+what keeps them honest. **Changing layer 3 alone shows the old colour for a frame
+on every launch.**
 
 ---
 
-## 2. The base palette — Locus's own appearance
+## 2. The one palette
 
-Authority: `client/src/pages/_theme.tsx` (`LOCUS_COLORS`, `LOCUS_LIGHT`). The
-registry's `default-dark` and `default-light` are **projections of these objects**,
-not copies, so this table is the single source for both.
-
-### Dark (`LOCUS_COLORS`) — the default a fresh install sees
+Authority: `client/src/pages/_theme.tsx` (`LOCUS_COLORS`), projected into MUI by
+`client/src/services/theme.ts`. This table is the single source for every value in
+the product, the landing page, the console and every native window frame.
 
 | Role | Value | Notes |
 |---|---|---|
-| `background` | `#141414` | The window |
-| `surface` | `#202020` | Cards and panels; one visible step above the window |
-| `surfaceHover` | `#2A2A2A` | Interactive surfaces |
-| `border` | `#4A4A4A` | Dividers, input borders |
-| `textPrimary` | `#E8E8E8` | Body text |
-| `textSecondary` | `#A6A6A6` | Labels and hints |
-| `accent` | `#C4C4C4` | Buttons, active indicators, **and the wordmark** |
-| `accentHover` | `#DEDEDE` | |
-| `success` | `#E8E8E8` | Connected |
-| `error` | `#D6D6D6` | Disconnected, failures |
-| `warning` | `#C8C8C8` | Connecting, degraded, renewal warnings |
+| `background` | `#1A1B26` | The window |
+| `surface` | `#24283B` | Cards and panels; one visible step above the window |
+| `surfaceHover` | `#2F3349` | Interactive surfaces; also the `::selection` ground |
+| `border` | `#3B4261` | Dividers, input borders, window border |
+| `textPrimary` | `#C0CAF5` | Body text |
+| `textSecondary` | `#9AA5CE` | Labels and hints |
+| `accent` | `#7AA2F7` | Primary action, active indicators, **and the wordmark** |
+| `accentHover` | `#9AB8FF` | |
+| `success` | `#9ECE6A` | Connected |
+| `warning` | `#E0AF68` | Connecting, degraded, renewal warnings |
+| `error` | `#F7768E` | Disconnected, failures |
+| `secondary` | `#BB9AF7` | Non-primary emphasis |
+| `info` | `#7DCFFF` | Informational, not a status |
 
-### Light (`LOCUS_LIGHT`)
+### The legacy projection
 
-| Role | Value |
-|---|---|
-| `background` | `#ECECEC` |
-| `surface` | `#F7F7F7` |
-| `surfaceHover` | `#E6E6E6` |
-| `border` | `#C0C0C0` |
-| `accent` | `#4C4C4C` |
-| `accentHover` | `#404040` |
+Authority: the same file, `defaultTheme`. These are the MUI fields the chain reads;
+every one is overridden by a student's own `theme_setting` when they have one.
 
-The light palette has no status colours of its own; the light projections in §3
-supply them.
+| Field | Value | Role |
+|---|---|---|
+| `primary_color` | `#7AA2F7` | the accent |
+| `secondary_color` | `#BB9AF7` | non-primary emphasis |
+| `primary_text` | `#C0CAF5` | body |
+| `secondary_text` | `#9AA5CE` | labels |
+| `info_color` | `#7DCFFF` | informational |
+| `error_color` | `#F7768E` | failure |
+| `warning_color` | `#E0AF68` | degradation |
+| `success_color` | `#9ECE6A` | connected |
+| `background_color` | `#1A1B26` | the window |
 
-### The legacy shape, and the six status roles
+### The surface ladder
 
-Authority: the same file, `defaultTheme` (light) and `defaultDarkTheme` (dark).
-These are the MUI fields the chain reads; every one is overridden by a student's
-own setting when they have one.
+`background` and `surface` are deliberately two different values: MUI's shadow
+scale is zeroed app-wide, so a card is separated from the page by a one-step-up
+surface **and** its 1px border. They must not collapse to one value, which is what
+the old default-dark did — the border alone is what reads as unfinished.
+`theme-colors.test.ts` asserts the step exists.
 
-| Field | Light | Dark | Role |
-|---|---|---|---|
-| `primary_color` | `#4C4C4C` | `#C4C4C4` | the accent |
-| `secondary_color` | `#565656` | `#A6A6A6` | non-primary emphasis |
-| `primary_text` | `#151515` | `#E8E8E8` | body |
-| `secondary_text` | `#565656` | `#A6A6A6` | labels |
-| `info_color` | `#565656` | `#D0D0D0` | informational |
-| `error_color` | `#151515` | `#D6D6D6` | failure |
-| `warning_color` | `#151515` | `#C8C8C8` | degradation |
-| `success_color` | `#151515` | `#E8E8E8` | connected |
-| `background_color` | `#ECECEC` | `#141414` | the window |
+### Shape
 
-**Status colour in a monochrome product is carried by position, weight and
-colour, not by hue alone** — the same redundancy rule the tier badge follows
-(`§6`). The three status roles are deliberately separable in value so a warning
-is still distinct from a success without colour.
+`--card-radius` is `12px` and `--control-radius` is `8px` (`DEFAULT_SHAPE` in the
+same file). Shape is not colour and is not a theme field: there is one set.
+
+### Status colour
+
+**Status is carried by hue *and* by a word and a glyph** — the redundancy rule the
+tier badge follows (§6). The three status roles are separated in both hue and
+value, which is the property the previous palette could not claim: under the
+monochrome reset the three roles were three greys within 32/255 levels of each
+other, so a connected dot and an error dot differed only by their shadow ring.
 
 ---
 
-## 3. The registry — nine themes
+## 3. There is one appearance
 
-Authority: `client/src/pages/_themes.ts` (`THEMES`). The list of ids is data in
-`docs/state.toml [client.theme_ids]`, recomputed from this registry by
-`check-consistency.sh` §9. Dropdown order is registry order.
+There is no registry. `client/src/pages/_themes.ts` was deleted on 2026-11-19,
+together with `THEMES`, `THEME_IDS`, `resolveTheme`, `isThemeId`,
+`themeDefaultFor`, `DEFAULT_THEME_ID`, `DECORATIONS` and the `ThemeSpec` /
+`ThemePalette` / `DecorationSpec` types. The Account screen no longer has an
+Appearance row or a Theme row, and `docs/state.toml [client.theme_ids]` is gone
+with the checker that recomputed it (`check-consistency.sh` §9).
 
-One mode per theme: a theme carries its own light/dark, and selecting one
-supersedes `theme_mode` until it is cleared.
+**Do not reintroduce a theme layer "for contrast" or "for light mode".** Re-adding
+one means re-adding the registry, the resolver, the dropdown, the decoration
+injector and the second paint path — all of which is what §0's decision removed.
+If a second appearance is ever wanted, it is a new decision with its own dated
+entry here, not a palette entry.
 
-### Themes that are projections of `§2` — neutral
-
-| id | Mode | Source |
-|---|---|---|
-| `default-dark` | dark | `LOCUS_COLORS` |
-| `default-light` | light | `LOCUS_LIGHT` + the light columns of `§2` |
-
-### Themes that keep their authored colour
-
-Bodies from `client/src/pages/_themes.ts`; each is a full self-contained palette
-with the fields `background, surface, surfaceHover, border, textPrimary,
-textSecondary, accent, accentHover, success, warning, error, secondary, info`.
-
-| id | Mode | Palette | Decoration | Shape |
-|---|---|---|---|---|
-| `slate` | dark | `#1E222A` · `#272C36` · `#323845` · `#3E4553` · `#D8DEE9` · `#A9B4C4` · `#88C0D0` · `#A3D4E2` · `#A3BE8C` · `#EBCB8B` · `#D08770` · `#81A1C1` · `#5E9FD8` | `blueprint` | default |
-| `dawn` | dark | `#1A1B26` · `#24283B` · `#2F3349` · `#3B4261` · `#C0CAF5` · `#9AA5CE` · `#7AA2F7` · `#9AB8FF` · `#9ECE6A` · `#E0AF68` · `#F7768E` · `#BB9AF7` · `#7DCFFF` | `signal-noise` | default |
-| `ember` | dark | `#211A17` · `#2E2521` · `#3B302A` · `#4E4038` · `#EDE0D8` · `#C0ABA0` · `#E0895F` · `#F0A17C` · `#9CB380` · `#E0A85F` · `#E0706B` · `#C98F9E` · `#8FB0C9` | `ember-pit` | default |
-| `linen` | light | `#EAEEF2` · `#F4F7FA` · `#DFE5EB` · `#C0CAD4` · `#1E2733` · `#55636F` · `#2F6F9F` · `#255A82` · `#3F6C45` · `#8A5A00` · `#A33226` · `#5B6E85` · `#255E8A` | — | default |
-| `sepia` | light | `#EDE4D3` · `#F7F0E4` · `#E2D6C0` · `#C9B79A` · `#2B2118` · `#5C4C3B` · `#8A5A2B` · `#6E4622` · `#3F6C45` · `#8A5A00` · `#A33226` · `#6B5641` · `#31556F` | `risograph` | default |
-| `contrast` | dark | `#14171A` · `#242A30` · `#2E353C` · `#5A646E` · `#F0F3F5` · `#C2CAD2` · `#6FD08C` · `#8FDFA6` · `#6FD08C` · `#E8C46A` · `#F08A8A` · `#9AB4CC` · `#8FC4E8` | — | default |
-
-The field order in that table is the object's own order: **background, surface,
-surfaceHover, border, textPrimary, textSecondary, accent, accentHover, success,
-warning, error, secondary, info.** Read a row against the header, not by
-guessing a column.
-
-### The theme that was neutralised
-
-| id | Mode | Palette | Decoration | Shape |
-|---|---|---|---|---|
-| `moss` | dark | `#1E1E1E` · `#2A2A2A` · `#333333` · `#3D3D3D` · `#E6E6E6` · `#ABABAB` · `#C8C8C8` · `#DCDCDC` · `#C8C8C8` · `#B4B4B4` · `#A6A6A6` · `#ABABAB` · `#B4B4B4` | `forest-glow` | card 14 / control 8 |
-
-`moss` keeps its identity as the theme with a larger card radius; what it lost is
-the green. Its palette was literal greens in the registry rather than a projection
-of `§2`, which is why it needed its own row here.
+`theme-colors.test.ts` asserts that none of those names survives in the source
+tree, and that the registry file does not exist. Both were demonstrated failing
+before being kept.
 
 ---
 
 ## 4. Decorations
 
-Authority: `client/src/pages/_themes.ts` (`DECORATIONS`). A preset is a
-**structure** — `short` declarations plus ordered `layers` — never free-form CSS,
-scoped to `[data-theme-skin]` and injected into one `<style>` element by
-`use-custom-theme`. Removing the element removes every trace of the layer.
+None. The five decoration presets (`forest-glow`, `ember-pit`, `blueprint`,
+`risograph`, `signal-noise`) were part of the theme layer and were deleted with it.
+The two `radial-gradient` washes that lived on the activation gate and the
+suspension screen — the only other decorative paint in the product — were removed
+at the same time: three screens carrying the same gradient is a placeholder, not a
+design.
 
-| Preset | Used by | What it paints | State |
-|---|---|---|---|
-| `forest-glow` | `moss` | a soft radial wash from the top edge | **neutral** — `rgba(153,153,153,0.10)` → transparent |
-| `ember-pit` | `ember` | a radial wash from below, 112% down | as authored |
-| `blueprint` | `slate` | a 32px repeating grid plus a cold wash | as authored |
-| `risograph` | `sepia` | two offset flat tints | as authored |
-| `signal-noise` | `dawn` | a 1px scanline on a 4px period under a phosphor glow | as authored |
-
-**Compositor-only is a rule, not a checked property.** `background-*`,
-`box-shadow`, `border-*`, `opacity`, `filter`, `mix-blend-mode` and custom-property
-declarations are permitted because none can change layout. **Nothing in a preset
-may set `width`, `height`, `margin`, `padding`, `position`, `display`, `flex`,
-`grid`, `gap`, `order` or `font-size`** — a decoration that can resize an element
-can move the Connect control, which is the one thing this app must not do. No test
-can tell `box-shadow` from `margin-top`, so this is the first thing to check in a
-theme diff.
-
-A preset's safety properties *are* checked (`client/tests/theme-colors.test.ts`):
-braces balance, no construct introduces a document-level rule, and no preset can
-load a remote or inline asset.
+The `<style id="locus-theme-decoration">` element that `use-custom-theme` wrote no
+longer exists, because the hook does not. Nothing injects decoration CSS, so there
+is no scope for a preset to escape into — the `[data-theme-skin]` scoping rules and
+the tests that guarded them went with the mechanism.
 
 ---
 
 ## 5. The landing page
 
-Authority: `server/site/style.css` `:root`, and its `prefers-color-scheme: dark`
-block. Served statically by Caddy with no build step, so it is a **by-value copy of
-§2** rather than an import, and it is not enforced by the test suite — it is
-enforced by whoever changes §2 remembering this section exists.
+Authority: `server/site/style.css` `:root`. Served statically by Caddy with no
+build step, so it is a **by-value copy of what the stylesheet compiles to** rather
+than an import, and it is not enforced by the TypeScript test — it is enforced by
+whoever changes the palette remembering this section exists.
 
-| Variable | Light | Dark |
-|---|---|---|
-| `--bg` | `#ECECEC` | `#141414` |
-| `--surface` | `#F7F7F7` | `#202020` |
-| `--surface-hover` | `#E6E6E6` | `#2A2A2A` |
-| `--border` | `#C0C0C0` | `#4A4A4A` |
-| `--text` | `#151515` | `#E8E8E8` |
-| `--text-secondary` | `#565656` | `#A6A6A6` |
-| `--accent` | `#4C4C4C` | `#D0D0D0` |
-| `--accent-hover` | `#404040` | `#E2E2E2` |
+| Variable | Value |
+|---|---|
+| `--bg` | `#1A1B26` |
+| `--surface` | `#24283B` |
+| `--surface-hover` | `#2F3349` |
+| `--border` | `#3B4261` |
+| `--text` | `#C0CAF5` |
+| `--text-secondary` | `#9AA5CE` |
+| `--accent` | `#7AA2F7` |
+| `--accent-hover` | `#9AB8FF` |
+
+The `prefers-color-scheme: dark` block and the light `:root` are gone: the page
+is dark-only, like the product. A light marketing page beside a permanently dark
+app would be two products.
 
 The four download buttons, the canonical URL and the platform keys on this page
 are **not** colour and are owned elsewhere (`docs/operate/CLAIMS.md`,
@@ -296,6 +273,11 @@ because a plan a student is paying for must never be invisible.
 Authority: `server/console/src/styles.css` `:root`, plus a handful of literal
 values in the same file that are not variables.
 
+The console is dark-only and is **not** yet recoloured to the Dawn palette: it
+still carries the neutral set below, because it is an operator surface served
+from the hub and its stylesheet is a separate build. This section records that
+honestly rather than claiming an agreement that does not exist.
+
 | Variable | Value |
 |---|---|
 | `--bg` | `#141414` |
@@ -317,6 +299,11 @@ badge backgrounds `#222222` (available) / `#1C1C1C` (bound) / `#1C1C1C`
 (suspended) / `#262626` (expired). Modal and toast shadows are black at alpha,
 unchanged.
 
+**Open:** the console reads as a second product beside the app. Recolouring it is
+a follow-up with its own change, gated on the console's build and deploy path
+(`docs/operate/DEPLOY.md`), and it must not be done by inventing values here — it
+implements `§2`.
+
 Not colour, and not owned here: the console's routes, its auth, and the
 `/admin/` path.
 
@@ -327,45 +314,49 @@ Not colour, and not owned here: the console's routes, its auth, and the
 | Mark | Source | Colour |
 |---|---|---|
 | Wordmark | `client/src/assets/image/logo.svg` | `fill: currentColor` |
-| Shield (dark / light pair) | `client/src/assets/image/icon_dark.svg`, `icon_light.svg` | `fill: currentColor` |
+| Shield | `client/src/assets/image/icon_dark.svg` | `fill: currentColor` |
 | Nav glyphs | `client/src/assets/image/itemicon/*.svg` | `fill: currentColor` |
 | Application icon | `client/src-tauri/icons/*` (PNG, ICO, ICNS, `Assets.car`) | flat neutral mark on white |
 | Tray icons | `client/src-tauri/icons/tray-icon*.ico` | unchanged — they are status indicators, not brand |
 | Landing-page logo | `server/site/logo.svg` | `fill: currentColor`; `server/site/icon.svg` likewise |
 
 The in-app marks resolve `currentColor` from their parent, which
-`layout-sidebar.tsx` sets to `theme.palette.primary.main`. So **the wordmark and
-shield follow the accent of whichever theme is selected, including every theme in
-§3 that kept its colour.** There is one asset per mark, never one per theme: a
-per-theme asset is a file that gets forgotten when a theme is added.
+`layout-sidebar.tsx` sets to `theme.palette.primary.main` — the accent. There is
+one asset per mark, never one per appearance: a per-mark asset is a file that gets
+forgotten.
 
-**The tray icons were left alone**, deliberately: they encode connection state,
-not brand. Every other mark follows the theme, which is why a student on `slate`
-sees a blue-grey wordmark and a student on `default-dark` sees a grey one — that
-is the documented behaviour, not an inconsistency.
+`icon_light.svg` was **deleted** with the theme layer. The sidebar used to pick
+between the light and dark glyph from the resolved mode; with one appearance that
+choice collapsed, and the file had no remaining reference.
+
+**The tray icons and the application icon are still Clash Verge Rev's**, and
+`client/docs/FRONTEND.md` §6 records that no Locus mark exists. Replacing them is
+a brand decision plus a release-asset change, and it has not been taken.
 
 ---
 
-## 9. Contrast rules every palette must satisfy
+## 9. Contrast rules the palette must satisfy
 
-These are not preferences. Each is asserted per theme by
-`client/tests/theme-colors.test.ts`, so a new palette cannot ship unreadable.
+These are not preferences. Each is asserted by `client/tests/theme-colors.test.ts`,
+so a change to the palette cannot ship unreadable.
 
 | Rule | Floor | Why |
 |---|---|---|
-| `textPrimary` on its own surface and on the page | **4.5:1** | body copy |
-| `textSecondary` on its surface | **3:1** | labels and hints |
-| `accent` on surface and on page | **3:1** | it paints the wordmark and button labels; 3:1 is the floor for a non-text UI mark, and the wordmark is the largest use of the accent |
-| surface against page | **1.03:1** | a card you cannot see does no work; the 1px border should reinforce separation, not carry it |
-| border against surface | **1.15:1** | |
+| `textPrimary` on the surface **and** on the page | **4.5:1** | body copy; both grounds, because most text sits on a card |
+| `textSecondary` on the surface | **4.5:1** | labels and hints are still text a student must read |
+| `accent` on the page | **3:1** | it paints the wordmark and the primary action; 3:1 is the floor for a non-text UI mark |
+| `success`, `warning`, `error` on the surface | **3:1** | the status dot is the whole signal; an invisible one is worse than none |
+| surface against page | **> 1.15:1** | the ladder must exist: with shadows zeroed, the border alone is what reads as unfinished |
 | no pure white, no pure black | — | pure white on a full-window panel is a light source, not a surface; pure black crushes the ladder |
 
-Two rules that a contrast figure cannot express:
+Two things a contrast figure cannot express, and a reader should know are
+therefore **unverified**:
 
-- **A mode must match its palette direction** — a dark theme carries light text.
-  This is the check that catches a copy-paste between two similar themes.
-- **An accent is a text-bearing colour, not a decoration.** If it is only legible
-  as a fill, it is not usable as the accent.
+- **Whether it looks right.** A ratio says two values are distinguishable, not that
+  they are pleasant. That needs a person, a dark room and a bright one.
+- **Whether a status reads at a glance.** Hue separation is asserted as a ratio;
+  colour-blindness is not modelled by any figure here. The words and glyphs beside
+  each status are the fallback, which is why they are not optional.
 
 ---
 
@@ -383,27 +374,46 @@ Two rules that a contrast figure cannot express:
 comment should say instead of the value.
 
 **One exception, and it is not a second home: the palette source files.** A
-palette has to be expressible in code, so `§2`–`§8` name the module that holds
-each one and those modules hold the literal. That is the *implementation* of the
-value this file describes, and the pair is guarded in both directions — the doc
-names the file, and `client/tests/theme-colors.test.ts` asserts the file's values
-are what §0–§9 say. No other code file, comment, document or spec may hold one.
-The guard's allowlist is exactly: this file, and the palette modules §2–§8 name.
+palette has to be expressible in code, so `§2`–`§8` name the file that holds each
+value. That is the *implementation* of what this file describes, and the pair is
+guarded in both directions — the doc names the file, and
+`client/tests/theme-colors.test.ts` asserts the file's values are what this
+document says, and that the four paint layers agree with each other.
 
-**The guard:** `server/scripts/check-consistency.sh` §49 fails when a live
-document outside this file carries a colour literal or a colour-looking claim, and
-`client/tests/theme-colors.test.ts` fails when a Locus-owned palette carries
-chroma. Both were shown failing against the tree they police before being kept.
+**The guard:** `server/scripts/check-consistency.sh` §49 fails when a file outside
+the allowlist carries a colour literal. The allowlist is: this file, and the seven
+sources below. It is *asserted* rather than trusted — each path must exist, so a
+renamed module fails here rather than silently widening the allowlist to nothing.
+
+| Allowlisted source | Holds |
+|---|---|
+| `client/src/pages/_theme.tsx` | `LOCUS_COLORS`, `defaultTheme`, `TIER_COLORS` |
+| `client/src/index.html` | the pre-bundle document ground |
+| `client/src/assets/styles/index.scss` | the pre-theme stylesheet fallback |
+| `client/src-tauri/src/utils/resolve/window.rs` | the native window ground |
+| `client/src-tauri/src/utils/resolve/window_script.rs` | the pre-bundle bootstrap ground |
+| `server/site/style.css` | the landing page |
+| `server/console/src/styles.css` | the operator console |
 
 **What the guard does not cover, stated so nobody reads it as coverage:** a
-component that hardcodes a colour outside the palette, and a *shape* decision
-(radius, weight, spacing) that changes how a surface reads. The first is caught
-only where the existing component scan looks; the second is not colour at all and
-this file has nothing to say about it.
+component that hardcodes a colour is caught only by the palette test's per-file
+scan of the five main screens, not by §49; and a *shape* decision (radius, weight,
+spacing) that changes how a surface reads is not colour at all and this file has
+nothing to say about it.
 
 ---
 
 ## 11. Superseded, and where the old values went
+
+Four decisions have been superseded, and none of their values are reproduced
+anywhere. In order:
+
+| Date | Decision | Superseded by |
+|---|---|---|
+| — | the original green-black specification | the redesign below |
+| — | the 3.3.x palette | the monochrome reset |
+| 2026-11-11 | **monochrome reset** — every Locus-owned surface neutral, so a colour design could start from a neutral base | **permanent Dawn (§0)** |
+| 2026-11-19 | **nine-theme registry** — `default-dark`, `default-light`, `slate`, `dawn`, `ember`, `moss`, `linen`, `sepia`, `contrast`, five decoration presets and a theme hook | **one appearance (§0, §3)** — the registry, the resolver, the hook, the dropdown and the decorations were deleted |
 
 The pre-reset palette, the original green-black specification and the retired
 client's colour table are **not reproduced anywhere**. Three documents used to

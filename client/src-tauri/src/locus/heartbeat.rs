@@ -27,6 +27,30 @@ pub const MIN_INTERVAL: Duration = Duration::from_secs(5 * 60);
 /// Longest gap between beats, however many failures have accumulated.
 pub const MAX_INTERVAL: Duration = Duration::from_secs(2 * 60 * 60);
 
+/// How often a SUSPENDED device keeps asking whether it has been reinstated.
+///
+/// # Why a suspended device keeps beating at all
+///
+/// It used to stop for good: a refusal ended the loop (`Refused => break`), on the
+/// reasoning that a device the hub will not serve has nothing to say. That is true
+/// of the BEAT and false of the QUESTION the beat answers, and it produced the
+/// worst property this feature has had — **a suspension could be set but never
+/// lifted.** An operator unsuspends a code, the hub now says 200, and the one thing
+/// that would discover it (a beat) had already been switched off. The student was
+/// left on the kick-out screen until they restarted the app, and the screen tells
+/// them to wait, so they waited.
+///
+/// A beat every two minutes is the smallest cadence that makes "ask them to lift
+/// it, you will be back in without re-entering anything" true while a student is
+/// looking at the screen. It is bounded on the hub side by that being the only
+/// thing a suspended device sends — no tunnel, no config, no traffic — and it
+/// costs the hub one cheap query per suspended device per two minutes.
+///
+/// Not zero: a suspended device in a classroom of suspended devices would
+/// otherwise be a small thundering herd. Jitter is applied on top, as everywhere
+/// else in the loop.
+pub const SUSPENDED_INTERVAL: Duration = Duration::from_secs(2 * 60);
+
 /// How long the tunnel keeps working without a successful heartbeat.
 ///
 /// This is what makes a suspension eventually bite even if the device never
@@ -205,6 +229,28 @@ pub struct HeartbeatResponse {
     pub update_url: Option<String>,
     #[serde(default)]
     pub update_sha256: Option<String>,
+
+    /// Which version of the hub's enforcement logic answered this beat.
+    ///
+    /// # Why the client reads this at all
+    ///
+    /// The hooks that police suspension run on the deployed box, not in this
+    /// checkout, and nothing here notices when they are stale. So "an operator
+    /// suspended a device and it kept working" has two indistinguishable causes:
+    /// the console never set the flag, or the box is running a hook old enough to
+    /// ignore it. Reading the version turns that into one fact.
+    ///
+    /// **Absent means the hub predates the field** — which is itself proof of a
+    /// deployment behind enforcement version 2, because that is the version that
+    /// introduced the field. That is why this is `Option` and not `#[serde(default)]
+    /// u32`: `0` would be a lie about a hub that simply never answered the
+    /// question.
+    ///
+    /// Tolerant of a malformed value for the same reason as
+    /// [`Self::free_allowance_mb`]: a hub sending `"3"` instead of `3` must not
+    /// turn every beat into `Unreachable` over a field nothing acts on.
+    #[serde(default, deserialize_with = "tolerant_u32")]
+    pub enforcement_version: Option<u32>,
 }
 
 impl HeartbeatResponse {
@@ -722,22 +768,26 @@ impl HeartbeatLoop {
             loop {
                 let outcome = beat(&credential, &fingerprint).await;
 
+                // A refusal does NOT end the loop, and that reversal is the fix
+                // for "a suspension can be set but never lifted". It used to
+                // `break` here, on the reasoning that a device the hub will not
+                // serve has nothing to say — which is true of the beat and false
+                // of the question it asks. Unsuspending a code changes the hub's
+                // answer to 200, and the only thing that would discover it had
+                // already been switched off, so the student sat on the kick-out
+                // screen waiting for a reinstatement nothing was looking for.
+                //
+                // Instead the loop keeps asking, slowly, for as long as the device
+                // is suspended (`SUSPENDED_INTERVAL`). The hub sees one cheap query
+                // per suspended device per interval — no config, no traffic, no
+                // tunnel — which is the cost of making "you will be back in as soon
+                // as they lift it" true.
+                let refused = matches!(outcome, BeatOutcome::Refused { .. });
                 match &outcome {
                     BeatOutcome::Ok(_) => backoff.reset(),
-                    // A refusal is terminal for this run: the account is not in
-                    // good standing, and hammering the hub will not change it.
-                    //
-                    // The completion signal is raised here rather than shared with
-                    // the path below, so the terminal case stays a single obvious
-                    // exit — a caller waiting on a manual check needs the wake on
-                    // a refusal too, since that is an answer to the question it
-                    // asked.
-                    BeatOutcome::Refused { .. } => {
-                        on_outcome(outcome);
-                        wake_waiting_beat(&beat_done_signal);
-                        break;
+                    BeatOutcome::Refused { .. } | BeatOutcome::Unreachable { .. } => {
+                        backoff.record_failure();
                     }
-                    BeatOutcome::Unreachable { .. } => backoff.record_failure(),
                 }
 
                 on_outcome(outcome);
@@ -745,10 +795,20 @@ impl HeartbeatLoop {
                 // everything a completed beat changes — the stored expiry, the
                 // applied config — having already happened. Signalling first would
                 // hand the UI a fresh flag over stale state, which is the same lie
-                // in a new place.
+                // in a new place. The `break` that used to sit above raised this
+                // separately for the terminal case; there is no terminal case now,
+                // so there is one wake site and no way for the two to drift.
                 wake_waiting_beat(&beat_done_signal);
 
-                let delay = backoff.jittered_delay();
+                // A suspended device is answered on a FIXED short interval, not on
+                // the failure backoff: the backoff exists to stop a device with a
+                // broken network from hammering the hub, while a suspended device
+                // has a working network and a question worth re-asking.
+                let delay = if refused {
+                    SUSPENDED_INTERVAL
+                } else {
+                    backoff.jittered_delay()
+                };
                 tokio::select! {
                     () = stop_signal.notified() => break,
                     // A beat was asked for. Wake now and beat on the next
@@ -1034,6 +1094,7 @@ mod tests {
             update_sha256_macos_arm: None,
             update_url: Some("https://hub/updates/2.0.0/locus-linux-amd64".into()),
             update_sha256: Some("legacy".into()),
+            enforcement_version: None,
         };
 
         assert_eq!(
@@ -1072,6 +1133,7 @@ mod tests {
             update_sha256_macos_arm: None,
             update_url: Some("https://hub/updates/2.0.0/locus-linux-amd64".into()),
             update_sha256: Some("legacy".into()),
+            enforcement_version: None,
         };
 
         assert_eq!(
@@ -1105,6 +1167,7 @@ mod tests {
             update_sha256_macos_arm: None,
             update_url: None,
             update_sha256: None,
+            enforcement_version: None,
         };
         assert!(!response.is_ok());
     }

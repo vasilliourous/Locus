@@ -21,8 +21,12 @@
 //!   * a **config refresh** is applied through the same path activation uses, so
 //!     there is one route from "the hub said something changed" to "the core is
 //!     running it";
-//!   * a **suspension** stops the tunnel and the loop and records a REVERSIBLE
-//!     state — the code is kept, so unsuspending restores the session;
+//!   * a **suspension** stops the tunnel and records a REVERSIBLE state — the
+//!     code is kept, so unsuspending restores the session. It does **not** stop
+//!     the loop: the loop is the only thing that can discover the operator
+//!     lifting it, so it keeps asking on `SUSPENDED_INTERVAL` until the hub says
+//!     200. Stopping it here is the defect that made a kick-out permanent
+//!     (`docs/reference/SUSPENSION.md` §3);
 //!   * any **other refusal** (unknown code, expiry) clears the entitlement,
 //!     because a device the hub has refused must not keep a tunnel up on the
 //!     strength of a stale local record;
@@ -44,10 +48,21 @@ use tauri::Emitter as _;
 /// at 10:00 kept working until 10:05. This event closes that, and it is the
 /// backend's only channel to the gate besides `locus_status`.
 ///
-/// Carries a short reason label (`"suspended"`, `"refused"`, `"reinstated"`) for
-/// logging and for the UI to log; the authoritative state is always re-read from
-/// `locus_status`, so a missed event delays the screen rather than making it lie.
+/// Carries a short reason label (`"suspended"`, `"refused"`, `"reinstated"`,
+/// `"activated"`, `"signed-out"`, `"resumed"`) for logging and for the UI to log;
+/// the authoritative state is always re-read from `locus_status`, so a missed
+/// event delays the screen rather than making it lie.
 pub const ENTITLEMENT_CHANGED_EVENT: &str = "locus://entitlement-changed";
+
+/// Tells any live window that the account state changed.
+///
+/// One function rather than a bare `emit` at each site, because there are now six
+/// of them and the event name is a string contract with the frontend — a typo in
+/// one site is a screen that silently does not update, which is the failure this
+/// event exists to prevent. Callers pass only the label.
+pub fn notify_entitlement_changed(reason: &str) {
+    let _ = crate::core::handle::Handle::app_handle().emit(ENTITLEMENT_CHANGED_EVENT, reason);
+}
 
 /// Holds the running loop, if any.
 static RUNNING: Mutex<Option<HeartbeatLoop>> = Mutex::new(None);
@@ -152,6 +167,50 @@ pub fn is_running() -> bool {
     match RUNNING.lock() {
         Ok(guard) => guard.is_some(),
         Err(poisoned) => poisoned.into_inner().is_some(),
+    }
+}
+
+/// Ensures a loop is beating, starting one from the stored record if not.
+///
+/// # Why a device needs to be able to resume itself
+///
+/// The loop owns the only channel that can change the account state, so "is it
+/// running?" is the same question as "can this device learn that an operator
+/// changed their mind?". Two situations answer it "no" until something re-arms it:
+///
+///   * the app was quit while the device was suspended, and the launch that
+///     follows finds a suspended record — [`start`] is called at startup, but a
+///     loop that was refused on its first beat must not leave the device
+///     unwatched for the rest of the run;
+///   * the loop was stopped by a path that had a reason at the time (a refusal
+///     about the credential) which has since been repaired by a new activation.
+///
+/// Idempotent, so every caller can be optimistic: a running loop is left alone, a
+/// record with no code is a no-op, and a device that is genuinely signed out stays
+/// silent. This is the "self-heal" half of the invariant — the *write* half is
+/// [`store::clear_entitlement`], which guarantees a signed-out device is never
+/// reported as suspended, so this can never resurrect a watch for a device with no
+/// code to watch with.
+pub async fn resume() {
+    if is_running() {
+        return;
+    }
+
+    let verge = crate::config::Config::verge().await;
+    match store::read(&verge.latest_arc()) {
+        Some(activation) => {
+            logging!(
+                info,
+                Type::Config,
+                "[locus] no heartbeat was running; resuming from the stored activation"
+            );
+            start(activation);
+        }
+        None => logging!(
+            debug,
+            Type::Config,
+            "[locus] no heartbeat to resume: this device holds no activation"
+        ),
     }
 }
 
@@ -431,7 +490,15 @@ fn offered_version_to_record<'a>(
     Some(version)
 }
 
-/// Leaves the suspended state, if this device was in it.
+/// Applies what a SUCCESSFUL beat says about the account's standing.
+///
+/// Two jobs, joined because they are two readings of the same event and because
+/// `handle_success` is at its complexity ceiling:
+///
+/// * [`record_hub_enforcement`] — which enforcement logic answered, so a
+///   deployment behind the suspension fix becomes a fact in the product rather
+///   than an inference from a support call;
+/// * leaving the suspended state, below.
 ///
 /// # Why an unsuspension is detected HERE
 ///
@@ -443,9 +510,17 @@ fn offered_version_to_record<'a>(
 ///
 /// Split out of [`handle_success`] because it is one self-contained decision with
 /// its own failure modes, and inlining it pushed that function past the complexity
-/// ceiling — a fair signal that it did not belong there.
-async fn leave_suspension_if_reinstated() {
-    if !store::is_suspended(&crate::config::Config::verge().await.latest_arc()) {
+/// ceiling — a fair signal that it did not belong there. That happened twice, which
+/// is why the enforcement record now lives here rather than alongside it.
+async fn leave_suspension_if_reinstated(response: &crate::locus::heartbeat::HeartbeatResponse) {
+    record_hub_enforcement(response).await;
+
+    // `is_suspended` reads the flag AND the stored activation, so the flag alone
+    // is not enough to conclude anything here. Checking the flag's raw value would
+    // treat a device that holds no code as "suspended, now reinstated" on its
+    // first ever beat, and clear a state that does not exist.
+    let verge = crate::config::Config::verge().await;
+    if !verge.latest_arc().locus_suspended.unwrap_or(false) || store::read(&verge.latest_arc()).is_none() {
         return;
     }
 
@@ -459,27 +534,71 @@ async fn leave_suspension_if_reinstated() {
         logging!(warn, Type::Config, "[locus] could not clear the suspension: {error:#}");
     }
 
-    // Restart the loop `handle_refusal` stopped, from the record that was just
-    // cleared. Without this the flag would be gone and nothing would ever beat
-    // again, so the NEXT suspension would go unnoticed indefinitely — the original
-    // bug, restored by the fix for it.
-    //
-    // `start` validates the stored credential and no-ops without one, so this
-    // cannot resurrect a loop for a device that has no code.
-    let verge = crate::config::Config::verge().await;
-    if let Some(activation) = store::read(&verge.latest_arc()) {
-        start(activation);
-    }
+    // The loop is no longer stopped by a suspension (see `handle_refusal`), so
+    // there is usually nothing to restart here — it kept asking, which is how this
+    // function was reached at all. `resume` still has to run for the paths where
+    // the loop is genuinely absent: a device that was suspended when the app quit
+    // and whose launch has not started one yet. It is idempotent, and it cannot
+    // resurrect a loop for a device with no code.
+    resume().await;
 
     // Tell the window, so the kick-out page is replaced now rather than at the
-    // next 5-minute poll. A reinstatement the student has to wait for is
-    // indistinguishable from one that did not work.
-    let _ = crate::core::handle::Handle::app_handle().emit(ENTITLEMENT_CHANGED_EVENT, "reinstated");
+    // next poll. A reinstatement the student has to wait for is indistinguishable
+    // from one that did not work.
+    notify_entitlement_changed("reinstated");
+}
+
+/// Records which enforcement logic the hub is running, and says so when it is behind.
+///
+/// # Why this is a function of its own
+///
+/// Two reasons, and the second is the interesting one.
+///
+/// It is a self-contained decision with its own log line and its own storage
+/// failure mode, so it reads better here than in the middle of `handle_success`.
+/// And inlining it pushed that function past this crate's cognitive-complexity
+/// ceiling — which is exactly the signal `leave_suspension_if_reinstated` was
+/// extracted on, and it is right again: the complexity is real, and the place it
+/// belongs is in the function that owns the question.
+///
+/// # What it does with the answer
+///
+/// Records it, and LOGS AT WARN when the hub is behind. The question it answers —
+/// "can this hub enforce a suspension?" — is a property of the deployment, and an
+/// operator can redeploy under a running app, so it is written on every healthy
+/// beat rather than once at activation. A value recorded once would go stale in the
+/// one direction that matters.
+///
+/// It is never a gate. Refusing service to a student because the operator's box is
+/// behind would be a worse defect than the one it reports, and the student cannot
+/// fix it. The Account page shows it; a student reading it can quote the number, and
+/// that is the whole of the intended effect.
+async fn record_hub_enforcement(response: &crate::locus::heartbeat::HeartbeatResponse) {
+    if let Some(version) = response.enforcement_version
+        && version < crate::locus::contract::ENFORCEMENT_VERSION
+    {
+        logging!(
+            warn,
+            Type::Config,
+            "[locus] this hub runs enforcement version {version}, but this client needs {}. \
+             A suspension set in the console will NOT reach this device until the hub's \
+             hooks are redeployed (see docs/reference/SUSPENSION.md \u{a7}4).",
+            crate::locus::contract::ENFORCEMENT_VERSION
+        );
+    }
+
+    if let Err(error) = store::record_hub_enforcement(response.enforcement_version).await {
+        logging!(
+            warn,
+            Type::Config,
+            "[locus] could not record the hub's enforcement version: {error:#}"
+        );
+    }
 }
 
 /// A successful beat: record it, then act on anything the hub changed.
 async fn handle_success(response: &crate::locus::heartbeat::HeartbeatResponse) {
-    leave_suspension_if_reinstated().await;
+    leave_suspension_if_reinstated(response).await;
 
     let now = chrono::Utc::now().timestamp();
     if let Err(error) = store::record_heartbeat_success(now).await {
@@ -694,8 +813,19 @@ fn is_suspension(reason: &str) -> bool {
 async fn handle_refusal(reason: &str) {
     logging!(warn, Type::Config, "[locus] the hub refused this device: {reason}");
 
-    stop();
-
+    // Stop the TUNNEL, never the loop — and the distinction is the whole
+    // difference between a suspension that can be lifted and one that cannot.
+    //
+    // This used to call `stop()`, which is correct for a refusal about the
+    // CREDENTIAL (the code is about to be deleted, so there is nothing left to
+    // authenticate with) and wrong for a suspension, which keeps the code
+    // precisely so the session can be restored. Stopping the loop there meant the
+    // one channel that could learn about an unsuspension had been switched off by
+    // the suspension itself.
+    //
+    // So the loop's fate is decided below, per arm: a suspension keeps it beating
+    // on `SUSPENDED_INTERVAL`; any other refusal stops it, because its credential
+    // is gone and a loop with no credential can only hammer the hub.
     if let Err(error) = crate::core::CoreManager::global().stop_core().await {
         logging!(
             warn,
@@ -718,14 +848,27 @@ async fn handle_refusal(reason: &str) {
         logging!(
             info,
             Type::Config,
-            "[locus] suspended: the code is kept so unsuspending restores the session"
+            "[locus] suspended: the code is kept so unsuspending restores the session, \
+             and the heartbeat keeps asking whether it has been lifted"
         );
+        // Re-arm the loop if it is not running. `handle_refusal` is reached from a
+        // beat, so one IS running in the ordinary case and this is a no-op; it
+        // matters for the paths that reach here with no loop — a manual status
+        // check after a restart, an activation refused as suspended by the hub.
+        // Without it, `runtime::resume` is the only thing that ever starts the
+        // watch, and a device suspended between launch and its first beat would
+        // sit unwatched until the next launch.
+        resume().await;
         // The window must show this NOW. Without the event the kick-out page waits
-        // for the gate's 5-minute poll, which on a background app is the whole
-        // working day.
-        let _ = crate::core::handle::Handle::app_handle().emit(ENTITLEMENT_CHANGED_EVENT, "suspended");
+        // for the gate's finite fallback poll, which on a background app is the
+        // whole working day.
+        notify_entitlement_changed("suspended");
         return;
     }
+
+    // Not reversible: the credential is about to be deleted, so there is nothing
+    // left for a loop to authenticate with.
+    stop();
 
     if let Err(error) = store::record_refusal(reason).await {
         logging!(
@@ -741,12 +884,30 @@ async fn handle_refusal(reason: &str) {
 
     // Same reason as the suspension arm: the gate polls, and a withdrawal the
     // student has to notice by waiting is a withdrawal they can act on meanwhile.
-    let _ = crate::core::handle::Handle::app_handle().emit(ENTITLEMENT_CHANGED_EVENT, "refused");
+    notify_entitlement_changed("refused");
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Source with `//` line comments removed.
+    ///
+    /// The absence assertions in this module must not be satisfied — or defeated —
+    /// by a doc comment that *names* the removed call in order to explain why it is
+    /// gone. That is not hypothetical: the first version of
+    /// `a_suspension_keeps_the_heartbeat_beating` failed against its own
+    /// explanation. Failing loudly is the good direction to be wrong in, but a guard
+    /// that cannot survive documentation is still no guard. Stripping comments first
+    /// means a check fails only when real code carries the call — the same helper
+    /// `activation_contract.rs` uses for the same reason.
+    fn strip_line_comments(source: &str) -> String {
+        source
+            .lines()
+            .map(|line| line.split("//").next().unwrap_or(""))
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
 
     /// Stopping when nothing is running must be harmless — it is called from
     /// shutdown paths where being wrong would panic on quit.
@@ -845,6 +1006,67 @@ mod tests {
             arm.contains("record_suspension"),
             "the suspension arm no longer records the suspension, so the client \
              could not tell a kick-out from any other refusal"
+        );
+    }
+
+    /// A suspension must not stop the loop, because the loop is how it is lifted.
+    ///
+    /// # The defect this is written against
+    ///
+    /// `handle_refusal` began with an unconditional `runtime::stop()`, and the loop
+    /// itself ended on any refusal (`Refused => break`). Together those meant a
+    /// suspension switched off the ONE channel that could discover the operator
+    /// undoing it. An operator unsuspends a code, the hub answers 200, and nothing
+    /// was listening — so the student sat on a screen telling them to wait, and
+    /// waiting did nothing until they restarted the app.
+    ///
+    /// Asserted on the source because the branch needs a live hub and a running app
+    /// to execute — the same trade `only_a_suspension_keeps_the_credential` makes.
+    /// The property is structural: the suspension arm must not stop the heartbeat.
+    #[test]
+    fn a_suspension_keeps_the_heartbeat_beating() {
+        let source = include_str!("runtime.rs");
+        let start = source
+            .find("async fn handle_refusal")
+            .expect("handle_refusal must exist");
+        let body = &source[start..];
+        let body = &body[..body.find("#[cfg(test)]").unwrap_or(body.len())];
+
+        // The suspension arm runs from its guard to its `return`. Slicing on
+        // `record_refusal` instead would include the code ABOVE the guard — where
+        // the destructive `stop()` now lives — and the guard would fail against a
+        // correct implementation. It did exactly that; the defect is worth keeping
+        // in the comment because the next person to move this code will reach for
+        // the same slice.
+        let arm_start = body
+            .find("if is_suspension(reason) {")
+            .expect("the reversible path must still be guarded by `is_suspension`");
+        let arm = &body[arm_start..];
+        let arm = &arm[..arm.find("return;").unwrap_or(arm.len())];
+
+        // Comment-stripped, so this tests the CODE and not the prose above it — the
+        // prose quotes `stop()` precisely to explain why it is not there, and a
+        // guard that fails on its own documentation is a guard nobody keeps.
+        let code_only = strip_line_comments(arm);
+
+        assert!(
+            !code_only.contains("stop();"),
+            "the suspension arm must not stop the heartbeat. A stopped loop cannot notice \
+             that an operator lifted the suspension, which is the difference between a \
+             kick-out that is reversible and one that needs a restart."
+        );
+        assert!(
+            code_only.contains("resume()"),
+            "the suspension arm must ensure a loop is running: a device suspended between \
+             launch and its first beat would otherwise sit unwatched until the next launch."
+        );
+
+        // The other half, one file away: the loop must have no terminal arm left.
+        let loop_source = include_str!("heartbeat.rs");
+        assert!(
+            !loop_source.contains("BeatOutcome::Refused { .. } => {\n                        on_outcome(outcome);"),
+            "the heartbeat loop must not end on a refusal: that arm is what made a \
+             suspension unrecoverable without a restart"
         );
     }
 
@@ -957,6 +1179,10 @@ mod tests {
             update_sha256_macos_arm: None,
             update_url: None,
             update_sha256: None,
+            // Absent, the same as a hub below enforcement version 2. The tests
+            // above are about the update offer and must not accidentally assert
+            // anything about deployment freshness.
+            enforcement_version: None,
         }
     }
 }

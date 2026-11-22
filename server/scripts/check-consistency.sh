@@ -1501,28 +1501,6 @@ def licence_client():
                   read("LICENSE"), re.MULTILINE)
     return m.group(1) if m else None
 
-def theme_ids():
-    """The theme registry's ids, in dropdown order.
-
-    Parsed from `THEMES` in the registry rather than from `THEME_IDS`, because
-    `THEME_IDS` is *derived from* `THEMES` (`Object.keys`) — comparing the two
-    would be checking the file against itself and could never fail. The keys of
-    the object literal are the authored artefact; that is what state.toml must
-    agree with.
-
-    The parse is deliberately narrow: it matches the top-level entries of the
-    `THEMES` literal only, by taking quoted keys at exactly one indent level.
-    A regex over nested TOML-shaped source is a crude tool, which is why it is
-    paired with the vitest suite that asserts the real invariants (id == key,
-    unique, resolvable) — see `client/tests/theme-colors.test.ts`.
-    """
-    src = read("client/src/pages/_themes.ts")
-    m = re.search(r'export const THEMES: Record<ThemeId, ThemeSpec> = \{(.*?)\n\}',
-                  src, re.DOTALL)
-    if not m:
-        return None
-    return re.findall(r"^  '?([a-z0-9-]+)'?:", m.group(1), re.MULTILINE) or None
-
 def version_sites():
     """The files `pnpm release-version` rewrites, from the bump script itself.
 
@@ -1587,7 +1565,6 @@ CHECKERS = {
     "hub.pocketbase_ui":    lambda: setup_log_path("PocketBase UI"),
     "platforms.keys":       platform_keys,
     "licence.client":       licence_client,
-    "client.theme_ids":     theme_ids,
     "tiers.free":           free_tier,
     "tiers.budget":         budget_tier,
     "tiers.paid":           paid_tier,
@@ -6812,7 +6789,6 @@ COLOUR_HOME="COLOURS.md"
 # module fails here rather than silently widening the allowlist to nothing.
 COLOUR_SOURCES="
 client/src/pages/_theme.tsx
-client/src/pages/_themes.ts
 client/src/index.html
 client/src/assets/styles/index.scss
 client/src-tauri/src/utils/resolve/window.rs

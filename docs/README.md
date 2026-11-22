@@ -58,6 +58,7 @@ bulk-delete `codes` or `code_events`; revoke with Suspend, move with Unbind.*
 | [`operate/SESSION.md`](operate/SESSION.md) | live | **Starting a working session** — checkout → dependencies → secrets → signing key → the gates. Read this first on a fresh clone. |
 | [`operate/DEPLOY.md`](operate/DEPLOY.md) | live | Deploying the hub to a VPS, from scratch or to a new host. |
 | [`operate/OPS.md`](operate/OPS.md) | live | Running it: health checks, backups, restore, the things you do at 2am. |
+| [`operate/PROSE.md`](operate/PROSE.md) | live | **How a wording change travels into a shipped build** — edit `client/PROSE.md`, apply, gate, push, and what it does *not* reach (the other 12 languages). |
 | [`operate/POCKETBASE-SETUP.md`](operate/POCKETBASE-SETUP.md) | live | PocketBase specifics, including the admin console at `/admin/`. |
 | [`operate/SECRETS-MANAGEMENT.md`](operate/SECRETS-MANAGEMENT.md) | live | age-encrypted secrets: what is plaintext, what must never be committed. |
 | [`operate/UPDATE-SYSTEM.md`](operate/UPDATE-SYSTEM.md) | live | How an update reaches a client, end to end, and what is verified vs not. |
@@ -82,9 +83,9 @@ bulk-delete `codes` or `code_events`; revoke with Suspend, move with Unbind.*
 | [`reference/ACTIVATION-TUNNEL.md`](reference/ACTIVATION-TUNNEL.md) | live | **When a censored network blocks enrolment** — the measured traces, why no existing override can rescue a new device, and the pre-activation Shadowsocks listener that carries the three enrolment endpoints. Read before changing the activation transport, the allowlist or the activation rate limit. |
 | [`reference/MAINTENANCE-TUNNEL.md`](reference/MAINTENANCE-TUNNEL.md) | live | **The free-tier route used when the hub cannot be reached by name** — what it carries, the "no HTTP status" switch rule, the lifecycle, and why the plan dials an address instead of chaining. Read before changing the switch, the lifecycle or `tier.rs::dial_server`. |
 | [`reference/TUNNEL-SUPERVISOR.md`](reference/TUNNEL-SUPERVISOR.md) | live | **When the maintenance tunnel may be stopped** — the four states, why an instantaneous `Ready` sample caused the engine to flap across TUN-up, and the hold that replaced it. Read before touching the lifecycle in `cmd/locus.rs` or the hold constants. |
+| [`reference/SUSPENSION.md`](reference/SUSPENSION.md) | live | **The four entitlement states and the invariant between them** — why a suspension can only be true of a device that still holds its code, why a suspended device keeps beating, and the deployment fact that decides whether the hub enforces any of it. Read before touching `handle_refusal`, `clear_entitlement`, `sign_out` or the gate. |
 | [`reference/DEBUGGING-METHOD.md`](reference/DEBUGGING-METHOD.md) | live | **How to diagnose a defect here** — the reproduce→locate→prove→fix→guard order, two-sided contracts, and checks that cannot fail. Read before fixing anything that "should work". |
 | [`reference/EGRESS-READINESS.md`](reference/EGRESS-READINESS.md) | live | **Why the button says "connecting"** — the readiness chain from probe to rendered phase, and how to localise a stall. Read before touching `probe.rs`. |
-| [`reference/THEMES.md`](reference/THEMES.md) | live | **The theme layer** — what a theme may and may not change, how an id resolves, and the checklist for adding one. Read before touching `_themes.ts`. **Colour itself is not here**: every palette and value is in [`/COLOURS.md`](../COLOURS.md). |
 | [`reference/FIXES.md`](reference/FIXES.md) | live | Dated defect log — what broke, what fixed it, and the rule it produced. **Historical** — later entries sometimes correct earlier ones. |
 | [`reference/STILL-OPEN.md`](reference/STILL-OPEN.md) | live | What is unfinished or unvalidated. |
 | [`reference/DOC-AUDIT.md`](reference/DOC-AUDIT.md) | live | **The state of this doc set** as of 2026-10-18 — the defects found, what a guard cannot see, and the one guard change still worth making. |
@@ -155,6 +156,7 @@ that the client keeps in a machine store —
 | [`client/CONTRIBUTING.md`](../client/CONTRIBUTING.md) | live | **How to set up and submit a change to the client** — the human-facing setup and submission guide. |
 | [`client/docs/UPSTREAM-CHANGES.md`](../client/docs/UPSTREAM-CHANGES.md) | live | **Authoritative** — how the client differs from Clash Verge Rev, and the load-bearing details that look like mistakes. Read before changing anything in `client/`. |
 | [`client/docs/FRONTEND.md`](../client/docs/FRONTEND.md) | live | The shipping two-tab UI, its routing, and the rules each surface obeys. |
+| [`client/PROSE.md`](../client/PROSE.md) | live | **Every user-facing string**, where in the app a student meets it, and the `file:line` that references it. Generated; edit the wording there and run `pnpm prose:apply`. |
 | [`client/docs/SIGNING.md`](../client/docs/SIGNING.md) | live | Key custody, rotation, and the release signing pipeline. |
 | [`client/docs/IDENTITY-MIGRATION.md`](../client/docs/IDENTITY-MIGRATION.md) | live | The app-id migration and what must NOT be renamed. |
 | [`client/docs/CONTRIBUTING_i18n.md`](../client/docs/CONTRIBUTING_i18n.md) | live | Adding or changing a translated string. |

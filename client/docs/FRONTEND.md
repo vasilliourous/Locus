@@ -36,12 +36,14 @@ exposing core choice, TUN, system proxy, ports and DNS.
 
 ### The activation gate owns everything behind it
 
-`src/main.tsx` renders `Shell`, which polls `locusStatus()` and branches:
+`src/main.tsx` renders `Shell`, which reads `useEntitlement()` and branches on its
+pure decision function, `gateScreen(activated, suspended)`:
 
 ```
-activated === null  -> a spinner          (first read, nothing else)
-!activated          -> <ActivationScreen> (the only thing on screen)
-activated           -> RouterProvider -> Layout -> the two tabs
+activated === null  -> a spinner                       (first read, nothing else)
+!activated          -> <ActivationScreen>              — BEFORE `suspended`
+suspended           -> <SuspendedScreen status=…>      (the kick-out page)
+otherwise           -> RouterProvider -> Layout -> the two tabs
 ```
 
 This is a **gate, not a redirect**: an unactivated device cannot reach the router,
@@ -49,27 +51,58 @@ the profile machinery or the connect controls by any route. "Render nothing else
 until activated" is a property that is easy to hold; "every page remembers to
 check" is not.
 
-Three rules live here and each was a real bug:
+**The order of the last two branches is load-bearing**, and it is why the decision
+is a pure function rather than an `if` chain in the component. A suspension keeps
+the credential (that is what makes unsuspending need no re-entry), so `suspended`
+implies `activated` — but the pair `activated: false, suspended: true` was
+*reachable*, because signing out removed the code and left the flag. The kick-out
+screen deliberately offers no controls, so that pair left a student with nothing to
+press and no exit but wiping the app's data. Testing `!activated` first means the
+kick-out page can only ever be shown to a device that holds a code. It is enforced
+three times over — on write (`store::clear_entitlement`), on read
+(`store::is_suspended`) and here — and `gateScreen`'s five cases are pinned in
+`hooks/use-entitlement.test.ts`. The full state model is
+`docs/reference/SUSPENSION.md`.
 
-- **The gate re-polls** (on `SUBSCRIPTION_POLL_MS`). The entitlement can be
-  withdrawn by a background heartbeat at any moment — a suspension, an expiry, a
-  refund — and reading it once meant the app kept showing a connection screen for
-  a device that no longer had one. The workaround a student found was to close and
-  reopen the app.
+Four rules live here and each was a real bug:
+
+- **Everything that can change the answer asks again, immediately.** The hook
+  re-reads on the backend's `locus://entitlement-changed` event, on the local
+  `entitlement-refresh` signal, and on window focus, `pageshow`, `online` and
+  `visibilitychange`. The interval (`SUBSCRIPTION_POLL_MS`) survives as a **floor**,
+  not as the mechanism: it is what keeps "event-driven" from meaning
+  "event-dependent", since every event above is something that might not fire. The
+  original defect was the opposite shape — the poll was the only trigger, so a
+  withdrawal reached the screen up to five minutes late and the workaround a
+  student found was to close and reopen the app.
 - **A read *failure* only forces "not activated" on the FIRST read.** A transient
   failure while running must not tear a working connection screen away
-  mid-session. `setActivated((current) => current ?? false)`.
+  mid-session. The same branch must never *clear a suspension*: keeping what we
+  have is the safe direction, because the other one silently re-admits a device an
+  operator just kicked out.
 - **The initial loading overlay is removed here, in `Shell`**, not in `Layout`.
   `Layout` is unreachable on an unactivated device, so removing the overlay there
   left it covering the activation screen permanently — a blank window over a
   working app.
+- **The kick-out screen takes the status it renders.** `SuspendedScreen` used to
+  issue its own `locusStatus()`, making it a third independent reader of a fact the
+  gate and the sidebar also read — and the one that disagreed was the one on
+  screen. It is now a pure render of the gate's read.
 
 ### The gate reads the status, and nothing mutates it out of band
 
-`Shell` renders `ActivationScreen` until `locus_status` reports `activated`, and
-re-reads that on an interval (`ENTITLEMENT_POLL_MS`) so a background refusal — a
-suspension, an expiry, a refund — moves the student off a working connection
-screen rather than leaving them on one until they restart.
+`useEntitlement()` owns the read. There are two signals that say "the account
+changed" — `locus://entitlement-changed` from the backend and
+`services/entitlement-refresh.ts` from the renderer — and the guidance for a new
+surface is to read the status from the hook, never to fetch it again:
+
+- **A backend change** (a suspension on a background beat, a reinstatement, a
+  sign-out) emits `locus://entitlement-changed`. The payload is a label for logs;
+  the authoritative state is always the re-read, so a missed event delays the
+  screen rather than making it lie.
+- **A student action** (sign-out) calls `requestEntitlementRefresh()` from the
+  renderer *and* the backend emits on its own path. Both land in the hook, so the
+  gate leaves the app immediately instead of after a poll.
 
 There used to be a second writer: a **device-recognition** check
 (`locus_recognise()`) that asked the hub whether it already knew the device, and
@@ -78,13 +111,14 @@ command returns, the successful case had to bump an `entitlementRestored` counte
 to make the status effect re-read — otherwise a returning student sat on the code
 prompt for a full poll interval while the app knew they had a working device.
 
-**All of that is gone.** Device recognition was removed, so the status read is
-the only writer and there is no counter to keep in step.
+**All of that is gone.** Device recognition was removed. The general rule it
+produced still applies, and the hook is now the place it is enforced:
 
-**The rule to carry forward:** if a command ever mutates a polled value again,
-the poll must be told. Join the two at the call site; nothing in the type system
-or the linter can see the omission, because both halves are individually correct.
-See the 2026-10-01 entry in `docs/reference/FIXES.md`.
+**The rule to carry forward:** if a command ever mutates the entitlement, it must
+announce it — `runtime::notify_entitlement_changed(reason)` from Rust, or
+`requestEntitlementRefresh()` from the renderer. Nothing in the type system or the
+linter can see the omission, because both halves are individually correct. See the
+2026-10-01 entry in `docs/reference/FIXES.md`.
 
 ### Routing is a HASH router — do not "simplify" it
 
@@ -280,48 +314,44 @@ satisfy.
 
 What this section owns is the *structure* the palette flows through:
 
-- `src/pages/_theme.tsx` holds `LOCUS_COLORS` (dark) and `LOCUS_LIGHT`, both
-  exported and both **defaults, not overrides** — `use-custom-theme` reads each
-  field as `setting.X || dt.X`, so a student who customised a colour keeps it.
-- **The window's background exists in three layers that cannot share code** — the
-  native window (`utils/resolve/window.rs`), the document (`src/index.html`), and
-  the theme (`_theme.tsx`). They are pinned against each other by
-  `tests/theme-colors.test.ts` instead of by a shared constant, because layer 2
-  cannot import the theme module and layer 1 is Rust. All three must change
-  together or the window flashes the wrong colour on startup. `/COLOURS.md` §1
-  has the table.
+- `src/pages/_theme.tsx` holds `LOCUS_COLORS` — the one palette — plus the
+  MUI-shaped `defaultTheme` projection and `TIER_COLORS`. The fields are
+  **defaults, not overrides**: `services/theme.ts` reads each as `setting.X ||
+  dt.X`, so a student who customised a colour keeps it. A custom colour is a
+  preference on top of the one appearance, not a second appearance.
+- `src/services/theme.ts` builds `locusTheme` **once at module load** and exposes
+  `applyThemeWhenReady()`, which writes the window-chrome CSS variables and the
+  global stylesheet. There is no theme hook: nothing can change the theme at
+  runtime, so nothing re-renders when it does not.
+- **The window's background exists in four layers that cannot share code** — the
+  native window (`utils/resolve/window.rs`), the pre-bundle bootstrap script
+  (`utils/resolve/window_script.rs`), the document (`src/index.html`,
+  `src/assets/styles/index.scss`), and the app (`_theme.tsx`). They are pinned
+  against each other by `tests/theme-colors.test.ts` instead of by a shared
+  constant, because layer 2 cannot import the theme module and the Rust layers
+  cannot import it at all. All four must change together or the window flashes
+  the wrong colour on startup. `/COLOURS.md` §1 has the table.
 - **Tier identity** (`TIER_COLORS`, `TIER_FALLBACK`) is per-tier so the badge
   reinforces the plan without being relied on, and `TIER_FALLBACK` covers a tier
   this build does not know so an unknown tier still renders.
 
-### The named themes are a layer over this, not a replacement for it
+### There are no themes
 
-`src/pages/_themes.ts` holds the registry a student picks from a dropdown on
-**Account**. Which themes exist and what each one looks like is
-`/COLOURS.md` §3; the layer's mechanics are
-[`../../docs/reference/THEMES.md`](../../docs/reference/THEMES.md) — read that
-before touching the registry.
+The registry, the resolver, the decoration presets, the Account dropdown and the
+theme hook were **deleted on 2026-11-19**. Locus has one permanent appearance
+(Dawn); `/COLOURS.md` §0 records the decision and §3 records what was removed.
+An archived copy of the old layer's mechanics is in
+[`../../docs/archive/THEMES.md`](../../docs/archive/THEMES.md) — read it for *why*
+that layer existed, never as an instruction, because every file it names is gone.
 
-The three properties that make it safe to have alongside this section:
+Two properties are worth keeping in mind if a second appearance is ever proposed:
 
-- **It is additive.** `verge.theme_id` unset — every install that never opened the
-  dropdown — resolves through `theme_mode` exactly as before. The shipped
-  appearance is a *member* of the registry, projected from `LOCUS_COLORS` /
-  `LOCUS_LIGHT` rather than restating them, so it cannot drift from the base.
-- **`setting.X || dt.X` is unchanged.** A selected theme changes only which base
-  `dt` is; the custom-colour precedence above still applies field by field.
-- **Shape and decoration travel by CSS variables** (`--card-radius`,
-  `--control-radius`) and one `<style id="locus-theme-decoration">` element scoped
-  to `[data-theme-skin]`. `cardSx` reads `var(--card-radius, 12px)` — the explicit
-  fallback is what an unthemed app and the pre-hook startup window render. A
-  decoration is one or more declaration blocks (`DecorationSpec`); each is scoped
-  identically, so a layer cannot introduce a selector of its own.
-
-A theme **cannot** change structure, tier identity, or what a state says. A
-decoration is a **named preset**, never injected CSS: a theme that could emit
-arbitrary CSS could restyle any component. The registry test asserts each
-preset's braces balance, that no layer introduces a document-level rule, and
-that none can load a remote or inline asset — see `THEMES.md` §1.
+- **Shape and decoration travelled by CSS variables** (`--card-radius`,
+  `--control-radius`) and one `<style id="locus-theme-decoration">` element. The
+  variables survive — there is one set of values and `cardSx` still reads
+  `var(--card-radius, 12px)` — but nothing injects a decoration any more.
+- **`setting.X || dt.X` is unchanged.** It is the only runtime input to the
+  palette, and it is a preference, not a mode.
 
 `src/pages/_surfaces.ts` defines the shared card styling, so every card is the
 same object. Note the app zeroes MUI's shadow scale app-wide and uses a 1px border

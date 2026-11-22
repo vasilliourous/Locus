@@ -1,4 +1,3 @@
-use dark_light::{Mode as SystemTheme, detect as detect_system_theme};
 use tauri::utils::config::Color;
 use tauri::webview::PageLoadEvent;
 use tauri::{Theme, WebviewWindow};
@@ -12,17 +11,23 @@ use clash_verge_logging::{Type, logging, logging_error};
 // first pixel a student sees. A value that disagrees with the page shows as a
 // flash of the wrong colour on every launch.
 //
-// Must stay in step with `src/pages/_theme.tsx` (LOCUS_COLORS.background /
-// LOCUS_LIGHT.background) and the `--bg-color` values in `src/index.html`. The
-// three layers exist because each one paints at a different moment: native
-// window, pre-bundle document, then themed app. Values: /COLOURS.md §1-§2.
+// Must stay in step with `src/pages/_theme.tsx` (`LOCUS_COLORS.background`) and
+// the `--bg-color` value in `src/index.html`. The three layers exist because each
+// one paints at a different moment: native window, pre-bundle document, then
+// themed app. Values: /COLOURS.md §1-§2.
 //
-// The hex strings are the source and the `Color` tuples are DERIVED from them,
-// rather than four independent literals. Two literals per mode is exactly how
-// the tuple and the hex drift apart — and the symptom would be a subtly wrong
-// flash colour that no test would catch.
-const DARK_BACKGROUND_HEX: &str = "#141414";
-const LIGHT_BACKGROUND_HEX: &str = "#ECECEC";
+// **One ground, not a pair.** Locus has one permanent appearance (`/COLOURS.md`
+// §0), so this file no longer asks the OS whether it prefers light and no longer
+// carries a second hex. The window is painted Dawn's background on every system,
+// which is also why a light-mode machine no longer gets a light flash before a
+// dark app.
+//
+// The hex string is the source and the `Color` tuple is DERIVED from it, rather
+// than two independent literals — that is exactly how the tuple and the hex would
+// drift apart, and the symptom would be a subtly wrong flash colour that no test
+// would catch.
+const BACKGROUND_HEX: &str = "#1A1B26";
+const TEXT_HEX: &str = "#C0CAF5";
 
 /// Parses `#RRGGBB` into the `Color` the window builder wants.
 ///
@@ -64,8 +69,7 @@ const fn hex_nibble(byte: u8) -> u8 {
     }
 }
 
-const DARK_BACKGROUND_COLOR: Color = parse_hex(DARK_BACKGROUND_HEX);
-const LIGHT_BACKGROUND_COLOR: Color = parse_hex(LIGHT_BACKGROUND_HEX);
+const BACKGROUND_COLOR: Color = parse_hex(BACKGROUND_HEX);
 
 const DEFAULT_WIDTH: f64 = 940.0;
 const DEFAULT_HEIGHT: f64 = 700.0;
@@ -104,31 +108,13 @@ pub async fn build_new_window() -> Result<WebviewWindow, String> {
     let config = Config::verge().await;
     let latest = config.latest_arc();
     let start_page = latest.start_page.as_deref().unwrap_or("/");
-    let initial_theme_mode = match latest.theme_mode.as_deref() {
-        Some("dark") => "dark",
-        Some("light") => "light",
-        _ => "system",
-    };
 
-    let resolved_theme = match initial_theme_mode {
-        "dark" => Some(Theme::Dark),
-        "light" => Some(Theme::Light),
-        _ => None,
-    };
-
-    let prefers_dark_background = match resolved_theme {
-        Some(Theme::Dark) => true,
-        Some(Theme::Light) => false,
-        _ => !matches!(detect_system_theme().ok(), Some(SystemTheme::Light)),
-    };
-
-    let background_color = if prefers_dark_background {
-        DARK_BACKGROUND_COLOR
-    } else {
-        LIGHT_BACKGROUND_COLOR
-    };
-
-    let initial_script = build_window_initial_script(initial_theme_mode, DARK_BACKGROUND_HEX, LIGHT_BACKGROUND_HEX);
+    // One appearance, so the native frame is pinned to it rather than following a
+    // stored preference or the OS. `latest.theme_mode` is deliberately not read:
+    // an older `verge.yaml` may still carry it, and honouring it would give a
+    // light window frame to an app that is permanently dark.
+    let background_color = BACKGROUND_COLOR;
+    let initial_script = build_window_initial_script(BACKGROUND_HEX, TEXT_HEX);
 
     let mut builder = tauri::WebviewWindowBuilder::new(
         app_handle,
@@ -183,9 +169,9 @@ pub async fn build_new_window() -> Result<WebviewWindow, String> {
         logging_error!(Type::Window, window.set_focus());
     });
 
-    if let Some(theme) = resolved_theme {
-        builder = builder.theme(Some(theme));
-    }
+    // The OS-level title-bar hint, so the native chrome does not render
+    // light-on-light over a dark window. A constant now, not a resolved mode.
+    builder = builder.theme(Some(Theme::Dark));
 
     builder = builder.background_color(background_color);
 
@@ -273,38 +259,32 @@ pub fn reload_main_window_if_needed() {
 mod tests {
     use super::*;
 
-    /// The native window colour is the palette's dark ground.
+    /// The native window colour is the palette's ground.
     ///
-    /// Pinned as literals because this is the FIRST pixel a student sees, and it
+    /// Pinned as a literal because this is the FIRST pixel a student sees, and it
     /// is the one layer with no CSS to inspect. A wrong value here shows as a
-    /// flash of the wrong colour before the page paints.
+    /// flash of the wrong colour before the page paints, on every launch.
+    ///
+    /// There is one mode, so there is one assertion: a second one here would be a
+    /// second appearance, which is the thing this change removed. The JS half of
+    /// this pin lives in `client/tests/theme-colors.test.ts`, which reads this
+    /// file and compares the literal — a JS test cannot read a Rust `const`, so
+    /// the two pinned literals are kept in step by that test rather than by the
+    /// compiler.
     #[test]
-    fn the_window_background_is_the_dark_ground() {
-        assert_eq!(DARK_BACKGROUND_HEX, "#141414");
-        assert_eq!(DARK_BACKGROUND_COLOR, Color(20, 20, 20, 255));
-    }
-
-    /// Light mode is the palette's light ground.
-    #[test]
-    fn the_light_window_background_is_the_light_ground() {
-        assert_eq!(LIGHT_BACKGROUND_HEX, "#ECECEC");
-        assert_eq!(LIGHT_BACKGROUND_COLOR, Color(236, 236, 236, 255));
+    fn the_window_background_is_the_palette_ground() {
+        assert_eq!(BACKGROUND_HEX, "#1A1B26");
+        assert_eq!(BACKGROUND_COLOR, Color(26, 27, 38, 255));
     }
 
     /// The tuple is DERIVED from the hex, so the two cannot disagree.
     ///
     /// This is the whole reason `parse_hex` exists: with two independent
-    /// literals per mode, someone updating one and not the other produces a
-    /// flash of the wrong colour that nothing else would catch.
+    /// literals, someone updating one and not the other produces a flash of the
+    /// wrong colour that nothing else would catch.
     #[test]
     fn the_color_tuple_matches_its_hex_literal() {
-        for hex in [
-            DARK_BACKGROUND_HEX,
-            LIGHT_BACKGROUND_HEX,
-            "#000000",
-            "#FFFFFF",
-            "#2EA86A",
-        ] {
+        for hex in [BACKGROUND_HEX, "#000000", "#FFFFFF", "#2EA86A"] {
             let parsed = parse_hex(hex);
             let expected = Color(
                 u8::from_str_radix(&hex[1..3], 16).unwrap(),

@@ -1,9 +1,8 @@
-import { Box, CircularProgress, Typography, alpha } from '@mui/material'
-import { useEffect, useState } from 'react'
+import { Box, Typography } from '@mui/material'
+import { useTranslation } from 'react-i18next'
 
 import { SupportBlock } from '@/components/shared/support-block'
-import { LOCUS_COLORS } from '@/pages/_theme'
-import { locusStatus } from '@/services/locus'
+import type { LocusStatus } from '@/services/locus'
 
 /**
  * The screen an operator's suspension lands on.
@@ -32,45 +31,50 @@ import { locusStatus } from '@/services/locus'
  * this screen is an operator undoing it, which the backend reports and the gate
  * re-reads — the student does not need to do anything, and a "check again" button
  * would suggest otherwise.
+ *
+ * **A screen with no controls is only safe while the state behind it cannot be a
+ * dead end**, and that was not true when this was written: a sign-out of a
+ * suspended device left the flag set and the credential gone, so the student
+ * arrived here with nothing to press and no way out but wiping the app's data.
+ * The guarantee now comes from the state, not from this component — a suspension
+ * is only ever true of a device that still holds its code
+ * (`docs/reference/SUSPENSION.md` §2), and a device that holds no code is sent to
+ * the activation gate instead. If that guarantee is ever weakened this screen
+ * becomes a trap again, which is why the invariant is enforced in three places and
+ * guarded rather than assumed here.
+ *
+ * # Why the copy is in the locale bundle
+ *
+ * It used to be English string literals in this file, which made the one screen
+ * an operator's action is announced on the only screen no translator could
+ * reach. `main.tsx` mounts the theme provider above this screen as well, so
+ * there is no longer any reason — theming and translation were skipped together
+ * here, and the two are unrelated.
  */
-const SuspendedScreen = () => {
-  /** The hub's own sentence, if we have one. */
-  const [reason, setReason] = useState<string | null>(null)
-  /** Why the subscription is refused, which distinguishes a suspension from a lapse. */
-  const [lapsed, setLapsed] = useState(false)
+interface Props {
   /**
-   * Whether a status read has completed.
+   * The status the gate already read, or `null` if it has not settled.
    *
-   * Distinguishes "no reason recorded" from "we have not asked yet" — the first
-   * renders the generic sentence, the second renders nothing rather than flashing
-   * one sentence and replacing it with another.
+   * Passed in rather than fetched here. This screen used to issue its own
+   * `locusStatus()` on mount, which made it a third independent reader of a fact
+   * two other surfaces also read — and the one that disagreed was the one the
+   * student was looking at. The gate's read is the authoritative one, so this
+   * renders from it and owns no state at all: there is nothing here that can go
+   * stale relative to the screen that chose to show it.
    */
-  const [read, setRead] = useState(false)
+  status: LocusStatus | null
+}
 
-  useEffect(() => {
-    let cancelled = false
-    locusStatus()
-      .then((status) => {
-        if (cancelled) return
-        // `state: 'refused'` is the shape the backend uses for every withdrawal
-        // of access, and it carries the hub's own sentence. A suspension and a
-        // lapse can both reach it in principle; the difference the student cares
-        // about is whether they can fix it themselves, which is why 'lapsed' is
-        // distinguished rather than folded in.
-        const subscription = status.subscription
-        if (subscription.state === 'refused') {
-          setReason(subscription.reason)
-        }
-        setLapsed(subscription.state === 'lapsed')
-        setRead(true)
-      })
-      .catch(() => {
-        if (!cancelled) setRead(true)
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [])
+const SuspendedScreen = ({ status }: Props) => {
+  const { t } = useTranslation()
+
+  // `state: 'refused'` is the shape the backend uses for every withdrawal of
+  // access, and it carries the hub's own sentence. A suspension and a lapse can
+  // both reach it in principle; the difference the student cares about is whether
+  // they can fix it themselves, which is why 'lapsed' is distinguished.
+  const subscription = status?.subscription
+  const reason = subscription?.state === 'refused' ? subscription.reason : null
+  const lapsed = subscription?.state === 'lapsed'
 
   return (
     <Box
@@ -80,60 +84,61 @@ const SuspendedScreen = () => {
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
-        // Same reasoning as the activation gate: this renders outside
-        // `ThemeModeProvider`, so the palette is stated explicitly rather than
-        // inherited. A screen about a withdrawn account must not also look broken.
-        color: LOCUS_COLORS.textPrimary,
-        bgcolor: LOCUS_COLORS.background,
-        backgroundImage: `radial-gradient(ellipse 80% 60% at 50% 0%, ${alpha(LOCUS_COLORS.error, 0.12)}, transparent 70%)`,
+        bgcolor: 'background.default',
+        color: 'text.primary',
       }}
     >
-      <Box sx={{ width: 460, maxWidth: 'calc(100vw - 48px)', textAlign: 'center' }}>
+      <Box
+        sx={{
+          width: 460,
+          maxWidth: 'calc(100vw - 48px)',
+          textAlign: 'center',
+        }}
+      >
         <Typography variant="h5" sx={{ fontWeight: 600, mb: 1.5 }}>
-          {lapsed ? 'Your Locus subscription has ended' : 'This device has been signed out of Locus'}
+          {lapsed
+            ? t('home.components.connection.suspended.lapsedTitle')
+            : t('home.components.connection.suspended.suspendedTitle')}
         </Typography>
 
-        {!read && <CircularProgress size={22} sx={{ mt: 1 }} />}
+        <Typography
+          variant="body2"
+          color="text.secondary"
+          sx={{ lineHeight: 1.7, mb: 2 }}
+        >
+          {/*
+            The hub's own sentence is shown VERBATIM when there is one — an
+            operator's wording ("contact your middleman") is an instruction, not a
+            description, and paraphrasing it would drop the one actionable part.
+          */}
+          {reason ??
+            (lapsed
+              ? t('home.components.connection.suspended.lapsedBody')
+              : t('home.components.connection.suspended.suspendedBody'))}
+        </Typography>
 
-        {read && (
-          <Typography
-            variant="body2"
-            sx={{ color: LOCUS_COLORS.textSecondary, lineHeight: 1.7, mb: 2 }}
-          >
-            {/*
-              The hub's own sentence is shown VERBATIM when there is one — an
-              operator's wording ("contact your middleman") is an instruction, not
-              a description, and paraphrasing it would drop the one actionable part.
-            */}
-            {reason ??
-              (lapsed
-                ? 'Your code has expired, so the tunnel has been stopped. Renewing with whoever sold you the code restores access.'
-                : 'An operator has suspended this code, so the tunnel has been stopped. Your code is still saved on this computer — nothing needs to be re-entered once the suspension is lifted.')}
-          </Typography>
-        )}
+        <Typography
+          variant="caption"
+          color="text.secondary"
+          sx={{ display: 'block', lineHeight: 1.6, mb: 2.5 }}
+        >
+          {/*
+            The second sentence is the one that was missing from every other
+            surface: a suspension is REVERSIBLE, and the code is kept. Without
+            saying so, a student assumes they have lost their purchase and goes
+            looking for a refund instead of asking the person who can undo it.
 
-        {read && (
-          <Typography
-            variant="caption"
-            sx={{ color: LOCUS_COLORS.textSecondary, display: 'block', lineHeight: 1.6, mb: 2.5 }}
-          >
-            {/*
-              The second sentence is the one that was missing from every other
-              surface: a suspension is REVERSIBLE, and the code is kept. Without
-              saying so, a student assumes they have lost their purchase and goes
-              looking for a refund instead of asking the person who can undo it.
-            */}
-            {lapsed
-              ? 'Contact whoever sold you the code to renew it.'
-              : 'Ask them to lift the suspension — you will be able to connect again on this computer without re-entering your code or restarting the app.'}
-          </Typography>
-        )}
+            It is now also TRUE on a timescale the student can see. The backend
+            keeps asking the hub whether the suspension has been lifted, so
+            "without restarting the app" is a statement about the code rather than a
+            hope; before that, a suspended device stopped beating and waited forever.
+          */}
+          {lapsed
+            ? t('home.components.connection.suspended.lapsedAction')
+            : t('home.components.connection.suspended.suspendedAction')}
+        </Typography>
 
-        {/* `palette="brand"`: this renders outside `ThemeModeProvider`, so it must
-            read the fixed dark constants or it inherits the light theme's
-            secondary colour and half the text disappears. Same reason
-            `activation.tsx` passes it. */}
-        <SupportBlock palette="brand" showMiddleman />
+        <SupportBlock showMiddleman />
       </Box>
     </Box>
   )

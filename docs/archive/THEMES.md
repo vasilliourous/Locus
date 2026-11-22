@@ -1,15 +1,26 @@
-# Themes — the decorative skin layer
+# Themes — the decorative skin layer (ARCHIVED)
+
+> **⚠️ STATUS: describes a layer that NO LONGER EXISTS.**
+>
+> The theme registry, the resolver, the decoration presets, the dropdown and the
+> theme hook were **deleted on 2026-11-19**. Locus has one permanent appearance
+> (Dawn); `/COLOURS.md` §0 records the decision and §3 records what was removed.
+> `client/src/pages/_themes.ts` does not exist.
+>
+> This document is kept for *why*: the failure modes it catalogues are still the
+> failure modes of any future appearance layer, and the two paint-layer rules it
+> states are still in force (in `/COLOURS.md` §1). It is **not** an instruction —
+> nothing here can be followed, because the files it names are gone.
 
 ```
-audience:    builder
-status:      live
-authoritative-for: the theme registry's mechanics — what a theme may change, how a selection resolves, and how to add one
-verified-against: docs/state.toml, client/tests/theme-colors.test.ts
+audience:    builder — reading why the layer existed
+status:      archived — superseded 2026-11-19
+authoritative-for: nothing. /COLOURS.md §0-§4 is the authority.
+verified-against: nothing (the code it described has been deleted)
 ```
 
-> **This document owns the *layer*. `/COLOURS.md` owns every colour.** No palette,
-> value or description of how a surface looks appears here — if you are looking
-> for what a theme *is* rather than what it *may do*, read `/COLOURS.md` §§3–4.
+> **This document owned the *layer*. `/COLOURS.md` owns every colour.** No palette,
+> value or description of how a surface looks appears here.
 > The history of that split is in `../reference/FIXES.md` and in `/COLOURS.md` §11.
 
 ---
@@ -303,7 +314,7 @@ these are the layer's.
    sentinel — `isThemeId('')` is false, so no registry entry can shadow it, and
    `hasTheme` in `use-custom-theme.ts` is `theme_id.length > 0` — and both
    properties are asserted in `client/tests/theme-colors.test.ts`. Recorded in
-   [`STILL-OPEN.md`](STILL-OPEN.md) as the resolution, because it was a real gap
+   [`STILL-OPEN.md`](../reference/STILL-OPEN.md) as the resolution, because it was a real gap
    students could only escape by hand-editing `verge.yaml`.
 2. **The two Appearance controls can still disagree in appearance.** The theme
    dropdown and the `theme_mode` dropdown are separate and both visible on

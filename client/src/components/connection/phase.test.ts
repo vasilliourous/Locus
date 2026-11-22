@@ -69,6 +69,10 @@ const status = (
   // file is describing. A test that set a blocker here would be asserting about
   // the message rule, not about the phase.
   connectBlocker: null,
+  // Also not read here. `unreported` is the honest default for a helper that is
+  // not describing a deployment — it means "no beat has told us yet", which is
+  // not a claim that the server is behind.
+  hubEnforcement: { kind: 'unreported' },
 })
 
 describe('connection phase from backend status', () => {

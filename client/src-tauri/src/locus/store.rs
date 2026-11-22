@@ -367,6 +367,22 @@ pub async fn record_hub_override(offered: &str) -> Result<()> {
 ///
 /// The refusal reason is NOT cleared, because it is the record of why this
 /// happened; see [`record_refusal`].
+///
+/// # It clears the suspension too, and that is not cosmetic
+///
+/// `locus_suspended` is a fact about a code that is STILL on this device. Once
+/// the code is gone the flag describes nothing, and leaving it set produced a
+/// state the UI could not escape from: the student signed out of a suspended
+/// device, the credential was removed correctly, and the kick-out screen — which
+/// deliberately offers no controls, because its remedy is a conversation — was
+/// rendered for a device that was no longer signed in at all. The only exit was
+/// to wipe the app's data.
+///
+/// So the invariant is enforced HERE, at the one function that removes a
+/// credential, rather than in each of its callers: **a suspended device is an
+/// activated device**, and removing the entitlement removes the suspension with
+/// it. [`super::cmd`]'s status read also refuses to report the impossible pair,
+/// but the write is the fix and that is the belt.
 pub async fn clear_entitlement() -> Result<()> {
     let saved = save_verge(|draft| {
         draft.activation_code = None;
@@ -374,6 +390,12 @@ pub async fn clear_entitlement() -> Result<()> {
         draft.locus_expires_at = None;
         draft.last_heartbeat_ok = None;
         draft.heartbeat_failures = None;
+        // The invariant. See this function's note and [`is_suspended`].
+        draft.locus_suspended = None;
+        // The hub's enforcement version describes the code that is gone, so a
+        // stale value would make the next activation's diagnostics claim the
+        // deployment was checked when it was not.
+        draft.locus_hub_enforcement = None;
     })
     .await;
     // The mirror goes with it, and this one IS the durable copy — leaving it
@@ -403,11 +425,18 @@ pub async fn clear_entitlement() -> Result<()> {
 /// # The credential left on disk
 ///
 /// A suspended device therefore still holds a bearer credential. That is the
-/// explicit trade, and it is bounded on both sides: the tunnel is down and the
-/// loop is stopped, so the code cannot be USED while suspended; and a sign-out
+/// explicit trade, and it is bounded on both sides: the TUNNEL is down, so the
+/// code cannot carry a packet while suspended, and the only thing it is sent to
+/// is a heartbeat that the hub refuses; and a sign-out
 /// ([`crate::locus::signout`]) still goes through [`clear_entitlement`] and
 /// removes it entirely. A device left suspended forever is a device whose owner
 /// was cut off — the operator's decision, visible in the console, not a leak.
+///
+/// The bound is the tunnel, **not** a stopped heartbeat: the loop deliberately
+/// keeps running while suspended, because it is the only thing that can learn the
+/// suspension was lifted (see [`crate::locus::runtime`]). A suspended device
+/// therefore sends one refused beat every `SUSPENDED_INTERVAL` — no config, no
+/// traffic — which is what makes the kick-out reversible without a restart.
 pub async fn record_suspension(reason: &str) -> Result<()> {
     save_verge(|draft| {
         draft.locus_suspended = Some(true);
@@ -438,9 +467,22 @@ pub async fn clear_suspension() -> Result<()> {
 ///
 /// Read by [`crate::cmd::locus_status`] and, through it, by the gate that decides
 /// between the kick-out screen and the normal app.
+///
+/// # The flag can be set, and still be false
+///
+/// A suspension is a statement about a code — "this key may not be used" — so it
+/// can only be true while a code is held. The flag used to be read as a bare
+/// boolean, and a stored `true` with no activation behind it is the state that
+/// trapped a signed-out student on the kick-out screen: it is a fact about
+/// nothing, and the screen it selects has no controls by design.
+///
+/// The writers keep the pair consistent ([`clear_entitlement`] clears the flag),
+/// and this read refuses the impossible pair anyway. Two cheap defences for a
+/// defect whose cost was "wipe the app's data", and the second one also repairs
+/// a config already written by a build that had the bug.
 #[must_use]
 pub fn is_suspended(verge: &IVerge) -> bool {
-    verge.locus_suspended.unwrap_or(false)
+    verge.locus_suspended.unwrap_or(false) && activation_from(verge, None).is_some()
 }
 
 /// Clears the per-device state that belongs to a signed-out student, not to the
@@ -463,6 +505,13 @@ pub fn is_suspended(verge: &IVerge) -> bool {
 ///    next student's Connection screen describe a cap that no longer applies.
 ///  * `locus_update_check_reason` — why the previous account was not being
 ///    offered updates.
+///  * `locus_hub_enforcement` — which version of the hub's enforcement logic last
+///    answered THIS code. It is a property of the deployment, but it is recorded
+///    per device-session because that is the only thing that observed it; a
+///    value left behind would describe a hub the next student never contacted.
+///
+/// `locus_suspended` is cleared too, for the reason [`clear_entitlement`]
+/// gives: signing out must never leave a device looking kicked out.
 ///
 /// Deliberately does **not** touch preferences (language, theme, auto-update,
 /// auto-launch). Those belong to the person at the keyboard, and wiping them on
@@ -482,6 +531,11 @@ pub async fn clear_device_state() -> Result<()> {
         draft.locus_throttle_mbps = None;
         draft.locus_update_check_reason = None;
         draft.locus_update_offered = None;
+        draft.locus_hub_enforcement = None;
+        // Belt to `clear_entitlement`'s braces: a suspension belongs to the
+        // student who was signed in, and this is the one path that says "not
+        // them any more". See [`is_suspended`].
+        draft.locus_suspended = None;
     })
     .await
 }
@@ -536,6 +590,26 @@ pub async fn record_refusal(reason: &str) -> Result<()> {
 pub async fn record_update_offer(version: &str) -> Result<()> {
     save_verge(|draft| {
         draft.locus_update_offered = Some(version.to_owned().into());
+    })
+    .await
+}
+
+/// Records which version of the hub's enforcement logic just answered.
+///
+/// Written on every successful beat, and **only when the hub sent a value**. The
+/// absence of the key is itself information — a hub below enforcement version 2
+/// predates the field — so the caller records that separately rather than this
+/// function writing `None` over a value a previous beat legitimately delivered. A
+/// hub that stops sending it (an operator rolling the box back) is reported as
+/// [`crate::cmd::locus::HubEnforcement::Unreported`], which is honest about not
+/// knowing rather than silently keeping a stale "current".
+///
+/// Nothing reads this to make a decision. It exists so that "I suspended a device
+/// and nothing happened" can be answered from the product instead of from an SSH
+/// session — see [`crate::locus::contract::ENFORCEMENT_VERSION`].
+pub async fn record_hub_enforcement(version: Option<u32>) -> Result<()> {
+    save_verge(|draft| {
+        draft.locus_hub_enforcement = version;
     })
     .await
 }
@@ -892,6 +966,85 @@ mod tests {
         let activation = activation_from(&verge, None).expect("a complete record must read");
         assert_eq!(activation.tier, "strike");
         assert!(is_usable(&activation));
+    }
+
+    /// A suspension is a statement about a CODE, so it cannot outlive the code.
+    ///
+    /// # The defect this is written against
+    ///
+    /// `clear_entitlement` removed the code, tier and expiry and left
+    /// `locus_suspended` set. Signing out of a suspended device therefore produced
+    /// `activated: false, suspended: true` — a pair that describes nothing — and the
+    /// gate rendered the kick-out screen, which deliberately offers no controls
+    /// because its remedy is a conversation with the middleman. The student's only
+    /// exit was to wipe the application's data and reactivate from scratch.
+    ///
+    /// The read must refuse the pair even when storage holds it, because a config
+    /// written by a shipped build is not something a fix can retract.
+    #[test]
+    fn a_suspension_without_a_code_is_not_a_suspension() {
+        let mut verge = verge_with(
+            Some("RQ-ABCD-EFGH-JKMN-T"),
+            Some("strike"),
+            Some("a".repeat(64).as_str()),
+        );
+        verge.locus_suspended = Some(true);
+
+        // PRECONDITION: with the code present this IS a suspension. If this ever
+        // stops holding, the assertion below proves nothing about the invariant.
+        assert!(
+            is_suspended(&verge),
+            "a suspended device that holds a code must report suspended, or this test is vacuous"
+        );
+
+        // The state a sign-out used to leave behind: the flag, no code.
+        verge.activation_code = None;
+        assert!(
+            !is_suspended(&verge),
+            "a stored suspension with no activation behind it must read as NOT suspended. \
+             Reported as suspended, the gate renders a screen with no controls for a device \
+             that holds nothing — the state a signed-out student could only escape by wiping \
+             the app's data."
+        );
+    }
+
+    /// The WRITE half of the same invariant: removing the credential clears the
+    /// flag.
+    ///
+    /// The read above is the belt. This is the fix, and it is asserted on the
+    /// source because `clear_entitlement` needs the app's global config to run — the
+    /// same trade `runtime.rs` and `signout.rs` make for their call order. Without
+    /// it, a device would keep a stale `true` on disk and every future read would
+    /// depend on the belt staying in place.
+    #[test]
+    fn clearing_the_entitlement_clears_the_suspension() {
+        let source = include_str!("store.rs");
+        let start = source
+            .find("pub async fn clear_entitlement()")
+            .expect("clear_entitlement must exist; this test reads its body");
+        let body = &source[start..];
+        let body = &body[..body.find("\n}\n").unwrap_or(body.len())];
+
+        assert!(
+            body.contains("draft.locus_suspended = None;"),
+            "clear_entitlement must clear `locus_suspended`. It removes the very code the \
+             flag is a statement about, and leaving the flag set is what put a signed-out \
+             student on a screen with no way out."
+        );
+
+        // ...and sign-out, which runs after it, must also clear it: a suspension
+        // belongs to the student who was signed in, and `clear_device_state` is the
+        // one path that says "not them any more".
+        let start = source
+            .find("pub async fn clear_device_state()")
+            .expect("clear_device_state must exist; this test reads its body");
+        let body = &source[start..];
+        let body = &body[..body.find("\n}\n").unwrap_or(body.len())];
+        assert!(
+            body.contains("draft.locus_suspended = None;"),
+            "sign-out must not leave a suspension behind: the kick-out screen explains \
+             someone else's kick-out, and it has no controls to escape it with"
+        );
     }
 
     /// A code built the way the hub builds one, for the tests that need a code

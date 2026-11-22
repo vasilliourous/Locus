@@ -2,8 +2,6 @@ import { Box, Link, Typography } from '@mui/material'
 import type { SxProps, Theme } from '@mui/material'
 import { useTranslation } from 'react-i18next'
 
-import { LOCUS_COLORS } from '@/pages/_theme'
-
 /**
  * The support route: the one place a student is told who to email and what to
  * say.
@@ -23,15 +21,13 @@ import { LOCUS_COLORS } from '@/pages/_theme'
  * nothing. So both live in the locale bundle exactly once and are rendered by
  * this component.
  *
- * # Why it takes a palette rather than reading the theme
+ * # Why it reads the theme now
  *
- * The activation gate renders OUTSIDE `ThemeModeProvider` (see `main.tsx`): it is
- * the pre-activation screen, so it cannot read the app theme and gets a bare
- * `createTheme()`. Reading `text.secondary` there would paint the LIGHT theme's
+ * It used to take a `palette: 'brand'` flag for screens rendered outside the
+ * theme provider, because `text.secondary` there resolved to the LIGHT theme's
  * grey on a dark page — the white-on-white class of defect this project already
- * has a story about. `palette: 'brand'` selects the fixed brand constants that
- * screen is already written against; the default follows the app theme, light
- * mode included.
+ * has a story about. `main.tsx` now mounts the provider above every screen, so
+ * there is no outside and the flag is gone. A single appearance means one answer.
  *
  * # What it is telling the student, and in what order
  *
@@ -50,21 +46,17 @@ export const SupportBlock = ({
   showMiddleman = true,
   /** Show the Device ID instruction. On where a student can actually see it. */
   showDeviceIdHint = false,
-  /** `brand` = fixed dark constants, for screens outside the theme provider. */
-  palette = 'theme',
   sx,
 }: {
   showMiddleman?: boolean
   showDeviceIdHint?: boolean
-  palette?: 'theme' | 'brand'
   sx?: SxProps<Theme>
 }) => {
   const { t } = useTranslation()
 
-  const brand = palette === 'brand'
-  const strongest = brand ? LOCUS_COLORS.textPrimary : 'text.primary'
-  const body = brand ? LOCUS_COLORS.textSecondary : 'text.secondary'
-  const accent = brand ? LOCUS_COLORS.accent : 'primary.main'
+  const strongest = 'text.primary'
+  const body = 'text.secondary'
+  const accent = 'primary.main'
 
   return (
     <Box
@@ -77,8 +69,8 @@ export const SupportBlock = ({
           py: 1.5,
           borderRadius: 1.5,
           border: '1px solid',
-          borderColor: brand ? LOCUS_COLORS.border : 'divider',
-          bgcolor: brand ? LOCUS_COLORS.surface : 'background.paper',
+          borderColor: 'divider',
+          bgcolor: 'background.paper',
         },
         ...(Array.isArray(sx) ? sx : [sx]),
       ]}

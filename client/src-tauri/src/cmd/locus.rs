@@ -103,6 +103,16 @@ pub struct LocusStatus {
     /// So this is the field that puts a kicked-out student on the kick-out screen,
     /// and — with `refusal_reason` — the field that lets it explain why and offer
     /// the one thing that helps: waiting, or contacting their middleman.
+    ///
+    /// # It is always accompanied by `activated`
+    ///
+    /// A suspension is a statement about a code, so it can only be true while one
+    /// is held — `suspended && !activated` describes nothing. That pair was
+    /// nevertheless serialised once, because removal of the code did not clear the
+    /// flag, and the gate rendered a screen with no controls for a device that was
+    /// signed out. `store::is_suspended` now refuses the pair on read and
+    /// `store::clear_entitlement` clears the flag on write, so this field means
+    /// what it says. Do not branch on `suspended` alone: test `!activated` first.
     pub suspended: bool,
     /// A code is stored but could not be a Locus code, so it was not used.
     ///
@@ -270,6 +280,62 @@ pub struct LocusStatus {
     /// `None` means no blocker is known — which is *not* the same as "connecting
     /// will work".
     pub connect_blocker: Option<ConnectBlocker>,
+
+    /// Whether the hub this device talks to is new enough to enforce a suspension.
+    ///
+    /// # The report this exists for
+    ///
+    /// "I suspended a device on the console and nothing happened." The chain in
+    /// this repository is correct — the console sets the flag, the heartbeat hook
+    /// answers 403, the client tears the tunnel down — so when it does nothing the
+    /// likely answer is that the hooks on the box predate the change. That is a
+    /// deployment fact, and nothing in the product could state it: the operator was
+    /// left comparing a file tree against a live server, and the student was told
+    /// nothing at all because, as far as their client knew, they were not suspended.
+    ///
+    /// The hub already answers the question on every beat (`enforcement_version`,
+    /// added for exactly this reason). This field is that answer, classified, so
+    /// the Account screen can say "this server is behind" instead of leaving both
+    /// parties guessing. It reports; it never gates — see
+    /// [`crate::locus::contract::ENFORCEMENT_VERSION`].
+    pub hub_enforcement: HubEnforcement,
+}
+
+/// Whether the hub can enforce what the console shows.
+///
+/// A closed set for the same reason as [`ConnectBlocker`]: the UI decides where to
+/// say it and how loudly, and a free-form string would make that a string
+/// comparison.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(tag = "kind", rename_all = "camelCase", rename_all_fields = "camelCase")]
+pub enum HubEnforcement {
+    /// No successful beat has reported a version yet. Unknown, not broken.
+    ///
+    /// Distinct from [`Self::Stale`] on purpose: a device that has never been
+    /// online has not been told anything, and telling its owner the server is out
+    /// of date would be a false claim about the world.
+    Unreported,
+    /// The hub enforces at least what this build needs.
+    Current,
+    /// The hub answered, and its enforcement logic predates this build's.
+    ///
+    /// The consequence in plain words: a suspension set in the console will not
+    /// reach this device until the hub's hooks are redeployed. `hub` carries the
+    /// number it reported so support has the fact, not the inference.
+    Stale { hub: u32 },
+}
+
+/// Classifies the recorded hub enforcement version against what this build needs.
+///
+/// Split out so the rule is testable without an app handle, and so there is exactly
+/// one comparison rather than one per caller.
+#[must_use]
+const fn classify_hub_enforcement(recorded: Option<u32>) -> HubEnforcement {
+    match recorded {
+        None => HubEnforcement::Unreported,
+        Some(hub) if hub >= crate::locus::contract::ENFORCEMENT_VERSION => HubEnforcement::Current,
+        Some(hub) => HubEnforcement::Stale { hub },
+    }
 }
 
 /// A known reason a connect cannot start the core, in the student's terms.
@@ -589,7 +655,12 @@ pub async fn locus_status() -> LocusStatus {
         // Read from the persisted flag, not derived from `activation`: a
         // suspension keeps the code, so `activated` is true in exactly the case
         // this field exists for.
+        //
+        // `is_suspended` still checks the code itself, so a config written by a
+        // build that did not clear the flag on sign-out reports `false` here
+        // rather than selecting a screen the student cannot leave.
         suspended: store::is_suspended(&verge_data),
+        hub_enforcement: classify_hub_enforcement(verge_data.locus_hub_enforcement),
         stored_code_damaged,
         tier: activation.as_ref().map(|a| a.tier.clone()),
         device_id: store::redact(&fingerprint),
@@ -1976,6 +2047,43 @@ mod tests {
     use crate::core::manager::RunningMode;
     use crate::core::runstate::ServiceHealth;
     use activation::ActivationOutcome as O;
+
+    /// Three states, three sentences, and the middle one must not be guessed.
+    ///
+    /// # Why this is worth a rule of its own
+    ///
+    /// "An operator suspended a device and nothing happened" is, most often, a
+    /// deployment fact: the hooks on the box predate the suspension logic. Nobody
+    /// could tell that apart from "the console never set the flag" — the client
+    /// knew nothing and said nothing, and the operator was left comparing a file
+    /// tree against a live server.
+    ///
+    /// `Unreported` is deliberately NOT `Stale`. A device that has never reached the
+    /// hub has been told nothing; calling that "the server is out of date" would be
+    /// a false claim about the world, and the whole point of reporting it is to be
+    /// believable when it matters.
+    #[test]
+    fn a_hub_that_never_answered_is_not_a_hub_that_is_behind() {
+        assert_eq!(classify_hub_enforcement(None), HubEnforcement::Unreported);
+
+        let current = crate::locus::contract::ENFORCEMENT_VERSION;
+        assert_eq!(
+            classify_hub_enforcement(Some(current)),
+            HubEnforcement::Current,
+            "a hub that reports exactly what this build needs is current"
+        );
+        assert_eq!(
+            classify_hub_enforcement(Some(current + 1)),
+            HubEnforcement::Current,
+            "a newer hub is not stale; it is ahead"
+        );
+        assert_eq!(
+            classify_hub_enforcement(Some(current - 1)),
+            HubEnforcement::Stale { hub: current - 1 },
+            "a hub below the version that introduced suspension enforcement cannot apply a \
+             kick-out, and that fact has to survive the comparison"
+        );
+    }
 
     /// The four shapes a tier's UDP configuration can arrive in, kept distinct.
     ///

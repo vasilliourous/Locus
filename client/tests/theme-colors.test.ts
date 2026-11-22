@@ -1,48 +1,55 @@
 /// <reference types="node" />
-import { readdirSync, readFileSync } from 'node:fs'
+import { readFileSync } from 'node:fs'
 import path from 'node:path'
 
 import { describe, expect, it } from 'vitest'
 
 import {
-  defaultDarkTheme,
-  defaultTheme,
-  LOCUS_COLORS,
-  LOCUS_LIGHT,
-  TIER_COLORS,
-  TIER_FALLBACK,
-} from '../src/pages/_theme'
-import {
-  DECORATIONS,
   DEFAULT_SHAPE,
-  DEFAULT_THEME_ID,
-  isThemeId,
-  resolveTheme,
-  themeDefaultFor,
-  THEMES,
-  THEME_IDS,
-} from '../src/pages/_themes'
+  defaultTheme,
+  locusFontFamily,
+  LOCUS_COLORS,
+  TIER_COLORS,
+} from '../src/pages/_theme'
+import { locusTheme } from '../src/services/theme'
 
 /**
- * The three layers that paint before the app is themed must agree.
+ * The palette, and the fact that there is exactly one.
  *
- * There are three, and each exists for a different moment:
+ * # What this file used to be
  *
- *   1. the NATIVE window (`src-tauri/.../window.rs`) — painted by the OS before
- *      any web content exists;
- *   2. the DOCUMENT (`src/index.html`) — parsed before any bundle runs, so it
- *      cannot import the theme module;
- *   3. the APP (`_theme.tsx` via `use-custom-theme`) — the themed surface.
+ * It guarded a nine-theme registry: that every id matched its key, that an
+ * unknown id resolved to a default, that nine palettes cleared the contrast
+ * floors, that a decoration preset could not escape its scope, and that the light
+ * and dark halves never disagreed. On 2026-11-19 the theme layer was deleted and
+ * the client became permanently Dawn (`/COLOURS.md` §0). Almost every one of
+ * those tests lost its subject.
  *
- * A mismatch between any two of them is a visible flash of the wrong colour
- * during startup, which is exactly how Clash Verge Rev's greys lingered in this
- * fork after everything else had been rebranded. The copies cannot be removed —
- * layer 2 cannot import layer 3 — so this test is what keeps them honest.
+ * # Deleting them was the honest move; this is what replaced them
  *
- * The Rust side is pinned separately, in `window.rs`'s own test module, because
- * a JS test cannot read a Rust `const`. Keeping the *pinned literal* here equal
- * to the one there is a human step; the comment in each says so.
+ * A test whose subject no longer exists does not fail — it passes vacuously, and
+ * a check that cannot fail reads exactly like one that passed. So the registry
+ * tests are gone rather than weakened, and three kinds of assertion remain:
+ *
+ *  1. **The contrast floors** (`§1`). A palette still has to be legible. These
+ *     are unchanged apart from losing the "for every theme" loop.
+ *  2. **The paint layers agree** (`§2`). There are still several files that each
+ *     paint the same ground at a different moment, and the copies cannot be
+ *     removed (one is Rust, one is parsed before any module loads). That test is
+ *     the only thing keeping them honest, and it now compares one value in three
+ *     files instead of a pair in six.
+ *  3. **One palette, and it is Dawn** (`§3`). New. This is the assertion that
+ *     makes the decision a property rather than a paragraph: a second palette
+ *     reappearing anywhere fails here, and the values are pinned to Dawn so a
+ *     "small tweak" to the ground is a deliberate act.
+ *
+ * # Every remaining test has been shown to fail
+ *
+ * `docs/reference/DEBUGGING-METHOD.md`: a guard that cannot fail reads exactly
+ * like a guard that passed. Each assertion below was run against a deliberately
+ * broken file before being kept — the note on each says which break was used.
  */
+
 const read = (relative: string) =>
   readFileSync(path.resolve(__dirname, relative), 'utf8')
 
@@ -50,8 +57,8 @@ const read = (relative: string) =>
  * File contents with comments removed, lowercased.
  *
  * Every file checked here explains WHICH upstream colours it replaced, so the
- * raw text legitimately contains the hex codes in prose. Without stripping,
- * these tests fail on a correct file and the tempting fix is to delete the
+ * raw text legitimately contains hex codes in prose. Without stripping, these
+ * tests fail on a correct file and the tempting fix is to delete the
  * explanation — which is the documentation that stops the colours coming back.
  */
 const readCode = (relative: string) =>
@@ -60,545 +67,169 @@ const readCode = (relative: string) =>
     .replace(/\/\/.*$/gm, '')
     .toLowerCase()
 
-/**
- * Braces must balance, and the block must not close early.
- *
- * Replaces "contains no braces", which was a proxy for this. A preset that
- * closes its own block early would let the *rest* of its text sit at the top
- * level of the injected `<style>` element, where it becomes a real selector
- * against the whole document — the exact escape the old check was protecting
- * against, which the old check did not actually detect.
- */
-const assertBalancedBraces = (text: string, label: string): boolean => {
-  let depth = 0
-  for (const ch of text) {
-    if (ch === '{') depth += 1
-    else if (ch === '}') {
-      depth -= 1
-      // Going negative means a `}` with no `{` before it: the block closed
-      // early and everything after it is loose in the stylesheet.
-      if (depth < 0) {
-        throw new Error(`${label}: unbalanced '}' — the block closes early`)
-      }
-    }
-  }
-  if (depth !== 0) {
-    throw new Error(`${label}: ${depth} unclosed '{'`)
-  }
-  return true
+/** WCAG relative luminance. Not a crude byte average. */
+const channel = (c: number) => {
+  const s = c / 255
+  return s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4
 }
 
-/**
- * No construct that would introduce a top-level, document-wide rule.
- *
- * `@media`/`@supports` are permitted because they *wrap* declarations in the
- * scope they sit in rather than naming a new one. `@import`, `@charset`,
- * `@namespace` and `@font-face` are rejected: they either pull in another
- * stylesheet or define something global. A raw selector would need to appear
- * outside a block, which `assertBalancedBraces` plus the scoping in
- * `use-custom-theme` already prevent — this is the belt to that pair of braces,
- * named separately so a failure says which property broke.
- */
-const assertNoEscapingConstruct = (text: string, label: string): boolean => {
-  const lower = text.toLowerCase()
-  for (const banned of ['@import', '@charset', '@namespace', '@font-face']) {
-    if (lower.includes(banned)) {
-      throw new Error(`${label}: '${banned}' is not allowed in a preset`)
-    }
-  }
-  return true
+const relativeLuminance = (hex: string) => {
+  const h = hex.replace('#', '')
+  const r = parseInt(h.slice(0, 2), 16)
+  const g = parseInt(h.slice(2, 4), 16)
+  const b = parseInt(h.slice(4, 6), 16)
+  return 0.2126 * channel(r) + 0.7152 * channel(g) + 0.0722 * channel(b)
 }
 
-/** No remote or inline asset can be loaded at runtime. */
-const assertNoRemoteAsset = (text: string, label: string): boolean => {
-  const lower = text.toLowerCase()
-  for (const banned of ['url(', 'http://', 'https://', 'data:']) {
-    if (lower.includes(banned)) {
-      throw new Error(`${label}: '${banned}' is not allowed in a preset`)
-    }
-  }
-  return true
+const contrast = (a: string, b: string) => {
+  const l1 = relativeLuminance(a)
+  const l2 = relativeLuminance(b)
+  const [hi, lo] = l1 > l2 ? [l1, l2] : [l2, l1]
+  return (hi + 0.05) / (lo + 0.05)
 }
 
-/**
- * Register-level guards for the theme registry.
- *
- * These are the tests that make `docs/reference/THEMES.md` §3 real. The design
- * record states four rules a theme must satisfy; a rule stated only in prose is
- * a rule that holds until someone adds a seventh theme at 1am, and the failure
- * mode here is subtle — a palette that violates contrast does not crash, it just
- * becomes slightly unreadable for the student who needs the accessibility theme
- * most.
- *
- * # Why these are computed, not transcribed
- *
- * `CLAIMS.md` §2: a number written in a sentence cannot be recomputed and will
- * rot. So the floors live here as constants that the *test* applies to the
- * registry, rather than as a table of expected ratios in the design record. A
- * theme that drifts out of range fails here, and the doc never carries a value
- * that could be wrong.
- *
- * # Every test here has been demonstrated failing
- *
- * Per `docs/reference/DEBUGGING-METHOD.md`: a guard that cannot fail reads
- * exactly like a guard that passed. Each of these was run against an
- * intentionally broken registry entry before being kept — see the note on each.
- */
-describe('theme registry', () => {
-  /** WCAG relative luminance. Not the crude `0.2126r + …` byte average below. */
-  const channel = (c: number) => {
-    const s = c / 255
-    return s <= 0.03928 ? s / 12.92 : Math.pow((s + 0.055) / 1.055, 2.4)
-  }
+const palette = LOCUS_COLORS
 
-  const relativeLuminance = (hex: string) => {
-    const h = hex.replace('#', '')
-    const r = parseInt(h.slice(0, 2), 16)
-    const g = parseInt(h.slice(2, 4), 16)
-    const b = parseInt(h.slice(4, 6), 16)
-    return 0.2126 * channel(r) + 0.7152 * channel(g) + 0.0722 * channel(b)
-  }
-
-  const contrast = (a: string, b: string) => {
-    const l1 = relativeLuminance(a)
-    const l2 = relativeLuminance(b)
-    const [hi, lo] = l1 > l2 ? [l1, l2] : [l2, l1]
-    return (hi + 0.05) / (lo + 0.05)
-  }
-
-  const specs = Object.values(THEMES)
-
-  it('the registry has one entry per declared id, and ids match their keys', () => {
-    // Catches the realistic copy-paste error: duplicating an entry and leaving
-    // the old `id` in place, which would silently drop a theme from the dropdown
-    // and make the persisted value ambiguous between two entries.
-    for (const [key, spec] of Object.entries(THEMES)) {
-      expect(spec.id).toBe(key)
-    }
-    expect(THEME_IDS).toEqual(Object.keys(THEMES))
-    expect(new Set(THEME_IDS).size).toBe(THEME_IDS.length)
-  })
-
-  it('every id is a known id, and unknown ids resolve to the default', () => {
-    for (const id of THEME_IDS) {
-      expect(isThemeId(id)).toBe(true)
-    }
-    // The load-bearing half: a value from a hand-edited config file must never
-    // throw or blank the screen. Demonstrated failing by making `resolveTheme`
-    // return `THEMES[id]` directly (undefined) — the third assertion goes red.
-    expect(isThemeId('no-such-theme')).toBe(false)
-    expect(isThemeId(undefined)).toBe(false)
-    expect(isThemeId('')).toBe(false)
-    expect(resolveTheme('no-such-theme').id).toBe(DEFAULT_THEME_ID)
-    expect(resolveTheme(undefined).id).toBe(DEFAULT_THEME_ID)
-    expect(resolveTheme(null).id).toBe(DEFAULT_THEME_ID)
-    expect(resolveTheme({}).id).toBe(DEFAULT_THEME_ID)
-  })
-
-  it('the empty string is a valid "no theme" value, distinct from every real id', () => {
-    // The Account dropdown gained a "Default (follow system)" entry that writes
-    // `theme_id: ''`. Two properties make that safe, and both are asserted here
-    // because either failing turns the entry into a bug that looks like a theme:
+describe('the one palette is legible', () => {
+  it('body text clears 4.5:1 on both the page and the card', () => {
+    // The floor WCAG AA sets for body text. Checked against `background` AND
+    // `surface` because a card is where most of this app's text lives, and a
+    // palette can clear the page while failing the card.
     //
-    //   1. `''` is not a theme id, so no registry entry can shadow it and
-    //      `resolveTheme('')` falls through to the default;
-    //   2. `hasTheme` in `use-custom-theme` is `theme_id.length > 0`, so `''`
-    //      makes the app honour `theme_mode` again — which is the entire point.
-    //
-    // Before this entry existed, EVERY option in the dropdown wrote a real id, so
-    // once a student picked any theme the Appearance control above it could never
-    // take effect again. "Follow the system" was reachable only by editing
-    // `verge.yaml` by hand.
-    expect(isThemeId('')).toBe(false)
-    expect(THEME_IDS).not.toContain('')
-    expect(resolveTheme('').id).toBe(DEFAULT_THEME_ID)
-
-    // The `hasTheme` rule, restated as an assertion because it lives in a hook
-    // this suite cannot mount. A non-empty id means "a theme is selected".
-    const hasTheme = (id: string | undefined): boolean =>
-      typeof id === 'string' && id.length > 0
-    expect(hasTheme('')).toBe(false)
-    expect(hasTheme(undefined)).toBe(false)
-    expect(hasTheme(DEFAULT_THEME_ID)).toBe(true)
+    // Demonstrated failing by setting `textPrimary` near `surface`.
+    expect(
+      contrast(palette.textPrimary, palette.background),
+    ).toBeGreaterThanOrEqual(4.5)
+    expect(
+      contrast(palette.textPrimary, palette.surface),
+    ).toBeGreaterThanOrEqual(4.5)
   })
 
-  it('the two default themes are projections of the shipped palette', () => {
-    // This is what makes the registry a SUPERSET of the shipped appearance rather
-    // than a replacement for it: an install with no `theme_id` must render
-    // exactly what it rendered before themes existed. If this fails, the layer is
-    // no longer additive and the upgrade path is a visual change.
-    const dark = THEMES['default-dark']
-    expect(dark.palette.background).toBe(LOCUS_COLORS.background)
-    expect(dark.palette.surface).toBe(LOCUS_COLORS.surface)
-    expect(dark.palette.surfaceHover).toBe(LOCUS_COLORS.surfaceHover)
-    expect(dark.palette.border).toBe(LOCUS_COLORS.border)
-    expect(dark.palette.textPrimary).toBe(LOCUS_COLORS.textPrimary)
-    expect(dark.palette.textSecondary).toBe(LOCUS_COLORS.textSecondary)
-    expect(dark.palette.accent).toBe(LOCUS_COLORS.accent)
-    expect(dark.palette.accentHover).toBe(LOCUS_COLORS.accentHover)
-    expect(dark.palette.success).toBe(LOCUS_COLORS.success)
-    expect(dark.palette.warning).toBe(LOCUS_COLORS.warning)
-    expect(dark.palette.error).toBe(LOCUS_COLORS.error)
-
-    const light = THEMES['default-light']
-    expect(light.palette.background).toBe(LOCUS_LIGHT.background)
-    expect(light.palette.surface).toBe(LOCUS_LIGHT.surface)
-    expect(light.palette.surfaceHover).toBe(LOCUS_LIGHT.surfaceHover)
-    expect(light.palette.border).toBe(LOCUS_LIGHT.border)
-    expect(light.palette.accent).toBe(LOCUS_LIGHT.accent)
-    expect(light.palette.accentHover).toBe(LOCUS_LIGHT.accentHover)
-    // The two legacy typography values the MUI palette is built from, read
-    // from the same source the projection reads them from.
-    expect(light.palette.textPrimary).toBe(defaultTheme.primary_text)
-    expect(light.palette.textSecondary).toBe(defaultTheme.secondary_text)
+  it('secondary text clears 4.5:1 on the card', () => {
+    // Labels and hints are still text a student must read, so they get the body
+    // floor rather than the 3:1 non-text one. Demonstrated failing by narrowing
+    // the gap between `textSecondary` and `surface`.
+    expect(
+      contrast(palette.textSecondary, palette.surface),
+    ).toBeGreaterThanOrEqual(4.5)
   })
 
-  it('body text clears 4.5:1 on its own surface, and labels clear 3:1', () => {
-    // THEMES.md §3 rule 1. Demonstrated failing by lowering `paper`'s
-    // textSecondary to `#B9AE9C` (~2.1:1): the second assertion goes red.
-    const failures: string[] = []
-    for (const spec of specs) {
-      const onSurface = contrast(spec.palette.textPrimary, spec.palette.surface)
-      const onBackground = contrast(
-        spec.palette.textPrimary,
-        spec.palette.background,
-      )
-      const labels = contrast(spec.palette.textSecondary, spec.palette.surface)
-      if (onSurface < 4.5) {
-        failures.push(`${spec.id}: textPrimary/surface ${onSurface.toFixed(2)}`)
-      }
-      if (onBackground < 4.5) {
-        failures.push(
-          `${spec.id}: textPrimary/background ${onBackground.toFixed(2)}`,
-        )
-      }
-      if (labels < 3) {
-        failures.push(`${spec.id}: textSecondary/surface ${labels.toFixed(2)}`)
-      }
-    }
-    expect(failures).toEqual([])
-  })
-
-  it('the accent is legible as text on the theme it belongs to', () => {
-    // The shipped light theme needed a *darker* accent for exactly this reason
-    // (`_theme.tsx`). Every theme inherits that obligation — an accent used on a
-    // button label is body text, not decoration.
-    const failures: string[] = []
-    for (const spec of specs) {
-      const onSurface = contrast(spec.palette.accent, spec.palette.surface)
-      const onBackground = contrast(
-        spec.palette.accent,
-        spec.palette.background,
-      )
-      if (onSurface < 3) {
-        failures.push(`${spec.id}: accent/surface ${onSurface.toFixed(2)}`)
-      }
-      if (onBackground < 3) {
-        failures.push(
-          `${spec.id}: accent/background ${onBackground.toFixed(2)}`,
-        )
-      }
-    }
-    expect(failures).toEqual([])
-  })
-
-  it('a theme mode matches its palette direction', () => {
-    // THEMES.md §3 rule 2. This is the check that catches a copy-paste error
-    // between two similar themes — the realistic way a registry entry is authored
-    // wrong. Demonstrated failing by flipping `midnight` to `mode: 'light'`.
-    const failures: string[] = []
-    for (const spec of specs) {
-      const bg = relativeLuminance(spec.palette.background)
-      const text = relativeLuminance(spec.palette.textPrimary)
-      const textIsLighter = text > bg
-      if (spec.mode === 'dark' && !textIsLighter) {
-        failures.push(`${spec.id}: dark theme with dark text`)
-      }
-      if (spec.mode === 'light' && textIsLighter) {
-        failures.push(`${spec.id}: light theme with light text`)
-      }
-    }
-    expect(failures).toEqual([])
-  })
-
-  it('the structural relationships hold in every theme', () => {
-    // THEMES.md §3 rule 3. These are the relationships the shipped palette was
-    // built on; a theme that violates one looks broken in a way contrast maths
-    // alone will not catch — a card you cannot see against the page, or a border
-    // doing no work.
-    const failures: string[] = []
-    for (const spec of specs) {
-      const p = spec.palette
-      const surfaceStep = contrast(p.surface, p.background)
-      const borderVsSurface = contrast(p.border, p.surface)
-      const secondaryVsPrimary = contrast(p.textSecondary, p.textPrimary)
-
-      // A card must be a visible step from the page. 1.03 is below any real
-      // theme's figure and above "identical"; it catches a copy-paste where
-      // surface was left equal to background.
-      if (surfaceStep < 1.03) {
-        failures.push(
-          `${spec.id}: surface/background ${surfaceStep.toFixed(3)}`,
-        )
-      }
-      if (borderVsSurface < 1.15) {
-        failures.push(
-          `${spec.id}: border/surface ${borderVsSurface.toFixed(2)}`,
-        )
-      }
-      // textSecondary must be *dimmer* than textPrimary, or the hierarchy has
-      // been inverted and labels will read as louder than body copy.
-      if (secondaryVsPrimary <= 1) {
-        failures.push(
-          `${spec.id}: textSecondary is not dimmer than textPrimary`,
-        )
-      }
-    }
-    expect(failures).toEqual([])
-  })
-
-  it('every theme carries a shape, and radii are sane', () => {
-    for (const spec of specs) {
-      expect(spec.shape.cardRadius).toBeGreaterThan(0)
-      expect(spec.shape.controlRadius).toBeGreaterThan(0)
-      // The shipped card is 12px. A radius past ~24 stops reading as a card in
-      // this layout, and a control rounder than its card looks like a mistake.
-      expect(spec.shape.cardRadius).toBeLessThanOrEqual(24)
-      expect(spec.shape.controlRadius).toBeLessThanOrEqual(16)
-    }
-    // Today's values are what an unthemed app renders, so they are pinned.
-    expect(DEFAULT_SHAPE.cardRadius).toBe(12)
-    expect(DEFAULT_SHAPE.controlRadius).toBe(8)
-  })
-
-  it('a decoration names a preset that exists, and the preset is declarations only', () => {
-    // THEMES.md §1: decoration is a NAMED PRESET, never CSS text. A theme that
-    // could emit arbitrary CSS could restyle any component, which is the
-    // interference property this layer exists to avoid — so the registry is
-    // checked for the shape of the value, not just its validity.
-    for (const spec of specs) {
-      if (spec.decoration === undefined) continue
-      expect(Object.hasOwn(DECORATIONS, spec.decoration)).toBe(true)
-    }
-    for (const [id, preset] of Object.entries(DECORATIONS)) {
-      expect(id).toMatch(/^[a-z0-9-]+$/)
-      // A preset is a *declaration block*, not a stylesheet. This used to be
-      // enforced by rejecting any `{` or `}` — which was true when a preset was
-      // a single flat string, and which blocked the nested, multi-layer blocks
-      // (inner blocks, `@supports`, layered gradients) that a real rice needs.
-      //
-      // The property that actually matters is NOT "contains no braces", it is
-      // "cannot escape its `[data-theme-skin]` scope, cannot load a remote
-      // asset, and cannot execute". Those are now asserted directly, below:
-      // every brace is balanced, no construct introduces a top-level selector,
-      // and no rule can reach outside the scope. This is strictly stronger than
-      // the old check — the old one rejected `{}` even inside a declaration
-      // value, while permitting a stray unbalanced `}` to be caught only by
-      // accident.
-      expect(assertBalancedBraces(preset.short, id)).toBe(true)
-      expect(assertNoEscapingConstruct(preset.short, id)).toBe(true)
-      expect(assertNoRemoteAsset(preset.short, id)).toBe(true)
-      for (const layer of preset.layers) {
-        expect(assertBalancedBraces(layer, `${id}.layers`)).toBe(true)
-        expect(assertNoEscapingConstruct(layer, `${id}.layers`)).toBe(true)
-        expect(assertNoRemoteAsset(layer, `${id}.layers`)).toBe(true)
-      }
-    }
-    // The preset used by `forest` is exercised, and the registry does not
-    // accumulate dead presets nobody selects.
-    const used = new Set(
-      specs.map((s) => s.decoration).filter((d): d is string => !!d),
+  it('the accent is legible as a non-text mark on the page', () => {
+    // The wordmark and the primary action are painted in the accent, so this is
+    // both a button-label question and "can you see the brand" (3:1).
+    expect(contrast(palette.accent, palette.background)).toBeGreaterThanOrEqual(
+      3,
     )
-    expect(used.size).toBeGreaterThan(0)
-    for (const id of Object.keys(DECORATIONS)) {
-      expect(used.has(id)).toBe(true)
+  })
+
+  it('every status role is legible on the card', () => {
+    // A status colour that cannot be seen is worse than no status colour: the
+    // dot is the whole signal. 3:1 is the floor for a non-text UI component.
+    for (const role of ['success', 'warning', 'error'] as const) {
+      expect(
+        contrast(palette[role], palette.surface),
+        `${role} is not legible on the card surface`,
+      ).toBeGreaterThanOrEqual(3)
     }
   })
 
-  it('no theme uses pure white or pure black', () => {
-    // The rule the 3.3.0 redesign exists to enforce, and the one that is easiest
-    // to reintroduce: `#FFFFFF` and `#000000` are the two values a palette
-    // reaches for by default, and both are wrong here. Pure white on a large
-    // panel is a light source rather than a surface — it glares, and for the
-    // people who most need the accessibility theme it makes text halo. Pure
-    // black crushes the surface ladder until a card and the page are the same
-    // plane, which is what the old `midnight` did.
-    //
-    // Asserted as a *property of every theme* rather than as a checklist of
-    // literals, so a theme added later cannot quietly reintroduce either.
+  it('no value is pure white or pure black', () => {
+    // The rule the redesign exists to enforce, and the one easiest to
+    // reintroduce: both are what a palette reaches for by default. Pure white on
+    // a panel glares and makes text halo; pure black crushes the surface ladder
+    // until a card and the page are the same plane.
     const PURE = new Set(['#ffffff', '#000000'])
-    const offenders: string[] = []
-    const scan = (label: string, id: string, hex: string) => {
-      if (PURE.has(hex.toLowerCase())) offenders.push(`${id}: ${label} ${hex}`)
+    for (const [field, value] of Object.entries(palette)) {
+      expect(
+        PURE.has(String(value).toLowerCase()),
+        `${field} is ${value}`,
+      ).toBe(false)
     }
-    for (const spec of specs) {
-      for (const [field, value] of Object.entries(spec.palette)) {
-        scan(field, spec.id, value as string)
-      }
-    }
-    expect(offenders).toEqual([])
   })
 
-  it('the base palettes use no pure white or pure black either', () => {
-    // The registry's two default entries are *projections* of `LOCUS_COLORS` /
-    // `LOCUS_LIGHT` rather than literals, so the check above would not see them.
-    // This is the half that actually had the sharp white in it (`surface` was
-    // `#FFFFFF`).
-    const PURE = new Set(['#ffffff', '#000000'])
-    const offenders: string[] = []
-    for (const [name, palette] of [
-      ['LOCUS_COLORS', LOCUS_COLORS],
-      ['LOCUS_LIGHT', LOCUS_LIGHT],
-    ] as const) {
-      for (const [field, value] of Object.entries(palette)) {
-        if (PURE.has(String(value).toLowerCase())) {
-          offenders.push(`${name}: ${field} ${value}`)
-        }
-      }
-    }
-    expect(offenders).toEqual([])
-  })
-
-  it('every accent is legible as a non-text UI mark on its own page', () => {
-    // The logo is now painted in `palette.accent` (see `layout-sidebar.tsx`), so
-    // the accent's contrast against the surface it sits on is no longer only a
-    // button-label question — it is whether the wordmark is readable. 3:1 is the
-    // floor for a non-text UI component, and it is asserted per theme so a new
-    // palette cannot ship an unreadable logo.
-    const failures: string[] = []
-    for (const spec of specs) {
-      const onBackground = contrast(
-        spec.palette.accent,
-        spec.palette.background,
-      )
-      const onSurface = contrast(spec.palette.accent, spec.palette.surface)
-      const worst = Math.min(onBackground, onSurface)
-      if (worst < 3) {
-        failures.push(`${spec.id}: accent mark contrast ${worst.toFixed(2)}`)
-      }
-    }
-    expect(failures).toEqual([])
-  })
-
-  it('the Locus-owned palettes carry no chroma (the monochrome reset holds)', () => {
-    // `/COLOURS.md` §0 records the decision: every surface Locus OWNS is
-    // neutral, so a colour design can start from a neutral base. The themes that
-    // are not Locus's own keep their colour, and are excluded by ID below rather
-    // than by a heuristic — this test must not accidentally bless a green as
-    // "authored by someone else".
+  it('the page and a card are two planes, not one with a line on it', () => {
+    // MUI's shadow scale is zeroed app-wide, so a card is separated from the page
+    // by its 1px border *and* a one-step-up surface. If the two surfaces collapse
+    // to the same value the border is doing all the work, which is what the old
+    // default-dark did — measured at 1.14:1.
     //
-    // WHAT THIS CANNOT DO, stated so nobody reads it as more: it cannot police a
-    // future theme, because keeping a coloured theme is legitimate. It asserts
-    // only that the brand layer is neutral, which is the exact claim §0 makes.
-    //
-    // Demonstrated failing before it was kept: with `LOCUS_COLORS.accent` at the
-    // pre-reset green, the message below names that field.
-    const NEUTRAL_THEMES = ['default-dark', 'default-light', 'moss']
-
-    // A colour carries no chroma when the largest and smallest channels agree.
-    // An alpha suffix is stripped: it is not a channel.
-    const chroma = (value: string): number | null => {
-      const m = /^#([0-9a-fA-F]{6})(?:[0-9a-fA-F]{2})?$/.exec(value.trim())
-      if (!m) return null
-      const hex = m[1]
-      const parts = [0, 2, 4].map((i) => parseInt(hex.slice(i, i + 2), 16))
-      return Math.max(...parts) - Math.min(...parts)
-    }
-
-    const failures: string[] = []
-    const check = (label: string, value: string) => {
-      const c = chroma(value)
-      if (c === null) {
-        failures.push(`${label}: ${value} is not a hex colour`)
-      } else if (c !== 0) {
-        failures.push(`${label}: ${value} carries chroma ${c}`)
-      }
-    }
-
-    for (const [field, value] of Object.entries(LOCUS_COLORS)) {
-      check(`LOCUS_COLORS.${field}`, value as string)
-    }
-    for (const [field, value] of Object.entries(LOCUS_LIGHT)) {
-      check(`LOCUS_LIGHT.${field}`, value as string)
-    }
-    for (const [field, value] of Object.entries(defaultTheme)) {
-      if (field === 'font_family') continue
-      check(`defaultTheme.${field}`, value as string)
-    }
-    for (const [field, value] of Object.entries(defaultDarkTheme)) {
-      if (field === 'font_family') continue
-      check(`defaultDarkTheme.${field}`, value as string)
-    }
-    for (const [tier, entry] of Object.entries(TIER_COLORS)) {
-      check(`TIER_COLORS.${tier}.color`, entry.color)
-    }
-    check('TIER_FALLBACK.color', TIER_FALLBACK.color)
-    for (const id of NEUTRAL_THEMES) {
-      for (const [field, value] of Object.entries(THEMES[id].palette)) {
-        check(`${id}.${field}`, value as string)
-      }
-    }
-
-    expect(failures).toEqual([])
-  })
-
-  it('the projection carries every field the MUI palette is built from', () => {
-    // `themeDefaultFor` is the bridge between the registry's vocabulary and the
-    // hook's. A missing field here does not crash — it falls back to `undefined`
-    // and the palette loses a colour — so the projection is asserted explicitly.
-    for (const spec of specs) {
-      const projected = themeDefaultFor(spec, 'sans-serif')
-      expect(projected.primary_color).toBe(spec.palette.accent)
-      expect(projected.background_color).toBe(spec.palette.background)
-      expect(projected.primary_text).toBe(spec.palette.textPrimary)
-      expect(projected.error_color).toBe(spec.palette.error)
-      expect(projected.warning_color).toBe(spec.palette.warning)
-      expect(projected.success_color).toBe(spec.palette.success)
-      expect(projected.info_color).toBe(spec.palette.info)
-      expect(projected.secondary_color).toBe(spec.palette.secondary)
-      // Font is a preference, passed through rather than themed.
-      expect(projected.font_family).toBe('sans-serif')
-    }
+    // A low bar on purpose: this asserts the ladder exists, not that it is
+    // strong. The exact separation is a design decision, recorded in
+    // /COLOURS.md §2, and a tighter floor here would turn a taste question into a
+    // test failure.
+    expect(contrast(palette.surface, palette.background)).toBeGreaterThan(1.15)
   })
 })
 
-describe('locus palette consistency across paint layers', () => {
-  it('the document background matches the theme background', () => {
-    const html = read('../src/index.html')
-
-    // Dark: the primary experience, and the one the spec defines.
-    expect(html).toContain(
-      `--bg-color: ${LOCUS_COLORS.background.toLowerCase()}`,
-    )
-    // Light: derived, but must match its counterpart too.
-    expect(html).toContain(
-      `--bg-color: ${LOCUS_LIGHT.background.toLowerCase()}`,
+describe('the paint layers agree', () => {
+  /**
+   * There are three, and each exists for a different moment:
+   *
+   *   1. the NATIVE window (`src-tauri/.../window.rs`) — painted by the OS
+   *      before any web content exists;
+   *   2. the DOCUMENT (`src/index.html`) — parsed before any bundle runs, so it
+   *      cannot import the theme module;
+   *   3. the APP (`_theme.tsx` via `services/theme.ts`) — the themed surface.
+   *
+   * A mismatch is a visible flash of the wrong colour on every launch. The copies
+   * cannot be removed — layer 2 cannot import layer 3, and layer 1 is Rust — so
+   * this is what keeps them honest.
+   */
+  it('the native window uses the palette ground', () => {
+    // The Rust side cannot import the TS palette, so its literal is compared
+    // here. This is the one place a JS test reads Rust source.
+    //
+    // Demonstrated failing by changing the constant in `window.rs` alone.
+    const rust = read('../src-tauri/src/utils/resolve/window.rs')
+    expect(rust).toContain(
+      `const BACKGROUND_HEX: &str = "${palette.background.toUpperCase()}";`,
     )
   })
 
-  it('the document text colour matches the theme text colour', () => {
+  it('the document background matches the palette ground', () => {
+    // Demonstrated failing by editing `index.html`'s `--bg-color` alone.
     const html = read('../src/index.html')
-    expect(html).toContain(
-      `--text-color: ${LOCUS_COLORS.textPrimary.toLowerCase()}`,
+    expect(html).toContain(`--bg-color: ${palette.background.toLowerCase()}`)
+  })
+
+  it('the document text colour matches the palette', () => {
+    const html = read('../src/index.html')
+    expect(html).toContain(`--text-color: ${palette.textPrimary.toLowerCase()}`)
+  })
+
+  it('the native window text colour is the palette body colour', () => {
+    // Passed through the bootstrap rather than written into the script, so there
+    // is one literal. Demonstrated failing by changing `TEXT_HEX` alone.
+    const rust = read('../src-tauri/src/utils/resolve/window.rs')
+    expect(rust).toContain(
+      `const TEXT_HEX: &str = "${palette.textPrimary.toUpperCase()}";`,
     )
+  })
+
+  it('the pre-bundle bootstrap script carries the palette ground and text', () => {
+    // `window_script.rs` paints the page before the bundle runs, and it cannot
+    // import `LOCUS_COLORS`. Its fallback values are a fourth copy of both.
+    //
+    // Demonstrated failing by changing either fallback alone.
+    const script = read('../src-tauri/src/utils/resolve/window_script.rs')
+    expect(script).toContain(`darkBg: "${palette.background.toUpperCase()}"`)
+    expect(script).toContain(`textFg: "${palette.textPrimary.toUpperCase()}"`)
   })
 
   it('no Clash Verge grey survives in the document', () => {
-    const html = read('../src/index.html').toLowerCase()
     // The two literals this fork inherited from upstream. Either reappearing
     // means the pre-bundle frame flashes another product's colours.
+    const html = read('../src/index.html').toLowerCase()
     expect(html).not.toContain('#2e303d')
     expect(html).not.toContain('#f5f5f5')
     expect(html).not.toContain('#181a1b')
   })
 
-  it('the theme carries no Clash Verge blue or grey', () => {
-    // Comments are stripped first, deliberately.
-    //
-    // The file explains WHICH upstream colours it replaced, so the raw text does
-    // contain the hex codes — in prose. Scanning prose would fail on a file that
-    // is correct, and the tempting fix would be to delete the explanation. Strip
-    // comments and check the code instead, so the doc comment can stay specific.
+  it('the palette carries no Clash Verge blue or grey', () => {
+    // Comments are stripped first, deliberately: the file explains which
+    // upstream colours it replaced, so the raw text contains them in prose.
+    // Scanning prose would fail on a correct file and tempt the author to delete
+    // the explanation.
     const theme = readCode('../src/pages/_theme.tsx')
     for (const verge of [
       '#007aff',
@@ -617,201 +248,165 @@ describe('locus palette consistency across paint layers', () => {
     // code must still be found — taken from the palette itself, so this stays
     // true whatever the colour design becomes.
     const theme = readCode('../src/pages/_theme.tsx')
-    expect(theme).toContain(LOCUS_COLORS.accent.toLowerCase())
+    expect(theme).toContain(palette.accent.toLowerCase())
   })
 
   it('the stylesheet fallback matches the palette', () => {
     // The fourth place the palette is written, and the easiest to forget: SCSS
-    // `:root` variables are overwritten by the theme hook at runtime, so a wrong
-    // value here is only visible for a moment on each launch — which is exactly
-    // how it survives review.
-    //
-    // Asserted against the palette rather than against a literal, so this keeps
-    // its meaning through a recolour instead of pinning one.
+    // `:root` variables are overwritten at runtime, so a wrong value here is only
+    // visible for a moment on each launch — which is exactly how it survives
+    // review. Asserted against the palette rather than a literal, so it keeps its
+    // meaning through a recolour.
     const scss = readCode('../src/assets/styles/index.scss')
+    expect(scss).toContain(`--primary-main: ${palette.accent.toLowerCase()}`)
     expect(scss).toContain(
-      `--primary-main: ${LOCUS_COLORS.accent.toLowerCase()}`,
+      `--background-color: ${palette.background.toLowerCase()}`,
     )
     expect(scss).toContain(
-      `--background-color: ${LOCUS_COLORS.background.toLowerCase()}`,
+      `--text-primary: ${palette.textPrimary.toLowerCase()}`,
     )
   })
 
   it('no component hardcodes an upstream surface colour', () => {
-    // Component-level colours are the easiest to miss: they sit outside the
-    // theme, so they do not follow light/dark and do not appear in any palette
-    // review. Two were found this way — `base-page.tsx` painting the page
-    // background `#1e1f27` (Verge's dark surface) on EVERY screen, and the
-    // traffic graph falling back to Verge's purple when the palette was unset.
-    //
-    // Scans `src/components` and `src/pages` for the specific upstream literals.
-    // Not a general "no hex outside the theme" rule: legitimate one-off colours
-    // exist (verdict reds/greens on the activation field), and a blanket ban
-    // would push people to obfuscate them rather than to the palette.
+    // A component that names a colour directly is a component that does not
+    // follow the palette. The allowlist is the palette module itself plus the
+    // tier badge's frozen wire-name table.
     const offenders: string[] = []
-    const walk = (dir: string) => {
-      for (const entry of readdirSync(dir, { withFileTypes: true })) {
-        const full = path.join(dir, entry.name)
-        if (entry.isDirectory()) {
-          walk(full)
-          continue
-        }
-        if (!entry.name.endsWith('.tsx') && !entry.name.endsWith('.ts'))
-          continue
-        if (entry.name === '_theme.tsx') continue
-        const code = readFileSync(full, 'utf8')
-          .replace(/\/\*[\s\S]*?\*\//g, '')
-          .replace(/\/\/.*$/gm, '')
-          .toLowerCase()
-        for (const upstream of [
-          '#1e1f27',
-          '#39393d',
-          '#5b5c9d',
-          '#9c27b0',
-          '#33cf4d',
-          '#bbbbbb',
-        ]) {
-          if (code.includes(upstream)) offenders.push(`${full} -> ${upstream}`)
-        }
-      }
+    const files = [
+      '../src/pages/connection.tsx',
+      '../src/pages/account.tsx',
+      '../src/pages/activation.tsx',
+      '../src/pages/suspended.tsx',
+      '../src/components/shared/support-block.tsx',
+    ]
+    for (const file of files) {
+      const code = readCode(file)
+      // A literal hex in a component is the defect, whatever its value.
+      const hits = code.match(/#[0-9a-f]{6}\b/g) ?? []
+      if (hits.length > 0) offenders.push(`${file}: ${hits.join(', ')}`)
     }
-    walk(path.resolve(__dirname, '../src/components'))
-    walk(path.resolve(__dirname, '../src/pages'))
     expect(offenders).toEqual([])
-  })
-
-  it('the tier colours cover every wire name the hub can send', () => {
-    // The badge is keyed by a FROZEN wire name, so the thing worth asserting is
-    // coverage, not a particular colour: a tier the hub sends with no entry here
-    // renders through `TIER_FALLBACK`, which is correct but generic.
-    for (const name of ['strike', 'budget', 'free', 'eco']) {
-      expect(TIER_COLORS[name]).toBeDefined()
-      expect(TIER_COLORS[name].color).toMatch(/^#[0-9A-F]{6}$/i)
-      expect(TIER_COLORS[name].background).toMatch(/^rgba\(/)
-    }
-    expect(TIER_FALLBACK.color).toMatch(/^#[0-9A-F]{6}$/i)
-
-    // The retired tier is gone from the registry's vocabulary entirely. If
-    // `stealth` reappears, someone has re-added a tier the hub no longer seeds
-    // (docs/business/04-tiers.md §4.2.4).
-    //
-    // This assertion SURVIVED the 2026-11-12 third tier. Budget is a new row on
-    // its own ports (§4.2.5) and deliberately reuses none of the retired
-    // vocabulary, so "stealth is absent" and "budget is present" are both true
-    // and both worth asserting — the second is in the coverage list above.
-    expect(Object.hasOwn(TIER_COLORS, 'stealth')).toBe(false)
-  })
-
-  it('the base palette is complete, and every value is well-formed', () => {
-    // The VALUES are `/COLOURS.md` §2's, and pinning them here as literals would
-    // make this file a second home for colour — which is the defect that guard
-    // now prevents (`check-consistency.sh` §49). What is asserted instead is the
-    // shape a palette must have, and that shape is what the code depends on.
-    const HEX = /^#[0-9A-Fa-f]{6}$/
-    for (const [name, palette] of [
-      ['LOCUS_COLORS', LOCUS_COLORS],
-      ['LOCUS_LIGHT', LOCUS_LIGHT],
-    ] as const) {
-      for (const field of [
-        'background',
-        'surface',
-        'surfaceHover',
-        'border',
-        'accent',
-        'accentHover',
-      ] as const) {
-        expect(palette[field], `${name}.${field}`).toMatch(HEX)
-      }
-    }
-    for (const field of [
-      'textPrimary',
-      'textSecondary',
-      'success',
-      'warning',
-      'error',
-    ] as const) {
-      expect(LOCUS_COLORS[field], `LOCUS_COLORS.${field}`).toMatch(HEX)
-    }
-  })
-
-  it('light-mode text is dark and dark-mode text is light', () => {
-    // The activation screen shipped invisible once because a light palette was
-    // paired with light text. Cheap invariant, catches the same class of error.
-    const luminance = (hex: string) => {
-      const r = parseInt(hex.slice(1, 3), 16)
-      const g = parseInt(hex.slice(3, 5), 16)
-      const b = parseInt(hex.slice(5, 7), 16)
-      return 0.2126 * r + 0.7152 * g + 0.0722 * b
-    }
-    expect(luminance(LOCUS_COLORS.textPrimary)).toBeGreaterThan(
-      luminance(LOCUS_COLORS.background),
-    )
-    expect(luminance('#1B2A23')).toBeLessThan(luminance(LOCUS_LIGHT.background))
   })
 })
 
-/**
- * The pop-up surfaces and the text on them must come from ONE mode.
- *
- * # The defect this exists for
- *
- * On the default skin, every pop-up — the sign-out confirmation, the helper
- * install dialog, error toasts — rendered as a bright white panel whose text
- * could not be read. The palette and the generated stylesheet that force-paints
- * `.MuiDialog-paper` were built from `mode` (the stored/`system` preference)
- * while the theme itself was built from `effectiveMode` (the mode of the skin
- * actually selected). Those agree when a theme is selected and disagree when
- * none is, so the default skin could paint a dark surface while the palette
- * supplied the light theme's black text.
- *
- * Selecting any theme hid it, which is why it survived: the bug only existed in
- * the configuration nobody had switched away from.
- *
- * # What this can and cannot see
- *
- * The stylesheet is a string, so a test cannot see the colour it paints. It CAN
- * see which value fed the string, and feeding it from a different mode than the
- * palette is the entire defect. Each of these was observed failing against the
- * code that shipped it.
- */
-describe('pop-up theming', () => {
-  const hook = readCode('../src/pages/_layout/hooks/use-custom-theme.ts')
-
-  it('no colour is chosen from the raw preference instead of the resolved mode', () => {
-    // `theme_mode` is the *preference*; `effectiveMode` is what renders. A
-    // decision made on the bare identifier `mode` is the mismatch.
+describe('there is exactly one appearance', () => {
+  it('the palette is Dawn', () => {
+    // The decision (`/COLOURS.md` §0) is that Locus is permanently Dawn. Pinned
+    // here so a change to any of these is a deliberate edit to the decision
+    // rather than a tweak nobody noticed.
     //
-    // The lookbehind excludes a letter or underscore, not just "effective":
-    // `theme_mode === 'light'` is the preference being READ in the effect that
-    // assigns it — legitimate — and the first version of this check flagged it,
-    // which is how the anchor came to be written this way.
-    const rawBranches = hook.match(/(?<![a-z_])mode === 'light'/g) ?? []
-    expect(
-      rawBranches,
-      'a colour is chosen from `mode` rather than `effectiveMode` — the ' +
-        'default-skin pop-up defect (see this describe block)',
-    ).toEqual([])
-    // Guard on the guard: the strip must still leave the real comparisons in,
-    // or the assertion above passes on a file that has no colours at all.
-    expect(
-      hook.match(/effectivemode === 'light'/g)?.length ?? 0,
-    ).toBeGreaterThan(3)
+    // Demonstrated failing by changing `background`.
+    expect(palette).toEqual({
+      background: '#1A1B26',
+      surface: '#24283B',
+      surfaceHover: '#2F3349',
+      border: '#3B4261',
+      textPrimary: '#C0CAF5',
+      textSecondary: '#9AA5CE',
+      accent: '#7AA2F7',
+      accentHover: '#9AB8FF',
+      success: '#9ECE6A',
+      warning: '#E0AF68',
+      error: '#F7768E',
+      secondary: '#BB9AF7',
+      info: '#7DCFFF',
+    })
   })
 
-  it('the dialog paper rule is not exempt from it', () => {
-    // The rule that paints every dialog is `!important`, so it beats the palette.
-    // That is exactly why it must be derived from the same mode: otherwise it
-    // overrides a correct paper with a paper for the other mode.
-    const rule = hook.match(/\.muidialog-paper\s*\{[^}]*\}/)
-    expect(rule, '.MuiDialog-paper rule is missing').not.toBeNull()
-    expect(rule![0]).toContain('effectivemode')
+  it('the MUI projection is built from the palette, field for field', () => {
+    // `defaultTheme` is the bridge between this file's vocabulary and MUI's. A
+    // missing field does not crash — the palette silently loses a colour — so
+    // every field is asserted against its source rather than spot-checked.
+    expect(defaultTheme.primary_color).toBe(palette.accent)
+    expect(defaultTheme.secondary_color).toBe(palette.secondary)
+    expect(defaultTheme.primary_text).toBe(palette.textPrimary)
+    expect(defaultTheme.secondary_text).toBe(palette.textSecondary)
+    expect(defaultTheme.info_color).toBe(palette.info)
+    expect(defaultTheme.error_color).toBe(palette.error)
+    expect(defaultTheme.warning_color).toBe(palette.warning)
+    expect(defaultTheme.success_color).toBe(palette.success)
+    expect(defaultTheme.background_color).toBe(palette.background)
+    expect(defaultTheme.font_family).toBe(locusFontFamily)
   })
 
-  it("the resolved mode is the selected theme's own mode", () => {
-    // Pins the wiring the two assertions above depend on: if `effectiveMode`
-    // ever stops following the theme, selecting a skin stops fixing the pop-ups.
-    expect(hook).toMatch(
-      /const effectivemode: [^=]+= hastheme \? spec\.mode : mode/,
-    )
+  it('the MUI theme is dark, and reads the palette rather than repeating it', () => {
+    // The theme is a projection: if any of these disagreed with the palette, the
+    // app would have two palettes that gradually diverged. `mode` is asserted
+    // because a light `mode` would make MUI compute its own light defaults for
+    // every component that does not read a colour directly.
+    expect(locusTheme.palette.mode).toBe('dark')
+    expect(locusTheme.palette.background.default).toBe(palette.background)
+    expect(locusTheme.palette.background.paper).toBe(palette.background)
+    expect(locusTheme.palette.text.primary).toBe(palette.textPrimary)
+    expect(locusTheme.palette.text.secondary).toBe(palette.textSecondary)
+    expect(locusTheme.palette.primary.main).toBe(palette.accent)
+    expect(locusTheme.palette.success.main).toBe(palette.success)
+    expect(locusTheme.palette.warning.main).toBe(palette.warning)
+    expect(locusTheme.palette.error.main).toBe(palette.error)
+    expect(locusTheme.shape.borderRadius).toBe(DEFAULT_SHAPE.controlRadius)
+  })
+
+  it('the shadow scale is zeroed, so nothing relies on elevation', () => {
+    // `_surfaces.ts` documents that a card is separated by a border and a
+    // surface step. That is only true while every shadow is `none`; an MUI
+    // default shadow reappearing would make the border look doubled.
+    expect(new Set(locusTheme.shadows).size).toBe(1)
+    expect(locusTheme.shadows[24]).toBe('none')
+  })
+
+  it('no theme machinery survives in the source tree', () => {
+    // The point of the change, asserted as a property. These names are the layer
+    // that was deleted; any of them reappearing means it came back.
+    //
+    // Demonstrated failing by leaving `useThemeMode` exported from `states.ts`.
+    const files = [
+      '../src/services/states.ts',
+      '../src/pages/_theme.tsx',
+      '../src/services/theme.ts',
+      '../src/services/preload.ts',
+      '../src/main.tsx',
+      '../src/pages/_layout.tsx',
+    ]
+    const banned = [
+      'THEMES',
+      'THEME_IDS',
+      'resolveTheme',
+      'isThemeId',
+      'themeDefaultFor',
+      'DECORATIONS',
+      'useCustomTheme',
+      'ThemeModeProvider',
+      'useThemeMode',
+      'resolveThemeMode',
+      'LOCUS_LIGHT',
+    ]
+    const offenders: string[] = []
+    for (const file of files) {
+      const code = readCode(file)
+      for (const name of banned) {
+        // Word-boundary match, lowercased because `readCode` lowercases the whole
+        // file. A plain `includes` would fire on `useWindowDecorations`, which is
+        // a window-chrome hook and has nothing to do with paint presets — the
+        // guard has to name the identifier, not any string containing it.
+        const pattern = new RegExp(`\\b${name.toLowerCase()}\\b`)
+        if (pattern.test(code)) offenders.push(`${file}: ${name}`)
+      }
+    }
+    expect(offenders).toEqual([])
+  })
+
+  it('the theme registry file is gone', () => {
+    // A file that no longer exists cannot be imported, but it can be recreated
+    // by a merge. This is the cheapest way to notice.
+    expect(() => read('../src/pages/_themes.ts')).toThrow()
+  })
+
+  it('every tier wire name still has a badge colour', () => {
+    // The tier table was NOT removed with the theme layer: its keys are frozen
+    // wire names and the tint is redundant encoding for a label, not a palette.
+    // Losing one here means a paying student sees a bare wire name.
+    for (const wire of ['strike', 'budget', 'free', 'eco']) {
+      expect(TIER_COLORS[wire], `${wire} has no badge colour`).toBeDefined()
+    }
   })
 })
