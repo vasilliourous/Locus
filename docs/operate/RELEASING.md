@@ -57,7 +57,8 @@ verified-against: client/scripts/release-version.mjs, server/scripts/publish-rel
 > for key custody. The short version:
 
 > **Step 0 — run the gate.** `server/scripts/release-gate.sh --tag vX.Y.Z` checks
-> the five version sites, the working tree, push state, the tag itself, the
+> every version site listed in `[client.version_sites]`
+> ([`../state.toml`](../state.toml)), the working tree, push state, the tag itself, the
 > contract (§37–§39) and that the signing key matches the pubkey in
 > `tauri.conf.json`. It exits non-zero with the reason. It is the enforcement of
 > the order below; the order itself is prose and prose has been skipped before.
