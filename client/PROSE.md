@@ -16,7 +16,7 @@ verified-against: generated from src/locales/en/ and clash-verge-i18n/locales/en
 > `node scripts/prose-manifest.mjs` regenerates this file after the code
 > changes. `--check` fails if it is stale.
 
-**332 strings.** Each row is: the key, the text, where in the app a
+**333 strings.** Each row is: the key, the text, where in the app a
 student meets it, and the exact `file:line` that references it.
 
 Changing a row changes that string only. To change what a whole screen
@@ -42,12 +42,12 @@ says, edit the rows under that screen's heading.
 
 | Key | Text | Code |
 |---|---|---|
-| `home.components.connection.suspended.lapsedAction` | Contact whoever sold you the code to renew it. | src/pages/suspended.tsx:142 |
-| `home.components.connection.suspended.lapsedBody` | Your code has expired, so the connection was stopped. Renewing with whoever sold you the code restores access. | src/pages/suspended.tsx:124 |
-| `home.components.connection.suspended.lapsedTitle` | Your subscription has ended | src/pages/suspended.tsx:105 |
-| `home.components.connection.suspended.suspendedAction` | Ask them to lift the suspension. You can connect again without re-entering your code or restarting the app. | src/pages/suspended.tsx:143 |
-| `home.components.connection.suspended.suspendedBody` | An operator has suspended this code, so the connection was stopped. Your code is still saved on this computer. | src/pages/suspended.tsx:125 |
-| `home.components.connection.suspended.suspendedTitle` | This device has been signed out | src/pages/suspended.tsx:106 |
+| `home.components.connection.suspended.lapsedAction` | Contact whoever sold you the code to renew it. | src/pages/suspended.tsx:137 |
+| `home.components.connection.suspended.lapsedBody` | Your code has expired, so the connection was stopped. Renewing with whoever sold you the code restores access. | src/pages/suspended.tsx:116 |
+| `home.components.connection.suspended.lapsedTitle` | Your subscription has ended | src/pages/suspended.tsx:100 |
+| `home.components.connection.suspended.suspendedAction` | Ask them to lift the suspension. You can connect again without re-entering your code or restarting the app. | src/pages/suspended.tsx:138 |
+| `home.components.connection.suspended.suspendedBody` | An operator has suspended this code, so the connection was stopped. Your code is still saved on this computer. | src/pages/suspended.tsx:117 |
+| `home.components.connection.suspended.suspendedTitle` | This device has been signed out | src/pages/suspended.tsx:101 |
 
 ## Connection tab
 
@@ -124,13 +124,13 @@ says, edit the rows under that screen's heading.
 
 ## Account tab
 
-*Subscription, device, preferences, updates (pages/account.tsx)* — 37 strings.
+*Subscription, device, preferences, updates (pages/account.tsx)* — 38 strings.
 
 | Key | Text | Code |
 |---|---|---|
 | `home.components.connection.account.activateForExpiry` | Activate this device to see your subscription. | src/pages/account.tsx:206 |
 | `home.components.connection.account.appVersion` | App version | src/pages/account.tsx:358 |
-| `home.components.connection.account.autoUpdate` | Check for updates automatically | src/pages/account.tsx:435 |
+| `home.components.connection.account.autoUpdate` | Check for updates automatically | src/pages/account.tsx:459 |
 | `home.components.connection.account.checkingStatus` | Checking… | src/pages/account.tsx:282 |
 | `home.components.connection.account.checkStatus` | Check status now | src/pages/account.tsx:283 |
 | `home.components.connection.account.confirmedDaysAgo` | {{count}} d ago | src/pages/account.tsx:117 |
@@ -143,28 +143,29 @@ says, edit the rows under that screen's heading.
 | `home.components.connection.account.expired` | Expired | src/pages/account.tsx:168 |
 | `home.components.connection.account.expires` | Expires | src/pages/account.tsx:149 |
 | `home.components.connection.account.expiresSoon` | Your subscription expires soon. Contact the person who sold you the code to renew. | src/pages/account.tsx:220 |
-| `home.components.connection.account.language` | Language | src/pages/account.tsx:408 |
+| `home.components.connection.account.hubBehind` | Your Locus server is running an older version of its account checks. If someone suspends your access, this device will not find out until the server is updated. Quote this number to them: {{hub}}. | src/pages/account.tsx:387 |
+| `home.components.connection.account.language` | Language | src/pages/account.tsx:432 |
 | `home.components.connection.account.lastChecked` | Last confirmed {{time}} | src/pages/account.tsx:287 |
 | `home.components.connection.account.noExpiryYet` | Your subscription end date is not available yet. It will appear after this device next contacts Locus. | src/pages/account.tsx:205 |
-| `home.components.connection.account.notActivated` | This device is not activated. Enter the code from your card to connect. | src/pages/account.tsx:640 |
+| `home.components.connection.account.notActivated` | This device is not activated. Enter the code from your card to connect. | src/pages/account.tsx:664 |
 | `home.components.connection.account.notActivatedToCheck` | Activate a code first — there is nothing to confirm yet. | src/pages/account.tsx:272 |
-| `home.components.connection.account.off` | Off | src/pages/account.tsx:448 |
-| `home.components.connection.account.on` | On | src/pages/account.tsx:447 |
+| `home.components.connection.account.off` | Off | src/pages/account.tsx:472 |
+| `home.components.connection.account.on` | On | src/pages/account.tsx:471 |
 | `home.components.connection.account.oneDayLeft` | 1 day | src/pages/account.tsx:154 |
 | `home.components.connection.account.plan` | Plan | src/pages/account.tsx:132 |
 | `home.components.connection.account.platform` | Platform | src/pages/account.tsx:354 |
-| `home.components.connection.account.preferences` | Preferences | src/pages/account.tsx:402 |
-| `home.components.connection.account.refresh` | Refresh | src/pages/account.tsx:611 |
-| `home.components.connection.account.refreshBusy` | A status read was already running | src/pages/account.tsx:602 |
-| `home.components.connection.account.refreshed` | Up to date — status re-read | src/pages/account.tsx:600 |
-| `home.components.connection.account.refreshFailed` | Could not re-read the status | src/pages/account.tsx:603 |
-| `home.components.connection.account.storedCodeDamaged` | The sign-in saved on this computer is damaged and could not be used, so Locus is asking you to enter your code again. Your plan and its remaining time are not affected. | src/pages/account.tsx:639 |
+| `home.components.connection.account.preferences` | Preferences | src/pages/account.tsx:426 |
+| `home.components.connection.account.refresh` | Refresh | src/pages/account.tsx:635 |
+| `home.components.connection.account.refreshBusy` | A status read was already running | src/pages/account.tsx:626 |
+| `home.components.connection.account.refreshed` | Up to date — status re-read | src/pages/account.tsx:624 |
+| `home.components.connection.account.refreshFailed` | Could not re-read the status | src/pages/account.tsx:627 |
+| `home.components.connection.account.storedCodeDamaged` | The sign-in saved on this computer is damaged and could not be used, so Locus is asking you to enter your code again. Your plan and its remaining time are not affected. | src/pages/account.tsx:663 |
 | `home.components.connection.account.subscription` | Subscription | src/pages/account.tsx:128 |
 | `home.components.connection.account.thisDevice` | This device | src/pages/account.tsx:305 |
 | `home.components.connection.account.today` | Today | src/pages/account.tsx:152 |
-| `home.components.connection.account.updateBlocked` | Locus cannot update itself right now: {{reason}} | src/pages/account.tsx:515 |
-| `home.components.connection.account.updateCheckOff` | Automatic update checking is off, so Locus is not being told about new versions. Turn it on above to receive fixes. | src/pages/account.tsx:480 |
-| `home.components.connection.account.updateCheckOffAction` | Turn on automatic updates | src/pages/account.tsx:497 |
+| `home.components.connection.account.updateBlocked` | Locus cannot update itself right now: {{reason}} | src/pages/account.tsx:539 |
+| `home.components.connection.account.updateCheckOff` | Automatic update checking is off, so Locus is not being told about new versions. Turn it on above to receive fixes. | src/pages/account.tsx:504 |
+| `home.components.connection.account.updateCheckOffAction` | Turn on automatic updates | src/pages/account.tsx:521 |
 
 ## Traffic graph and figures
 
@@ -280,7 +281,7 @@ says, edit the rows under that screen's heading.
 | `settings.sections.proxyControl.messages.installedCheckProxy` | The service is installed and the core is running through it. Check the system proxy switch and make your change again if it did not take. | src/components/layout/sysproxy-privilege-dialog.tsx:121 |
 | `settings.sections.proxyControl.messages.installedCoreNotOnService` | The service is installed, but the core is not running through it. Check the core and try again. | src/components/layout/sysproxy-privilege-dialog.tsx:127 |
 | `settings.sections.proxyControl.messages.installedProxyRestored` | The service is installed, the core is running through it, and your system proxy change has been applied. | src/components/layout/sysproxy-privilege-dialog.tsx:122 |
-| `settings.sections.system.fields.autoLaunch` | Auto Launch | src/pages/account.tsx:532 |
+| `settings.sections.system.fields.autoLaunch` | Auto Launch | src/pages/account.tsx:556 |
 | `settings.sections.system.notifications.tunMode.autoDisabled` | TUN Mode automatically disabled due to service unavailable | src/pages/_layout/utils/notification-handlers.ts:69 |
 | `settings.sections.system.notifications.tunMode.autoDisableFailed` | Failed to disable TUN Mode automatically | src/pages/_layout/utils/notification-handlers.ts:73 |
 | `settings.statuses.clash.restarting` | Restarting Core... | src/hooks/use-service-installer.ts:33 |
