@@ -23,7 +23,7 @@ buys you.
 ## 1. Check out, and clear the environment
 
 ```sh
-git clone <repo> && cd Locus
+git clone https://github.com/vasilliourous/Locus.git && cd Locus
 direnv allow            # or: set -a; . ./.envrc; set +a
 ```
 
