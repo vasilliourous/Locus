@@ -296,6 +296,27 @@ value      = { port = 8445, cap = "100mbit", tier_rows = ["strike"], retired_row
 source     = "server/modules/04-tc.sh; server/scripts/seed-pb.py"
 provenance = "derived"
 
+[business.prices]
+# The three monthly prices, in NZD. ASSERTED, not derived, and that distinction
+# is the whole point of the `asserted` provenance: a price is a DECISION. No
+# command recomputes it from this checkout, so §9 cannot check it against the
+# tree — there is nothing in the tree to check it against.
+#
+# That is exactly why it belongs here rather than in a sentence. Before
+# 2026-11-22 the prices lived only in `docs/business/05-pricing.md:10-11`, which
+# `docs/STATE.md`'s ownership map already named canonical, and `11-growth.md`
+# repeated two of the three. Two copies of a fact is two things that can
+# disagree, and nothing failed when they did.
+#
+# What `asserted` buys: §52 greps the two documents that state a price and fails
+# the build on a mismatch. Changing a price is therefore a two-file edit — this
+# table and the prose — and the guard is what forces the second half. It does
+# NOT verify the price is a good price; that is the operator's, and the
+# reasoning stays in `05-pricing.md` §5.1.
+value      = { free = 0, budget = 2, full = 5, currency = "NZD", period = "month" }
+source     = "docs/business/05-pricing.md; docs/business/11-growth.md"
+provenance = "asserted"
+
 [world]
 # A pointer into CLAIMS.md §5, not a fact. Listed here so a reader of this file
 # is sent to the right place rather than tempted to put a world claim in this
