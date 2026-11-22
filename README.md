@@ -168,3 +168,7 @@ The repository was restructured on 2026-09-23: `v5/server/` → `server/`,
 `modular-vps/`, `originals/`) are recoverable from git history. The full narrative
 — including why the Wails client was retired — is
 [`docs/CONTEXT.md`](docs/CONTEXT.md) and [`docs/history/LAYOUT.md`](docs/history/LAYOUT.md).
+
+---
+
+> Wow github is super adament about having a readme displayed :)
