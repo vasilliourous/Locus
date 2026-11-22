@@ -120,9 +120,17 @@ chmod 600 "$TMP_ENV"
   Check the passphrase. Nothing was written."
 
 # ── Pull the key out, without ever echoing it ──
-key_b64=$(grep -m1 '^CHRYSALIS_UPDATE_KEY_B64=' "$TMP_ENV" | cut -d= -f2- || true)
+# The bundle's key is still named LOCUS_UPDATE_KEY_B64. That is a DEPRECATED
+# ALIAS held on purpose: the value is a key inside a committed age ciphertext,
+# and renaming it would mean re-encrypting the bundle for a spelling. Both names
+# are accepted so the script keeps working across a future re-encrypt.
+# See docs/reference/NAME-MIGRATION.md.
+key_b64=$(
+    { grep -m1 '^LOCUS_UPDATE_KEY_B64=' "$TMP_ENV" || grep -m1 '^CHRYSALIS_UPDATE_KEY_B64=' "$TMP_ENV"; } \
+        | cut -d= -f2- || true
+)
 if [ -z "$key_b64" ]; then
-    fail "server/secrets.env.age has no CHRYSALIS_UPDATE_KEY_B64.
+    fail "server/secrets.env.age has no LOCUS_UPDATE_KEY_B64 (or CHRYSALIS_UPDATE_KEY_B64).
   The bundle is the key's only durable copy — restore it before signing.
   See docs/operate/RELEASE-RECOVERY.md §2."
 fi
@@ -132,7 +140,7 @@ chmod 600 "$TMP_KEY"
 # shellcheck disable=SC2064
 trap 'rm -f "$TMP_ENV" "$TMP_KEY"' EXIT
 printf '%s' "$key_b64" | base64 -d > "$TMP_KEY" 2>/dev/null \
-    || fail "CHRYSALIS_UPDATE_KEY_B64 is not valid base64 — the bundle entry is corrupt"
+    || fail "LOCUS_UPDATE_KEY_B64 is not valid base64 — the bundle entry is corrupt"
 
 # ── Verification 1: is this a minisign secret key at all? ──
 #
@@ -142,7 +150,7 @@ printf '%s' "$key_b64" | base64 -d > "$TMP_KEY" 2>/dev/null \
 # newline folded into it — which would otherwise surface only at signing time.
 head -c 18 "$TMP_KEY" | grep -q 'untrusted comment:' \
     || fail "the extracted bytes are not a minisign secret key (missing 'untrusted comment:').
-  CHRYSALIS_UPDATE_KEY_B64 in the bundle may be truncated or wrapped."
+  LOCUS_UPDATE_KEY_B64 in the bundle may be truncated or wrapped."
 
 # ── Verification 2: does the PUBLIC half match what the client trusts? ──
 #
@@ -218,7 +226,7 @@ else
 
   Signing with this would produce updates every installed client refuses, and
   nothing would fail until a student tried to update. Do not sign with it.
-  Either the bundle entry is stale (put the right key into CHRYSALIS_UPDATE_KEY_B64
+  Either the bundle entry is stale (put the right key into LOCUS_UPDATE_KEY_B64
   and re-encrypt) or the pubkey was rotated without re-encrypting.
   See docs/operate/RELEASE-RECOVERY.md §2."
 fi
@@ -265,5 +273,5 @@ echo
 echo "  Signing works now. When the session is over:"
 echo "    $0 --remove"
 echo
-warn "This directory is a CACHE. The durable copy is CHRYSALIS_UPDATE_KEY_B64 in"
+warn "This directory is a CACHE. The durable copy is LOCUS_UPDATE_KEY_B64 in"
 warn "server/secrets.env.age. Never treat the file here as the backup."

@@ -93,6 +93,26 @@ rotation.
 **Neither is a sign of a stale migration.** They are the aliases the fleet's
 update path depends on.
 
+**Two scripts read these names, and both must keep reading the OLD spelling of
+the bundle key.** `chrysalis-key-extract.sh` extracts it and
+`secrets-encrypt.sh` requires it to be present before it will encrypt:
+
+| Script | Reads | Accepts the new name too? |
+|---|---|---|
+| `server/scripts/chrysalis-key-extract.sh` | `LOCUS_UPDATE_KEY_B64` | Yes — tries `LOCUS_…` first, then `CHRYSALIS_…` |
+| `server/scripts/secrets-encrypt.sh` | `LOCUS_UPDATE_KEY_B64` (required-var list) | Not yet — a re-encrypted bundle under the new name would fail the form check until this list is updated |
+
+The rename **broke both** during this migration: an over-eager
+`CHRYSALIS_UPDATE_KEY_B64` substitution left the extractor failing with *"the
+bundle has no CHRYSALIS_UPDATE_KEY_B64"*, and the encrypt-side required-var list
+would have refused every re-encrypt. Both were found by running the scripts
+against the real bundle, not by reading them — the extractor's failure is a
+silent one that only appears at signing time. That is why this row exists **and**
+why the scripts carry a comment naming this page.
+
+Verified 2026-11-23 against the committed bundle: decryption succeeds, and the
+extracted key's ID is `4DA9B48F39251CEF` (`CLAIMS.md` A25).
+
 ### 3.4 The bootstrap header (a matched pair)
 
 | Retained | Where | Why | Retires when |

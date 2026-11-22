@@ -7409,6 +7409,8 @@ if [ ! -f "$REGISTER" ]; then
     bad "  the deployed fleet. Restore it from git."
 else
     retain_report=$(cd "$REPO" && python3 - <<'PY'
+import re
+
 def read(path):
     try:
         with open(path, encoding="utf-8", errors="replace") as fh:
@@ -7427,6 +7429,12 @@ CHECKS = [
     ("locus-linux-amd64",        "client/src-tauri/src/chrysalis/contract.rs","locus-linux-amd64"),
     ("locus-linux-amd64",        "server/scripts/fetch-release.py",           "locus-linux-amd64"),
     ("LOCUS_UPDATE_KEY_B64",     "server/scripts/chrysalis-key-extract.sh",   "LOCUS_UPDATE_KEY_B64"),
+    # The encrypt-side FORM CHECK, not just a doc: a required-var list naming the
+    # wrong spelling refuses every re-encrypt with "LOCUS_UPDATE_KEY_B64(absent)".
+    # Scoped to the `REQUIRED_VARS` block, because a plain substring match would be
+    # satisfied by the explanatory COMMENT above it — which is how the first draft
+    # of this row passed against the very defect it exists to catch.
+    ("LOCUS_UPDATE_KEY_B64",     "server/scripts/secrets-encrypt.sh",          "REQUIRED_VARS"),
     ("LOCUS_UPDATE_KEY",         ".github/workflows/client.yml",              "LOCUS_UPDATE_KEY"),
     ("X-Locus-Bootstrap",        "server/modules/09-activation-tunnel.sh",    "X-Chrysalis-Bootstrap"),
     ("X-Locus-Bootstrap",        "server/pb_hooks/activation.pb.js",          "x-chrysalis-bootstrap"),
@@ -7439,10 +7447,31 @@ CHECKS = [
 
 reg = read("docs/reference/NAME-MIGRATION.md") or ""
 
+def required_vars_block(body):
+    """The `REQUIRED_VARS="` list on its own, without any surrounding comment.
+
+    Deliberately narrow: the list is what the script ACTUALLY checks, so naming
+    the wrong spelling there is the defect. A comment that explains the old
+    spelling must not make this guard pass.
+    """
+    m = re.search(r'^REQUIRED_VARS="(.*?)^"', body, re.S | re.M)
+    return m.group(1) if m else None
+
 for anchor, path, literal in CHECKS:
     body = read(path)
     if body is None:
         print("BAD\t%s is missing - the retained name it holds cannot be checked" % path)
+        continue
+    if literal == "REQUIRED_VARS":
+        block = required_vars_block(body)
+        if block is None:
+            print("BAD\t%s has no REQUIRED_VARS list - the encrypt form check cannot be located" % path)
+        elif "LOCUS_UPDATE_KEY_B64" not in block:
+            print("BAD\t%s REQUIRED_VARS no longer lists LOCUS_UPDATE_KEY_B64." % path)
+            print("BAD\t  The bundle's key keeps the old spelling; a re-encrypt would")
+            print("BAD\t  fail the form check with 'LOCUS_UPDATE_KEY_B64(absent)'.")
+        else:
+            print("OK\t%s - REQUIRED_VARS lists `LOCUS_UPDATE_KEY_B64`" % path)
         continue
     if literal not in body:
         print("BAD\t%s no longer contains `%s`." % (path, literal))
@@ -7466,6 +7495,9 @@ PY
 )
     if [ -z "$retain_report" ]; then
         bad "the retained-name check produced no output - it did not run"
+    elif printf '%s' "$retain_report" | grep -q 'Traceback (most recent call last)'; then
+        bad "the retained-name check CRASHED - a crashing guard reads like a passing one:"
+        printf '%s\n' "$retain_report" | sed 's/^/        /' >&2
     else
         while IFS="$(printf '\t')" read -r _kind message; do
             case "$_kind" in

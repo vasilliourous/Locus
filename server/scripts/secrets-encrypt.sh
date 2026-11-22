@@ -91,7 +91,7 @@ STRIKE_PASS
 BUDGET_PASS
 PB_ADMIN_EMAIL
 PB_ADMIN_PASS
-CHRYSALIS_UPDATE_KEY_B64
+LOCUS_UPDATE_KEY_B64
 VPS_PW
 "
 # BUDGET_PASS joined the required list on 2026-11-12: Budget is a SOLD plan
@@ -99,6 +99,11 @@ VPS_PW
 # tier that cannot be served. This is the same reasoning ACTIVATION_TUNNEL_KEY
 # got its own entry for — a key absent from the bundle becomes a surprise on the
 # VPS, not at this prompt.
+#
+# LOCUS_UPDATE_KEY_B64 carries the old product word on purpose: it is a key name
+# inside the committed ciphertext, and renaming it would mean re-encrypting the
+# bundle for a spelling. A bundle re-encrypted under the new name is accepted too
+# — see ALIASES below. See docs/reference/NAME-MIGRATION.md.
 #
 # STEALTH_PASS stays OPTIONAL (retired tier) but must still be a real value if
 # present, so an upgraded host does not fork. ACTIVATION_TUNNEL_KEY is reported
