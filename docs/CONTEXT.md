@@ -67,7 +67,7 @@ derived facts live in [`state.toml`](state.toml), world claims in
 | Directory | What it is | Read next |
 |---|---|---|
 | `client/` | **The shipping client.** Tauri 2 + React on Clash Verge Rev; Locus logic in `src-tauri/src/locus/`. | [`../client/AGENTS.md`](../client/AGENTS.md), [`../client/docs/ARCHITECTURE.md`](../client/docs/ARCHITECTURE.md) |
-| `server/` | **The live hub:** deploy modules (`modules/00-env.sh` … `08-firewall.sh`), `pb_hooks/`, `scripts/`, the operator console at `console/`, and the public landing page at `site/`. | [`operate/DEPLOY.md`](operate/DEPLOY.md), [`operate/OPS.md`](operate/OPS.md) |
+| `server/` | **The live hub:** deploy modules (`modules/00-env.sh` … `08-firewall.sh`, with the numbering deliberately skipping `03` — see `setup.sh`'s module list; the reason is unrecorded and its absence is not a missing file), `pb_hooks/`, `scripts/`, the operator console at `console/`, and the public landing page at `site/`. | [`operate/DEPLOY.md`](operate/DEPLOY.md), [`operate/OPS.md`](operate/OPS.md) |
 | `docs/` | This set. Index: [`README.md`](README.md). | — |
 | `docs/archive/`, `docs/history/` | Retired material. Read for *why*, never for *what is*. | [`history/README.md`](history/README.md) |
 | `legacy/` | Retired clients (`wails-client/`, `v4/`). **Read it, never build it.** | — |

@@ -18,7 +18,8 @@
         "smooth": "ناعم",
         "linear": "خطي"
       },
-      "diagnostics": "النقاط: {{points}} | مضغوط: {{compressed}} | الإطارات/ث: {{fps}}"
+      "diagnostics": "النقاط: {{points}} | مضغوط: {{compressed}} | الإطارات/ث: {{fps}}",
+      "idle": "Idle"
     },
     "connection": {
       "connect": "اتصال",
@@ -67,10 +68,73 @@
         "confirmedHoursAgo": "{{count}} h ago",
         "confirmedDaysAgo": "{{count}} d ago",
         "checkingStatus": "Checking…",
-        "notActivatedToCheck": "Activate a code first — there is nothing to confirm yet."
+        "notActivatedToCheck": "Activate a code first — there is nothing to confirm yet.",
+        "hubBehind": "Your Locus server is running an older version of its account checks. If someone suspends your access, this device will not find out until the server is updated. Quote this number to them: {{hub}}.",
+        "refreshed": "Up to date — status re-read",
+        "refreshBusy": "A status read was already running",
+        "refreshFailed": "Could not re-read the status",
+        "storedCodeDamaged": "The sign-in saved on this computer is damaged and could not be used, so Locus is asking you to enter your code again. Your plan and its remaining time are not affected.",
+        "updateCheckOff": "Automatic update checking is off, so Locus is not being told about new versions. Turn it on above to receive fixes.",
+        "updateCheckOffAction": "Turn on automatic updates",
+        "updateBlocked": "Locus cannot update itself right now: {{reason}}"
       },
       "cancel": "Cancel",
-      "takingLonger": "Still connecting. This can take a few seconds on a school network — you can cancel and try again."
+      "takingLonger": "Still connecting. This can take a few seconds on a school network — you can cancel and try again.",
+      "metricsWhenConnected": "Traffic figures appear once the VPN is on.",
+      "blockerServiceInstallRequired": "Locus cannot turn the VPN on yet: its helper service is not installed, and the permission prompt to install it was dismissed, denied, or never appeared. Quit and reopen Locus, then approve the prompt when it appears. If no prompt appears at all, reinstall Locus, then approve the prompt.",
+      "blockerServiceUnavailable": "Locus cannot turn the VPN on yet: its helper service is installed but not working ({{reason}}). Quit and reopen Locus to repair it. If that does not work, reinstall Locus.",
+      "blockerServiceOperationInFlight": "Locus is setting up its helper service. This takes a moment — wait for the prompt or for this message to clear, then try again.",
+      "toggleHint": "Press Enter to turn the VPN on or off",
+      "supportBlock": {
+        "title": "Any problem at all — email us.",
+        "middleman": "Start with the person who sold you your code: they know your account and can usually fix it on the spot.",
+        "emailLead": "If they cannot, or you bought your code yourself, email",
+        "emailNote": "and describe the problem: what you were doing, the exact message the app showed, and the Device ID from your Account page. Short is fine — the message is the part that matters.",
+        "replyPromise": "Every email is answered within 12 hours, not counting nighttime.",
+        "why": "Locus is run by one person, so an email that names the error is something that can actually be fixed.",
+        "deviceIdHint": "Include the Device ID from your Account page — it is the one thing that tells us which install you are using."
+      },
+      "supportEmail": "maillcontainer@proton.me",
+      "signOut": {
+        "title": "Signed in on this device",
+        "body": "Signing out makes this computer forget your access key. Your subscription is not cancelled, and the time you have paid for keeps running.",
+        "action": "Sign out on this device",
+        "confirmTitle": "Sign out on this device?",
+        "confirmBody": "Locus will forget your access key on this computer. This computer will stop working with Locus until you enter the key from your card again.",
+        "confirmMoving": "If you are moving to a new computer, this is what you want.",
+        "confirmKeeps": "Your subscription is not cancelled, and it will not be shortened.",
+        "countingDown": "Signing out in {{count}}…",
+        "undo": "Cancel",
+        "signedOut": "Signed out. This computer no longer holds your key.",
+        "signedOutReleased": "Signed out. Your key has been released here and is ready for your next device.",
+        "signedOutOffline": "Signed out on this computer. We could not reach Locus to record it — your key is still yours, and entering it on your next device will work.",
+        "signedOutFailed": "Locus could not sign out. Nothing has changed on this device. Try again, and email us if it keeps happening.",
+        "deviceIdCopy": "Copy",
+        "deviceIdCopied": "Device ID copied",
+        "deviceIdCopyFailed": "Could not copy automatically — select the Device ID and copy it by hand."
+      },
+      "freeData": "Free data",
+      "freeDataUsed": "{{used}} of {{total}} used",
+      "freeDataNearlyOut": "{{used}} of {{total}} used — nearly out of free data",
+      "freeDataThrottled": "{{used}} of {{total}} used — free data is spent for this month",
+      "freeDataThrottledUpgrade": "Full is faster and unmetered. Ask the person who sold you your code about upgrading.",
+      "activation": {
+        "title": "Enter your code",
+        "lede": "Your code is on the card you were sold.",
+        "submit": "Activate",
+        "backupRoute": "Using the Locus backup route to reach the server.",
+        "alphabet": "The code is 15 characters and never contains 0, O, 1 or I.",
+        "codeLabel": "Activation code",
+        "codePlaceholder": "RQ-XXXX-XXXX-XXXX-X"
+      },
+      "suspended": {
+        "lapsedTitle": "Your subscription has ended",
+        "suspendedTitle": "This device has been signed out",
+        "lapsedBody": "Your code has expired, so the connection was stopped. Renewing with whoever sold you the code restores access.",
+        "suspendedBody": "An operator has suspended this code, so the connection was stopped. Your code is still saved on this computer.",
+        "lapsedAction": "Contact whoever sold you the code to renew it.",
+        "suspendedAction": "Ask them to lift the suspension. You can connect again without re-entering your code or restarting the app."
+      }
     },
     "ipInfo": {
       "errors": {

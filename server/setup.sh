@@ -395,6 +395,18 @@ else
 fi
 
 # ── Ordered module list ──
+#
+# NUMBERING HAS A GAP AT 03, AND ITS REASON IS UNKNOWN. The search is done and
+# it is empty: `03-*.sh` has never existed in this repository's history (it is
+# absent from the initial commit's file list, and
+# `git log --all --oneline -- '*03-*.sh'` returns nothing), so there was no
+# module removed and nothing to restore. The numbers after it were NOT shifted
+# down, and that is the one thing worth preserving: moving 04..08 to close the
+# hole would silently change what every old deploy log refers to.
+#
+# This file records the blank rather than a guess. If the absence is ever
+# explained, the clause belongs here and in docs/CONTEXT.md, not in a commit
+# message. Tracked as F-22 / U-06 in DOC-AUDIT-2026-11-22.md.
 MODULES=(
     "${MODULES_DIR}/00-env.sh"
     "${MODULES_DIR}/01-bbr.sh"

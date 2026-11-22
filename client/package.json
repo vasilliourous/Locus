@@ -43,7 +43,7 @@
     "rust:test": "cargo test --manifest-path src-tauri/Cargo.toml --lib",
     "gen:contract": "python3 ../server/scripts/gen-ts-contract.py --write",
     "check:contract": "python3 ../server/scripts/gen-ts-contract.py --check && python3 ../server/scripts/contract-snapshot.py --check",
-    "check:release": "pnpm rust:lint && pnpm rust:test && pnpm web:build && bash ../server/scripts/check-consistency.sh"
+    "check:release": "pnpm rust:lint && bash ../scripts/check-rust-deps.sh && pnpm rust:test && pnpm web:build && bash ../server/scripts/check-consistency.sh"
   },
   "dependencies": {
     "@dnd-kit/collision": "^0.5.0",

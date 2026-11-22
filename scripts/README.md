@@ -8,6 +8,7 @@ Utility scripts for Locus code generation, printing, and operations.
 |--------|---------|
 | `generate_codes.sh` | Generate Luhn-mod-N activation codes and import to PocketBase |
 | `print_codes.sh`    | Format codes into printable PDF card sheets |
+| `check-rust-deps.sh` | Fail on a dead `[dependency]` in the client workspace. Run it when a `Cargo.toml` moves; it is also a CI step, because `-D warnings` structurally cannot see this class |
 | `vps-test/`         | Read-only network probes run against the live VPS |
 
 **Publishing** lives under `server/scripts/`: `publish-release.sh` (the correct

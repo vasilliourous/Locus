@@ -6085,7 +6085,33 @@ else
     #    `$SUPPORT_ADDRESS` is spelled here as the EXPECTED value, so a deliberate
     #    change of address has to be made in two places on purpose — which is the
     #    point, since a change of address is exactly when both halves must agree.
+    #
+    #    THE TWELVE TRANSLATIONS ARE EXCLUDED, AND THAT IS A FEATURE (amended
+    #    2026-11-23). A locale bundle is a copy of the KEY STRUCTURE, not of the
+    #    decision: an address, a port or a price is the same string in every
+    #    language, and leaving `supportEmail` out of `de/home.json` is not a
+    #    translation choice — it is the key falling through to the fallback
+    #    language, i.e. a hole that was invisible until `tests/locale-parity.test.ts`
+    #    existed. Each locale legitimately carries the address INSIDE ITS OWN
+    #    BUNDLE, and `support-block.tsx` resolves it through ONE key at runtime,
+    #    so the runtime property this guard exists to protect — one reference, no
+    #    drifting literal in a component — is untouched by the copies here.
+    #
+    #    `en` is deliberately NOT excluded: it is the single definition this check
+    #    is about, and excluding the whole `locales/` directory would also delete
+    #    the thing being counted (observed: it reported "gone from the client
+    #    entirely" on a correct tree).
+    #
+    #    This was found the honest way: filling the 56 missing keys per locale
+    #    (the parity fix above) made this line count 13 and report BAD on a
+    #    correct tree. The check was wrong, not the locale files.
+    locale_excludes=""
+    for _loc in ar de es fa id jp ko ru tr tt zh zhtw; do
+        locale_excludes="$locale_excludes --exclude-dir=$_loc"
+    done
+    # shellcheck disable=SC2086
     address_count=$(grep -rF --include='*.ts' --include='*.tsx' --include='*.json' \
+        $locale_excludes \
         -- "$SUPPORT_ADDRESS" "$REPO/client/src" \
         | wc -l | tr -d ' ')
     address_count=$(printf '%s' "$address_count" | tr -dc '0-9')

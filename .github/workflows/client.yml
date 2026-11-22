@@ -559,6 +559,18 @@ jobs:
         working-directory: .
         run: bash server/scripts/test-contract-guard.sh
 
+      # ── A dependency nothing uses cannot fail any compiler gate (audit F-21) ──
+      #
+      # `cargo clippy ... -D warnings` in the Linux build job CANNOT see
+      # `cargo::unused_dependencies`: that is a rustc flag and this is a cargo
+      # warning, so the gate prints it and exits 0. The class went unaddressed
+      # for exactly that reason, and it had already collected one real finding
+      # (`rust_iso3166`, in the workspace manifest since the initial commit and
+      # referenced by nothing). This step is the gate that class never had.
+      - name: No dependency is dead
+        working-directory: .
+        run: bash scripts/check-rust-deps.sh
+
       # ── The frontend is built ONCE, here, and shared as an artifact ──
       #
       # WHAT CHANGED
@@ -635,6 +647,21 @@ jobs:
       # anything but the real output.
       - name: User-facing prose manifest is current
         run: node scripts/prose-manifest.mjs --check
+
+      # ── Every locale carries every English key ──
+      #
+      # `pnpm i18n:check` REPORTS missing keys and exits **0**, so it has never
+      # been able to fail this job, and it was not wired into CI at all. The
+      # result: on 2026-11-23 twelve locales were each 56 keys behind English —
+      # the whole sign-out, suspension, account and free-data surface — and no
+      # gate had an opinion. The parity itself is restored; this step is the
+      # part that stops it recurring.
+      #
+      # It is a test, not a script step, on purpose: `tests/locale-parity.test.ts`
+      # is run by the `pnpm test` above and asserts a non-empty subject list
+      # first, so it cannot pass by finding nothing to compare.
+      - name: Locale keys are in parity with English
+        run: pnpm exec vitest run tests/locale-parity.test.ts
 
       # ── Rust tests and lints have MOVED to the `linux` build job ──
       #
