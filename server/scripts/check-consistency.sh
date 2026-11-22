@@ -1112,13 +1112,19 @@ def top_level_docs():
                 out.append(rel)
     return out
 
-# Root `*.md` beyond the two entry points, from 2026-11-22 (audit F-02): §28 now
-# holds root files to the index, so §8 must resolve links out of them or it
-# reports a target it cannot see. `README.md`/`AGENTS.md` were already here;
-# `CLAUDE.md`/`GEMINI.md` and the front door were not.
+# Root `*.md`, from 2026-11-22 (audit F-02): §28 now holds root files to the
+# index, so §8 must resolve links out of them or it reports a target it cannot
+# see. `AGENTS.md` and the front door are project documents and belong here.
+#
+# THE FRONT DOOR IS `README.md` SINCE 2026-11-22, and it is NOT exempt from this
+# walk. It used to be `Readmedon'tdisplayonpublicpage.md` — a name chosen so
+# GitHub would not render it — and the file was renamed to `README.md` precisely
+# so the first page a reader opens is the real one. Carrying the old exemption
+# over to the new path would promote a file to the front door while leaving it
+# the one document nothing link-checks; that is the silent-regression shape this
+# whole renovation exists to prevent.
 def root_docs():
-    return ['README.md', 'AGENTS.md', 'CLAUDE.md', 'GEMINI.md',
-            "Readmedon'tdisplayonpublicpage.md"]
+    return ['README.md', 'AGENTS.md', 'CLAUDE.md', 'GEMINI.md', 'START-HERE.md']
 
 docs = [p for p in md_files('docs')] + \
        [p for p in md_files('client/docs')] + \
@@ -4343,15 +4349,23 @@ ARCHIVE_PREFIXES = ('docs/archive/', 'docs/history/',
 #
 # ROOT `*.md` JOINED THE SCOPE ON 2026-11-22 (audit F-02). It had been outside
 # every walk — §8, §10 and this one — and the consequence was not theoretical:
-# `Readmedon'tdisplayonpublicpage.md` is the de-facto front door, cited by nothing
-# and unguarded by anything, while this section printed "every live document is
-# linked from docs/README.md". A completeness claim that excludes the first file
-# a reader opens is worse than no claim. The root exemptions are the same
-# vocabulary as the client ones: entry points and shims delegate to AGENTS.md,
-# and the index does not list its own front matter.
+# the front door was cited by nothing and unguarded by anything, while this
+# section printed "every live document is linked from docs/README.md". A
+# completeness claim that excludes the first file a reader opens is worse than no
+# claim. The root exemptions are the same vocabulary as the client ones: entry
+# points and shims delegate to AGENTS.md, and the index does not list its own
+# front matter.
+#
+# The front door is `README.md` since the 2026-11-22 rename. It stays EXEMPT from
+# the index — a front door is not a document to be listed inside itself — but it
+# is NOT exempt from `§8`, which is the only guard that would notice a broken link
+# on the first page a reader opens. The two exemptions are different in kind:
+# `§28` asks "is this reachable from the index", `§8` asks "do its links resolve".
 INDEX_EXEMPT = {
     'client/AGENTS.md', 'client/CLAUDE.md', 'client/GEMINI.md',
-    'AGENTS.md', 'CLAUDE.md', 'GEMINI.md', 'README.md', 'CONTRIBUTING.md',
+    'AGENTS.md', 'CLAUDE.md', 'GEMINI.md',
+    # The front door, and the pointer that survives the rename.
+    'README.md', 'START-HERE.md', 'CONTRIBUTING.md',
     # Not documentation in the index sense: a licence, and the audit's own
     # untracked scratch (gitignored, so it is normally absent).
     'LICENSE', 'DOC-AUDIT-2026-11-22.md',
