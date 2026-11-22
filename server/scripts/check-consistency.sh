@@ -972,7 +972,30 @@ else
                 # operator. Excluding it (as this check did until 2026-09-29) made
                 # the standard bold form `**3.2.5**` invisible, which is exactly
                 # how the docs write a version in a table cell or a header.
-                found=$(grep -oE '(^|[^0-9A-Za-z.^~<>=])3\.[0-9]+\.[0-9]+\b' "$f" 2>/dev/null \
+                #
+                # HISTORICAL PHRASING IS NOT DRIFT (2026-11-22, audit F-12). The
+                # check fired 8 times every run with **zero true positives**; each
+                # hit was a sentence about a PAST release, and one of them said so
+                # in the words this now reads: "every pre-3.3.2 build", "ROTATED
+                # 2026-10-16 (3.3.0)", "the version ladder is continuous across
+                # the rotation (3.2.30 → 3.3.0)".
+                #
+                # A bare number is ambiguous on its own, so the LINE decides. A
+                # line that marks the version as historical is removed before the
+                # scan; everything else is still reported. The marker list is
+                # closed and each entry is a phrase the eight triaged hits
+                # genuinely use — it is not a per-file exemption, which is what
+                # TRIAGED_BASIS above had to be because it could not see lines.
+                #
+                # MEASURED LIMIT, stated rather than hidden: some hits mark their
+                # history in an ADJACENT line ("shipped from `3.3.0`. The key ID
+                # is in the" — the history marker is on the line above). Those
+                # still report. Suppressing them needs a window, and a window is
+                # what turns a precise rule back into the 14-file wall this file
+                # dug itself out of.
+                historical='pre-[0-9]|since [0-9]\.[0-9]|until [0-9]\.[0-9]|before [0-9]\.[0-9]|rotat|shipped (as|in|from)|first shipped|was [0-9]\.[0-9]|were [0-9]\.[0-9]|landed in|replaced|legacy|history|historically|previously|used to|had been'
+                found=$(grep -vEi "$historical" "$f" 2>/dev/null \
+                    | grep -oE '(^|[^0-9A-Za-z.^~<>=])3\.[0-9]+\.[0-9]+\b' \
                     | grep -oE '3\.[0-9]+\.[0-9]+' \
                     | grep -v "^${manifest_version}$" | sort -u | tr '\n' ' ')
                 [ -n "$found" ] && printf '         %s -> %s\n' "$f" "$found"
