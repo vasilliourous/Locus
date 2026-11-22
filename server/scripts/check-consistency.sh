@@ -4474,6 +4474,18 @@ RULES = [
     (r'(^|/)passphrase\.txt$',
      'secrets passphrase',
      'ad-hoc name an operator would plausibly choose'),
+    # The two below are the .gitignore:250-258 incident, caught on the ignore
+    # side and never followed here. `passphrase.txt` above requires the exact
+    # name; an operator who adds a suffix, or who writes the passphrase under
+    # any `passphrase*` name, matched nothing. `decryptionkey*` is the file that
+    # prompted the `.gitignore` rule: it sat at the repo ROOT, untracked and
+    # UNIGNORED, through the whole school-network fix.
+    (r'(^|/)decryption-?key[^/]*$',
+     'secrets passphrase',
+     '.gitignore:258-266 — sat at the repo root, untracked and unignored'),
+    (r'(^|/)passphrase[^/]*$',
+     'secrets passphrase',
+     '.gitignore:255 — any `passphrase*` name, not only `passphrase.txt`'),
     (r'(^|/)vpspassword\.txt$',
      'VPS root credential',
      '2026-10-02 — one command short of committing a live credential'),
