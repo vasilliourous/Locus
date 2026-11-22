@@ -145,6 +145,9 @@ for pair in "PLATFORM_LINUX:linux" "PLATFORM_WINDOWS:windows" \
     fi
 done
 
+echo
+echo "1a. The hub fetches the Windows installer, not the raw binary"
+
 # ─────────────────────────────────────────────────────────────
 # 1b. The update-signature WIRE FORMAT.
 #
@@ -6033,6 +6036,9 @@ else
     fi
 fi
 
+echo
+echo "42. The update offer names a host the CLIENT can actually reach"
+
 # ─────────────────────────────────────────────────────────────
 # 42. The update offer names a host the CLIENT can actually reach
 #
@@ -6891,6 +6897,58 @@ if grep -qE '#[0-9a-fA-F]{6}|rgba?\(' "$REPO/docs/archive/UI-AESTHETICS.md" 2>/d
     bad "  That document is cited as a design authority; a value in it is a second home."
 else
     ok "the archived design spec carries no colour value"
+fi
+
+echo
+echo "════════════════════════════════════════════════════════════"
+echo "51. Every section header announces itself with a banner"
+
+# ── WHY THIS GUARD EXISTS ──
+#
+# The §-numbering is an API: live prose cites §N by number 649 times across the
+# doc set, and a reader who follows one runs this script and looks for the line.
+# A section whose `# NN.` header exists but whose `echo "NN. …"` does not is a
+# section that executes and is invisible — §42 did exactly that from the day it
+# was written until 2026-11-22, and four runbooks cited §1a for a section that
+# had a header and no banner either.
+#
+# A citation to a section nobody can see is not a weaker guard, it is a false
+# claim that a guard exists. This is the cheapest possible check on the
+# numbering: pure sed, no semantics.
+#
+# ── WHAT THIS CHECKS ──
+#
+# ONE DIRECTION: every `# NN[a-z]?. ` header must have a matching banner. That is
+# the defect class — a section that executes and is invisible.
+#
+# NOT the reverse direction, and the measurements say why: the file has 26 header
+# lines and 54 banners. A banner with no header is the NORMAL shape here: a
+# section may carry a one-line `echo "NN. …"` and put its long reasoning behind a
+# `# WHY THIS EXISTS` comment instead of a number. Requiring a numbered header for
+# every banner failed 29 times on the first run, every one of them a section that
+# was working, cited and correct. That is §7's lesson applied to a new check: a
+# check that fires 29 times on correct input is worse than no check.
+#
+# Duplicates are tolerated on the header side, because §25 carries the header
+# twice (`:3994` "—" and `:4122` "(parentheses)"), which is a pre-existing
+# inconsistency this check is deliberately not the place to fix.
+# ─────────────────────────────────────────────────────────────
+banner_report=$(grep -oE '^# [0-9]+[a-z]?\. ' "$REPO/server/scripts/check-consistency.sh" \
+      | sed 's/^# //;s/\. $//' | sort -u > /tmp/locus_hdr.$$ ; \
+    grep -oE '^echo "[0-9]+[a-z]?\. ' "$REPO/server/scripts/check-consistency.sh" \
+      | sed 's/^echo "//;s/\. $//' | sort -u > /tmp/locus_echo.$$ ; \
+    comm -23 /tmp/locus_hdr.$$ /tmp/locus_echo.$$ \
+      | awk '{printf "%s\t%s\n", "NOBANNER", $0}' )
+rm -f /tmp/locus_hdr.$$ /tmp/locus_echo.$$
+
+if [ -z "$banner_report" ]; then
+    ok "every numbered '#' section header has a matching echo banner"
+else
+    while IFS="$(printf '\t')" read -r _kind number; do
+        bad "§${number} has a '# ${number}.' header but no 'echo \"${number}. …\"' — it executes and is invisible, so a citation to it sends the reader to a section they cannot find"
+    done <<EOF
+$banner_report
+EOF
 fi
 
 echo
