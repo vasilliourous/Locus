@@ -50,8 +50,9 @@ empty `.locus-keys/` tells you nothing about whether the key is lost. Ask the
 bundle instead — `server/scripts/locus-key-extract.sh --check` answers "is the
 key still recoverable, and is it the right one" without writing anything.
 
-The current key is `4DA9B48F39251CEF`, shipped from `3.3.0`. The key ID is in the
-comment line of the `.pub`; the value compiled into the client is in
+The current key is `4DA9B48F39251CEF`; it has been in use since the rotation
+(see `client/docs/SIGNING.md`). The key ID is in the comment line of the
+`.pub`; the value compiled into the client is in
 `client/src-tauri/tauri.conf.json` → `plugins.updater.pubkey`, and
 `client/src-tauri/tests/update_signature_contract.rs` asserts the two agree.
 
@@ -152,7 +153,7 @@ What the rotation deliberately preserved, and why it matters here:
   Resetting the ladder would have made *every future release* a manual install —
   that is the cost this choice avoids, and the reason not to reset it now.
 
-For the operator: the affected devices are those built before `3.3.0`. There is
+For the operator: the affected devices are those built pre-rotation. There is
 no server-side list of them — the hub holds no device identity by design
 (`../reference/DEVICE-IDENTITY.md`). Expect the refusal report itself to be the
 signal, and treat it as *"this device has not been reinstalled yet"* rather than

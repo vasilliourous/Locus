@@ -41,8 +41,8 @@ on 2026-10-17, each time after a commit silently produced no run.
 **Docs are in the list because the pipeline checks documents**: §8 (dead
 cross-references), §25 (front-matter) and §28 (index reachability) all fail the
 build. A docs-only commit that skips CI is one whose most likely defect is never
-tested — and that is not theoretical: the 3.3.1 doc commit was rejected by §8 for
-two files that existed only in a working tree.
+tested — and that is not theoretical: a docs-only commit (it shipped in 3.3.1)
+was rejected by §8 for two files that existed only in a working tree.
 
 **`pull_request` carries the identical list.** The two were the same before
 2026-10-17 and would otherwise drift one edit at a time.
@@ -113,7 +113,8 @@ tied to a release — by the time a release fails on a full quota, the upload th
 needed the space has already gone.
 
 **Remedy:** restore billing, or make the repository public — public repos get
-Actions minutes and storage on the Free plan, which is what unblocked 3.3.1.
+Actions minutes and storage on the Free plan, which is what unblocked that
+release's upload.
 
 **Artifact retention cleaning is still worth doing, for a different reason.** Each
 release run leaves ~800 MB (seven artifacts across four platforms). They are not
@@ -227,14 +228,23 @@ Two jobs, two suites, and they are not interchangeable:
 
 | Job | Runs | Notes |
 |---|---|---|
-| `verify` | `check-consistency.sh`, the tag/version check, `pnpm run web:build`, `pnpm run lint`, `pnpm test`, `test-contract-guard.sh` | **Frontend and docs only.** No Rust is compiled here. |
+| `verify` | `check-consistency.sh`, the tag/version check, `scripts/check-rust-deps.sh`, `pnpm run web:build`, `pnpm run lint`, `pnpm test`, `tests/locale-parity.test.ts`, `prose-manifest.mjs --check`, `test-contract-guard.sh` | **No Rust is compiled here** except by the dependency guard, which runs `cargo check` |
 | `build` (linux only) | installs `sing-box` and `shadowsocks-rust`, then `cargo test --all-targets --profile fast-release` on a branch (no `--profile` on a tag), `cargo clippy`, doc-tests, `cargo fmt --check` | See "The Rust suite cannot skip" and "The same profile, or two full compiles" below |
 | `build` (all four) | the platform build, signing and packaging | |
 
 The Rust half was added 2026-09-29 because it existed and passed locally while
 nothing in CI invoked it, which is how the updater's signature encoding mismatch
-reached a real install. A clippy error now fails the gate; `cargo fmt` is still
-not run.
+reached a real install. A clippy error now fails the gate.
+
+**FOUR GATES, NOT THREE (2026-11-23).** `cargo test`, `cargo clippy … -D
+warnings` and `cargo fmt --check` are three. The fourth is
+`scripts/check-rust-deps.sh`, and it exists because `-D warnings` is a *rustc*
+flag while `cargo::unused_dependencies` is a *cargo* warning — the Linux job
+printed the warning and exited **0**. The class had already collected a real
+finding (`rust_iso3166`, unreferenced since the initial commit). The same
+reasoning applies to the two frontend gates added the same day:
+`pnpm i18n:check` has always **reported** missing locale keys and exited 0, so
+`tests/locale-parity.test.ts` is what actually fails.
 
 > **`cargo test` is in the matrix, not in `verify`.** This note previously said
 > the opposite, and gave a reason that the workflow contradicts: the claim was

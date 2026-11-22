@@ -136,12 +136,12 @@ IP address here. The hub's reachability is a **dated claim** in
 > `*.duckdns.org` was filtered by N4L, which took activation, heartbeat and the
 > update path down together). The previous name, `[hub.domain_legacy]`, is
 > **served from the same Caddy site block, not redirected**: every build before
-> 3.3.2 has it compiled in and the only channel that could carry a new address
-> (the heartbeat) needs a working hub to reach. **Removing it strands the
-> deployed fleet at the activation gate** with no path to the update that would
-> fix it. `05-caddy.sh` emits both; `check-consistency.sh` §32 fails the build if
-> that stops being true. `locusvpn.jadedns.uk` is the landing page only and must
-> never serve the API.
+> this rename has it compiled in, and the only channel that could carry a new
+> address (the heartbeat) needs a working hub to reach. **Removing it
+> strands the deployed fleet at the activation gate** with no path to the
+> update that would fix it. `05-caddy.sh` emits both; `check-consistency.sh`
+> §32 fails the build if that stops being true. `locusvpn.jadedns.uk` is the
+> landing page only and must never serve the API.
 
 ---
 

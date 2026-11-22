@@ -673,10 +673,34 @@ function collectUsedKeysFromTsFile(
   visit(sourceFile)
 }
 
+// ── A FILESYSTEM NAME IS NOT A TRANSLATION KEY ──
+//
+// This harvests quoted dotted strings from a Rust file, and not every one of them
+// is an i18n key. `init.rs` builds an archive directory called "service.legacy",
+// which lives under the `service.` namespace, so it sailed through
+// `addKeyIfValid` and then showed up as a key "used but missing in source" —
+// reported forever against a locale bundle that was never wrong, and the only
+// outstanding line in the whole i18n audit (2026-11-23).
+//
+// The distinction is a shape, not a list: a TRANSLATION KEY names the last
+// segment as well (`service.adminInstallPrompt`), while a FILENAME-LEAF key ends
+// in a token that names an extension or an archive suffix (`service.legacy`,
+// `logs.old`, `backup.bak`). Requiring the leaf to look like a camelCase/flat
+// assembly is too strict to be safe here, so this refuses exactly the case that
+// was wrong: a leaf with no uppercase and no underscore, i.e. a lowercase word.
+// `service.legacy` is refused; `service.adminInstallPrompt` and
+// `settings.font_family` are still harvested.
+//
+// If a real key ever needs to be all-lowercase, this rule will hide it from the
+// report — that is the cost, and it is smaller than a permanent false positive
+// that trains the next reader to ignore the audit.
+const FILENAME_LEAF = /(?:^|\.)[a-z0-9]+$/
+
 function collectUsedKeysFromTextFile(file, baselineNamespaces, usedKeys) {
   const regex = /['"`]([A-Za-z][A-Za-z0-9_-]*(?:\.[A-Za-z0-9_-]+)+)['"`]/g
   let match
   while ((match = regex.exec(file.content))) {
+    if (FILENAME_LEAF.test(match[1])) continue
     addKeyIfValid(match[1], usedKeys, baselineNamespaces, {
       forceNamespace: false,
     })

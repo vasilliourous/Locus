@@ -282,7 +282,7 @@ The **same key must be used**, not a freshly generated one: the matching public
 half is compiled into every already-installed client, and a new key produces
 updates those clients will all refuse (§5). The one exception is a deliberate
 rotation, which also requires a new `pubkey` in `tauri.conf.json` and a major
-version bump — 3.3.0 is that exception, and
+version bump — the rotation itself is that exception, and
 [`../../docs/operate/RELEASE-RECOVERY.md`](../../docs/operate/RELEASE-RECOVERY.md)
 is its runbook.
 
