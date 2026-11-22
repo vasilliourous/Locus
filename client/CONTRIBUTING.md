@@ -149,13 +149,13 @@ pnpm build:fast
 ### Clean Build
 
 ```bash
-pnpm clean
+cargo clean --manifest-path src-tauri/Cargo.toml && rm -rf dist
 ```
 
 ### Portable Version (Windows Only)
 
 ```bash
-pnpm portable
+pnpm build -- --no-bundle
 ```
 
 
@@ -167,7 +167,7 @@ pnpm portable
 
 ```bash
 # Rust backend
-cargo clippy-all
+cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets --features clippy -- -D warnings
 # Frontend
 pnpm lint
 ```
@@ -176,13 +176,13 @@ pnpm lint
 
 ```bash
 # Rust backend
-cargo fmt
+cargo fmt --manifest-path src-tauri/Cargo.toml --check
 # Frontend
-pnpm format
+pnpm format:check
 ```
 
 ### Submitting Your Changes
 
 This is a private, single-maintainer repository — there is no public fork-and-PR
-process. Branch, commit with a clear message, and push. The repository root
-`README.md` describes the release path.
+process. Branch, commit with a clear message, and push. The release path is
+[`../docs/operate/RELEASING.md`](../docs/operate/RELEASING.md).
