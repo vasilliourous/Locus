@@ -339,6 +339,12 @@ mod tests {
         // never asserted in its absence by another: a test that asserted the
         // DEFAULT would depend on execution order, which is the flake shape this
         // crate has already paid for.
+        //
+        // That has now actually happened, and the comment above was the reason it
+        // was missed: it described what the module DID, and the tests below still
+        // asserted `server` with no lock held. See the block comment above
+        // `produces_valid_yaml`. The guard stays here because this test WRITES the
+        // flag; the readers take the same lock.
         let _serialised = preference_guard();
         let config = strike_tier();
 
@@ -380,6 +386,13 @@ mod tests {
     /// Asserted in its own test so the two directions are independent — the
     /// preference is process-wide, and a single test asserting both would depend
     /// on `cargo test`'s ordering to observe the unset state.
+    ///
+    /// "In its own test" is necessary but was NOT sufficient, which is worth
+    /// recording because it is how the 2026-11-22 flake survived review: being
+    /// alone in a test hides a write from other tests, but says nothing about the
+    /// OTHER tests that read the flag. Those read it without this lock, and a
+    /// separate test clearing it is no protection at all. The lock is what
+    /// excludes them; the separate test is only what asserts the default.
     #[test]
     fn the_plan_dials_the_hubs_name_by_default() {
         // Cleared first so this test observes the default whatever ran before it.
@@ -467,10 +480,38 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    // ── Every test below this line reads the process-wide routing preference ──
+    //
+    // `build_profile` -> `shadowsocks_proxy` -> `dial_server` reads
+    // `activation_tunnel::prefer_maintenance()`, a process-wide flag. `cargo test`
+    // shares one process across concurrent tests, so a test that built a profile
+    // WITHOUT this guard could observe another test's write and see the hub's
+    // ADDRESS where it asserted the hostname. That is not hypothetical: on
+    // 2026-11-22 CI reported `left: "114.23.136.196"` against
+    // `right: "networkingguides.duckdns.org"` in
+    // `the_proxy_carries_the_tier_credentials` — one failure in 709, passing on
+    // every local rerun, which is exactly the shape a race takes.
+    //
+    // The two comments that used to sit at the top of this module claimed the
+    // opposite: `the_plan_dials_the_address_once_the_session_prefers_the_maintenance_route`
+    // says the flag "is set and read inside one test and never asserted in its
+    // absence by another", and `the_plan_dials_the_hubs_name_by_default` says a
+    // single test asserting both directions "would depend on `cargo test`'s
+    // ordering". Both were wrong in the same way — the tests below DID assert the
+    // name's presence with no lock held — and that wrong belief is what made the
+    // guard look complete when only three tests had it.
+    //
+    // `preference_guard()` is process-wide and lives in `activation_tunnel.rs`
+    // beside the flag, deliberately: a second lock here would be a split lock,
+    // which is the failure `activation_tunnel.rs` documents having already paid
+    // for once. Taking ONE lock from every reader is what excludes the writers in
+    // that module too.
+
     /// The generated document must be valid YAML, or the core refuses to start
     /// and the student sees an opaque engine error.
     #[test]
     fn produces_valid_yaml() {
+        let _serialised = preference_guard();
         let profile = build_profile(&tcp_only_tier(), false);
         let parsed: Value = serde_yaml_ng::from_str(&profile.yaml).expect("the tier profile must be valid YAML");
         assert!(parsed.get("proxies").is_some());
@@ -482,6 +523,7 @@ mod tests {
     /// dials and is rejected.
     #[test]
     fn the_proxy_carries_the_tier_credentials() {
+        let _serialised = preference_guard();
         let profile = build_profile(&tcp_only_tier(), false);
         let parsed: Value = serde_yaml_ng::from_str(&profile.yaml).expect("valid YAML");
 
@@ -499,6 +541,7 @@ mod tests {
     /// into a black hole until it times out.
     #[test]
     fn a_tier_without_uot_has_no_uot_outbound() {
+        let _serialised = preference_guard();
         let profile = build_profile(&tcp_only_tier(), false);
         let parsed: Value = serde_yaml_ng::from_str(&profile.yaml).expect("valid YAML");
 
@@ -514,6 +557,7 @@ mod tests {
     /// gaming tier.
     #[test]
     fn a_tier_with_uot_gets_a_udp_over_tcp_outbound() {
+        let _serialised = preference_guard();
         let profile = build_profile(&strike_tier(), true);
         let parsed: Value = serde_yaml_ng::from_str(&profile.yaml).expect("valid YAML");
 
@@ -540,6 +584,7 @@ mod tests {
     /// default cannot silently move the fleet back to the older framing.
     #[test]
     fn the_uot_outbound_names_its_protocol_version() {
+        let _serialised = preference_guard();
         let profile = build_profile(&strike_tier(), true);
         let parsed: Value = serde_yaml_ng::from_str(&profile.yaml).expect("valid YAML");
 
@@ -555,6 +600,7 @@ mod tests {
     /// to a profile whose UDP went to a member that cannot carry it.
     #[test]
     fn the_group_defaults_to_the_uot_outbound_when_it_exists() {
+        let _serialised = preference_guard();
         let profile = build_profile(&strike_tier(), true);
         let parsed: Value = serde_yaml_ng::from_str(&profile.yaml).expect("valid YAML");
 
@@ -576,6 +622,7 @@ mod tests {
     /// only speaks the UoT framing.
     #[test]
     fn the_main_proxy_still_uses_the_standard_port() {
+        let _serialised = preference_guard();
         let profile = build_profile(&strike_tier(), true);
         let parsed: Value = serde_yaml_ng::from_str(&profile.yaml).expect("valid YAML");
 
@@ -590,6 +637,7 @@ mod tests {
     /// port 0.
     #[test]
     fn udp_relay_alone_does_not_enable_uot() {
+        let _serialised = preference_guard();
         let profile = build_profile(&strike_tier(), false);
         let parsed: Value = serde_yaml_ng::from_str(&profile.yaml).expect("valid YAML");
 
@@ -630,6 +678,7 @@ mod tests {
     /// a function is not a rule.
     #[test]
     fn the_udp_rule_is_present_in_the_generated_document() {
+        let _serialised = preference_guard();
         let profile = build_profile(&strike_tier(), true);
         let parsed: Value = serde_yaml_ng::from_str(&profile.yaml).expect("valid YAML");
 
@@ -646,6 +695,7 @@ mod tests {
     /// game traffic never reaches the UoT outbound.
     #[test]
     fn the_udp_rule_precedes_the_catch_all() {
+        let _serialised = preference_guard();
         let profile = build_profile(&strike_tier(), true);
         let parsed: Value = serde_yaml_ng::from_str(&profile.yaml).expect("valid YAML");
         let rules: Vec<&str> = parsed["rules"]
@@ -667,6 +717,7 @@ mod tests {
     /// target is unreachable from the group and mihomo rejects the config.
     #[test]
     fn the_group_lists_the_uot_outbound_when_it_exists() {
+        let _serialised = preference_guard();
         let with_uot = build_profile(&strike_tier(), true);
         let parsed: Value = serde_yaml_ng::from_str(&with_uot.yaml).expect("valid YAML");
         let mut members = parsed["proxy-groups"][0]["proxies"]
@@ -702,6 +753,7 @@ mod tests {
     /// which is why the rule is pinned here as a test rather than a comment.
     #[test]
     fn the_group_name_does_not_collide_with_its_members() {
+        let _serialised = preference_guard();
         assert_ne!(
             GROUP_NAME, PROXY_NAME,
             "a group named the same as a proxy inside it is a reference loop to mihomo"
@@ -752,6 +804,7 @@ mod tests {
     /// checked here.
     #[test]
     fn every_outbound_the_probe_asks_about_is_one_the_profile_defines() {
+        let _serialised = preference_guard();
         assert!(
             OUTBOUND_NAMES.contains(&PROXY_NAME),
             "the probe must ask about the tier's own outbound first, or every \
@@ -814,6 +867,7 @@ mod tests {
     /// avoid.
     #[test]
     fn the_match_rule_routes_through_the_group() {
+        let _serialised = preference_guard();
         let profile = build_profile(&strike_tier(), true);
         let parsed: Value = serde_yaml_ng::from_str(&profile.yaml).expect("valid YAML");
         let rules: Vec<&str> = parsed["rules"]
@@ -837,6 +891,7 @@ mod tests {
     /// every five minutes.
     #[test]
     fn generation_is_deterministic() {
+        let _serialised = preference_guard();
         let first = build_profile(&strike_tier(), true);
         let second = build_profile(&strike_tier(), true);
         assert_eq!(first.yaml, second.yaml);
@@ -847,6 +902,7 @@ mod tests {
     /// that need quoting.
     #[test]
     fn credentials_survive_a_yaml_round_trip() {
+        let _serialised = preference_guard();
         let mut tier = tcp_only_tier();
         tier.password = "p@ss:word#with\"specials".into();
 
