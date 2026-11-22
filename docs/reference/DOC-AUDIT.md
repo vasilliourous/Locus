@@ -4,7 +4,7 @@
 audience:    all
 status:      live
 authoritative-for: the known blind spots of the doc set, and the one guard change still open
-verified-against: this checkout at 2026-10-18; check-consistency.sh after each change
+verified-against: this checkout at 2026-11-22; check-consistency.sh after each change
 ```
 
 A dated observation, not a rule. The live rules are [`../README.md`](../README.md)
@@ -39,6 +39,12 @@ somewhere:
 reads exactly like a guard that passed. Extending it to spelled-out numbers where
 the sentence also names the version sites is the highest-leverage guard change left.
 
+*That is no longer the highest-leverage gap.* As of 2026-11-22 the larger one was
+**scope, not vocabulary**: root `*.md` sat outside §8's, §10's and §28's walks, so
+the front door was orphaned and unguarded while §28 printed a completeness claim
+that did not cover it. §28/§8/§10 now walk root `*.md` and the word-number gap
+above is unchanged and still open.
+
 ## Shape of the set, and why it is like that
 
 | Set | Contract | Read it as |
@@ -65,5 +71,5 @@ separately.
   skipped. Treat every procedure there as "true as written, unconfirmed against a
   running box".
 
-*Revised 2026-10-18. When this page and the code disagree, the code wins and this
+*Revised 2026-11-22. When this page and the code disagree, the code wins and this
 page is the bug.*
