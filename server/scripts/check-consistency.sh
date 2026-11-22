@@ -1124,7 +1124,7 @@ def top_level_docs():
 # the one document nothing link-checks; that is the silent-regression shape this
 # whole renovation exists to prevent.
 def root_docs():
-    return ['README.md', 'AGENTS.md', 'CLAUDE.md', 'GEMINI.md', 'START-HERE.md']
+    return ['README.md', 'AGENTS.md', 'CLAUDE.md', 'GEMINI.md']
 
 docs = [p for p in md_files('docs')] + \
        [p for p in md_files('client/docs')] + \
@@ -4364,8 +4364,8 @@ ARCHIVE_PREFIXES = ('docs/archive/', 'docs/history/',
 INDEX_EXEMPT = {
     'client/AGENTS.md', 'client/CLAUDE.md', 'client/GEMINI.md',
     'AGENTS.md', 'CLAUDE.md', 'GEMINI.md',
-    # The front door, and the pointer that survives the rename.
-    'README.md', 'START-HERE.md', 'CONTRIBUTING.md',
+    # The front door.
+    'README.md', 'CONTRIBUTING.md',
     # Not documentation in the index sense: a licence, and the audit's own
     # untracked scratch (gitignored, so it is normally absent).
     'LICENSE', 'DOC-AUDIT-2026-11-22.md',
