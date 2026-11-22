@@ -182,14 +182,19 @@ jobs:
     runs-on: ubuntu-24.04
     # A lint failure must cost seconds, not 45 minutes.
     #
-    # This used to add "The gate no longer compiles any Rust", which stopped
-    # being true when `check-rust-deps.sh` joined it (audit F-21): that runs
-    # `cargo check --all-targets` over the whole client workspace. The budget
-    # still holds — `cargo check` is the cheapest thing that emits the manifest
-    # lints — but the job now needs Tauri's Linux headers, which is what
-    # "Install Linux dependencies" below is for. Corrected 2026-11-22, when the
-    # stale half of this comment was the reason v3.4.2's gate failed on
-    # `glib-sys` and no release was published.
+    # The header here used to add "The gate no longer compiles any Rust". That
+    # sentence was true when written and became false when `check-rust-deps.sh`
+    # was added (audit F-21), and it was then used as the justification for
+    # putting that scan in THIS job — where it could never work, because this job
+    # has neither `prebuild` (which fills the gitignored `sidecar/` binaries the
+    # locus build script reads) nor Tauri's Linux headers. The scan panicked on
+    # every run from 431abd5 to 2026-11-22, and `release` needs
+    # `[verify, build]`, so nothing published.
+    #
+    # The scan now lives in `Build (linux)`, under "No dependency is dead". This
+    # job is back to compiling no Rust. That is now ENFORCED rather than merely
+    # asserted: if a future step here needs a compiler, it will fail, and the fix
+    # is to move the step, not to relax this comment.
     timeout-minutes: 15
     defaults:
       run:
@@ -567,49 +572,27 @@ jobs:
         working-directory: .
         run: bash server/scripts/test-contract-guard.sh
 
-      # ── Tauri's Linux headers, for the ONE step below that compiles Rust ──
-      #
-      # Added 2026-11-22, after v3.4.2's `verify` failed on `glib-sys` and the
-      # release published NOTHING. Two comments were both wrong, and together
-      # they hid it:
-      #
-      #   * this job's header says "The gate no longer compiles any Rust";
-      #   * `check-rust-deps.sh` runs `cargo check --all-targets`, which DOES
-      #     compile — including `glib-sys`'s build script, which needs
-      #     `pkg-config` to find GTK.
-      #
-      # The `build` job installs these and notes that the Ubuntu images "ship
-      # these PREINSTALLED". That is true of the `build` matrix image and was
-      # assumed true here; it is not. The result was a gate that runs locally
-      # (where the headers exist) and fails in CI (where they do not) — the
-      # local-passes/CI-fails shape, which is worse than a plain failure because
-      # it validates the wrong thing for as long as nobody looks.
-      #
-      # It sits BEFORE the dependency scan, and is otherwise a no-op: the same
-      # `pkg-config` guard the build job uses, so the common case costs nothing.
-      - name: Install Linux dependencies
-        run: |
-          set -euo pipefail
-          if pkg-config --exists gtk+-3.0 glib-2.0; then
-            echo "Tauri's Linux dependencies are already present."
-            exit 0
-          fi
-          sudo apt-get update
-          sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev
-
       # ── A dependency nothing uses cannot fail any compiler gate (audit F-21) ──
       #
-      # `cargo clippy ... -D warnings` in the Linux build job CANNOT see
-      # `cargo::unused_dependencies`: that is a rustc flag and this is a cargo
-      # warning, so the gate prints it and exits 0. The class went unaddressed
-      # for exactly that reason, and it had already collected one real finding
-      # (`rust_iso3166`, in the workspace manifest since the initial commit and
-      # referenced by nothing). This step is the gate that class never had.
+      # THIS CHECK USED TO LIVE HERE, AND IT COULD NEVER PASS HERE. It was added to
+      # this job on the strength of the header's claim that "the gate no longer
+      # compiles any Rust" — but `check-rust-deps.sh` runs `cargo check
+      # --all-targets`, which compiles the locus build script, and `tauri_build`
+      # reads `bundle.externalBin` from `client/src-tauri/sidecar/`.
       #
-      # It compiles Rust, which is why the Linux headers above are required.
-      - name: No dependency is dead
-        working-directory: .
-        run: bash scripts/check-rust-deps.sh
+      # Those binaries are gitignored in full and only `prebuild` fetches them, and
+      # this job never runs `prebuild`. So the scan panicked on every run from the
+      # moment it was added (431abd5, 2026-11-22): `release` needs
+      # `[verify, build]`, so no release could publish at all, and the failure was
+      # reported as "cargo check itself failed" because the script filtered the
+      # panic's message out of its own output.
+      #
+      # `Build (linux)` DOES run `prebuild` and DOES install Tauri's headers, so it
+      # is where the check is wired. It runs there under the same name, together
+      # with the Rust gates it belongs beside.
+      #
+      # Do not move it back here without giving this job both `prebuild` and the
+      # Linux headers — that combination is why it is a build-job check.
 
       # ── The frontend is built ONCE, here, and shared as an artifact ──
       #
@@ -1659,6 +1642,26 @@ jobs:
       - name: Rust formatting
         if: matrix.label == 'linux'
         run: cargo fmt --check
+
+      # ── No dependency is dead (audit F-21) — the fourth Rust gate ──
+      #
+      # It lives HERE, not in `verify`, because it needs two things this job has
+      # and that one does not: `prebuild` (which populates the gitignored
+      # `client/src-tauri/sidecar/` that `tauri_build` reads) and Tauri's Linux
+      # headers. In `verify` it panicked on every single run from 431abd5 until
+      # 2026-11-22, and because `release` needs `[verify, build]` no release could
+      # publish. The reasoning is written out at the top of the `verify` job.
+      #
+      # It belongs beside clippy/fmt/doc-tests for the same reason the comment
+      # above gives: `-D warnings` is a RUSTC flag and cannot see
+      # `cargo::unused_dependencies`, which is a CARGO warning — clippy prints it
+      # and exits 0. That gap is the whole point of this step.
+      #
+      # Linux-only like its three neighbours: one toolchain answers it once.
+      - name: No dependency is dead
+        if: matrix.label == 'linux'
+        working-directory: .
+        run: bash scripts/check-rust-deps.sh
 
       # ── Stage the raw executable under the name the hub expects ──
       #

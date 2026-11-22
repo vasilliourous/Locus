@@ -24,6 +24,11 @@
 # inheritance, not a dead dependency, and turning it on would fail on three crates
 # for a reason unrelated to this check. Stated so the gap is visible.
 #
+# WHERE IT MUST RUN: a job that has run `pnpm prebuild`. The scan compiles the
+# locus build script, `tauri_build` reads the gitignored `sidecar/` binaries, and
+# without them it panics — so this is not a tree condition any job can skip, it is
+# a precondition of the check. See the precondition block below the cargo lookup.
+#
 # The count printed on success is the point of the guard: "0 dead" from a search
 # that ran, not an empty result from a search that never ran. If cargo did not
 # scan, this reports BAD rather than OK.
@@ -49,12 +54,46 @@ fi
 # still runs the manifest lints. `--all-targets` keeps dev-dependency helpers from
 # reading as unused. Output is captured because the lints are warnings — a bare
 # exit code proves nothing.
+#
+# ⚠️ THIS NEEDS THE SIDECAR, SO IT NEEDS `prebuild` FIRST.
+#
+# `tauri_build` copies `bundle.externalBin` (`sidecar/verge-mihomo`, …) into the
+# target dir during the locus build script, and those files are gitignored in
+# full — `prebuild.mjs` is what fetches them. In a tree where `prebuild` has not
+# run, `tauri_build` panics and this scan fails with a message about a proc macro
+# rather than about a missing engine.
+#
+# That is exactly what happened in CI: this script was placed in `verify`, which
+# never runs `prebuild`, so the gate reported "cargo check itself failed" on
+# EVERY run from the moment it was added (431abd5) — and `release` needs
+# `[verify, build]`, so no release could publish. `Build (linux)` runs
+# `prebuild`, so the check belongs there.
+#
+# Said here rather than only in the workflow, because the next person to wire this
+# into a job needs to know the precondition, not just that it once broke.
+sidecar="$root/client/src-tauri/sidecar"
+if [ ! -d "$sidecar" ] || ! ls "$sidecar" >/dev/null 2>&1 || [ -z "$(ls -A "$sidecar" 2>/dev/null)" ]; then
+  bad "client/src-tauri/sidecar/ is empty or missing — run \`pnpm prebuild\` first"
+  printf '          %s\n' \
+    "tauri_build reads bundle.externalBin from it and panics when it cannot," \
+    "so the dependency scan would report a proc-macro panic instead of a dead dep." \
+    "This check belongs in a job that runs prebuild (e.g. Build (linux))."
+  printf '  %s\n' "$pass passed, $fail failed"
+  exit 1
+fi
+
 out=$(cd "$root/client" && cargo check --all-targets 2>&1)
 rc=$?
 
 if [ "$rc" -ne 0 ]; then
   bad "cargo check itself failed — the dependency scan did not complete"
-  printf '%s\n' "$out" | grep -E '^error' | head -5 | sed 's/^/          /'
+  # Print WHY, not just the verdict. This used to grep '^error' and take five
+  # lines, which dropped the panic's own message and the file it named, so the
+  # log said "cargo check itself failed" and nothing about `sidecar/`. A failure
+  # report that cannot name its cause is the same class as a guard that cannot
+  # fail — it reads as a diagnosis and is only a symptom.
+  printf '%s\n' "$out" | grep -E 'error|panicked|does not exist|could not compile' \
+    | head -15 | sed 's/^/          /'
   printf '  %s\n' "$pass passed, $fail failed"
   exit 1
 fi
