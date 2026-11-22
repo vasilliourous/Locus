@@ -3072,7 +3072,7 @@ fi
 # not model branches or subshells) but it catches the real failure, which is a
 # definition placed below the code that uses it.
 echo
-echo "22. Shell helpers are defined before their first use"
+echo "22. hooks-sync.sh defines its helpers before use"
 
 HOOKSYNC="$REPO/server/scripts/hooks-sync.sh"
 if [ ! -f "$HOOKSYNC" ]; then
