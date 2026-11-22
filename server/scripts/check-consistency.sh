@@ -4252,6 +4252,17 @@ fi
 #       document while the head's own status field said `live`. So that is what
 #       this checks: the first 25 lines, and the title.
 #
+#       WHAT IT ACTUALLY CATCHES, so this comment cannot claim more than the code
+#       does: exactly four capitalised markers, in the first 25 lines of a
+#       `status: live` document — SUPERSEDED, ARCHIVED, NOT SHIPPED, RETIRED. It
+#       is case-SENSITIVE and it does not read `removed`, `no longer`, `dead`,
+#       `obsolete`, `historical` or `superseded` in lower case. A case-insensitive
+#       scan for those wider words finds 12 live documents and every one is
+#       legitimate — each is about something *else* being retired, which is the
+#       same false-positive class the whole-body scan was abandoned for. The
+#       marker set is deliberately narrow; do not widen it without triaging 12
+#       correct hits first.
+#
 # It does NOT check that a declared status is TRUE — a guard cannot read a design
 # record and know it is stale (§25 says the same). It catches the case where the
 # document states the contradiction ITSELF, in the place a reader looks first.
