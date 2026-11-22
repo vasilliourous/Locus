@@ -44,6 +44,7 @@ bulk-delete `codes` or `code_events`; revoke with Suspend, move with Unbind.*
 
 | Document | `status` | What it is |
 |---|---|---|
+| [`../Readmedon'tdisplayonpublicpage.md`](../Readmedon'tdisplayonpublicpage.md) | live | **The front door.** What Locus is, the layout, and where to go next. Renamed so GitHub does not render it; the root `README.md` points here. |
 | [`../AGENTS.md`](../AGENTS.md) | live | **Agents read this first.** Repo map, the fact rules, and the release procedure (bump → commit → tag). |
 | [`STATE.md`](STATE.md) | live | **Where a fact goes.** The two claim classes and the ownership map — one canonical home per topic. Not a fact table. |
 | [`state.toml`](state.toml) | data | The derived facts (version, domain, console path, platform list) as **data**, each with a `source` and `provenance`. Guard-enforced by §9. |

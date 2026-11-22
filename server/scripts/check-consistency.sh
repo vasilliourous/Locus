@@ -1089,9 +1089,17 @@ def top_level_docs():
                 out.append(rel)
     return out
 
+# Root `*.md` beyond the two entry points, from 2026-11-22 (audit F-02): §28 now
+# holds root files to the index, so §8 must resolve links out of them or it
+# reports a target it cannot see. `README.md`/`AGENTS.md` were already here;
+# `CLAUDE.md`/`GEMINI.md` and the front door were not.
+def root_docs():
+    return ['README.md', 'AGENTS.md', 'CLAUDE.md', 'GEMINI.md',
+            "Readmedon'tdisplayonpublicpage.md"]
+
 docs = [p for p in md_files('docs')] + \
        [p for p in md_files('client/docs')] + \
-       top_level_docs() + ['README.md', 'AGENTS.md']
+       top_level_docs() + root_docs()
 docs = sorted(set(p for p in docs if os.path.exists(p)))
 
 anchors = {}
@@ -1682,8 +1690,20 @@ echo "10. No volatile fact (IP address / hub URL) inlined in live documentation"
 #   docs/operate/CLAIMS.md         the ONE place a world claim may be described
 #                                  (its §5 register and §1 worked example)
 #   docs/state.toml                the derived-facts data file itself
-DOCS_TO_SCAN=$(cd "$REPO" && find docs client/docs -name '*.md' 2>/dev/null \
-    | grep -vE '^docs/reference/FIXES\.md$|^docs/history/|^docs/archive/|^docs/business/redesign/archive/|^docs/operate/CLAIMS\.md$' \
+#
+# ROOT `*.md` JOINED THE SCAN ON 2026-11-22 (audit F-02, finding 9). The front
+# door made a claim about the landing-page hostname that this section forbids
+# anywhere else, and nothing could see it because the walk started at `docs`.
+# `AGENTS.md` and `CLAUDE.md`/`GEMINI.md` are scanned with it; they are entry
+# points, and an entry point that names an address is the same defect as a
+# document that does.
+#
+# `LICENSE` is not `*.md` and cannot appear. The audit's own scratch file is
+# excluded by name because it quotes the defects it found — including addresses.
+DOCS_TO_SCAN=$(cd "$REPO" && { find docs client/docs -name '*.md' 2>/dev/null; \
+        find . -maxdepth 1 -name '*.md' 2>/dev/null; } \
+    | grep -vE '^\./' \
+    | grep -vE '^docs/reference/FIXES\.md$|^docs/history/|^docs/archive/|^docs/business/redesign/archive/|^docs/operate/CLAIMS\.md$|^DOC-AUDIT-[0-9-]+\.md$' \
     | sort)
 
 # An IPv4 literal. Deliberately does NOT flag addresses that are provably NOT the
@@ -4297,7 +4317,22 @@ ARCHIVE_PREFIXES = ('docs/archive/', 'docs/history/',
 #       indexing them would put "how to run a perf harness" in the same list as
 #       "the API contract", which is how an index stops being worth reading.
 #       They are covered against LINK ROT by §8, which is the risk that matters.
-INDEX_EXEMPT = {'client/AGENTS.md', 'client/CLAUDE.md', 'client/GEMINI.md'}
+#
+# ROOT `*.md` JOINED THE SCOPE ON 2026-11-22 (audit F-02). It had been outside
+# every walk — §8, §10 and this one — and the consequence was not theoretical:
+# `Readmedon'tdisplayonpublicpage.md` is the de-facto front door, cited by nothing
+# and unguarded by anything, while this section printed "every live document is
+# linked from docs/README.md". A completeness claim that excludes the first file
+# a reader opens is worse than no claim. The root exemptions are the same
+# vocabulary as the client ones: entry points and shims delegate to AGENTS.md,
+# and the index does not list its own front matter.
+INDEX_EXEMPT = {
+    'client/AGENTS.md', 'client/CLAUDE.md', 'client/GEMINI.md',
+    'AGENTS.md', 'CLAUDE.md', 'GEMINI.md', 'README.md', 'CONTRIBUTING.md',
+    # Not documentation in the index sense: a licence, and the audit's own
+    # untracked scratch (gitignored, so it is normally absent).
+    'LICENSE', 'DOC-AUDIT-2026-11-22.md',
+}
 
 def md_files(root):
     for dirpath, _dirs, files in os.walk(root):
@@ -4308,7 +4343,12 @@ def md_files(root):
                 yield os.path.join(dirpath, fn).replace(os.sep, '/')
 
 def indexed_scope():
-    """Top-level `client/*.md` that are documentation rather than entry points."""
+    """Top-level `client/*.md` and root `*.md` that are documentation.
+
+    Root was added 2026-11-22 (audit F-02): the front door lived outside every
+    walk, so the completeness claim on `docs/README.md` did not cover it. See the
+    INDEX_EXEMPT comment for which root files are exempt and why.
+    """
     out = []
     for fn in sorted(os.listdir('client')):
         if not fn.endswith('.md'):
@@ -4317,6 +4357,12 @@ def indexed_scope():
         if not os.path.isfile(rel) or rel in INDEX_EXEMPT:
             continue
         out.append(rel)
+    for fn in sorted(os.listdir('.')):
+        if not fn.endswith('.md'):
+            continue
+        if not os.path.isfile(fn) or fn in INDEX_EXEMPT:
+            continue
+        out.append(fn)
     return out
 
 def front_matter(path):
