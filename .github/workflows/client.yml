@@ -180,8 +180,16 @@ jobs:
     # workflow is a world claim nobody re-checks. Same reasoning as the matrix
     # labels below.
     runs-on: ubuntu-24.04
-    # A lint failure must cost seconds, not 45 minutes. The gate no longer
-    # compiles any Rust, so this is generous.
+    # A lint failure must cost seconds, not 45 minutes.
+    #
+    # This used to add "The gate no longer compiles any Rust", which stopped
+    # being true when `check-rust-deps.sh` joined it (audit F-21): that runs
+    # `cargo check --all-targets` over the whole client workspace. The budget
+    # still holds — `cargo check` is the cheapest thing that emits the manifest
+    # lints — but the job now needs Tauri's Linux headers, which is what
+    # "Install Linux dependencies" below is for. Corrected 2026-11-22, when the
+    # stale half of this comment was the reason v3.4.2's gate failed on
+    # `glib-sys` and no release was published.
     timeout-minutes: 15
     defaults:
       run:
@@ -559,6 +567,36 @@ jobs:
         working-directory: .
         run: bash server/scripts/test-contract-guard.sh
 
+      # ── Tauri's Linux headers, for the ONE step below that compiles Rust ──
+      #
+      # Added 2026-11-22, after v3.4.2's `verify` failed on `glib-sys` and the
+      # release published NOTHING. Two comments were both wrong, and together
+      # they hid it:
+      #
+      #   * this job's header says "The gate no longer compiles any Rust";
+      #   * `check-rust-deps.sh` runs `cargo check --all-targets`, which DOES
+      #     compile — including `glib-sys`'s build script, which needs
+      #     `pkg-config` to find GTK.
+      #
+      # The `build` job installs these and notes that the Ubuntu images "ship
+      # these PREINSTALLED". That is true of the `build` matrix image and was
+      # assumed true here; it is not. The result was a gate that runs locally
+      # (where the headers exist) and fails in CI (where they do not) — the
+      # local-passes/CI-fails shape, which is worse than a plain failure because
+      # it validates the wrong thing for as long as nobody looks.
+      #
+      # It sits BEFORE the dependency scan, and is otherwise a no-op: the same
+      # `pkg-config` guard the build job uses, so the common case costs nothing.
+      - name: Install Linux dependencies
+        run: |
+          set -euo pipefail
+          if pkg-config --exists gtk+-3.0 glib-2.0; then
+            echo "Tauri's Linux dependencies are already present."
+            exit 0
+          fi
+          sudo apt-get update
+          sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev
+
       # ── A dependency nothing uses cannot fail any compiler gate (audit F-21) ──
       #
       # `cargo clippy ... -D warnings` in the Linux build job CANNOT see
@@ -567,6 +605,8 @@ jobs:
       # for exactly that reason, and it had already collected one real finding
       # (`rust_iso3166`, in the workspace manifest since the initial commit and
       # referenced by nothing). This step is the gate that class never had.
+      #
+      # It compiles Rust, which is why the Linux headers above are required.
       - name: No dependency is dead
         working-directory: .
         run: bash scripts/check-rust-deps.sh
