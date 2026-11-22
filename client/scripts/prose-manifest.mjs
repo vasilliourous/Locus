@@ -39,10 +39,7 @@ const SRC = path.join(ROOT, 'src')
 const OUT = path.join(ROOT, 'PROSE.md')
 
 const LOCALES = path.join(SRC, 'locales')
-const BACKEND_LOCALE = path.join(
-  ROOT,
-  'crates/clash-verge-i18n/locales/en.yml',
-)
+const BACKEND_LOCALE = path.join(ROOT, 'crates/clash-verge-i18n/locales/en.yml')
 
 /**
  * Screens and surfaces, in the order a student meets them.
@@ -68,9 +65,13 @@ const AREAS = [
   {
     id: 'connection',
     title: 'Connection tab',
-    where: 'The main screen — status, Connect, traffic, tier (pages/connection.tsx)',
+    where:
+      'The main screen — status, Connect, traffic, tier (pages/connection.tsx)',
     prefix: 'home.components.connection.',
-    exclude: ['home.components.connection.activation.', 'home.components.connection.suspended.'],
+    exclude: [
+      'home.components.connection.activation.',
+      'home.components.connection.suspended.',
+    ],
   },
   {
     id: 'support',
@@ -185,7 +186,8 @@ const NOT_USER_FACING = [
   },
   {
     ns: 'shared.placeholders.',
-    reason: 'Only the search box and text field above use these; both unrendered.',
+    reason:
+      'Only the search box and text field above use these; both unrendered.',
   },
   {
     ns: 'shared.validation.',
@@ -207,7 +209,8 @@ const NOT_USER_FACING = [
   },
   {
     ns: 'shared.statuses.',
-    reason: 'Only the empty-state and chip editor above use it; both unrendered.',
+    reason:
+      'Only the empty-state and chip editor above use it; both unrendered.',
   },
   {
     ns: 'shared.actions.close',
@@ -266,7 +269,11 @@ const readBackend = () => {
   let stack = []
   const lines = fs.readFileSync(BACKEND_LOCALE, 'utf8').split('\n')
   for (const line of lines) {
-    if (!line.trim() || line.trim().startsWith('#') || line.startsWith('_version')) {
+    if (
+      !line.trim() ||
+      line.trim().startsWith('#') ||
+      line.startsWith('_version')
+    ) {
       continue
     }
     const indent = line.length - line.trimStart().length
@@ -297,7 +304,10 @@ const sourceFiles = () => {
       if (entry.isDirectory()) {
         if (entry.name === 'locales' || entry.name === 'generated') continue
         walk(full)
-      } else if (/\.(ts|tsx)$/.test(entry.name) && !/\.test\./.test(entry.name)) {
+      } else if (
+        /\.(ts|tsx)$/.test(entry.name) &&
+        !/\.test\./.test(entry.name)
+      ) {
         // `src/types/generated/` is the complete key list, written so TypeScript
         // can reject a typo. It references EVERY key by construction, so counting
         // it as a usage makes every string look reachable — it would have hidden
@@ -383,8 +393,7 @@ const areaFor = (key) => {
 const longestPrefix = (area) =>
   Math.max(...(area.prefixes ?? [area.prefix]).map((p) => p.length))
 
-const excluded = (key) =>
-  NOT_USER_FACING.find(({ ns }) => key.startsWith(ns))
+const excluded = (key) => NOT_USER_FACING.find(({ ns }) => key.startsWith(ns))
 
 const build = () => {
   const strings = [...readFrontend(), ...readBackend()]
@@ -420,9 +429,11 @@ const build = () => {
 const backendWhere = (key) => {
   const k = key.replace('backend:', '')
   if (k.startsWith('tray.')) return 'Native tray menu (`core/tray/menu_def.rs`)'
-  if (k.startsWith('notifications.')) return 'OS notification (`utils/notification.rs`)'
+  if (k.startsWith('notifications.'))
+    return 'OS notification (`utils/notification.rs`)'
   if (k.startsWith('service.')) return 'macOS privilege prompt (`cmd/locus.rs`)'
-  if (k.startsWith('launchGuard.')) return 'macOS first-run guard (`utils/macos_launch_guard.rs`)'
+  if (k.startsWith('launchGuard.'))
+    return 'macOS first-run guard (`utils/macos_launch_guard.rs`)'
   return 'Native dialog'
 }
 
@@ -439,15 +450,17 @@ const backendCode = (key) => {
   for (const rel of roots) {
     const text = readRust(rel)
     if (!text) continue
-    const idx = text.indexOf(`"${leaf}"`) !== -1 ? text.indexOf(`"${leaf}"`) : text.indexOf(`.${leaf}`)
+    const idx =
+      text.indexOf(`"${leaf}"`) !== -1
+        ? text.indexOf(`"${leaf}"`)
+        : text.indexOf(`.${leaf}`)
     if (idx === -1) continue
     hits.push(`${rel}:${text.slice(0, idx).split('\n').length}`)
   }
   return hits
 }
 
-const escapeCell = (s) =>
-  s.replace(/\|/g, '\\|').replace(/\n/g, ' ').trim()
+const escapeCell = (s) => s.replace(/\|/g, '\\|').replace(/\n/g, ' ').trim()
 
 const render = ({ byArea, unattributed, excludedStrings, total }) => {
   const lines = []
@@ -456,16 +469,22 @@ const render = ({ byArea, unattributed, excludedStrings, total }) => {
   w('# PROSE — every user-facing string, in one place')
   w()
   w('```')
-  w('audience:    whoever edits the app\'s wording')
+  w("audience:    whoever edits the app's wording")
   w('status:      live')
-  w('authoritative-for: the text a student sees, where it appears, and where it lives in code')
-  w('verified-against: generated from src/locales/en/ and clash-verge-i18n/locales/en.yml')
+  w(
+    'authoritative-for: the text a student sees, where it appears, and where it lives in code',
+  )
+  w(
+    'verified-against: generated from src/locales/en/ and clash-verge-i18n/locales/en.yml',
+  )
   w('```')
   w()
   w('> **This file is generated. Edit the wording here, then run')
   w('> `node scripts/apply-prose.mjs`** — that writes your text back over the')
   w('> original in every locale bundle and verifies nothing was missed. Do not')
-  w('> hand-edit a locale JSON; the next generation would show your change as a')
+  w(
+    '> hand-edit a locale JSON; the next generation would show your change as a',
+  )
   w('> diff to itself.')
   w('>')
   w('> `node scripts/prose-manifest.mjs` regenerates this file after the code')
@@ -475,7 +494,7 @@ const render = ({ byArea, unattributed, excludedStrings, total }) => {
   w('student meets it, and the exact `file:line` that references it.')
   w()
   w('Changing a row changes that string only. To change what a whole screen')
-  w('says, edit the rows under that screen\'s heading.')
+  w("says, edit the rows under that screen's heading.")
   w()
 
   for (const area of AREAS) {
@@ -497,22 +516,32 @@ const render = ({ byArea, unattributed, excludedStrings, total }) => {
   if (unattributed.length > 0) {
     w('## ⚠ Unattributed')
     w()
-    w('These strings belong to no area above. **A string nobody can place is the')
-    w('one that goes stale** — add a `scope` for it in `AREAS` in the generator')
+    w(
+      'These strings belong to no area above. **A string nobody can place is the',
+    )
+    w(
+      'one that goes stale** — add a `scope` for it in `AREAS` in the generator',
+    )
     w('rather than moving it by hand.')
     w()
     w('| Key | Text | Code |')
     w('|---|---|---|')
     for (const r of unattributed.sort((a, b) => a.key.localeCompare(b.key))) {
-      w(`| \`${r.key}\` | ${escapeCell(r.value)} | ${(r.code ?? []).join('<br>') || '—'} |`)
+      w(
+        `| \`${r.key}\` | ${escapeCell(r.value)} | ${(r.code ?? []).join('<br>') || '—'} |`,
+      )
     }
     w()
   }
 
   w('## Deliberately not in the manifest')
   w()
-  w('Strings that exist in the bundles but that a student cannot reach. Each is')
-  w('listed with the reason, so "why is this not editable here?" has an answer.')
+  w(
+    'Strings that exist in the bundles but that a student cannot reach. Each is',
+  )
+  w(
+    'listed with the reason, so "why is this not editable here?" has an answer.',
+  )
   w()
   w('| Key prefix | Why it is out of scope |')
   w('|---|---|')
@@ -533,22 +562,30 @@ const render = ({ byArea, unattributed, excludedStrings, total }) => {
   w('row in this file therefore has **three** possible outcomes, and only the')
   w('first is a finished job:')
   w()
-  w('| The other locale\'s value | What `prose:apply` does | What a student sees |')
+  w(
+    "| The other locale's value | What `prose:apply` does | What a student sees |",
+  )
   w('|---|---|---|')
-  w('| a real translation | leaves it alone | the **old** meaning, in their language |')
+  w(
+    '| a real translation | leaves it alone | the **old** meaning, in their language |',
+  )
   w('| a copy of the old English | leaves it alone | the **old** English |')
   w('| the key is absent | leaves it absent | English, by i18next fallback |')
   w()
   w('So `prose:apply` makes the change true for `en` and for any key still')
   w('falling back — and **not** for a string someone translated. That is not a')
   w('bug to fix by copying English over the top: it would replace a real')
-  w('translation with English. The row is finished when the translated value is')
-  w('updated in that locale, which is a translator\'s job and is reviewed per')
+  w(
+    'translation with English. The row is finished when the translated value is',
+  )
+  w("updated in that locale, which is a translator's job and is reviewed per")
   w('language.')
   w()
   w('`pnpm i18n:check` reports the drift: a key present in `en` and absent')
   w('elsewhere is `missing`, and a value identical to English in a locale that')
-  w('normally translates is not distinguishable from a fallback copy — which is')
+  w(
+    'normally translates is not distinguishable from a fallback copy — which is',
+  )
   w('why the count below is a floor, not a total.')
   w()
   w('Changing a `{{placeholder}}` or a count-sensitive string needs the')

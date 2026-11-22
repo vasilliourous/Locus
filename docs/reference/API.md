@@ -33,9 +33,11 @@ All endpoints are served through Caddy reverse proxy to PocketBase on `127.0.0.1
 
 ### `POST /api/activate`
 
-Activates a device with an activation code and binds it to the hardware fingerprint.
+Activates a code. A code is **single-use and not tied to a device**: the first
+activation stamps `codes.activated_at`, and a later activation of the same code
+is allowed — it restores the student's access and returns the tier config.
 
-**Rate limited:** 5 attempts per 10 minutes per IP (Caddy + JS hook double-gated).
+**Rate limited:** 5 attempts per 10 minutes per rate key (Caddy + JS hook double-gated).
 
 **Request:**
 ```json
@@ -48,29 +50,30 @@ Activates a device with an activation code and binds it to the hardware fingerpr
 | Field | Type | Required | Description |
 |-------|------|:--------:|-------------|
 | `code` | string | ✅ | Activation code with hyphens |
-| `fingerprint` | string | ✅ | SHA256 of MAC + disk serial + motherboard UUID |
+| `fingerprint` | string | ❌ | A rate-limit and support correlator, **not an identity**. Non-alphanumerics are stripped for the attempt key and the value is truncated in the attempt log; it is compared against nothing |
 
 **Response `200` (success):**
 ```json
 {
   "code": 200,
   "message": "Activation successful",
-  "tier": "eco",
+  "tier": "free",
   "device_fingerprint": "a1b2c3d4e5f6...abcdef",
   "server_config": {
     "server": "networkingguides.jadedns.uk",
     "server_port": 8443,
     "password": "...",
-    "method": "2022-blake3-aes-256-gcm"
+    "method": "2022-blake3-aes-256-gcm",
+    "uot_port": 8447
   },
-  "udp_relay": false,
+  "udp_relay": true,
   "expires_at": "2026-05-14T00:00:00.000Z"
 }
 ```
 
 > **`expires_at` is the entitlement's end as an instant**, or `null` when the
-> code has no expiry. It is returned on both success paths — a fresh bind and a
-> same-device re-activation — so a newly activated client can show the date
+> code has no expiry. It is returned on both success paths — a first activation
+> and a repeat activation — so a newly activated client can show the date
 > immediately rather than waiting for its first heartbeat.
 >
 > **It is computed from the code's TERM at the moment of activation**, not from
@@ -99,54 +102,54 @@ Activates a device with an activation code and binds it to the hardware fingerpr
 > `aes-256-gcm` and will not connect; it must be updated. The server does not
 > serve both.
 
-**Response `200` (re-activation — same device):**
+**Response `200` (re-activation — a redeemed code):**
 ```json
 {
   "code": 200,
   "message": "Already activated",
-  "tier": "eco",
-  "device_fingerprint": "a1b2c3d4e5f6...abcdef",
+  "tier": "free",
   "server_config": { "...": "as above" },
-  "udp_relay": false,
+  "udp_relay": true,
   "expires_at": "2026-05-14T00:00:00.000Z"
 }
 ```
 
-> Re-activating on the same device is a **success, not an error**, and it returns
+> Re-activating a redeemed code is a **success, not an error**, and it returns
 > the current tier config so a client can refresh stale connection parameters
-> (a rotated password, a moved server). The fingerprint is compared in
-> normalised form, so a device re-activating its own code is never mistaken for
-> a different one.
+> (a rotated password, a moved server). The code is not tied to a device, so the
+> request is not checked against a stored fingerprint — the student presenting
+> their own code again is the recovery path after a reinstall or a new machine.
+>
+> **`device_fingerprint` is echoed on the first-activation path only**, because
+> deployed 3.2.x clients read the key. It no longer means "the device this code
+> is bound to"; nothing is bound, and current clients ignore it.
 
 **Error responses:**
 
 | Status | Code | Message | Meaning |
 |:------:|:----:|---------|---------|
 | 400 | 400 | "Missing code" | No code provided |
-| 400 | 400 | "Missing device fingerprint" | No fingerprint provided |
 | 400 | 400 | "Invalid code format" | Luhn-mod-N validation failed |
-| 403 | 403 | "Code bound to another device" | Fingerprint mismatch |
 | 403 | 403 | "Code suspended" | Admin suspended the code |
-| **409** | **409** | **"This device is already activated on another Locus code."** | **One code per device. See below.** |
 | 404 | 404 | "Code not found" | Code doesn't exist in DB |
 | 410 | 410 | "Code expired" | Past expires_at date |
 | 429 | 429 | "Too many attempts" | Rate limit hit |
+| 500 | 500 | hub message | Unexpected failure |
 
 > Messages are the exact strings `activation.pb.js` returns; the client matches
 > on status code, but a support conversation will quote the text, so it is kept
 > verbatim here.
 
-> **The 409 is new, and it is not a 403 for a reason.** 403 already covers BOTH
-> "suspended" and "bound to another device", and the client tells them apart by
-> looking for the substring `suspended` in the message — a contract pinned by
-> `activation_contract_test`. Reusing 403 for a third condition would make a
-> deployed client report the wrong account state. The 409's message must
-> therefore also **avoid the word "suspended"**, because the oldest builds have
-> no 409 arm and render the text verbatim through their `ServerError` path.
+> **403 means suspended on this route, and the client recognises it by the frozen
+> substring `suspended`.** That wording is a contract pinned by
+> `activation_contract_test`; the operator's own `suspended_reason` is appended on
+> the heartbeat, never substituted here.
 >
-> **The fingerprint in the request is normalised** to `[a-zA-Z0-9]` server-side
-> before it is stored or compared. Clients should send it as-is; the hub does
-> the stripping, and doing it in two places is how the two halves drift.
+> **There is no "bound to another device" refusal and no 409 one-code-per-device
+> check.** Device binding was removed in 2026-10; the only record of redemption is
+> `codes.activated_at`, and re-activation is deliberately allowed. Do not put
+> authorisation back on the fingerprint — it is a rate-limit and support key, not
+> an identity.
 
 ---
 
@@ -216,7 +219,7 @@ update signal and a refreshed tier config.
 {
   "status": "ok",
   "server_time": "2026-09-19T10:09:42.945Z",
-  "tier": "eco",
+  "tier": "free",
   "update_available": "2.1.0",
   "update_url": "https://networkingguides.jadedns.uk/updates/2.1.0/locus-linux-amd64",
   "update_sha256": "abc123...",
@@ -326,15 +329,24 @@ There is no rate limit any more — nothing is looked up to limit.
 
 ---
 
-## 4. Admin Unbind
+## 4. Admin Release (the legacy `unbind-code` endpoint)
 
 ### `POST /api/admin/unbind-code`
 
-Releases a code back to unused, so it can be re-activated — by the same student
-on a new machine, or handed to a different one. It clears the single-use stamp
-(`codes.activated_at`); it does **not** touch the tier or the expiry, because
-releasing must not change what a code entitles its holder to.
-Requires valid admin API token.
+Clears the single-use stamp (`codes.activated_at`), returning the code to the
+unused pool so it can be activated by a **different** student. It is not how a
+student moves to a new machine: a redeemed code already re-activates and
+restores access without operator help.
+
+It does **not** touch the tier or the expiry, because releasing must not change
+what a code entitles its holder to. It records `unbound_at` and `unbind_reason`;
+`first_seen_at` deliberately survives, so the console can tell "never activated"
+from "issued once and released".
+Requires a valid admin API token.
+
+> The console's `codes.unbind` action calls the same operation through
+> `/api/admin/console`; this route is the legacy SSH-era endpoint and does not
+> accept the console's `X-Admin-Token` header.
 
 **Rate limit:** None (admin endpoint).
 
@@ -351,14 +363,14 @@ Requires valid admin API token.
 |-------|------|:--------:|-------------|
 | `admin_token` | string | ✅ | Must match `ADMIN_API_TOKEN` env variable on VPS |
 | `code` | string | ✅ | Code to unbind |
-| `reason` | string | ❌ | Optional reason for audit log |
+| `reason` | string | ❌ | Optional reason for the audit log; defaults to `"Requested by admin"` |
 
 **Response `200`:**
 ```json
 {
   "code": 200,
-  "message": "Code unbound successfully. Can now be activated on a new device.",
-  "tier": "eco",
+  "message": "Code released successfully.",
+  "tier": "free",
   "middleman": ""
 }
 ```
@@ -368,9 +380,10 @@ Requires valid admin API token.
 | Status | Code | Message |
 |:------:|:----:|---------|
 | 400 | 400 | "Missing code" |
-| 400 | 400 | "Code is not bound to any device" |
+| 400 | 400 | "Code has not been used yet" |
 | 403 | 403 | "Invalid admin token" |
 | 404 | 404 | "Code not found" |
+| 500 | 500 | "ADMIN_API_TOKEN not configured" |
 
 ---
 

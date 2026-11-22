@@ -245,7 +245,10 @@ const main = () => {
     }
     const replaced = replaceYamlLeaf(yaml, dotted, leaf, row.text)
     if (replaced === null) {
-      problems.push({ key: row.key, why: 'could not locate the leaf to replace' })
+      problems.push({
+        key: row.key,
+        why: 'could not locate the leaf to replace',
+      })
       continue
     }
     yaml = replaced
@@ -368,9 +371,7 @@ const replaceYamlLeaf = (yaml, dotted, leaf, value) => {
         // Quote only when the value needs it, and double any embedded quote the
         // way this file already does (`current user''s home`).
         const needsQuote = /[:#'"]|^\s|\s$/.test(value)
-        const rendered = needsQuote
-          ? `'${value.replace(/'/g, "''")}'`
-          : value
+        const rendered = needsQuote ? `'${value.replace(/'/g, "''")}'` : value
         const pad = ' '.repeat(lineIndent)
         const keyRendered = /^[a-z][\w-]*$/i.test(want) ? want : `'${want}'`
         lines[j] = `${pad}${keyRendered}: ${rendered}`

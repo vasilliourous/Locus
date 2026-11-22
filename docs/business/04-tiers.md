@@ -45,8 +45,8 @@ Source of truth for the caps: `server/modules/04-tc.sh` (the `apply_tc_now` and
 `server/modules/02-shadowsocks.sh`. The free tier's 1 Mbps cap **is in the tree**
 (`04-tc.sh`, port 8443) and the allowance is sent by the hub on every heartbeat
 as `free_allowance_mb` (`server/pb_hooks/heartbeat.pb.js`); both are held in
-agreement by `check-consistency.sh` §23, which since this change holds the
-**paid** tier's cap and UoT endpoint to the same standard (§4.7).
+agreement by `check-consistency.sh` §23, which holds the **paid tiers'** caps
+and UoT endpoints to the same standard (§4.7).
 
 > **All three UDP listeners are separate, and that is a credential requirement.**
 > A sing-box shadowsocks inbound is bound to **one** password, so serving two
@@ -63,13 +63,6 @@ agreement by `check-consistency.sh` §23, which since this change holds the
 > tier by that string. The customer-facing name is **Full**. This is the same
 > asymmetry §4.5 describes for `eco`/`free`, for the same reason — and it is why
 > **no wire name changed** in this merge (§4.7).
-
-Source of truth for the caps: `server/modules/04-tc.sh` (the `apply_tc_now` and
-`create_tc_service` calls); for the UoT listener,
-`server/modules/02-shadowsocks.sh`. The free tier's 1 Mbps cap **is in the tree**
-(`04-tc.sh`, port 8443) and the allowance is sent by the hub on every heartbeat
-as `free_allowance_mb` (`server/pb_hooks/heartbeat.pb.js`); both are held in
-agreement by `check-consistency.sh` §23.
 
 > **There is ONE row for the free plan: `free`.** The hub used to seed a second
 > row named `eco` against the same port 8443, kept in case a code minted in the
@@ -99,8 +92,10 @@ Consequences:
 
 - The old "Stealth's jitter makes gaming unplayable → upgrade to Strike"
   argument no longer has a mechanism behind it. There is no jitter generator.
-- **Tier differentiation is now: the data allowance and whether UoT is on.**
-  That is the entire ladder — two tiers, one paid.
+- **Tier differentiation became the data allowance and whether UoT was on.**
+  That was the ladder at the time — two tiers, one paid. §4.2.5 later re-added a
+  paid rung on new ports and made **rate** the differentiator again, with UDP on
+  every plan.
 
 ### 4.2.2 Eco is replaced by Free
 
@@ -239,11 +234,6 @@ differentiator is **rate**, in three steps rather than two.
   the top. What it sells over the rungs below is not a capability but a *rate*:
   100× the throughput over Free, 4× over Budget, which is the difference between
   "the game connects" and "the game is worth playing".
-- **The 100 Mbps cap is not a limitation to overcome.** It is far above what any
-  game or a household's worth of streaming needs (Valorant ~5 Mbps, Fortnite
-  ~20 Mbps), and it exists to stop one user saturating the droplet. It is the
-  same rate Stealth charged $4 for; the merge did not lower what a paid student
-  gets, it lowered the count of things they have to choose between.
 - **The 100 Mbps cap is not a limitation to overcome.** It is far above what any
   game or a household's worth of streaming needs (Valorant ~5 Mbps, Fortnite
   ~20 Mbps), and it exists to stop one user saturating the droplet. It is the
@@ -399,9 +389,9 @@ on, and punishing the casual user is the opposite of the point.
 
 ### 4.4.6 The bandwidth cost of free users
 
-Every free user consumes real bandwidth on the same 1 vCPU / 454 MB droplet
-and the same N4L link as paying users. At 1 Mbps and 10 GB, an individual
-free user is cheap; the risk is *volume*.
+Every free user consumes real bandwidth on the same single droplet and the same
+N4L link as paying users. At 1 Mbps and 10 GB, an individual free user is cheap;
+the risk is *volume*.
 
 - **10 GB × 1,000 free users = 10 TB/month**, which is not cheap and not small.
 - The cheap tiers protect themselves: a free user cannot exceed 1 Mbps, so

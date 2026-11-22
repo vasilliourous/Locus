@@ -37,7 +37,7 @@ Because the free quota is enforced **client-side**
 - The cap itself is a `tc` value on the hub — that part propagates as a
   normal config change (but note it is fixed in `04-tc.sh`, so it takes a
   `setup.sh` re-run rather than a console edit).
-- The **5 GB allowance** is a number the client holds. Changing it means
+- The **free allowance** is a number the client holds. Changing it means
   telling existing clients the new number through the same config channel.
 - A client that is offline during the change keeps the old number until it
   heartbeats.

@@ -13,8 +13,8 @@ verified-against: docs/state.toml
 | **The job it does** | Lets a student on school WiFi reach games, video, and sites the school firewall blocks. |
 | **How** | Shadowsocks 2022 over **TCP** — no TLS fingerprint for the firewall to match, no UDP dependency for the base tiers. |
 | **Form** | Signed desktop app (Windows-primary; macOS/Linux builds exist), activation-code gated, no self-signup. |
-| **Tiers** | **Free · Full.** Two plans, no ladder. See [`04-tiers.md`](04-tiers.md). |
-| **Prices** | **$0 · $5** per month. See [`05-pricing.md`](05-pricing.md). |
+| **Tiers** | **Free · Budget · Full.** Three plans on separate endpoints. See [`04-tiers.md`](04-tiers.md); Budget's deployment status is tracked in [`../reference/STILL-OPEN.md`](../reference/STILL-OPEN.md). |
+| **Prices** | **$0 · $2 · $5** per month. See [`05-pricing.md`](05-pricing.md). |
 | **Distribution** | Friends act as middlemen and sell paper code cards for cash. See [`08-distribution.md`](08-distribution.md). |
 | **Cost base** | One ~$6/mo VPS. See [`06-unit-economics.md`](06-unit-economics.md). |
 | **Ambition** | Cover costs, pay a coffee, stay a side project. See [`12-scale-and-ceiling.md`](12-scale-and-ceiling.md). |

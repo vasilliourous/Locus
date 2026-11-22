@@ -501,7 +501,7 @@ fi
 # to go and generate some before anything can be sold. Set FIRST_BATCH to mint
 # them during deploy.
 #
-#   FIRST_BATCH=20                  each tier gets 20 codes (free/full)
+#   FIRST_BATCH=20                  free and strike each get 20 codes (Budget is console-minted)
 #   FIRST_BATCH_FREE=50             per-tier overrides
 #   FIRST_BATCH_STRIKE=10           (the paid tier's row name is `strike`)
 #   FIRST_BATCH_MIDDLEMAN=Sarah     recorded against every code in the batch
@@ -631,7 +631,7 @@ log ""
 log "   PocketBase UI:  https://${DOMAIN}/_/"
 log "                   admin: $(grep '^PB_ADMIN_EMAIL=' /root/.pb_admin_creds 2>/dev/null | cut -d= -f2 || echo 'see /root/.pb_admin_creds')"
 log ""
-log "   Tier configs:   seeded automatically (free/strike, plus legacy eco)"
+log "   Tier configs:   seeded automatically (free/budget/strike)"
 log "   Backups:        pocketbase-backup.timer (hourly -> B2)"
 log "   SSH access:     fail2ban protected (no ufw rate-limit on port 22)"
 log ""

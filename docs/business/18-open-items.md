@@ -23,12 +23,13 @@ is done, and what is left:
 - The Eco/8443 slot is capped at 1 Mbps in `04-tc.sh` — both the applied class
   and the reboot unit, which is the pair that silently disagree if you edit one
   ([`04-tiers.md`](04-tiers.md#45-the-deploy-time-choice-renaming-eco--free)).
-- A `free` `tier_configs` row is seeded beside the legacy `eco` one, so codes
-  minted now and codes already in the field both resolve.
+- A single `free` `tier_configs` row is seeded against the 8443 slot; the
+  legacy `eco` duplicate row was removed on 2026-10-06 after the live hub was
+  checked and held no `eco` codes.
 - The allowance is sent on every heartbeat (`free_allowance_mb`,
   `free_throttle_mbps`), so it can change without a client release
   ([`15-continuity.md`](15-continuity.md#152-the-free-tiers-continuity-question-new)).
-- Client-side counting of the 5 GB window, the 80% line and the classification —
+- Client-side counting of the 10 GB window, the 80% line and the classification —
   one pure module, `client/src-tauri/src/locus/usage.rs`, fake-clock tested.
 - The usage bar, the warning and the throttle state on the connection screen.
 - `check-consistency.sh` §23 holds all of it in agreement, and was observed
@@ -63,18 +64,18 @@ is done, and what is left:
 **Before a middleman sells a free card**, the throttle application and a hub
 deploy are the two items that matter.
 
-### P2 — ~~Confirm the price ladder~~ DONE: the ladder is $0 / $5 and there is no ladder
+### P2 — ~~Confirm the price ladder~~ DONE: the ladder is $0 / $2 / $5
 
-**Decided and written, not yet sold.** The offer is two plans — Free ($0, 1 Mbps,
-10 GB) and Full ($5, 100 Mbps unmetered + UDP) — with a $12 term pass
-([`05-pricing.md`](05-pricing.md)). This replaces the $0/$4/$7 ladder, which is
-now historical.
+**Decided and written, not yet sold.** The offer is three plans — Free ($0,
+1 Mbps, 10 GB), Budget ($2, 25 Mbps unmetered + shaped UDP) and Full ($5,
+100 Mbps unmetered + unshaped UDP) — with a $12 term pass
+([`05-pricing.md`](05-pricing.md), [`04-tiers.md`](04-tiers.md#425-budget-is-added-as-a-third-tier--and-it-is-not-a-reborn-stealth)).
+This replaces the $0/$4/$7 ladder, which is now historical.
 
-> **Since 2026-11-12 the ladder has three rungs again — Free / Budget ($2) /
-> Full ($5)** ([`04-tiers.md`](04-tiers.md#425-budget-is-added-as-a-third-tier--and-it-is-not-a-reborn-stealth)).
-> That is an addition to the 2026-10 merge, not a reversal of it: Budget is a
-> distinct endpoint rather than a second price on one, which is what made the
-> original pair redundant. The deployment work it adds is P2.0 above.
+> **Budget was added on 2026-11-12 and is an addition to the 2026-10 merge, not a
+> reversal of it.** It is a distinct endpoint rather than a second price on one,
+> which is what made the original Stealth/Strike pair redundant. The deployment
+> work it adds is P2.0 above.
 
 **What remains for the operator:**
 

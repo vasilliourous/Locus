@@ -100,7 +100,7 @@ The commercial plan: the product as it ships, and how it is run as a business.
 | [`business/01-overview.md`](business/01-overview.md) | live | The business in one page. |
 | [`business/02-market.md`](business/02-market.md) | live | Who the customer is, and why the incumbents fail them. |
 | [`business/03-product.md`](business/03-product.md) | live | What the product is: client, hub, activation code. |
-| [`business/04-tiers.md`](business/04-tiers.md) | live | **The tier table** — Free and Full, ports, caps, the free tier's design in full. The owner of the live UoT facts. |
+| [`business/04-tiers.md`](business/04-tiers.md) | live | **The tier table** — Free, Budget and Full, ports, caps, the free tier's design in full. The owner of the live UoT facts. |
 | [`business/05-pricing.md`](business/05-pricing.md) | live | The price ladder, re-derived, with reasoning and sensitivity. |
 | [`business/06-unit-economics.md`](business/06-unit-economics.md) | live | Cost base, breakeven, and the one unvalidated estimate. |
 | [`business/07-billing.md`](business/07-billing.md) | live | Monthly vs term pass. |

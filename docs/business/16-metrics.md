@@ -85,13 +85,12 @@ it becomes important, that is the first thing worth instrumenting
 - Per-user bandwidth.
 - Revenue (inferred from code counts and the price ladder, by hand).
 
-> **The one simplification the merge brought.** "Revenue" used to need a
-> per-tier price table, because a code count told you nothing until you knew
-> whether each code was Stealth or Strike. Now every paid code is worth the same
-> $5, so **paid code count × $5** is the whole calculation. It is still
-> hand-computed and still approximate (it cannot see refunds, suspensions, or
-> term passes sold at the discount), but the arithmetic stopped being a source of
-> error — a small, real operational win from deleting a tier.
+> **The merge's simplification is gone again.** For a while every paid code was
+> worth the same $5, so **paid code count × $5** was the whole calculation. With
+> Budget at $2 and Full at $5 ([`04-tiers.md`](04-tiers.md#425-budget-is-added-as-a-third-tier--and-it-is-not-a-reborn-stealth)),
+> the count alone no longer gives revenue; the code's `tier` field has to be
+> included. It is still hand-computed and still approximate (it cannot see
+> refunds, suspensions, or term passes sold at the discount).
 - Money owed to or by a middleman ([`07-billing.md`](07-billing.md#74-cash-handling)).
 
 > **There is no analytics beyond the dashboard.** If a metric matters, it is

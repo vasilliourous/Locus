@@ -74,10 +74,10 @@ product repeatable — see [`07-billing.md`](07-billing.md).
 > ([`04-tiers.md`](04-tiers.md#44-the-free-tier-in-full)).
 >
 > **A code is single-use, not device-bound.** Once activated it carries an
-> `activated_at` stamp and cannot be activated a second time — but it is not
-> tied to which machine did it, so the same student reinstalling on the same
-> laptop simply re-enters the same code. Moving back to a fresh machine is a
-> re-entry, not an operator operation; `codes.unbind` (release) exists only to
+> `activated_at` stamp. Re-entering the same code is not refused — it returns
+> "Already activated" and restores access — and nothing records which machine
+> did it. The same student reinstalling on the same laptop, or moving to a fresh
+> one, simply re-enters the same code; `codes.unbind` (release) exists only to
 > hand the code to a *different* student.
 
 ## 3.4 What the customer never touches

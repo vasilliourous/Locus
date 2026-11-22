@@ -794,22 +794,25 @@ fn is_suspension(reason: &str) -> bool {
 
 /// The hub has definitively refused this device: suspended, expired, or unknown.
 ///
-/// Tears the entitlement down and stops the tunnel. Leaving it up would keep
+/// Stops the tunnel and records the refusal. Leaving the tunnel up would keep
 /// working on the strength of a stale local record, which is precisely what
 /// suspension exists to prevent.
 ///
 /// # A suspension is reversible, and nothing else is
 ///
-/// Both branches stop the tunnel and the loop; the difference is what happens to
-/// the CREDENTIAL:
+/// Both branches stop the tunnel; the difference is what happens to the
+/// credential and to the heartbeat loop:
 ///
 ///   * **Suspended** — the code is kept, along with the tier and expiry, and a
-///     flag is set. An operator unsuspending this code restores the session on
-///     the next beat with no re-entry and no restart. Deleting the code here would
-///     make "undo" mean "find your card again", on every machine.
+///     flag is set. The loop KEEPS BEATING on `SUSPENDED_INTERVAL`, because the
+///     loop is the only channel that can learn an operator lifted the
+///     suspension. An unsuspend then restores the session with no re-entry and
+///     no restart. Deleting the code here would make "undo" mean "find your card
+///     again", on every machine.
 ///   * **Anything else** (unknown code, expiry, a credential the hub will not
-///     accept) — the code is cleared, because there is nothing to come back to.
-///     A code the hub does not recognise is not going to start being recognised.
+///     accept) — the code is cleared and the loop is stopped, because there is
+///     nothing left to authenticate with. A code the hub does not recognise is
+///     not going to start being recognised.
 async fn handle_refusal(reason: &str) {
     logging!(warn, Type::Config, "[locus] the hub refused this device: {reason}");
 

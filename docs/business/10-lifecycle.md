@@ -29,11 +29,13 @@ The legacy plans had almost none of this. The live system does.
 rather than *memory-based* — a real operational maturity the legacy business
 did not have.
 
-## 10.0 One code, one activation — and almost no support cost
+## 10.0 One code, one redemption — and almost no support cost
 
-A code is **single-use**: activating it stamps `activated_at` and a second
-activation of the same code is refused (HTTP 409, *"Already activated"*). That
-is the whole rule. The code is **not** tied to a device.
+A code is **single-use**: activating it stamps `activated_at`, which is the
+whole record of redemption. A later activation is **not refused** — it returns
+HTTP 200, *"Already activated"*, and the current tier config, which is the
+student's recovery path after a reinstall, a reset or a new machine. The code is
+**not** tied to a device.
 
 > **Corrected 2026-10.** This section previously described a device-binding
 > model — one code per device, a `device_bindings` collection, `codes.rebind` —

@@ -20,10 +20,10 @@ this file links, it does not restate. Retired material is in `archive/` and
 
 | Term | Meaning | Notes |
 |---|---|---|
-| **hub** | The deployed server: the VPS running the PocketBase hooks, Caddy and the two Shadowsocks services. | **Prefer "hub"** in prose. "server" means the same thing and survives in older text; `server/` is the code directory. |
+| **hub** | The deployed server: the VPS running the PocketBase hooks, Caddy and the three Shadowsocks services. | **Prefer "hub"** in prose. "server" means the same thing and survives in older text; `server/` is the code directory. |
 | **client** | The shipping desktop app at `client/` — a Tauri 2 fork of Clash Verge Rev tunnelling through mihomo. | `legacy/wails-client/` is the retired pre-Tauri client and does not ship. |
-| **tier** | A service level, rendered as a *plan*. The row names `eco` and `strike` are frozen wire names. | Canonical table: [`business/04-tiers.md`](business/04-tiers.md) §4.1. Both plans carry UDP; the differentiator is rate. |
-| **plan** | What a student calls a tier: **Free** or **Full**. | The hub still sends the row name; one component maps wire name → label, so the two cannot drift. |
+| **tier** | A service level, rendered as a *plan*. The row names `free`, `budget` and `strike` are frozen wire names; the free plan's on-box infrastructure still says `eco`. | Canonical table: [`business/04-tiers.md`](business/04-tiers.md) §4.1. All plans carry UDP; the differentiator is rate. |
+| **plan** | What a student calls a tier: **Free**, **Budget** or **Full**. | The hub still sends the row name; one component maps wire name → label, so the two cannot drift. |
 | **code** | A student's activation code, `RQ-XXXX-XXXX-XXXX-C`. | The unit of entitlement. **Single-use and tied to no device** — device binding was removed in 2026-10. See [`reference/DEVICE-IDENTITY.md`](reference/DEVICE-IDENTITY.md). |
 | **term** | How long one purchase lasts, measured from activation. | `term_days` on the code, materialised into `expires_at`. |
 | **middleman** | The reseller who sells a card for cash. | The distribution model; see [`business/08-distribution.md`](business/08-distribution.md). |
@@ -38,8 +38,10 @@ only transport that consistently survives N4L's detection. The reasoning is
 research, not a rule: [`history/school-vpn-blocking-implementation.md`](history/school-vpn-blocking-implementation.md)
 and [`history/comprehensive-vpn-blocklist.md`](history/comprehensive-vpn-blocklist.md).
 
-Two plans, **Free** (row `eco`) and **Full** (row `strike`), both with
-server-enforced tc caps. Ports, caps, prices and the free tier's design in full
+Three plans — **Free** (row `free`), **Budget** (row `budget`) and **Full** (row
+`strike`) — each with server-enforced tc caps. The free plan's infrastructure
+still carries the on-box `eco` name; the `eco` *tier row* was removed, not
+renamed. Ports, caps, prices and the free tier's design in full
 are [`business/04-tiers.md`](business/04-tiers.md) §4.1 — the canonical table,
 guarded against the tree. It is not copied here: a second copy is a second thing
 that can drift.

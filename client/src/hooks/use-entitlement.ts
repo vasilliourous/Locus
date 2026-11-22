@@ -189,7 +189,10 @@ export const useEntitlement = (): Entitlement => {
       } catch (error) {
         // Without the event the focus/resume/online triggers and the poll still
         // work; a webview that refuses the event API must not lose the gate.
-        console.warn('[use-entitlement] could not subscribe to entitlement events', error)
+        console.warn(
+          '[use-entitlement] could not subscribe to entitlement events',
+          error,
+        )
       }
     })()
 

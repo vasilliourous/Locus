@@ -78,8 +78,8 @@ boundary between what the tree now says and what the hub now does.
 | Piece | Status |
 |---|---|
 | `04-tc.sh` — 8444 retired, 8445 at 100mbit | **BUILT** — and the module's existing filter flush drops the stale 8444 class on its next run. |
-| `02-shadowsocks.sh` — no `stealth` service | **BUILT** — a fresh box gets two shadowsocks instances, not three. |
-| `seed-pb.py` — no `stealth` row | **BUILT** — the seed loop enumerates two tiers. |
+| `02-shadowsocks.sh` — no `stealth` service | **BUILT** — a fresh box gets three shadowsocks instances (Free, Budget, Full), none of them `stealth`. |
+| `seed-pb.py` — no `stealth` row | **BUILT** — the seed loop enumerates three tiers; `stealth` is not one of them. |
 | The client's tier name | **BUILT** — the badge and palette carry the merged tier's key; the hub keeps emitting `strike`. |
 | `check-consistency.sh` §23 for the paid tier, and §27 for the console list | **BUILT** — asserted and observed failing against the pre-merge tree. |
 | **The retired `stealth` service on a live box** | **NOT DONE — and cannot be, from the tree.** `setup.sh` is skip-if-exists and will not remove it. This is an operator step ([`14-risks.md`](14-risks.md#148-the-tier-merge-strands-a-live-endpoint-and-nothing-removes-it)). |

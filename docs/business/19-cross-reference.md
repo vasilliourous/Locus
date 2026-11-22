@@ -16,7 +16,7 @@ verified-against: docs/ (the link graph itself)
 | What am I actually selling? | [`03-product.md`](03-product.md), [`04-tiers.md`](04-tiers.md) |
 | **How does a student keep access / pay again?** | [`07-billing.md`](07-billing.md#75-the-renewal-routine--the-operational-job-this-creates), [`10-lifecycle.md`](10-lifecycle.md) |
 | **What does "a term" mean, and how do I renew?** | [`10-lifecycle.md`](10-lifecycle.md), [`07-billing.md`](07-billing.md#75-the-renewal-routine--the-operational-job-this-creates) |
-| **My student changed laptops — what do I do?** | [`10-lifecycle.md`](10-lifecycle.md#100-one-code-one-activation--and-almost-no-support-cost) — usually *nothing*; the code is not device-bound |
+| **My student changed laptops — what do I do?** | [`10-lifecycle.md`](10-lifecycle.md#100-one-code-one-redemption--and-almost-no-support-cost) — usually *nothing*; the code is not device-bound |
 | **What happens if a student loses their card?** | [`../reference/DEVICE-IDENTITY.md`](../reference/DEVICE-IDENTITY.md) — the client keeps the code, so they usually still have access |
 | What does the free tier do? | [`04-tiers.md`](04-tiers.md#44-the-free-tier-in-full), [`11-growth.md`](11-growth.md#113-the-free-tier-as-the-acquisition-engine) |
 | What do I charge? | [`05-pricing.md`](05-pricing.md), [`07-billing.md`](07-billing.md) |
@@ -50,7 +50,7 @@ status.
 |---|---|
 | Free replaces Eco | [`04-tiers.md`](04-tiers.md#422-eco-is-replaced-by-free) |
 | Stealth and Strike merge into one paid plan | [`04-tiers.md`](04-tiers.md#424-stealth-and-strike-are-merged-into-one-paid-tier) |
-| The plan is $0 / $5, with no ladder | [`05-pricing.md`](05-pricing.md#52-the-offer) |
+| The plan is $0 / $2 / $5, on separate endpoints | [`05-pricing.md`](05-pricing.md#52-the-offer) |
 | The survivor is called `strike` on the box | [`04-tiers.md`](04-tiers.md#46-the-same-choice-made-again-for-stealth--merged-into-full) |
 | The free allowance is 10 GB | [`05-pricing.md`](05-pricing.md#55-why-the-free-allowance-is-10-gb-and-not-5) |
 | Free is a data cap, not a user cap | [`04-tiers.md`](04-tiers.md#442-why-a-data-allowance-not-a-user-cap) |

@@ -7,10 +7,12 @@ authoritative-for: the price ladder, and the reasoning behind each step
 verified-against: docs/state.toml
 ```
 
-> **Status: decided (this change).** The offer is **two plans**: **Free at $0**
-> and **Full at $5/month**. The three-step ladder ($0/$4/$7) that this file used
-> to describe is gone, and the reasoning below is kept so the number can be
-> re-justified rather than merely re-stated.
+> **Status: decided.** The offer is **three plans**: **Free at $0**, **Budget at
+> $2/month** and **Full at $5/month**. Budget was added on 2026-11-12 as a paid
+> rung on its own ports, credential and cap — not a reborn Stealth; the reasoning
+> is in [`04-tiers.md`](04-tiers.md) §4.2.5. The older ladders this file used to
+> describe are kept below so each number can be re-justified rather than merely
+> re-stated.
 
 ---
 
@@ -27,26 +29,32 @@ verified-against: docs/state.toml
   buys **100× the rate**, which is the difference between a game that connects
   and a game worth playing. That is a weaker-sounding but more honest claim, and
   it is the one the product can actually keep.
-- **The floor is a sanity check only:** the paid plan must clear its share
-  of the ~$6/mo VPS many times over. At $5, two paying students pay for the hub.
+- **The floor is a sanity check only:** the paid plans must clear their share
+  of the ~$6/mo VPS many times over. At $5, two Full students pay for the hub;
+  Budget contributes at $2 and is not expected to carry it alone.
 
 ---
 
 ## 5.2 The offer
 
-There is no ladder. There are **two plans and one price**:
+There is a ladder again, but its paid rungs are **different endpoints**, not the
+same endpoint at two rates:
 
 | Plan | Price | What it is |
 |---|:--:|---|
 | **Free** | **$0** | 1 Mbps, 10 GB/month, then throttled, **UDP included**. The funnel — an install, not a destination. See [`04-tiers.md`](04-tiers.md#44-the-free-tier-in-full). |
-| **Full** | **$5** | 100 Mbps, unmetered, **UDP included**. The whole paid product. |
+| **Budget** | **$2** | 25 Mbps, unmetered, **UDP included and shaped**. Comfortable everyday use without buying Full's rate. |
+| **Full** | **$5** | 100 Mbps TCP, unmetered, **UDP included and unshaped**. The whole paid product. |
 
-> **Why one paid tier, and not two.** Stealth and Strike were the same plan at
-> two rates — the same kernel, the same unmetered data, differing only by the
-> UDP endpoint and a 200 Mbps cap no game could use
+> **Why Budget is not a reborn Stealth.** Stealth and Strike were the same plan
+> at two rates — the same endpoint, the same unmetered data, differing only by a
+> 200 Mbps cap no game could use
 > ([`04-tiers.md`](04-tiers.md#424-stealth-and-strike-are-merged-into-one-paid-tier)).
-> A second paid tier asked the student to make a comparison that had no real
-> answer, so the merge deletes the question instead of answering it.
+> Budget has its own TCP port, its own UoT listener, its own password and its own
+> `tc` classes, so it cannot collapse into Full by a config edit. It answers a
+> different question — "do I want this to be comfortable, without paying for
+> games at full rate?" — rather than re-asking "which of these two rates do I
+> want?"
 
 ---
 
@@ -59,7 +67,8 @@ There is no ladder. There are **two plans and one price**:
 
 This is why Full is **$5** and not $12. A high premium price buys margin on a
 minority of users while risking the thing that actually sells the product, and
-there is no longer a second tier for that margin to hide behind.
+there is no premium tier for that margin to hide behind — Budget is a $2 rung,
+not a second premium one.
 
 > **The risk this raise creates, stated plainly.** Giving UDP away removed the
 > one *binary* reason a light user had to pay — a student who only played
@@ -71,17 +80,19 @@ there is no longer a second tier for that margin to hide behind.
 
 ### 5.3.2 The gap that matters is free → paid, and it is the only gap
 
-With one paid tier there is exactly **one** decision a student makes: pay or
-don't. That is the honest shape of this product — there was never a meaningful
-second choice — and it means every pricing effort belongs on the free→paid step:
+Budget gives the paid side a second decision — comfort at $2 or Full at $5 — but
+the decision that decides the business is still **free → paid**. Every pricing
+effort belongs on that step:
 
 - **Make Free genuinely useful**, so the app stays installed
   ([`11-growth.md`](11-growth.md)).
-- **Make the step obvious**, which the 1 Mbps → 100 Mbps jump does on its own.
+- **Make the step obvious**, which the 1 Mbps → 25 Mbps / 100 Mbps jump does on
+  its own.
 
 > **This supersedes "the paid gap is small on purpose."** That principle was
-> correct for a two-tier paid ladder. With one paid tier it is not small — it
-> does not exist.
+> correct for a paid ladder with no free tier. Once Free exists, the gap that
+> matters is the one from $0, and it is not small — it is the whole product
+> decision.
 
 ### 5.3.3 The real anchor is $0
 
@@ -102,8 +113,13 @@ any more — both plans carry it, so the *rate* is doing the whole job.)
 
 ## 5.4 Sensitivity
 
-Revenue at several scale points on the **Free / Full** offer. Only paid users
-contribute, so the free mix matters as much as the headcount.
+Revenue at several scale points on the **pre-Budget Free / Full** offer. Only
+paid users contribute, so the free mix matters as much as the headcount.
+
+> **This table has not been re-derived for Budget.** Budget makes gross revenue
+depend on the Budget/Full mix, and that mix is unmeasured. Do not read these
+numbers as a three-tier forecast; they are kept as the two-plan baseline, and
+re-deriving them needs a real mix rather than an invented one.
 
 | Total users | Mix (Free/Full) | Paid users | Gross/mo | After ~25% middleman | Net/mo |
 |:--:|:--:|:--:|:--:|:--:|:--:|
