@@ -1,4 +1,4 @@
-// Locus Code Lookup Hook — PocketBase 0.22 compatible
+// Chrysalis Code Lookup Hook — PocketBase 0.22 compatible
 //
 // READ-ONLY pre-check for activation codes. The client calls this from the
 // activation screen so a student learns whether their code is actually
@@ -66,7 +66,7 @@ routerAdd("POST", "/api/code-lookup", function(e) {
         var bootstrapId = "";
         try {
             var allHeaders = $apis.requestInfo(e).headers || {};
-            var rawId = allHeaders["x-locus-bootstrap"] || allHeaders["X-Locus-Bootstrap"] || "";
+            var rawId = allHeaders["x-chrysalis-bootstrap"] || allHeaders["X-Chrysalis-Bootstrap"] || "";
             rawId = String(rawId).trim();
             if (rawId.length >= 16 && rawId.length <= 64) bootstrapId = rawId;
         } catch(ex) { bootstrapId = ""; }

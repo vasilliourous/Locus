@@ -3,14 +3,14 @@
 
 WHY THIS EXISTS
 
-`client/src/services/locus.ts` hand-writes a TypeScript interface for every Rust
+`client/src/services/chrysalis.ts` hand-writes a TypeScript interface for every Rust
 type that crosses the Tauri IPC boundary. Nine of them today:
 
-    LocusStatus  ValidateCodeResult  ActivationResult  ConnectionResult
+    ChrysalisStatus  ValidateCodeResult  ActivationResult  ConnectionResult
     UpdateStatus  UpdateProgress  UdpStatus  AllowanceStatus  SubscriptionStatus
 
 Nothing makes them agree. `check-consistency.sh` §33 asserts that for
-`LocusStatus` alone — one type out of nine — and it does so by regex-matching
+`ChrysalisStatus` alone — one type out of nine — and it does so by regex-matching
 two files. The other eight have no check at all, so the drift there is silent by
 construction: a field added to Rust and not to TypeScript serialises and is
 ignored (a feature that does nothing); a field read by TypeScript that Rust
@@ -31,7 +31,7 @@ a check on the generator rather than a check on nine hand-maintained files.
 
 MODES
 
-  --write   Regenerate client/src/services/locus.generated.ts from the Rust.
+  --write   Regenerate client/src/services/chrysalis.generated.ts from the Rust.
   --check   (default) Regenerate into memory and fail if the committed file
             differs. This is what CI runs: a developer who edits the Rust types
             without running the generator fails the build with a diff.
@@ -58,13 +58,13 @@ import sys
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
-SOURCE = REPO / "client" / "src-tauri" / "src" / "cmd" / "locus.rs"
-OUTPUT = REPO / "client" / "src" / "services" / "locus.generated.ts"
+SOURCE = REPO / "client" / "src-tauri" / "src" / "cmd" / "chrysalis.rs"
+OUTPUT = REPO / "client" / "src" / "services" / "chrysalis.generated.ts"
 
 HEADER = """\
 // AUTO-GENERATED — do not edit by hand.
 //
-// Source: client/src-tauri/src/cmd/locus.rs
+// Source: client/src-tauri/src/cmd/chrysalis.rs
 // Tool:   server/scripts/gen-ts-contract.py
 //
 // Every type in this file is a mechanical mirror of a Rust type that crosses the
@@ -75,7 +75,7 @@ HEADER = """\
 // To change a wire shape, change the Rust type and run:
 //   python3 server/scripts/gen-ts-contract.py --write
 //
-// Prose documentation for these types lives in services/locus.ts beside the
+// Prose documentation for these types lives in services/chrysalis.ts beside the
 // functions that return them. This file carries the Rust doc comments as
 // context, but the decision to document a field belongs with the hand-written
 // file, which is not generated.

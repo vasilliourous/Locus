@@ -27,14 +27,14 @@ before touching this again — this entry is only the part that is not proven.
 names, then restored):**
 
 - `a_suspension_without_a_code_is_not_a_suspension` and
-  `clearing_the_entitlement_clears_the_suspension` in `locus::store`. The second
+  `clearing_the_entitlement_clears_the_suspension` in `chrysalis::store`. The second
   one first failed against *its own explanatory comment*, which is why the runtime
   test module now has `strip_line_comments`; the guards are asserted on code, not
   prose.
-- `a_suspension_keeps_the_heartbeat_beating` in `locus::runtime` — both halves
+- `a_suspension_keeps_the_heartbeat_beating` in `chrysalis::runtime` — both halves
   observed red: against a restored `stop()` in the suspension arm, and against a
   restored `Refused => break` in the loop.
-- `a_hub_that_never_answered_is_not_a_hub_that_is_behind` in `cmd::locus`.
+- `a_hub_that_never_answered_is_not_a_hub_that_is_behind` in `cmd::chrysalis`.
 - `gateScreen`'s five cases in `use-entitlement.test.ts` — including the pair that
   trapped the reporter (`activated: false, suspended: true` → the activation gate).
 - All three Rust gates and every frontend gate: `cargo test` (709 lib plus the
@@ -55,7 +55,7 @@ names, then restored):**
    in the field.** The client now keeps beating at `SUSPENDED_INTERVAL` while
    suspended, which is what makes the reinstatement reachable; whether the hub's
    403/200 pair behaves as the hook reads is unobserved here. Needs a code, a
-   running client, and `locus_check_subscription` to force the beat.
+   running client, and `chrysalis_check_subscription` to force the beat.
 3. **That a device suspended across a restart re-arms correctly.** `resume()` is
    exercised only insofar as it is idempotent and no-ops without a code; the path
    "launch → first beat refused → still watching → operator unsuspends" has not
@@ -301,7 +301,7 @@ firewall opens 8447. Each assertion was observed failing first.
   now proven; the rate is not.** `client/src-tauri/tests/tunnel_end_to_end.rs`
   (2026-10-29) runs a **real** `sing-box` Shadowsocks-2022 listener and the real
   mihomo sidecar against each other on loopback, sends a datagram through the
-  `Locus-UoT` outbound, and gets it back — with the server logging
+  `Chrysalis-UoT` outbound, and gets it back — with the server logging
   `to sp.v2.udp-over-tcp.arpa:0`, which is the v2 revision `tier.rs` pins. So the
   negotiation, the framing and the cipher all agree across the boundary for the
   first time. This test was **observed failing** against the 3.3.x shape (the UoT
@@ -466,7 +466,7 @@ rate limit that mirrors Caddy's.
   hand, and a raw-address Shadowsocks profile in Clash Verge Rev works, but the
   app does not form the connection. Candidates and the measurement that settles
   each are in `MAINTENANCE-TUNNEL.md` §8 — the first is whether the shipped build
-  carries `LOCUS_FREE_TIER_KEY` at all, which until 2026-11-19 nothing reported
+  carries `CHRYSALIS_FREE_TIER_KEY` at all, which until 2026-11-19 nothing reported
   (`build_stamp()` named only the activation key; it now names both, guarded by
   `the_build_stamp_reports_the_maintenance_tunnel_too`, shown failing against the
   old line).
@@ -474,14 +474,14 @@ rate limit that mirrors Caddy's.
   each independently made the tunnel inert: `Failure::Refused` did not trigger the
   fallback (and a filtering appliance answers either way depending on how far it
   gets); the generated outbound dialled `127.0.0.1`, i.e. the student's own
-  machine; and `LOCUS_ACTIVATION_TUNNEL_KEY` was absent from every shipped build,
+  machine; and `CHRYSALIS_ACTIVATION_TUNNEL_KEY` was absent from every shipped build,
   with nothing in the artifact saying so. All three are fixed, each with a guard
   shown failing first. **Not verified on hardware** — see the re-verification
   lines above.
 
 - ~~**That a real activation completes over it, because no client code uses the
   tunnel yet.**~~ **CLOSED 2026-11-01: the client half now exists.** The fallback
-  lives in `locus/activation_tunnel.rs` and is wired at `activation.rs::post_json`
+  lives in chrysalis/activation_tunnel.rs` and is wired at `activation.rs::post_json`
   and `heartbeat.rs::beat`. It fires on `ResetDuringHandshake`, `Refused`, and —
   since 2026-11-09 — `Dns`. See
   [`ACTIVATION-TUNNEL.md`](ACTIVATION-TUNNEL.md) §6.
@@ -545,7 +545,7 @@ network, and again from an ordinary connection. **The two must agree.** As of th
 `ResetDuringHandshake`, i.e. the fallback failing exactly like the direct path.
 Nothing that answers a reset is carrying an allowlisted request, so before asking
 the school question, settle it on the box:
-`systemctl status locus-activation-tunnel locus-activation-forwarder` and
+`systemctl status chrysalis-activation-tunnel chrysalis-activation-forwarder` and
 `ss -lntp | grep 8453`. The detail, and why this is now the more important open
 item, is [`ACTIVATION-TUNNEL.md`](ACTIVATION-TUNNEL.md) §6.6.
 
@@ -595,8 +595,8 @@ platform signed):
 
 - **That the Intel Mac's bundle fails to validate.** This is the hypothesis the
   entitlement fix rests on, and it has not been observed. Read on the machine:
-  `codesign -dv --verbose=4 /Applications/Locus.app` and
-  `spctl -a -vvv -t install /Applications/Locus.app`. If both report the same as
+  `codesign -dv --verbose=4 /Applications/Chrysalis.app` and
+  `spctl -a -vvv -t install /Applications/Chrysalis.app`. If both report the same as
   on the silicon machine, the entitlement change is a *correctness* fix (it is
   still correct) and is **not** the cause of the Intel difference — look to
   `sysopt` timing next.
@@ -607,7 +607,7 @@ platform signed):
 - **That the free plan's UoT listener is running on the hub, with credentials
   matching the seeded row.** `sing-box-uot-eco.service` must be `active` (not
   merely `enabled`), `/etc/sing-box/eco.json`'s password must equal `ECO_PASS`, and
-  8447 must be shaped by `1:20`. `locus_status.udp` now reports what the *client*
+  8447 must be shaped by `1:20`. `chrysalis_status.udp` now reports what the *client*
   believes; it cannot report what the hub is doing.
   **Run `server/scripts/verify-ss2022.sh` on the box** — it now checks exactly
   this pairing, which it previously could not.
@@ -627,7 +627,7 @@ This is a **world claim about a third party's classification**, not a code
 property, and it must be treated as one: it can be true today and false after any
 reclassification, and it can differ per school.
 
-**Fixable here:** which hostname the client dials. `locus::contract::resolve_hub_url`
+**Fixable here:** which hostname the client dials. `chrysalis::contract::resolve_hub_url`
 now honours a validated stored override (absolute https, no path), so a hub move is
 one operator-set value plus a Caddy site block — no release.
 
@@ -810,7 +810,7 @@ do is lower it further.
 
 **Added 2026-10-04.** The free tier's quota now exists end to end in the tree: a
 1 Mbps `tc` cap, a heartbeat-provided allowance, a client that counts its own
-30-day window (`client/src-tauri/src/locus/usage.rs`), and — as of 3.2.26 —
+30-day window (`client/src-tauri/src/chrysalis/usage.rs`), and — as of 3.2.26 —
 clamping and skew guards on the advisory inputs.
 
 **Verified:** the client-side rule (window rollover, the 80% line, the
@@ -924,7 +924,7 @@ against the code it catches. The wiring was read, not run:
   against a Core that dies mid-stream.
 
 **What to do with a live machine:** connect, confirm `trafficFlowing` is `true` in
-`locusStatus()` while the graph moves, then kill the Core and confirm it goes `false`
+`chrysalisStatus()` while the graph moves, then kill the Core and confirm it goes `false`
 within `TRAFFIC_ACTIVE_WINDOW` (3 s) rather than staying green on the last sample.
 
 ### Two engine tests read `ok` while never running, and there was no way to tell (2026-10-02)
@@ -946,7 +946,7 @@ only that a broken tunnel reads as broken, never that a working one reads as
 working. **That is precisely the direction the three shipped defects failed in.**
 
 **What changed:** both files now skip through a `skip(reason)` helper that honours
-`LOCUS_REQUIRE_LIVE_ENGINE=1`, turning every skip into a failure. Verified: with
+`CHRYSALIS_REQUIRE_LIVE_ENGINE=1`, turning every skip into a failure. Verified: with
 the variable set, `a_reachable_member_yields_a_usable_delay` FAILS on this runner
 instead of passing. On a machine with a real engine and egress, that is the run
 worth trusting; without the variable, behaviour is unchanged.
@@ -954,7 +954,7 @@ worth trusting; without the variable, behaviour is unchanged.
 **CLOSED 2026-10-29, and the mechanism was pointed at the wrong thing.**
 
 - **CI now sets it.** The Linux `build` job runs `cargo test` with
-  `LOCUS_REQUIRE_LIVE_ENGINE=1` *and* `LOCUS_REQUIRE_EGRESS=1`, and installs
+  `CHRYSALIS_REQUIRE_LIVE_ENGINE=1` *and* `CHRYSALIS_REQUIRE_EGRESS=1`, and installs
   `sing-box` immediately beforehand. Nothing in the engine suites is allowed to
   skip on that path; a missing peer is a red build naming it.
 - **The variable was gating the wrong requirement.** It made *every* skip a
@@ -963,11 +963,11 @@ worth trusting; without the variable, behaviour is unchanged.
   and four of `egress_probe_engine.rs`'s are loopback-only. All seven skipped on a
   missing sidecar, so on a machine that had simply not run `prebuild` the suite
   threw away the only part of it that always works — and reported `ok` for it.
-  Requiring the engine is now the default; `LOCUS_REQUIRE_EGRESS` gates the one
+  Requiring the engine is now the default; `CHRYSALIS_REQUIRE_EGRESS` gates the one
   requirement that genuinely depends on the runner.
 - **A conflicting assertion, found by setting the variable.** The positive-egress
   case reported `504 Timeout` against `cp.cloudflare.com` from the CI mode, and
-  the first "fix" — skip — was unreachable, because `LOCUS_REQUIRE_LIVE_ENGINE`
+  the first "fix" — skip — was unreachable, because `CHRYSALIS_REQUIRE_LIVE_ENGINE`
   turns skips into panics. The case now retries a **second independent host**
   before failing, and its message names both. A single third party's availability
   was never what this assertion was about.
@@ -1019,7 +1019,7 @@ reasoning is sound and the asymmetry it rests on is read from the plugin source:
 
 - **That this was the reporter's cause.** The symptom (bars moving, `whatsmyip` on
   the exit node, button amber) is consistent with it, and the mechanism reproduces
-  against a local sidecar — but no Locus tunnel on a school link has been measured.
+  against a local sidecar — but no Chrysalis tunnel on a school link has been measured.
   The commands to confirm are in `EGRESS-READINESS.md` §3.
 - **That a real tunnel now reports ready.** Confirming needs a device on a working
   tier, which this environment does not have.
@@ -1124,7 +1124,7 @@ assertion. Check for the `SKIP:` line, not the green tick.
 > a repo one, and this fix does not change it: it removes the reason the signal
 > could never fire, it does not prove a real device fires it.
 
-`LOCUS_REQUIRE_EGRESS=1` stays set. It turns the skip into a failure by design, and
+`CHRYSALIS_REQUIRE_EGRESS=1` stays set. It turns the skip into a failure by design, and
 it is what stops the suite passing by not running — the flag was never the problem.
 
 ### Every installed 3.2.17 Windows client is stranded, and the fix cannot reach it
@@ -1178,15 +1178,15 @@ displaced while the Core is running. Until then the honest claim class is
 ### The activation code's durability has never been exercised against a real machine
 
 **Added 2026-10.** The code is now mirrored to a machine-scoped store
-(`locus/credential.rs`) so a reinstall, an update or an unexpected shutdown does
+(chrysalis/credential.rs`) so a reinstall, an update or an unexpected shutdown does
 not lose it. The unit behaviour is tested — round-trip, corrupt file, empty code,
 config-first-then-mirror ordering — and the module is pure I/O against a scratch
 directory.
 
 What is **not** observed, and cannot be from here:
 
-- That a real Windows or macOS install writes `/Library/Application Support/Locus`
-  (or `%PROGRAMDATA%\Locus`) successfully, without elevation. The fallback is
+- That a real Windows or macOS install writes `/Library/Application Support/Chrysalis`
+  (or `%PROGRAMDATA%\Chrysalis`) successfully, without elevation. The fallback is
   the app config, which does not survive an uninstall — so on a machine where the
   machine store is unwritable, the guarantee is weaker than the design intends.
   That distinction is *not* surfaced in the UI today; it should be, before this is
@@ -1369,7 +1369,7 @@ property is the point of the register; re-check with
 
 **Open since 2026-09-29; the closest gap to closed.** Everything up to and
 including signature verification is proven — the decode chain is reproduced
-against the real crate behaviour and a real signature from `.locus-keys/`,
+against the real crate behaviour and a real signature from `.chrysalis-keys/`,
 including the tamper case. What has never run is **the installer handoff**:
 the plugin launches NSIS and the app exits, so "success" looks like the process
 disappearing. That needs Windows or macOS hardware.
@@ -1421,8 +1421,8 @@ are *indexed*, not that they are *true*.
   ([`../operate/RELEASING.md`](../operate/RELEASING.md)).
 - **The Verge UI and the `proxies` page (3.1.0).** Deleted, not rebranded: two
   tabs remain (Connection, Account). The backend was untouched — profiles,
-  `enhance`, the service-vs-sidecar decision and `locus::tier` still drive
-  `locus_connect`.
+  `enhance`, the service-vs-sidecar decision and `chrysalis::tier` still drive
+  `chrysalis_connect`.
 - **`publish-update.sh` and the `updatecfg` comment (2026-09-23).**
   `legacy/publish-update.sh.broken` was never live, and both writers of
   `update_config` write `download_*`. What made it worth recording is the rule:
@@ -1503,7 +1503,7 @@ frontend builds are green in this checkout; none of it has been run end to end.
   predicate. This one **found a live bug**: `read_code()` never checked the marker and
   `is_signed_out()` was called from nowhere.
 - The update poll's cadence, its first-check offset, and that a stop resolves
-  immediately rather than waiting out the hour (`locus::update::poll::tests`).
+  immediately rather than waiting out the hour (`chrysalis::update::poll::tests`).
 - That `locus_update_status` refuses to offer the running version, and that a spent
   offer is cleared — by construction plus `gen-ts-contract.py`, which caught the
   missing TypeScript field and the fixture that predated it.
@@ -1522,7 +1522,7 @@ frontend builds are green in this checkout; none of it has been run end to end.
    rebuild is not firing and the fix is in the trigger, not the value.
 2. **That the whole kick-out path works on a real device** — suspend→screen,
    unsuspend→restored, in both cases within one check-in. Needs a code, a running
-   client, and `locus_check_subscription` to force the beat. **Narrowed
+   client, and `chrysalis_check_subscription` to force the beat. **Narrowed
    2026-11-22:** the *time to restored* no longer depends on a manual check, since
    a suspended client keeps beating every two minutes — see the entry at the top of
    this file. The observation itself is still outstanding.
@@ -1575,7 +1575,7 @@ what is not, because the difference decides whether you should deploy or diagnos
    --check`, then a heartbeat response carrying `enforcement_version: 4`. A
    response without that key is a stale hook, and no client-side or console
    change can compensate. **As of 2026-11-22 the client reports this itself** —
-   `locus_status.hubEnforcement` is `stale` when the hub is behind, and the Account
+   `chrysalis_status.hubEnforcement` is `stale` when the hub is behind, and the Account
    page shows the number to quote — but the reading still has to come from a hub,
    so the gap is narrowed, not closed.
 2. **That `first_seen_at` / `first_seen_fingerprint` exist on the live `codes`
@@ -1593,11 +1593,11 @@ what is not, because the difference decides whether you should deploy or diagnos
    Check one redeemed-and-released code in the Codes view after deploying
    `admin_console.pb.js`.
 4. **That a suspension reaches a connected client within one beat.** Needs a real
-   code, a running client, and `locus_check_subscription` to force the beat rather
+   code, a running client, and `chrysalis_check_subscription` to force the beat rather
    than waiting one interval.
 
 > **Nothing here required touching the client binary** except one fallback
-> sentence in `locus/activation.rs`, which only renders if the hub sends a status
+> sentence in chrysalis/activation.rs`, which only renders if the hub sends a status
 > without a message. The fixes are hub hooks, the console, and the schema — so
 > they ship by `hooks-sync.sh` + `seed-pb.py` + `deploy-console.sh`, not by a
 > release.
@@ -1613,11 +1613,11 @@ the hub half is **structural only**.
 **Verified in the tree (and each guard observed failing):**
 
 - The client sequence, including "the hub is told before the key is forgotten"
-  and "the entitlement is cleared last" — `locus::signout`'s tests read the real
+  and "the entitlement is cleared last" — `chrysalis::signout`'s tests read the real
   `sign_out` body and compare call offsets (`FIXES.md`, 2026-11-04).
 - That a signed-out device does not re-adopt its code, and that clearing only
   `verge.yaml` *would* be undone by the machine-scoped mirror — the
-  counter-example test in `locus::store`.
+  counter-example test in `chrysalis::store`.
 - That the `signed-out` marker blocks a mirror rewrite, which is the in-flight-beat
   race `runtime::stop()` does not by itself close.
 - The countdown reads 3, 2, 1, cancel stays available for the whole window, and a
@@ -1651,7 +1651,7 @@ the hub half is **structural only**.
 
 > **Nothing here blocks shipping the client half.** A hub that has not taken the
 > hook answers 404 to `/api/release-entitlement`, which the client reads as
-> `notConfirmed` and reports as "signed out here; we could not tell Locus". That
+> `notConfirmed` and reports as "signed out here; we could not tell Chrysalis". That
 > sentence is true, and the student's local sign-out is unaffected — which is why
 > the failure mode was designed to be a true sentence rather than an error.
 

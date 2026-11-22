@@ -5,7 +5,7 @@ audience:    builder
 status:      live
 authoritative-for: the state machine that decides when the maintenance tunnel is up,
                    and why a transition may not drop the app's traffic
-verified-against: client/src-tauri/src/cmd/locus.rs, client/src-tauri/src/locus/activation_tunnel.rs,
+verified-against: client/src-tauri/src/cmd/chrysalis.rs, client/src-tauri/src/chrysalis/activation_tunnel.rs,
                   client/src-tauri/src/core/manager/probe.rs, client/src-tauri/src/core/manager/traffic_probe.rs
 ```
 
@@ -19,7 +19,7 @@ Two words carry the weight: *all* (not just hub calls), and *established* (not
 
 ## 2. What the current code does, and why it is unstable
 
-`cmd/locus.rs` decided the lifecycle with a two-branch `if`, evaluated on every
+`cmd/chrysalis.rs` decided the lifecycle with a two-branch `if`, evaluated on every
 status poll:
 
 ```rust
@@ -77,7 +77,7 @@ Four states. The engine exists in all of them except `Stopped`.
 | `Stopped` | down | direct | `Ready` lost, or a transport failure → `Warming` |
 
 Implemented as `activation_tunnel::Supervisor`, driven by `supervise()` from
-`cmd/locus.rs`. The transition rule is a pure function of two booleans and an
+`cmd/chrysalis.rs`. The transition rule is a pure function of two booleans and an
 `Instant`, so every edge below is tested at a fake clock with no Core, no engine
 and no network.
 
@@ -127,7 +127,7 @@ been missed at a call site. All are fixed; the point of recording them is that
 each was invisible to a green test run.
 
 1. **The drained stop blocked the status poll.** `supervise()` is awaited inside
-   `locus_status`, which the UI polls every 750 ms. Awaiting a 45 s drain there
+   `chrysalis_status`, which the UI polls every 750 ms. Awaiting a 45 s drain there
    would stall the status command — a worse student-visible fault than the
    handover it was making graceful. Start and stop are now **dispatched**, not
    awaited, and each is re-entrancy guarded.

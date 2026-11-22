@@ -2,7 +2,7 @@
 //!
 //! # Why this has to exist at all
 //!
-//! Locus is a background VPN. The student opens it, connects, and then leaves it
+//! Chrysalis is a background VPN. The student opens it, connects, and then leaves it
 //! minimised for days — so "check for an update on launch" means "check for an
 //! update approximately never", and a released fix reaches nobody. The offer
 //! itself already travels on the heartbeat, which is the right transport (it is
@@ -13,7 +13,7 @@
 //! So this is deliberately thin and adds no new protocol:
 //!
 //!   * It does not talk to the hub. `/api/update` is read by
-//!     [`crate::locus::update::install::PendingInstall::check`], which is the same
+//!     [`crate::chrysalis::update::install::PendingInstall::check`], which is the same
 //!     path the manual "check now" uses — one implementation of the host
 //!     allowlist, the checksum requirement and the no-downgrade gate.
 //!   * It does not decide anything. It asks that path what is installable and
@@ -62,7 +62,7 @@ pub const FIRST_CHECK_DELAY: Duration = Duration::from_secs(5 * 60);
 /// The prompt used to read `offeredVersion` exactly once, on mount, so a beat
 /// that recorded an offer thirty seconds after launch reached nothing: the
 /// student had to relaunch to be asked. This is what closes that gap.
-pub const UPDATE_OFFERED_EVENT: &str = "locus://update-offered";
+pub const UPDATE_OFFERED_EVENT: &str = "chrysalis://update-offered";
 
 /// The running checker, if any.
 ///
@@ -103,7 +103,7 @@ pub fn start(app: tauri::AppHandle) {
         logging!(
             info,
             Type::System,
-            "[locus] periodic update check started (every {} minutes)",
+            "[chrysalis] periodic update check started (every {} minutes)",
             CHECK_INTERVAL.as_secs() / 60
         );
 
@@ -117,7 +117,7 @@ pub fn start(app: tauri::AppHandle) {
             check_once(&app).await;
 
             if !wait_or_stop(&control, CHECK_INTERVAL).await {
-                logging!(info, Type::System, "[locus] periodic update check stopped");
+                logging!(info, Type::System, "[chrysalis] periodic update check stopped");
                 return;
             }
         }
@@ -170,15 +170,15 @@ async fn check_once(app: &tauri::AppHandle) {
         logging!(
             debug,
             Type::System,
-            "[locus] periodic update check skipped: automatic checks are off"
+            "[chrysalis] periodic update check skipped: automatic checks are off"
         );
         return;
     }
 
-    let hub = crate::locus::contract::hub_url().await;
+    let hub = crate::chrysalis::contract::hub_url().await;
     let current = env!("CARGO_PKG_VERSION");
 
-    match crate::locus::update::install::PendingInstall::check(app, &hub, current).await {
+    match crate::chrysalis::update::install::PendingInstall::check(app, &hub, current).await {
         Ok(Some(pending)) => {
             let version = pending.version().to_owned();
             // Only announce on a CHANGE. Re-announcing the same offer every hour
@@ -187,7 +187,7 @@ async fn check_once(app: &tauri::AppHandle) {
             let already = crate::config::Config::verge()
                 .await
                 .latest_arc()
-                .locus_update_offered
+                .chrysalis_update_offered
                 .clone();
             if already.as_deref() == Some(version.as_str()) {
                 return;
@@ -196,13 +196,13 @@ async fn check_once(app: &tauri::AppHandle) {
             logging!(
                 info,
                 Type::System,
-                "[locus] the hub is offering update {version} (periodic check)"
+                "[chrysalis] the hub is offering update {version} (periodic check)"
             );
-            if let Err(error) = crate::locus::store::record_update_offer(&version).await {
+            if let Err(error) = crate::chrysalis::store::record_update_offer(&version).await {
                 logging!(
                     warn,
                     Type::System,
-                    "[locus] could not record the offered update: {error:#}"
+                    "[chrysalis] could not record the offered update: {error:#}"
                 );
                 return;
             }
@@ -214,7 +214,7 @@ async fn check_once(app: &tauri::AppHandle) {
                 logging!(
                     warn,
                     Type::System,
-                    "[locus] could not announce the offered update: {error}"
+                    "[chrysalis] could not announce the offered update: {error}"
                 );
             }
         }
@@ -225,15 +225,15 @@ async fn check_once(app: &tauri::AppHandle) {
             let stale = crate::config::Config::verge()
                 .await
                 .latest_arc()
-                .locus_update_offered
+                .chrysalis_update_offered
                 .clone();
             if stale.is_some() {
                 logging!(
                     info,
                     Type::System,
-                    "[locus] the recorded update offer is no longer available; clearing it"
+                    "[chrysalis] the recorded update offer is no longer available; clearing it"
                 );
-                let _ = crate::locus::store::clear_update_offer().await;
+                let _ = crate::chrysalis::store::clear_update_offer().await;
             }
         }
         Err(error) => {
@@ -244,7 +244,7 @@ async fn check_once(app: &tauri::AppHandle) {
             logging!(
                 debug,
                 Type::System,
-                "[locus] periodic update check found nothing installable: {error:#}"
+                "[chrysalis] periodic update check found nothing installable: {error:#}"
             );
         }
     }
@@ -284,7 +284,7 @@ mod tests {
     /// pair, and this pins the constant itself.
     #[test]
     fn the_offer_event_is_the_name_the_frontend_listens_for() {
-        assert_eq!(UPDATE_OFFERED_EVENT, "locus://update-offered");
+        assert_eq!(UPDATE_OFFERED_EVENT, "chrysalis://update-offered");
     }
 
     /// A stop before the first wait must resolve immediately rather than sleeping

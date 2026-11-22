@@ -47,7 +47,7 @@ async function submit() {
   <div class="login-wrap">
     <div class="login-box">
       <div class="panel">
-        <h2 style="margin-bottom: 4px">Locus Console</h2>
+        <h2 style="margin-bottom: 4px">Chrysalis Console</h2>
         <p class="muted" style="margin-top: 0; font-size: 13px">
           Sign in with the admin token to manage codes, releases and tiers.
         </p>

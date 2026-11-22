@@ -72,7 +72,7 @@ verified-against: client/scripts/release-version.mjs, server/scripts/publish-rel
 2. Commit, then GATE, then tag and push both:
        git add -A && git commit -m "chore(release): X.Y.Z"
        server/scripts/release-gate.sh --tag vX.Y.Z    # must pass
-       git tag -a vX.Y.Z -m "Locus client vX.Y.Z"
+       git tag -a vX.Y.Z -m "Chrysalis client vX.Y.Z"
        git push origin main && git push origin vX.Y.Z
      → the TAG triggers CI to build + sign all four platforms and create the
        GitHub Release. Pushing main alone does not.
@@ -108,7 +108,7 @@ tree. Two ways to check it, both read-only:
 
 ```bash
 # 1. What the page actually offers, right now.
-curl -s https://locusvpn.jadedns.uk/ \
+curl -s https://chrysalisvpn.jadedns.uk/ \
   | grep -oE 'updates/[0-9]+\.[0-9]+\.[0-9]+/[^"]*'
 
 # 2. Does it match the version the hub is serving?
@@ -155,10 +155,10 @@ step 2 fails (and so does every branch build — signing is not tag-gated).
 clone**, so a migrated repository starts without it:
 
 ```sh
-# If .locus-keys/ is empty, recover the key from the bundle first:
+# If .chrysalis-keys/ is empty, recover the key from the bundle first:
 # see RELEASE-RECOVERY.md §2.
-gh secret set LOCUS_UPDATE_KEY --repo vasilliourous/Locus < .locus-keys/locus_update.key
-gh secret list --repo vasilliourous/Locus   # confirms it exists; never prints the value
+gh secret set LOCUS_UPDATE_KEY --repo vasilliourous/Chrysalis < .chrysalis-keys/chrysalis_update.key
+gh secret list --repo vasilliourous/Chrysalis   # confirms it exists; never prints the value
 ```
 
 Use the **same** key, not a new one — its public half is compiled into every
@@ -272,8 +272,8 @@ re-downloads each artifact to confirm the served bytes match the recorded hash.
 
 ### The macOS download, which is not an update
 
-CI also produces `installer-Locus_<v>_amd64.zip` and `..._arm64.zip` — the
-compressed, **ad-hoc-signed** `Locus.app`. The hub fetches them, and the console's
+CI also produces `installer-Chrysalis_<v>_amd64.zip` and `..._arm64.zip` — the
+compressed, **ad-hoc-signed** `Chrysalis.app`. The hub fetches them, and the console's
 Releases page links them with the verified size, format and SHA-256.
 
 They are **not** update payloads and never appear in `update_config`, CI's

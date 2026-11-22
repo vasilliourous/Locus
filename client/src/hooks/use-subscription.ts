@@ -1,8 +1,8 @@
 import {
-  locusCheckSubscription,
-  locusStatus,
+  chrysalisCheckSubscription,
+  chrysalisStatus,
   type SubscriptionStatus,
-} from '@/services/locus'
+} from '@/services/chrysalis'
 import { useQuery } from '@/services/query-client'
 
 import { useVisibility } from './use-visibility'
@@ -15,12 +15,12 @@ import { useVisibility } from './use-visibility'
  * be a second opinion, and the whole point is that "expires in 3 days" is one
  * fact, not three renderings of it.
  *
- * Kept off the connect path deliberately: `locus_connect` refuses a lapsed code
+ * Kept off the connect path deliberately: `chrysalis_connect` refuses a lapsed code
  * in Rust, from the stored date, with no IPC and no dependency on this hook
  * having ever run. This is the *display* half; the enforcement half is
  * `subscription_allows_connect`.
  */
-export const subscriptionQueryKey = ['locusSubscription'] as const
+export const subscriptionQueryKey = ['chrysalisSubscription'] as const
 
 /**
  * How often to re-read the subscription.
@@ -51,7 +51,7 @@ export interface SubscriptionState {
   /** Whether the device has an entitlement at all — gates the whole indicator. */
   activated: boolean
   /**
-   * A code is stored but is not a Locus code, so it was not used.
+   * A code is stored but is not a Chrysalis code, so it was not used.
    *
    * False whenever {@link activated} is true. Reported separately so a damaged
    * sign-in is never described as "not activated": the student did activate, and
@@ -86,11 +86,11 @@ export const useSubscription = (): SubscriptionState => {
 
   const { data, mutate } = useQuery({
     queryKey: subscriptionQueryKey,
-    queryFn: locusStatus,
+    queryFn: chrysalisStatus,
     // A backgrounded window has no one to show it to; re-reading on focus keeps
     // a student who left the app open from seeing a stale date when they return.
     //
-    // Note what this poll CAN and CANNOT see. `locus_status` reads the client's
+    // Note what this poll CAN and CANNOT see. `chrysalis_status` reads the client's
     // own stored state, which a heartbeat writes — so this reflects a change
     // shortly after the beat that caused it, and cannot itself make one happen.
     // Only the hub can move an expiry, and only a beat asks it; that is what
@@ -117,14 +117,14 @@ export const useSubscription = (): SubscriptionState => {
     checkNow: async () => {
       // Awaits the beat, not merely its request.
       //
-      // `locus_check_subscription` used to return as soon as the loop was woken,
+      // `chrysalis_check_subscription` used to return as soon as the loop was woken,
       // so this cleared the caller's pending state before the request had left
       // the machine — and the "Check status now" control flicked to "Checking…"
       // and back in single-digit milliseconds, unrelated to the hub round trip
       // the student was waiting for. The command now resolves once the beat has
       // completed and its outcome has been applied, so awaiting it IS the
       // progress bar.
-      const started = await locusCheckSubscription()
+      const started = await chrysalisCheckSubscription()
       // Re-read regardless: the beat that just completed will have written an
       // expiry, recorded a refusal, or applied a refreshed config on its own
       // path, and the screen must show that rather than the pre-check state until

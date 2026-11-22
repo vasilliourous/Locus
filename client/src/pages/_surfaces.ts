@@ -1,6 +1,6 @@
 import type { SxProps, Theme } from '@mui/material'
 
-import { LOCUS_COLORS } from '@/pages/_theme'
+import { CHRYSALIS_COLORS } from '@/pages/_theme'
 
 /**
  * Shared surface styling, so every card in the app is the same object.
@@ -23,7 +23,7 @@ import { LOCUS_COLORS } from '@/pages/_theme'
 export const cardSx = (theme: Theme): SxProps<Theme> => ({
   borderRadius: `var(--card-radius, 12px)`,
   border: `1px solid ${
-    theme.palette.mode === 'light' ? theme.palette.divider : LOCUS_COLORS.border
+    theme.palette.mode === 'light' ? theme.palette.divider : CHRYSALIS_COLORS.border
   }`,
   bgcolor: theme.palette.background.paper,
 })

@@ -1,4 +1,4 @@
 User-agent: *
 Allow: /
 
-Sitemap: https://locusvpn.jadedns.uk/sitemap.xml
+Sitemap: https://chrysalisvpn.jadedns.uk/sitemap.xml

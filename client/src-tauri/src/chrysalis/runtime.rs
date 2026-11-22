@@ -1,6 +1,6 @@
 //! Supervising the heartbeat loop for the running app.
 //!
-//! [`crate::locus::heartbeat`] implements the loop but owns no app state: it
+//! [`crate::chrysalis::heartbeat`] implements the loop but owns no app state: it
 //! knows how to beat, back off and stop, and nothing about Tauri. Something has
 //! to start it after activation, restart it if the code changes, and stop it on
 //! exit. That is this.
@@ -34,8 +34,8 @@
 //!     student's decision, and doing it silently mid-session would kill their
 //!     connection without asking.
 
-use crate::locus::heartbeat::{BeatOutcome, Credential, HeartbeatLoop};
-use crate::locus::{apply, store};
+use crate::chrysalis::heartbeat::{BeatOutcome, Credential, HeartbeatLoop};
+use crate::chrysalis::{apply, store};
 use clash_verge_logging::{Type, logging};
 use std::sync::Mutex;
 use tauri::Emitter as _;
@@ -46,13 +46,13 @@ use tauri::Emitter as _;
 /// (`SUBSCRIPTION_POLL_MS`). That is a defensible cadence for a warning badge and
 /// an indefensible one for "your access has been withdrawn": a student kicked out
 /// at 10:00 kept working until 10:05. This event closes that, and it is the
-/// backend's only channel to the gate besides `locus_status`.
+/// backend's only channel to the gate besides `chrysalis_status`.
 ///
 /// Carries a short reason label (`"suspended"`, `"refused"`, `"reinstated"`,
 /// `"activated"`, `"signed-out"`, `"resumed"`) for logging and for the UI to log;
-/// the authoritative state is always re-read from `locus_status`, so a missed
+/// the authoritative state is always re-read from `chrysalis_status`, so a missed
 /// event delays the screen rather than making it lie.
-pub const ENTITLEMENT_CHANGED_EVENT: &str = "locus://entitlement-changed";
+pub const ENTITLEMENT_CHANGED_EVENT: &str = "chrysalis://entitlement-changed";
 
 /// Tells any live window that the account state changed.
 ///
@@ -78,7 +78,7 @@ pub fn start(activation: store::Activation) {
     // fall back to a session token minted at device recognition, for a device
     // that had no code because recognition had restored it; recognition and the
     // token are both gone, and the code is kept across restarts by
-    // `crate::locus::credential` instead.
+    // `crate::chrysalis::credential` instead.
     if activation.code.trim().is_empty() {
         // No code: this run cannot authenticate at all. Refusing to start is the
         // honest answer — a loop beating with an empty credential would hammer
@@ -86,7 +86,7 @@ pub fn start(activation: store::Activation) {
         logging!(
             warn,
             Type::Config,
-            "[locus] refusing to start a heartbeat with no activation code"
+            "[chrysalis] refusing to start a heartbeat with no activation code"
         );
         return;
     }
@@ -114,7 +114,7 @@ pub fn start_with(credential: Credential, activation: store::Activation) {
     logging!(
         info,
         Type::Config,
-        "[locus] starting heartbeat (tier {})",
+        "[chrysalis] starting heartbeat (tier {})",
         activation.tier
     );
 
@@ -134,7 +134,11 @@ pub fn start_with(credential: Credential, activation: store::Activation) {
             // A poisoned lock means a previous holder panicked. The loop itself
             // is still valid, so recover the guard rather than leaving the app
             // unable to heartbeat for the rest of its life.
-            logging!(warn, Type::Config, "[locus] heartbeat mutex was poisoned; recovering");
+            logging!(
+                warn,
+                Type::Config,
+                "[chrysalis] heartbeat mutex was poisoned; recovering"
+            );
             *poisoned.into_inner() = Some(loop_handle);
         }
     }
@@ -156,7 +160,7 @@ pub fn stop() {
         // runtime it is scheduled on, so it is dropped into the runtime instead.
         crate::process::AsyncHandler::spawn(|| async move {
             loop_handle.stop().await;
-            logging!(info, Type::Config, "[locus] heartbeat stopped");
+            logging!(info, Type::Config, "[chrysalis] heartbeat stopped");
         });
     }
 }
@@ -202,14 +206,14 @@ pub async fn resume() {
             logging!(
                 info,
                 Type::Config,
-                "[locus] no heartbeat was running; resuming from the stored activation"
+                "[chrysalis] no heartbeat was running; resuming from the stored activation"
             );
             start(activation);
         }
         None => logging!(
             debug,
             Type::Config,
-            "[locus] no heartbeat to resume: this device holds no activation"
+            "[chrysalis] no heartbeat to resume: this device holds no activation"
         ),
     }
 }
@@ -246,7 +250,7 @@ pub fn beat_now() -> bool {
 /// # What resolves, and what does not
 ///
 /// Resolves `true` once a requested beat has completed **and its outcome has been
-/// applied** (`runtime::handle_outcome` runs first), so a `locus_status` issued
+/// applied** (`runtime::handle_outcome` runs first), so a `chrysalis_status` issued
 /// afterwards sees the result. Resolves `false` immediately when nothing is
 /// beating — no activation, or the loop is stopped — because in that case no beat
 /// will complete and waiting would hang the control forever.
@@ -293,7 +297,7 @@ async fn handle_outcome(outcome: BeatOutcome) {
         BeatOutcome::Refused { reason } => handle_refusal(&reason).await,
         BeatOutcome::Unreachable { reason } => {
             // NOT necessarily an entitlement problem. The tunnel keeps working
-            // through the grace period, and `locus_status` reports the remaining
+            // through the grace period, and `chrysalis_status` reports the remaining
             // window so the UI can warn before access ends. Taking the tunnel
             // down the moment a beat fails would punish a student for the
             // school's network.
@@ -308,7 +312,7 @@ async fn handle_outcome(outcome: BeatOutcome) {
             logging!(
                 debug,
                 Type::Config,
-                "[locus] heartbeat could not reach the hub: {reason}"
+                "[chrysalis] heartbeat could not reach the hub: {reason}"
             );
             enforce_grace_period().await;
         }
@@ -341,12 +345,12 @@ async fn enforce_grace_period() {
     let last_ok = verge.latest_arc().last_heartbeat_ok.unwrap_or(0);
     let now = chrono::Utc::now().timestamp();
 
-    let remaining = crate::locus::heartbeat::Backoff::remaining_grace(last_ok, now);
+    let remaining = crate::chrysalis::heartbeat::Backoff::remaining_grace(last_ok, now);
     if !remaining.is_zero() {
         logging!(
             debug,
             Type::Config,
-            "[locus] {remaining:?} of the heartbeat grace period left"
+            "[chrysalis] {remaining:?} of the heartbeat grace period left"
         );
         return;
     }
@@ -354,7 +358,7 @@ async fn enforce_grace_period() {
     logging!(
         warn,
         Type::Config,
-        "[locus] heartbeat grace period spent with no successful check-in; stopping the tunnel"
+        "[chrysalis] heartbeat grace period spent with no successful check-in; stopping the tunnel"
     );
 
     stop();
@@ -362,14 +366,14 @@ async fn enforce_grace_period() {
         logging!(
             warn,
             Type::Config,
-            "[locus] could not stop the core after the grace period expired: {error:#}"
+            "[chrysalis] could not stop the core after the grace period expired: {error:#}"
         );
     }
     if let Err(error) = store::record_lapsed_grace().await {
         logging!(
             warn,
             Type::Config,
-            "[locus] could not clear the session state after the grace period expired: {error:#}"
+            "[chrysalis] could not clear the session state after the grace period expired: {error:#}"
         );
     }
 }
@@ -385,12 +389,17 @@ async fn enforce_grace_period() {
 /// The rejection reason is logged, because "an update was advertised and silently
 /// ignored" is the exact failure this whole path exists to avoid.
 async fn record_update_offer(
-    response: &crate::locus::heartbeat::HeartbeatResponse,
-) -> Option<crate::locus::update::NoOfferReason> {
-    let Some(platform) = crate::locus::update::Platform::current() else {
+    response: &crate::chrysalis::heartbeat::HeartbeatResponse,
+) -> Option<crate::chrysalis::update::NoOfferReason> {
+    let Some(platform) = crate::chrysalis::update::Platform::current() else {
         // Not a build target we ship updates for.
-        let reason = crate::locus::update::NoOfferReason::UnsupportedPlatform;
-        logging!(info, Type::System, "[locus] no update offered: {}", reason.describe());
+        let reason = crate::chrysalis::update::NoOfferReason::UnsupportedPlatform;
+        logging!(
+            info,
+            Type::System,
+            "[chrysalis] no update offered: {}",
+            reason.describe()
+        );
         return Some(reason);
     };
 
@@ -422,19 +431,24 @@ async fn record_update_offer(
         // nothing, the setting is on a page they may never open, and the field is
         // inherited from upstream — so it can be `false` from an era when the row
         // was mis-labelled. A debug-level line meant this left no trace at all.
-        let reason = crate::locus::update::NoOfferReason::AutomaticChecksOff {
+        let reason = crate::chrysalis::update::NoOfferReason::AutomaticChecksOff {
             version: version.to_owned(),
         };
-        logging!(warn, Type::System, "[locus] no update offered: {}", reason.describe());
+        logging!(
+            warn,
+            Type::System,
+            "[chrysalis] no update offered: {}",
+            reason.describe()
+        );
         return Some(reason);
     }
 
-    logging!(info, Type::System, "[locus] the hub is offering update {version}");
+    logging!(info, Type::System, "[chrysalis] the hub is offering update {version}");
     if let Err(error) = store::record_update_offer(version).await {
         logging!(
             warn,
             Type::System,
-            "[locus] could not record the offered update: {error:#}"
+            "[chrysalis] could not record the offered update: {error:#}"
         );
     }
     None
@@ -463,17 +477,17 @@ async fn record_update_offer(
 /// same source this offer came from — so anything accepted here is checked there,
 /// and duplicating them would mean two implementations that can disagree.
 fn offered_version_to_record<'a>(
-    response: &'a crate::locus::heartbeat::HeartbeatResponse,
+    response: &'a crate::chrysalis::heartbeat::HeartbeatResponse,
     platform: &str,
     current_version: &str,
 ) -> Option<&'a str> {
     let version = response.update_available.as_deref().filter(|v| !v.is_empty())?;
 
-    if let Some(reason) = crate::locus::update::rejection_reason(version, current_version) {
+    if let Some(reason) = crate::chrysalis::update::rejection_reason(version, current_version) {
         // INFO, not debug. A rejection that leaves no trace at the default log
         // level is how "the update wasn't offered" became undiagnosable; see
         // `NoOfferReason`.
-        logging!(info, Type::System, "[locus] no update offered: {reason}");
+        logging!(info, Type::System, "[chrysalis] no update offered: {reason}");
         return None;
     }
 
@@ -481,7 +495,7 @@ fn offered_version_to_record<'a>(
         logging!(
             warn,
             Type::System,
-            "[locus] no update offered: {version} carries no artifact for {platform} — \
+            "[chrysalis] no update offered: {version} carries no artifact for {platform} — \
              the release is incomplete for this platform"
         );
         return None;
@@ -512,7 +526,7 @@ fn offered_version_to_record<'a>(
 /// its own failure modes, and inlining it pushed that function past the complexity
 /// ceiling — a fair signal that it did not belong there. That happened twice, which
 /// is why the enforcement record now lives here rather than alongside it.
-async fn leave_suspension_if_reinstated(response: &crate::locus::heartbeat::HeartbeatResponse) {
+async fn leave_suspension_if_reinstated(response: &crate::chrysalis::heartbeat::HeartbeatResponse) {
     record_hub_enforcement(response).await;
 
     // `is_suspended` reads the flag AND the stored activation, so the flag alone
@@ -520,18 +534,22 @@ async fn leave_suspension_if_reinstated(response: &crate::locus::heartbeat::Hear
     // treat a device that holds no code as "suspended, now reinstated" on its
     // first ever beat, and clear a state that does not exist.
     let verge = crate::config::Config::verge().await;
-    if !verge.latest_arc().locus_suspended.unwrap_or(false) || store::read(&verge.latest_arc()).is_none() {
+    if !verge.latest_arc().chrysalis_suspended.unwrap_or(false) || store::read(&verge.latest_arc()).is_none() {
         return;
     }
 
     logging!(
         info,
         Type::Config,
-        "[locus] the hub has reinstated this code; leaving the suspended state"
+        "[chrysalis] the hub has reinstated this code; leaving the suspended state"
     );
 
     if let Err(error) = store::clear_suspension().await {
-        logging!(warn, Type::Config, "[locus] could not clear the suspension: {error:#}");
+        logging!(
+            warn,
+            Type::Config,
+            "[chrysalis] could not clear the suspension: {error:#}"
+        );
     }
 
     // The loop is no longer stopped by a suspension (see `handle_refusal`), so
@@ -573,17 +591,17 @@ async fn leave_suspension_if_reinstated(response: &crate::locus::heartbeat::Hear
 /// behind would be a worse defect than the one it reports, and the student cannot
 /// fix it. The Account page shows it; a student reading it can quote the number, and
 /// that is the whole of the intended effect.
-async fn record_hub_enforcement(response: &crate::locus::heartbeat::HeartbeatResponse) {
+async fn record_hub_enforcement(response: &crate::chrysalis::heartbeat::HeartbeatResponse) {
     if let Some(version) = response.enforcement_version
-        && version < crate::locus::contract::ENFORCEMENT_VERSION
+        && version < crate::chrysalis::contract::ENFORCEMENT_VERSION
     {
         logging!(
             warn,
             Type::Config,
-            "[locus] this hub runs enforcement version {version}, but this client needs {}. \
+            "[chrysalis] this hub runs enforcement version {version}, but this client needs {}. \
              A suspension set in the console will NOT reach this device until the hub's \
              hooks are redeployed (see docs/reference/SUSPENSION.md \u{a7}4).",
-            crate::locus::contract::ENFORCEMENT_VERSION
+            crate::chrysalis::contract::ENFORCEMENT_VERSION
         );
     }
 
@@ -591,13 +609,13 @@ async fn record_hub_enforcement(response: &crate::locus::heartbeat::HeartbeatRes
         logging!(
             warn,
             Type::Config,
-            "[locus] could not record the hub's enforcement version: {error:#}"
+            "[chrysalis] could not record the hub's enforcement version: {error:#}"
         );
     }
 }
 
 /// A successful beat: record it, then act on anything the hub changed.
-async fn handle_success(response: &crate::locus::heartbeat::HeartbeatResponse) {
+async fn handle_success(response: &crate::chrysalis::heartbeat::HeartbeatResponse) {
     leave_suspension_if_reinstated(response).await;
 
     let now = chrono::Utc::now().timestamp();
@@ -605,7 +623,7 @@ async fn handle_success(response: &crate::locus::heartbeat::HeartbeatResponse) {
         logging!(
             warn,
             Type::Config,
-            "[locus] could not record a successful heartbeat: {error:#}"
+            "[chrysalis] could not record a successful heartbeat: {error:#}"
         );
     }
 
@@ -633,7 +651,7 @@ async fn handle_success(response: &crate::locus::heartbeat::HeartbeatResponse) {
         logging!(
             warn,
             Type::Config,
-            "[locus] could not store the hub alias the hub offered: {error:#}"
+            "[chrysalis] could not store the hub alias the hub offered: {error:#}"
         );
     }
     // Persist the expiry on EVERY successful beat, deliberately outside the
@@ -655,7 +673,7 @@ async fn handle_success(response: &crate::locus::heartbeat::HeartbeatResponse) {
         logging!(
             warn,
             Type::Config,
-            "[locus] could not store the subscription expiry: {error:#}"
+            "[chrysalis] could not store the subscription expiry: {error:#}"
         );
     }
 
@@ -673,7 +691,7 @@ async fn handle_success(response: &crate::locus::heartbeat::HeartbeatResponse) {
     // deliberate: an absent expiry means "this hub cannot tell you", where an
     // absent allowance means "no allowance applies".)
     if let Some(raw) = response.free_allowance_mb
-        && raw > crate::locus::usage::MAX_SANE_ALLOWANCE_MB
+        && raw > crate::chrysalis::usage::MAX_SANE_ALLOWANCE_MB
     {
         // The hub sent a figure the arithmetic cannot trust. The client clamps
         // it (see `usage::sane_allowance_mb`), so the student is safe either
@@ -684,17 +702,17 @@ async fn handle_success(response: &crate::locus::heartbeat::HeartbeatResponse) {
         logging!(
             warn,
             Type::Config,
-            "[locus] the hub advertised an implausible free-tier allowance ({} MB); \
+            "[chrysalis] the hub advertised an implausible free-tier allowance ({} MB); \
              clamping to {} MB. The student is unaffected, but the hub's tier row is wrong.",
             raw,
-            crate::locus::usage::MAX_SANE_ALLOWANCE_MB
+            crate::chrysalis::usage::MAX_SANE_ALLOWANCE_MB
         );
     }
     if let Err(error) = store::store_allowance(response.free_allowance_mb).await {
         logging!(
             warn,
             Type::Config,
-            "[locus] could not store the free-tier allowance: {error:#}"
+            "[chrysalis] could not store the free-tier allowance: {error:#}"
         );
     }
     // …and the speed to drop to once it is spent. Same rule: the hub's latest
@@ -703,7 +721,7 @@ async fn handle_success(response: &crate::locus::heartbeat::HeartbeatResponse) {
         logging!(
             warn,
             Type::Config,
-            "[locus] could not store the free-tier throttle speed: {error:#}"
+            "[chrysalis] could not store the free-tier throttle speed: {error:#}"
         );
     }
 
@@ -725,7 +743,7 @@ async fn handle_success(response: &crate::locus::heartbeat::HeartbeatResponse) {
         logging!(
             warn,
             Type::Config,
-            "[locus] could not record the update-check reason: {error:#}"
+            "[chrysalis] could not record the update-check reason: {error:#}"
         );
     }
 }
@@ -736,7 +754,7 @@ async fn handle_success(response: &crate::locus::heartbeat::HeartbeatResponse) {
 /// `server_config` on every beat, and applying it unconditionally would reload
 /// or restart the core every five minutes, dropping every connection the student
 /// has, forever, for no reason.
-async fn apply_refreshed_config(config: &crate::locus::contract::TierConfig, udp_relay: bool) {
+async fn apply_refreshed_config(config: &crate::chrysalis::contract::TierConfig, udp_relay: bool) {
     if !store::tier_changed(config, udp_relay).await {
         return;
     }
@@ -744,14 +762,14 @@ async fn apply_refreshed_config(config: &crate::locus::contract::TierConfig, udp
     logging!(
         info,
         Type::Config,
-        "[locus] hub supplied new connection details; applying"
+        "[chrysalis] hub supplied new connection details; applying"
     );
 
     if let Err(error) = store::store_tier_config(config, udp_relay).await {
         logging!(
             warn,
             Type::Config,
-            "[locus] could not store the refreshed config: {error:#}"
+            "[chrysalis] could not store the refreshed config: {error:#}"
         );
         // Continue to the apply attempt: the in-memory config is still correct
         // for this session even if it could not be persisted, and refusing to
@@ -760,14 +778,14 @@ async fn apply_refreshed_config(config: &crate::locus::contract::TierConfig, udp
 
     match apply::apply_tier(config, udp_relay).await {
         Ok(apply::ApplyOutcome::Rejected { reason }) => {
-            logging!(warn, Type::Config, "[locus] refreshed config was refused: {reason}")
+            logging!(warn, Type::Config, "[chrysalis] refreshed config was refused: {reason}")
         }
         Err(error) => logging!(
             warn,
             Type::Config,
-            "[locus] could not apply the refreshed config: {error:#}"
+            "[chrysalis] could not apply the refreshed config: {error:#}"
         ),
-        Ok(_) => logging!(info, Type::Config, "[locus] refreshed config applied"),
+        Ok(_) => logging!(info, Type::Config, "[chrysalis] refreshed config applied"),
     }
 }
 
@@ -814,7 +832,7 @@ fn is_suspension(reason: &str) -> bool {
 ///     nothing left to authenticate with. A code the hub does not recognise is
 ///     not going to start being recognised.
 async fn handle_refusal(reason: &str) {
-    logging!(warn, Type::Config, "[locus] the hub refused this device: {reason}");
+    logging!(warn, Type::Config, "[chrysalis] the hub refused this device: {reason}");
 
     // Stop the TUNNEL, never the loop — and the distinction is the whole
     // difference between a suspension that can be lifted and one that cannot.
@@ -833,7 +851,7 @@ async fn handle_refusal(reason: &str) {
         logging!(
             warn,
             Type::Config,
-            "[locus] could not stop the core after refusal: {error:#}"
+            "[chrysalis] could not stop the core after refusal: {error:#}"
         );
     }
 
@@ -845,13 +863,17 @@ async fn handle_refusal(reason: &str) {
     if is_suspension(reason) {
         // `record_suspension` writes the reason too, so it is not called twice.
         if let Err(error) = store::record_suspension(reason).await {
-            logging!(warn, Type::Config, "[locus] could not record the suspension: {error:#}");
+            logging!(
+                warn,
+                Type::Config,
+                "[chrysalis] could not record the suspension: {error:#}"
+            );
         }
         // The credential is deliberately left in place — see `record_suspension`.
         logging!(
             info,
             Type::Config,
-            "[locus] suspended: the code is kept so unsuspending restores the session, \
+            "[chrysalis] suspended: the code is kept so unsuspending restores the session, \
              and the heartbeat keeps asking whether it has been lifted"
         );
         // Re-arm the loop if it is not running. `handle_refusal` is reached from a
@@ -877,12 +899,16 @@ async fn handle_refusal(reason: &str) {
         logging!(
             warn,
             Type::Config,
-            "[locus] could not record the refusal reason: {error:#}"
+            "[chrysalis] could not record the refusal reason: {error:#}"
         );
     }
 
     if let Err(error) = store::clear_entitlement().await {
-        logging!(warn, Type::Config, "[locus] could not clear the entitlement: {error:#}");
+        logging!(
+            warn,
+            Type::Config,
+            "[chrysalis] could not clear the entitlement: {error:#}"
+        );
     }
 
     // Same reason as the suspension arm: the gate polls, and a withdrawal the
@@ -1101,7 +1127,7 @@ mod tests {
     /// nothing else, so no student was ever told an update existed.
     #[test]
     fn an_actionable_offer_is_recorded() {
-        let response = heartbeat(Some("3.3.0"), Some("https://hub/updates/locus-linux"), "linux");
+        let response = heartbeat(Some("3.3.0"), Some("https://hub/updates/chrysalis-linux"), "linux");
         assert_eq!(offered_version_to_record(&response, "linux", "3.2.1"), Some("3.3.0"));
     }
 
@@ -1112,7 +1138,7 @@ mod tests {
     #[test]
     fn an_offer_that_is_not_newer_is_ignored() {
         for advertised in ["3.2.1", "3.2.0", "1.0.0"] {
-            let response = heartbeat(Some(advertised), Some("https://hub/updates/locus-linux"), "linux");
+            let response = heartbeat(Some(advertised), Some("https://hub/updates/chrysalis-linux"), "linux");
             assert_eq!(
                 offered_version_to_record(&response, "linux", "3.2.1"),
                 None,
@@ -1146,7 +1172,7 @@ mod tests {
     #[test]
     fn nothing_advertised_produces_no_offer() {
         for empty in [None, Some("")] {
-            let response = heartbeat(empty, Some("https://hub/updates/locus-linux"), "linux");
+            let response = heartbeat(empty, Some("https://hub/updates/chrysalis-linux"), "linux");
             assert_eq!(offered_version_to_record(&response, "linux", "3.2.1"), None);
         }
     }
@@ -1160,9 +1186,9 @@ mod tests {
         version: Option<&str>,
         url: Option<&str>,
         url_platform: &str,
-    ) -> crate::locus::heartbeat::HeartbeatResponse {
+    ) -> crate::chrysalis::heartbeat::HeartbeatResponse {
         let for_key = |key: &str| url.filter(|_| key == url_platform).map(str::to_owned);
-        crate::locus::heartbeat::HeartbeatResponse {
+        crate::chrysalis::heartbeat::HeartbeatResponse {
             status: "ok".to_owned(),
             tier: None,
             server_config: None,

@@ -88,12 +88,12 @@ const TEST_METHOD: &str = "2022-blake3-aes-256-gcm";
 ///     `continue-on-error` so that a network failure reports through the §39
 ///     proof's own message rather than as a cryptic build break.
 ///
-/// `LOCUS_REQUIRE_LIVE_ENGINE=1` turns every one of these into a failure, which is
+/// `CHRYSALIS_REQUIRE_LIVE_ENGINE=1` turns every one of these into a failure, which is
 /// the mode CI uses where both are installed deliberately. A skip that cannot be
 /// made to fail is the thing `STILL-OPEN.md` spent two entries complaining about.
 fn skip(reason: &str) {
-    if std::env::var_os("LOCUS_REQUIRE_LIVE_ENGINE").is_some() {
-        panic!("SKIP was requested to be a failure (LOCUS_REQUIRE_LIVE_ENGINE is set): {reason}");
+    if std::env::var_os("CHRYSALIS_REQUIRE_LIVE_ENGINE").is_some() {
+        panic!("SKIP was requested to be a failure (CHRYSALIS_REQUIRE_LIVE_ENGINE is set): {reason}");
     }
     eprintln!("SKIP: {reason}");
 }
@@ -251,7 +251,7 @@ fn wait_for<F: Fn() -> bool>(what: &str, within: Duration, ready: F) {
     panic!("{what} did not become ready within {within:?}");
 }
 
-/// The client config, in the shape `locus::tier::build_profile` produces for a
+/// The client config, in the shape `chrysalis::tier::build_profile` produces for a
 /// tier with UDP-over-TCP.
 ///
 /// **`log-level` is `debug`, not `warning`.** At `warning` mihomo emits nothing
@@ -267,14 +267,14 @@ fn client_yaml(ss_port: u16, controller: u16, mixed: u16) -> String {
          external-controller: 127.0.0.1:{controller}\n\
          log-level: debug\n\
          proxies:\n\
-         \x20 - name: \"Locus\"\n\
+         \x20 - name: \"Chrysalis\"\n\
          \x20   type: ss\n\
          \x20   server: 127.0.0.1\n\
          \x20   port: {ss_port}\n\
          \x20   cipher: {TEST_METHOD}\n\
          \x20   password: \"{TEST_KEY}\"\n\
          \x20   udp: false\n\
-         \x20 - name: \"Locus-UoT\"\n\
+         \x20 - name: \"Chrysalis-UoT\"\n\
          \x20   type: ss\n\
          \x20   server: 127.0.0.1\n\
          \x20   port: {ss_port}\n\
@@ -284,13 +284,13 @@ fn client_yaml(ss_port: u16, controller: u16, mixed: u16) -> String {
          \x20   udp-over-tcp: true\n\
          \x20   udp-over-tcp-version: 2\n\
          proxy-groups:\n\
-         \x20 - name: \"Locus Auto\"\n\
+         \x20 - name: \"Chrysalis Auto\"\n\
          \x20   type: select\n\
          \x20   proxies:\n\
-         \x20     - \"Locus-UoT\"\n\
-         \x20     - \"Locus\"\n\
+         \x20     - \"Chrysalis-UoT\"\n\
+         \x20     - \"Chrysalis\"\n\
          rules:\n\
-         \x20 - \"MATCH,Locus Auto\"\n"
+         \x20 - \"MATCH,Chrysalis Auto\"\n"
     )
 }
 
@@ -380,7 +380,7 @@ struct Harness {
 /// there is parallel. Distinct directories per test, and no cleanup of anybody
 /// else's.
 fn start(label: &str, engine: &Path, sing: &Path) -> Harness {
-    let dir = std::env::temp_dir().join(format!("locus-e2e-tunnel-{label}"));
+    let dir = std::env::temp_dir().join(format!("chrysalis-e2e-tunnel-{label}"));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).expect("create the harness directory");
 
@@ -617,7 +617,7 @@ fn udp_over_tcp_v2_negotiates_and_carries_a_datagram() {
     let h = start("udp", &engine, &sing);
 
     // SOCKS5 UDP ASSOCIATE through the mixed port. The rule pins UDP to
-    // `Locus-UoT`, so this exercises the `udp-over-tcp` outbound rather than the
+    // `Chrysalis-UoT`, so this exercises the `udp-over-tcp` outbound rather than the
     // plain one — which is the whole point: the 3.3.x field defect was that
     // outbound never being constructed while both sides looked correct.
     let mut control = TcpStream::connect(("127.0.0.1", h.mixed_port)).expect("connect to the mixed port");
@@ -712,7 +712,7 @@ fn the_probe_reads_a_measurement_through_a_real_tunnel() {
         // because its target is a public host.
         last = http_get(
             &h.controller_addr,
-            &format!("/proxies/Locus/delay?url={url}&timeout=5000"),
+            &format!("/proxies/Chrysalis/delay?url={url}&timeout=5000"),
         );
         if last.0 == 200 && usable(delay_of(&last.1)) {
             return;

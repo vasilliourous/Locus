@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest'
 
-import type { LocusStatus } from '@/services/locus'
+import type { ChrysalisStatus } from '@/services/chrysalis'
 
 import { phaseFromStatus } from './phase'
 
@@ -22,7 +22,7 @@ const status = (
   connected: boolean,
   ready: boolean,
   bootstrapping = false,
-): LocusStatus => ({
+): ChrysalisStatus => ({
   activated,
   // `phaseFromStatus` never reads a suspension either: the gate in `main.tsx`
   // routes a suspended device to the kick-out screen BEFORE any connection
@@ -103,7 +103,7 @@ describe('connection phase from backend status', () => {
    * button jumped from "not connected" to "connected" with nothing in between.
    */
   test('a running-but-not-ready core reads as connecting', () => {
-    const starting: LocusStatus = status(true, true, false)
+    const starting: ChrysalisStatus = status(true, true, false)
     expect(phaseFromStatus(starting)).toBe('connecting')
     expect(phaseFromStatus(starting)).not.toBe('connected')
     expect(phaseFromStatus(starting)).not.toBe('disconnected')
@@ -171,7 +171,7 @@ describe('connection phase from backend status', () => {
    * backend, a running-but-unanswering core must never render as connected.
    */
   test('a core that cannot answer never reads as connected', () => {
-    const noNetwork: LocusStatus = status(true, true, false)
+    const noNetwork: ChrysalisStatus = status(true, true, false)
     expect(phaseFromStatus(noNetwork)).not.toBe('connected')
     expect(phaseFromStatus(noNetwork)).toBe('connecting')
   })

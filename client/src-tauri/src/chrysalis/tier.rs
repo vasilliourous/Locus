@@ -31,7 +31,7 @@
 //! merge, script, rules, DNS, TUN settings — keeps working unmodified, and there
 //! is exactly one code path from "a tier arrived" to "the core is running it".
 
-use crate::locus::contract::TierConfig;
+use crate::chrysalis::contract::TierConfig;
 use serde_yaml_ng::{Mapping, Value};
 
 /// A mihomo proxy document for one tier, plus the metadata the UI needs.
@@ -45,7 +45,7 @@ pub struct TierProfile {
 
 /// The name of the generated proxy. Kept stable so a config refresh replaces it
 /// rather than accumulating duplicates.
-pub const PROXY_NAME: &str = "Locus";
+pub const PROXY_NAME: &str = "Chrysalis";
 
 /// The name of the generated proxy group.
 ///
@@ -54,16 +54,16 @@ pub const PROXY_NAME: &str = "Locus";
 /// with:
 ///
 /// ```text
-/// loop is detected in ProxyGroup, please check following ProxyGroups: [Locus]
+/// loop is detected in ProxyGroup, please check following ProxyGroups: [Chrysalis]
 /// ```
 ///
 /// which surfaces on the device as a tunnel that never starts. Verified against
 /// the real mihomo sidecar with `-t`, which is the only check that catches this —
 /// the document is valid YAML either way.
-pub const GROUP_NAME: &str = "Locus Auto";
+pub const GROUP_NAME: &str = "Chrysalis Auto";
 
 /// The name of the UDP-over-TCP outbound, when a tier has one.
-pub const UOT_PROXY_NAME: &str = "Locus-UoT";
+pub const UOT_PROXY_NAME: &str = "Chrysalis-UoT";
 
 /// Every outbound a tier profile can define, in the order
 /// [`proxy_group`] lists them.
@@ -160,7 +160,7 @@ pub fn build_profile(config: &TierConfig, udp_relay: bool) -> TierProfile {
     insert(&mut root, "rules", Value::Sequence(rules));
 
     let yaml = serde_yaml_ng::to_string(&Value::Mapping(root))
-        .unwrap_or_else(|_| String::from("# Locus: failed to serialise the tier profile\n"));
+        .unwrap_or_else(|_| String::from("# Chrysalis: failed to serialise the tier profile\n"));
 
     TierProfile {
         yaml,
@@ -201,8 +201,8 @@ fn dial_server(config: &TierConfig) -> String {
     // a poll, so it cannot flood. It names WHICH host was chosen and why, because
     // a support log that says only "connected" cannot distinguish a plan tunnel
     // dialling the name from one dialling the address.
-    if crate::locus::activation_tunnel::prefer_maintenance() {
-        let addr = crate::locus::contract::activation_tunnel_addr();
+    if crate::chrysalis::activation_tunnel::prefer_maintenance() {
+        let addr = crate::chrysalis::contract::activation_tunnel_addr();
         tracing::info!("[plan] server={addr} (prefer_maintenance)");
         addr.to_owned()
     } else {
@@ -300,7 +300,7 @@ mod tests {
     /// `activation_tunnel`'s tests, so its ONE lock lives beside the flag. A
     /// second guard here would serialise these tests against each other and not
     /// against the other module's — which is a split lock, and it failed that way.
-    use crate::locus::activation_tunnel::preference_guard;
+    use crate::chrysalis::activation_tunnel::preference_guard;
 
     fn tcp_only_tier() -> TierConfig {
         TierConfig {
@@ -348,11 +348,11 @@ mod tests {
         let _serialised = preference_guard();
         let config = strike_tier();
 
-        crate::locus::activation_tunnel::remember_prefer_maintenance();
+        crate::chrysalis::activation_tunnel::remember_prefer_maintenance();
 
         let switched = build_profile(&config, true);
         let switched_yaml: serde_yaml_ng::Value = serde_yaml_ng::from_str(&switched.yaml).expect("valid yaml");
-        let expected = crate::locus::contract::activation_tunnel_addr();
+        let expected = crate::chrysalis::contract::activation_tunnel_addr();
         // BOTH proxies: the plan's TCP outbound and its UoT outbound share one
         // builder, so a substitution that covered only one would leave game
         // traffic dialling a blocked name.
@@ -399,7 +399,7 @@ mod tests {
         // It is the one place the flag is forced off, and it asserts what the
         // default means rather than that it is currently set.
         let _serialised = preference_guard();
-        crate::locus::activation_tunnel::forget_prefer_maintenance_for_tests();
+        crate::chrysalis::activation_tunnel::forget_prefer_maintenance_for_tests();
 
         let config = strike_tier();
         let direct = build_profile(&config, true);
@@ -423,7 +423,7 @@ mod tests {
         use std::io::Write as _;
 
         let _serialised = preference_guard();
-        crate::locus::activation_tunnel::remember_prefer_maintenance();
+        crate::chrysalis::activation_tunnel::remember_prefer_maintenance();
         // A REAL SS2022 key, unlike the human-readable fixtures the other tests
         // use: the engine decodes the password before it looks at anything else,
         // so "strike-secret" is refused for being illegal base64 rather than for
@@ -431,9 +431,9 @@ mod tests {
         let mut tier = strike_tier();
         tier.password = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=".into();
         let profile = build_profile(&tier, true);
-        crate::locus::activation_tunnel::forget_prefer_maintenance_for_tests();
+        crate::chrysalis::activation_tunnel::forget_prefer_maintenance_for_tests();
 
-        let dir = std::env::temp_dir().join(format!("locus-tier-subst-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("chrysalis-tier-subst-{}", std::process::id()));
         let _ = std::fs::create_dir_all(&dir);
         let path = dir.join("config.yaml");
         let mut file = std::fs::File::create(&path).expect("write the generated config");
@@ -446,11 +446,11 @@ mod tests {
         if !exe.is_file() {
             // A SILENT skip is the defect the other engine suites' `skip()` helper
             // exists to prevent: a test that cannot run reads exactly like one that
-            // passed. CI installs the sidecar and sets `LOCUS_REQUIRE_LIVE_ENGINE`,
+            // passed. CI installs the sidecar and sets `CHRYSALIS_REQUIRE_LIVE_ENGINE`,
             // so there a missing engine FAILS; a contributor without it is told.
-            if std::env::var_os("LOCUS_REQUIRE_LIVE_ENGINE").is_some() {
+            if std::env::var_os("CHRYSALIS_REQUIRE_LIVE_ENGINE").is_some() {
                 panic!(
-                    "SKIP was requested to be a failure (LOCUS_REQUIRE_LIVE_ENGINE is set): the engine \
+                    "SKIP was requested to be a failure (CHRYSALIS_REQUIRE_LIVE_ENGINE is set): the engine \
                      sidecar is not present at {}",
                     exe.display()
                 );
@@ -528,7 +528,7 @@ mod tests {
         let parsed: Value = serde_yaml_ng::from_str(&profile.yaml).expect("valid YAML");
 
         let proxy = &parsed["proxies"][0];
-        assert_eq!(proxy["name"], "Locus");
+        assert_eq!(proxy["name"], "Chrysalis");
         assert_eq!(proxy["type"], "ss");
         assert_eq!(proxy["server"], "networkingguides.duckdns.org");
         assert_eq!(proxy["port"], 8443);
@@ -565,7 +565,7 @@ mod tests {
         assert_eq!(proxies.len(), 2, "UoT adds exactly one outbound");
 
         let uot = &proxies[1];
-        assert_eq!(uot["name"], "Locus-UoT");
+        assert_eq!(uot["name"], "Chrysalis-UoT");
         assert_eq!(
             uot["port"], 8446,
             "the UoT outbound must use uot_port, not the main port"
@@ -745,7 +745,7 @@ mod tests {
     /// mihomo reads a group whose name matches a member as a reference loop and
     /// refuses the whole configuration:
     ///
-    ///     loop is detected in ProxyGroup, please check following ProxyGroups: [Locus]
+    ///     loop is detected in ProxyGroup, please check following ProxyGroups: [Chrysalis]
     ///
     /// This is invisible in YAML terms — the document is perfectly valid — and
     /// surfaces only on the device, as a tunnel that never starts. It was caught

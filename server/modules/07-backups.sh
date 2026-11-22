@@ -33,7 +33,7 @@ write_backup_script() {
 
     cat > "$BACKUP_SCRIPT" << 'SCRIPT'
 #!/usr/bin/env bash
-# Locus PocketBase Backup to Backblaze B2
+# Chrysalis PocketBase Backup to Backblaze B2
 # Triggered hourly by systemd timer.
 set -euo pipefail
 
@@ -207,7 +207,7 @@ write_timer() {
 
     cat > "$BACKUP_TIMER" << 'TIMER'
 [Unit]
-Description=Locus hourly PocketBase backup to B2
+Description=Chrysalis hourly PocketBase backup to B2
 # After=, NOT Requires= — see the note below. Requires= here stopped the hourly
 # backup PERMANENTLY the first time PocketBase was stopped on purpose.
 After=pocketbase.service
@@ -225,7 +225,7 @@ TIMER
     # Write companion service
     cat > "$BACKUP_SERVICE" << 'SERVICE'
 [Unit]
-Description=Locus PocketBase backup to B2
+Description=Chrysalis PocketBase backup to B2
 After=network.target pocketbase.service
 
 [Service]
@@ -270,7 +270,7 @@ B2WARN
 
     # IMPORTANT: Use 'set -a' semantics so variables are exported when script is sourced
     cat > "$CREDS_FILE" << EOF
-# Locus B2 Backup Credentials
+# Chrysalis B2 Backup Credentials
 # Sourced by myvpn-backup.sh
 B2_APPLICATION_KEY_ID="${B2_APPLICATION_KEY_ID}"
 B2_APPLICATION_KEY="${B2_APPLICATION_KEY}"

@@ -141,8 +141,8 @@ if [ "$FETCH_SERVICE" = "1" ]; then
     # known string instead.
     assert_reachable() {
         local probe
-        probe="$(remote 'printf %s locus-hooksync-probe' 2>/dev/null || true)"
-        if [ "$probe" != "locus-hooksync-probe" ]; then
+        probe="$(remote 'printf %s chrysalis-hooksync-probe' 2>/dev/null || true)"
+        if [ "$probe" != "chrysalis-hooksync-probe" ]; then
             fail "cannot reach ${VPS} over SSH (no usable key, or the host is down)" 1
         fi
     }
@@ -154,11 +154,11 @@ if [ "$FETCH_SERVICE" = "1" ]; then
         log "Verifying the fetch service…"
 
         local active
-        active="$(remote 'systemctl is-active locus-fetch' 2>/dev/null || true)"
+        active="$(remote 'systemctl is-active chrysalis-fetch' 2>/dev/null || true)"
         if [ "$active" = "active" ]; then
-            log "  ✓ locus-fetch is active"
+            log "  ✓ chrysalis-fetch is active"
         else
-            warn "  ✗ locus-fetch is '${active:-unknown}'"
+            warn "  ✗ chrysalis-fetch is '${active:-unknown}'"
             rc=4
         fi
 
@@ -217,7 +217,7 @@ if [ "$FETCH_SERVICE" = "1" ]; then
         log "  already current (${local_sha:0:12}…)"
         if [ "$DO_RESTART" = "1" ]; then
             log "Restarting to pick up any in-place edits…"
-            remote 'systemctl restart locus-fetch' || fail "restart command failed" 3
+            remote 'systemctl restart chrysalis-fetch' || fail "restart command failed" 3
             sleep 2
         fi
     else
@@ -243,22 +243,22 @@ if [ "$FETCH_SERVICE" = "1" ]; then
 
     if [ "$DO_RESTART" = "1" ]; then
         local_since="$(date -u '+%Y-%m-%d %H:%M:%S')"
-        log "Restarting locus-fetch…"
-        remote 'systemctl restart locus-fetch' || fail "restart command failed" 3
+        log "Restarting chrysalis-fetch…"
+        remote 'systemctl restart chrysalis-fetch' || fail "restart command failed" 3
 
         for _ in $(seq 1 20); do
             if remote 'curl -fsS -m 3 -o /dev/null http://127.0.0.1:8091/health' 2>/dev/null; then
-                log "  ✓ locus-fetch is answering on 127.0.0.1:8091"
+                log "  ✓ chrysalis-fetch is answering on 127.0.0.1:8091"
                 break
             fi
             sleep 1
         done
 
-        errs="$(remote "journalctl -u locus-fetch --since '${local_since}' --no-pager -p err -q 2>/dev/null | wc -l" || echo 0)"
+        errs="$(remote "journalctl -u chrysalis-fetch --since '${local_since}' --no-pager -p err -q 2>/dev/null | wc -l" || echo 0)"
         errs="$(printf '%s' "$errs" | tr -dc '0-9')"
         if [ "${errs:-0}" -gt 0 ]; then
-            warn "locus-fetch logged ${errs} error line(s) since the restart:"
-            remote "journalctl -u locus-fetch --since '${local_since}' --no-pager -p err -q" | tail -20 | sed 's/^/    /'
+            warn "chrysalis-fetch logged ${errs} error line(s) since the restart:"
+            remote "journalctl -u chrysalis-fetch --since '${local_since}' --no-pager -p err -q" | tail -20 | sed 's/^/    /'
         else
             log "  ✓ no new errors in the journal"
         fi

@@ -157,10 +157,10 @@ if ! command -v fail2ban-client >/dev/null 2>&1; then
 fi
 
 if command -v fail2ban-client >/dev/null 2>&1; then
-    cat > /etc/fail2ban/jail.d/locus-sshd.local <<JAIL
+    cat > /etc/fail2ban/jail.d/chrysalis-sshd.local <<JAIL
 # Managed by server/modules/08-firewall.sh — do not edit by hand.
 # (The live host still carries the older "v5/server/modules/…" wording in
-# /etc/fail2ban/jail.d/locus-sshd.local until setup.sh is re-run. Harmless: it is
+# /etc/fail2ban/jail.d/chrysalis-sshd.local until setup.sh is re-run. Harmless: it is
 # a comment. Do not "fix" the deployed copy by hand.)
 [DEFAULT]
 # Ban for BANTIME after MAXRETRY failures within FINDTIME.

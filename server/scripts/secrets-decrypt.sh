@@ -18,12 +18,12 @@
 #   ./secrets-decrypt.sh                          # to stdout
 #   ./secrets-decrypt.sh > ../.secrets.env        # to a file you then shred
 #   ./secrets-decrypt.sh --check                  # verify it decrypts; print nothing
-#   LOCUS_SECRETS_PASSPHRASE_FILE=/tmp/pw ./secrets-decrypt.sh --check
+#   CHRYSALIS_SECRETS_PASSPHRASE_FILE=/tmp/pw ./secrets-decrypt.sh --check
 #
 # Passphrase sources, in order of precedence (identical to secrets-encrypt.sh and
 # to the deploy path in setup.sh / restore.sh):
-#   1. LOCUS_SECRETS_PASSPHRASE       — the passphrase itself
-#   2. LOCUS_SECRETS_PASSPHRASE_FILE  — a file containing it
+#   1. CHRYSALIS_SECRETS_PASSPHRASE       — the passphrase itself
+#   2. CHRYSALIS_SECRETS_PASSPHRASE_FILE  — a file containing it
 #   3. an interactive prompt (age's own), if neither is set
 #
 # The passphrase is never echoed and never passed as an argument.
@@ -48,11 +48,18 @@ command -v age >/dev/null 2>&1 || fail "age is not installed. Install it first (
 [ -f "$SECRETS_FILE" ] || fail "no ciphertext at ${SECRETS_FILE}"
 
 # ── Resolve passphrase source ──
-if [ -n "${LOCUS_SECRETS_PASSPHRASE:-}" ]; then
+if [ -n "${CHRYSALIS_SECRETS_PASSPHRASE:-}" ]; then
     PASS_MODE=env
+elif [ -n "${CHRYSALIS_SECRETS_PASSPHRASE_FILE:-}" ]; then
+    [ -f "$CHRYSALIS_SECRETS_PASSPHRASE_FILE" ] || fail "CHRYSALIS_SECRETS_PASSPHRASE_FILE is not a file: $CHRYSALIS_SECRETS_PASSPHRASE_FILE"
+    PASS_MODE=file
+# DEPRECATED ALIAS: the pre-rename names, accepted for one release so a script or
+# a host still passing them does not break mid-upgrade. See NAME-MIGRATION.md.
+elif [ -n "${LOCUS_SECRETS_PASSPHRASE:-}" ]; then
+    PASS_MODE=env;  CHRYSALIS_SECRETS_PASSPHRASE="$LOCUS_SECRETS_PASSPHRASE"
 elif [ -n "${LOCUS_SECRETS_PASSPHRASE_FILE:-}" ]; then
     [ -f "$LOCUS_SECRETS_PASSPHRASE_FILE" ] || fail "LOCUS_SECRETS_PASSPHRASE_FILE is not a file: $LOCUS_SECRETS_PASSPHRASE_FILE"
-    PASS_MODE=file
+    PASS_MODE=file; CHRYSALIS_SECRETS_PASSPHRASE_FILE="$LOCUS_SECRETS_PASSPHRASE_FILE"
 else
     PASS_MODE=prompt
 fi
@@ -70,9 +77,9 @@ if [ "$PASS_MODE" = prompt ]; then
   The passphrase is wrong, or ${SECRETS_FILE##*/} is corrupt."
 else
     if [ "$PASS_MODE" = env ]; then
-        _feed() { printf '%s\n' "$LOCUS_SECRETS_PASSPHRASE"; }
+        _feed() { printf '%s\n' "$CHRYSALIS_SECRETS_PASSPHRASE"; }
     else
-        _pw="$(cat "$LOCUS_SECRETS_PASSPHRASE_FILE")"
+        _pw="$(cat "$CHRYSALIS_SECRETS_PASSPHRASE_FILE")"
         _feed() { printf '%s\n' "$_pw"; }
     fi
 

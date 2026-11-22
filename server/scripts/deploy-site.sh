@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# deploy-site.sh — render, package and publish the Locus landing page.
+# deploy-site.sh — render, package and publish the Chrysalis landing page.
 #
 # Usage:
 #   VPS=root@host server/scripts/deploy-site.sh
@@ -62,7 +62,7 @@ HUB_BASE="${HUB_BASE:-https://networkingguides.jadedns.uk}"
 # The hostname the page is served from. Used for the canonical link and the
 # sitemap, and must agree with LANDING_DOMAIN in modules/05-caddy.sh —
 # check-consistency.sh asserts that agreement rather than trusting it.
-LANDING_DOMAIN="${LANDING_DOMAIN:-locusvpn.jadedns.uk}"
+LANDING_DOMAIN="${LANDING_DOMAIN:-chrysalisvpn.jadedns.uk}"
 
 REMOTE_BUNDLE="/root/server/site-dist.tar.gz"
 
@@ -87,7 +87,7 @@ log "Hub base:     ${HUB_BASE}"
 # deploy_site() on the hub only asserts named files are PRESENT. That is exactly
 # what happened on this script's first run: the bundle failed its own
 # index.html-at-root check because the manifest had been fetched into the tree.
-WORK="$(mktemp -d -t locus-site-XXXXXX)"
+WORK="$(mktemp -d -t chrysalis-site-XXXXXX)"
 STAGE="${WORK}/bundle"
 mkdir -p "$STAGE"
 trap 'rm -rf "$WORK"' EXIT
@@ -275,7 +275,7 @@ fi
 # "$STAGE" itself would yield ./site/index.html and fail there. Asserted before
 # the upload for the same reason deploy-console.sh asserts it: the mistake
 # cannot leave this machine.
-TARBALL="$(mktemp -t locus-site-tar-XXXXXX.tar.gz)"
+TARBALL="$(mktemp -t chrysalis-site-tar-XXXXXX.tar.gz)"
 # Chained onto the same cleanup as WORK, not a replacement for it: a second
 # `trap ... EXIT` REPLACES the first, so this must clean up both or the bundle
 # directory leaks on every run.

@@ -13,7 +13,7 @@ repair is the expensive one:
 
 | Symptom | You have lost | Go to |
 |---|---|---|
-| `.locus-keys/` is empty and you need to sign | nothing — an empty cache is the normal state | §2 — refill it |
+| `.chrysalis-keys/` is empty and you need to sign | nothing — an empty cache is the normal state | §2 — refill it |
 | CI fails at signing with *"LOCUS_UPDATE_KEY is not set"* | the **Actions secret**, but the key file exists | §3 — re-set |
 | Clients download an update and refuse it: *"created with a different key"* | nothing — they are on an **old key** | §4 — reinstall |
 | §2 cannot produce a key the fleet trusts | the **key itself** | §5 — rotate, the last resort |
@@ -36,18 +36,18 @@ It must exist in **three** places. The 2026-10-16 loss had only the first:
 | Copy | Where | Can it be read back? |
 |---|---|---|
 | CI secret | GitHub Actions `LOCUS_UPDATE_KEY` | **No** — Actions secrets are write-only, by design. No API, `gh` command or UI action returns the value. |
-| Offline | `~/.locus-secrets/locus_update.key` (outside the repo), plus a password-manager copy | Yes |
+| Offline | `~/.chrysalis-secrets/chrysalis_update.key` (outside the repo), plus a password-manager copy | Yes |
 | Encrypted, in-repo | `LOCUS_UPDATE_KEY_B64` in `server/secrets.env.age` | Yes, with the bundle passphrase |
 
-The working copy is generated into the **repo root's** `.locus-keys/`, which is
-gitignored (verified with `git check-ignore -v .locus-keys/locus_update.key`).
+The working copy is generated into the **repo root's** `.chrysalis-keys/`, which is
+gitignored (verified with `git check-ignore -v .chrysalis-keys/chrysalis_update.key`).
 That directory is a **cache, never a backup**: it is emptied after every signing
 session on purpose, so that "the key is missing" is the *normal* state rather than
 a symptom. §2 refills it in one command.
 
 **Treat its absence as expected.** Because the cache is emptied deliberately, an
-empty `.locus-keys/` tells you nothing about whether the key is lost. Ask the
-bundle instead — `server/scripts/locus-key-extract.sh --check` answers "is the
+empty `.chrysalis-keys/` tells you nothing about whether the key is lost. Ask the
+bundle instead — `server/scripts/chrysalis-key-extract.sh --check` answers "is the
 key still recoverable, and is it the right one" without writing anything.
 
 The current key is `4DA9B48F39251CEF`; it has been in use since the rotation
@@ -57,9 +57,9 @@ The current key is `4DA9B48F39251CEF`; it has been in use since the rotation
 `client/src-tauri/tests/update_signature_contract.rs` asserts the two agree.
 
 > **Check before believing a key is lost.** The key file is gitignored
-> (`.locus-keys/`), is resolved from the **repo root** (not `client/` — a copy
+> (`.chrysalis-keys/`), is resolved from the **repo root** (not `client/` — a copy
 > there is silently ignored), and CI writes it to `$RUNNER_TEMP` from the secret,
-> which never survives the job. Run `locus-key-extract.sh --check` before
+> which never survives the job. Run `chrysalis-key-extract.sh --check` before
 > concluding anything.
 
 ---
@@ -69,21 +69,21 @@ The current key is `4DA9B48F39251CEF`; it has been in use since the rotation
 Do this **before** §3. If the key can be recovered, nothing else needs to change.
 
 **This is no longer a procedure — it is a single command.** Every session that
-signs extracts the key from the bundle, because `.locus-keys/` is a cache and not
-a home (see [`.locus-keys/README.md`](../../.locus-keys/README.md)). Recovery and
+signs extracts the key from the bundle, because `.chrysalis-keys/` is a cache and not
+a home (see [`.chrysalis-keys/README.md`](../../.chrysalis-keys/README.md)). Recovery and
 routine use are therefore the *same* action, which is deliberate: a recovery
 route that is exercised only when something is already broken is a route nobody
 has tested.
 
 ```sh
 # 1. Point at the passphrase (or let the script prompt for it).
-export LOCUS_SECRETS_PASSPHRASE_FILE=~/locus-passphrase
+export CHRYSALIS_SECRETS_PASSPHRASE_FILE=~/chrysalis-passphrase
 
 # 2. Verify the bundle's key is the one the client trusts. Writes nothing.
-server/scripts/locus-key-extract.sh --check
+server/scripts/chrysalis-key-extract.sh --check
 
-# 3. Extract it: .locus-keys/ becomes 0700, both files 0600.
-server/scripts/locus-key-extract.sh
+# 3. Extract it: .chrysalis-keys/ becomes 0700, both files 0600.
+server/scripts/chrysalis-key-extract.sh
 ```
 
 The script refuses to write on a wrong passphrase, and it will not write a key
@@ -115,7 +115,7 @@ CI fails before signing with `LOCUS_UPDATE_KEY is not set`. Note this also fails
 **branch** builds: signing is not tag-gated.
 
 ```sh
-gh secret set LOCUS_UPDATE_KEY --repo <owner>/<repo> < .locus-keys/locus_update.key
+gh secret set LOCUS_UPDATE_KEY --repo <owner>/<repo> < .chrysalis-keys/chrysalis_update.key
 gh secret list  --repo <owner>/<repo>     # prints names and dates, never values
 ```
 
@@ -145,7 +145,7 @@ is a manual **uninstall + reinstall** of the current build, per device.
 
 What the rotation deliberately preserved, and why it matters here:
 
-- **The app identity is unchanged** (`com.locus.client`). A reinstall is an update
+- **The app identity is unchanged** (`com.locus.client` — a DEPRECATED ALIAS retained so the fielded app keeps updating and keeps its data root; see [`../reference/NAME-MIGRATION.md`](../reference/NAME-MIGRATION.md)). A reinstall is an update
   of the same app, not a migration to a new one, so no codes, storage or settings
   are orphaned by identity.
 - **The version ladder is continuous** across the rotation (`3.2.30` → `3.3.0`).
@@ -171,7 +171,7 @@ the app ID, and it must be planned as one (`client/docs/SIGNING.md` §5).
 
 The order is not optional, and it is the reverse of what caused the last failure:
 
-1. **Generate locally**, into the repo root's `.locus-keys/` — not `client/.locus-keys/`,
+1. **Generate locally**, into the repo root's `.chrysalis-keys/` — not `client/.chrysalis-keys/`,
    which the test does not read.
 2. **Encrypt the backup into the bundle** as `LOCUS_UPDATE_KEY_B64` (base64 of the
    whole file — `SECRETS-MANAGEMENT.md` FAQ says why the raw form breaks `source`).

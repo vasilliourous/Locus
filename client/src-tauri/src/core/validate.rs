@@ -23,14 +23,14 @@ const SYNTAX_CHECK_TIMEOUT: std::time::Duration = std::time::Duration::from_secs
 /// not revalidated on every apply.
 static LAST_VALIDATED: LazyLock<parking_lot::Mutex<Option<u64>>> = LazyLock::new(|| parking_lot::Mutex::new(None));
 
-/// Whether the engine binary is absent from the folder Locus is running in.
+/// Whether the engine binary is absent from the folder Chrysalis is running in.
 ///
 /// Resolved exactly the way Tauri resolves a sidecar — a sibling of the running
 /// executable, with the platform's `.exe` suffix on Windows — so this answers the
 /// same question the spawn will.
 ///
 /// Used to turn an opaque `os error 2` into a diagnosis. The situation it detects
-/// is running the raw `locus-*` updater payload, which ships alone; the installer
+/// is running the raw `chrysalis-*` updater payload, which ships alone; the installer
 /// is the only download that includes the engine beside the app.
 ///
 /// Returns `false` when the executable's own path cannot be determined: an
@@ -126,14 +126,14 @@ pub enum ValidationSkipReason {
     /// This is **not** the meaning of [`ValidationOutcome::Busy`], and the two are
     /// deliberately distinct. `Busy` came from the *outer* `CoreManager` guard
     /// (`try_start_config_update`) and reaches a caller that can legitimately wait
-    /// and retry — `locus_connect` does exactly that. This variant comes from
+    /// and retry — `chrysalis_connect` does exactly that. This variant comes from
     /// `CoreConfigValidator`'s own guard, which is held only for the duration of
     /// one kernel check of one YAML string; a caller that waited on it would be
     /// waiting for a workload that already validated *these bytes*, which yields no
     /// new information.
     ///
     /// It exists so that case stops being reported as a verdict. It used to return
-    /// `Busy`, which `locus/apply.rs` formats into a refusal — a connect could be
+    /// `Busy`, which `chrysalis/apply.rs` formats into a refusal — a connect could be
     /// told "the tunnel configuration was refused: Configuration validation is
     /// already running", which is a sentence about the wrong thing entirely.
     Validating,
@@ -418,7 +418,7 @@ impl CoreConfigValidator {
             //
             //   The system cannot find the file specified. (os error 2)
             //
-            // That is what a user sees when they run the raw `locus-*` updater
+            // That is what a user sees when they run the raw `chrysalis-*` updater
             // payload instead of the installer. Tauri resolves a sidecar relative
             // to the running executable's own directory, and the raw payload ships
             // with nothing beside it — so `verge-mihomo` genuinely is not there.
@@ -428,10 +428,10 @@ impl CoreConfigValidator {
             // work on an English Windows and silently miss everywhere else.
             if sidecar_is_missing(clash_core.as_str()) {
                 return anyhow::anyhow!(
-                    "the {clash_core:?} engine is missing from the folder Locus is running in. \
-                     This usually means Locus was started from the raw download instead of the \
+                    "the {clash_core:?} engine is missing from the folder Chrysalis is running in. \
+                     This usually means Chrysalis was started from the raw download instead of the \
                      installer — the installer is the only download that includes the engine. \
-                     Install Locus with the installer for your platform and start it from there. \
+                     Install Chrysalis with the installer for your platform and start it from there. \
                      (Looked for {clash_core:?} next to {})",
                     dirs::app_home_dir()
                         .map(|dir| dir.display().to_string())

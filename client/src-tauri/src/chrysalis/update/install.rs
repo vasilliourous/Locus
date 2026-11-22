@@ -1,4 +1,4 @@
-//! Driving the plugin's installer from Locus update metadata.
+//! Driving the plugin's installer from Chrysalis update metadata.
 //!
 //! # The mechanism (corrected against the plugin's source, not its docs)
 //!
@@ -100,7 +100,7 @@ impl PendingInstall {
     pub async fn check(app: &tauri::AppHandle, hub_url: &str, current_version: &str) -> Result<Option<Self>> {
         use tauri_plugin_updater::UpdaterExt as _;
 
-        let Some(platform) = crate::locus::update::Platform::current() else {
+        let Some(platform) = crate::chrysalis::update::Platform::current() else {
             anyhow::bail!("this build target is not supported by the updater");
         };
 
@@ -112,7 +112,7 @@ impl PendingInstall {
         //
         // `updater_builder()` hands the plugin a plain `reqwest` client: the OS
         // certificate store only, the environment's proxy, and no bound on which
-        // host it will follow. That is precisely the client `locus::hub` exists
+        // host it will follow. That is precisely the client `chrysalis::hub` exists
         // to replace — on an unpatched Windows machine the OS store cannot verify
         // the hub's chain, so the update check fails for a certificate that is
         // valid for months, and the update path is the one route a stranded
@@ -134,7 +134,7 @@ impl PendingInstall {
                 builder
                     .no_proxy()
                     .redirect(reqwest::redirect::Policy::none())
-                    .timeout(crate::locus::hub::Timeout::Activation.seconds_public())
+                    .timeout(crate::chrysalis::hub::Timeout::Activation.seconds_public())
             })
             .build()
             .context("could not build the updater")?;
@@ -145,7 +145,7 @@ impl PendingInstall {
 
         // Second gate. The hub owns rollout and entitlement, but a version that
         // is not strictly newer must never be installed, whoever advertised it.
-        if let Some(reason) = crate::locus::update::rejection_reason(&update.version, current_version) {
+        if let Some(reason) = crate::chrysalis::update::rejection_reason(&update.version, current_version) {
             logging_rejection(&reason);
             return Ok(None);
         }
@@ -158,12 +158,12 @@ impl PendingInstall {
         }
 
         // The offer's own URL is what `download_to_file` will fetch, and it must
-        // be a Locus hub — see `signal::OfferHosts` for why the set is the dialled
+        // be a Chrysalis hub — see `signal::OfferHosts` for why the set is the dialled
         // hub plus the compiled-in name rather than one string.
-        let hosts = crate::locus::update::signal::OfferHosts::for_hub(hub_url);
+        let hosts = crate::chrysalis::update::signal::OfferHosts::for_hub(hub_url);
         if !hosts.permits(update.download_url.as_str()) {
             logging_rejection(&format!(
-                "the hub offered an artifact from a host that is not the Locus hub \
+                "the hub offered an artifact from a host that is not the Chrysalis hub \
                  ({}): {}",
                 hosts.describe(),
                 update.download_url
@@ -279,8 +279,8 @@ impl PendingInstall {
 /// ERR_FILE_NOT_FOUND
 /// ```
 ///
-/// inside a Locus window, with the drive letter the *build runner* used
-/// (`D:\a\Locus\Locus` on GitHub Actions). Nothing named Locus, the install
+/// inside a Chrysalis window, with the drive letter the *build runner* used
+/// (`D:\a\Chrysalis\Chrysalis` on GitHub Actions). Nothing named Chrysalis, the install
 /// directory was never touched, and it happened again on every release: the
 /// client keeps accepting whatever the manifest names as newest.
 ///
@@ -469,7 +469,7 @@ impl ReadyInstall {
                 self.downloaded.version,
                 bytes.len()
             );
-            logging!(error, Type::System, "[locus] {detail}");
+            logging!(error, Type::System, "[chrysalis] {detail}");
             bail!("{detail} — this build cannot install a raw executable, and neither can the platform installer");
         }
 
@@ -503,7 +503,7 @@ fn logging_rejection(reason: &str) {
     clash_verge_logging::logging!(
         warn,
         clash_verge_logging::Type::System,
-        "[locus] ignoring the offered update: {reason}"
+        "[chrysalis] ignoring the offered update: {reason}"
     );
 }
 
@@ -713,7 +713,7 @@ mod tests {
     /// this test fail, which is the property that gives it value.
     #[test]
     fn the_real_shipped_installer_is_an_installer() {
-        // Byte-for-byte from `installer-Locus_3.2.18_x64-setup.exe` at the
+        // Byte-for-byte from `installer-Chrysalis_3.2.18_x64-setup.exe` at the
         // firstheader (offset 68100): de ad be ef "NullsoftInst" 40 4f 01 00.
         let installers_header = b"\xef\xbe\xad\xdeNullsoftInst@O\x01\x00";
         let mut real = Vec::with_capacity(69 * 1024);

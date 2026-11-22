@@ -54,10 +54,10 @@
         "repairFailed": "No se pudo reparar el servicio"
       },
       "sysproxy": {
-        "privilegeRequired": "No se puede establecer el proxy del sistema: macOS rechazó el cambio por falta de permisos. Instale el servicio de Locus; si es administrador, también puede desactivar la exigencia de contraseña de administrador para los ajustes de todo el sistema en las opciones avanzadas de Ajustes del Sistema → Privacidad y seguridad.",
+        "privilegeRequired": "No se puede establecer el proxy del sistema: macOS rechazó el cambio por falta de permisos. Instale el servicio de Chrysalis; si es administrador, también puede desactivar la exigencia de contraseña de administrador para los ajustes de todo el sistema en las opciones avanzadas de Ajustes del Sistema → Privacidad y seguridad.",
         "directFallback": "No se pudo establecer el proxy del sistema; el tráfico volvió a una conexión directa.",
         "guardStopped": "El guardián del proxy del sistema se detuvo tras varios fallos seguidos. El proxy del sistema ya no se mantiene automáticamente.",
-        "coreNotReady": "No se pudo activar el proxy del sistema porque el núcleo no está en ejecución. Inicie el núcleo (o instale/repare el servicio de Locus) e inténtelo de nuevo.",
+        "coreNotReady": "No se pudo activar el proxy del sistema porque el núcleo no está en ejecución. Inicie el núcleo (o instale/repare el servicio de Chrysalis) e inténtelo de nuevo.",
         "systemCallFailed": "No se pudo escribir el proxy del sistema porque falló una llamada al sistema de Windows. Suele ser transitorio; inténtelo de nuevo."
       }
     },

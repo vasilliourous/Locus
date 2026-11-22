@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 
 import { SUBSCRIPTION_POLL_MS } from '@/hooks/use-subscription'
+import { chrysalisStatus, type ChrysalisStatus } from '@/services/chrysalis'
 import { subscribeEntitlementRefresh } from '@/services/entitlement-refresh'
-import { locusStatus, type LocusStatus } from '@/services/locus'
 
 /**
  * The one place that decides what the gate is allowed to branch on.
@@ -11,7 +11,7 @@ import { locusStatus, type LocusStatus } from '@/services/locus'
  *
  * `main.tsx` used to own this: a poll, an event listener added by hand inside an
  * effect, and a `catch` that guessed. Three surfaces then had to agree about it —
- * the gate, the kick-out screen (which issued its own `locusStatus()`) and the
+ * the gate, the kick-out screen (which issued its own `chrysalisStatus()`) and the
  * activation screen (which issued a third) — and they read the same facts at
  * different times with different fallbacks.
  *
@@ -54,9 +54,9 @@ export interface Entitlement {
    *
    * Surfaces that need more than the gate's two booleans — the kick-out page shows
    * the hub's own sentence — read this rather than issuing their own
-   * `locusStatus()`, which is how two screens came to disagree about one device.
+   * `chrysalisStatus()`, which is how two screens came to disagree about one device.
    */
-  status: LocusStatus | null
+  status: ChrysalisStatus | null
   /**
    * Whether a code is stored and accepted.
    *
@@ -114,7 +114,7 @@ export const gateScreen = (
 }
 
 export const useEntitlement = (): Entitlement => {
-  const [status, setStatus] = useState<LocusStatus | null>(null)
+  const [status, setStatus] = useState<ChrysalisStatus | null>(null)
   const [activated, setActivated] = useState<boolean | null>(null)
   const [suspended, setSuspended] = useState(false)
   /**
@@ -134,7 +134,7 @@ export const useEntitlement = (): Entitlement => {
    * Stable across renders, so the effect below can depend on it honestly.
    */
   const read = useCallback(() => {
-    locusStatus()
+    chrysalisStatus()
       .then((next) => {
         settledRef.current = true
         setStatus(next)
@@ -183,7 +183,7 @@ export const useEntitlement = (): Entitlement => {
     void (async () => {
       try {
         const { listen } = await import('@tauri-apps/api/event')
-        const stop = await listen('locus://entitlement-changed', tick)
+        const stop = await listen('chrysalis://entitlement-changed', tick)
         if (cancelled) stop()
         else unlisten = stop
       } catch (error) {

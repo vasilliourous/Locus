@@ -54,7 +54,7 @@
         "repairFailed": "Failed to repair the service"
       },
       "sysproxy": {
-        "privilegeRequired": "Cannot set the system proxy: Locus needs permission for that change. Install the Locus service and try again — this prompt will not come back.",
+        "privilegeRequired": "Cannot set the system proxy: Chrysalis needs permission for that change. Install the Chrysalis service and try again — this prompt will not come back.",
         "directFallback": "Failed to set the system proxy; traffic has been switched back to a direct connection.",
         "guardStopped": "The system proxy guard stopped after failing several times running. The system proxy is no longer being kept in place.",
         "coreNotReady": "The system proxy could not be enabled because the VPN is not running. Turn the VPN on and try again.",

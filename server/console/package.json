@@ -1,9 +1,9 @@
 {
-  "name": "locus-console",
+  "name": "chrysalis-console",
   "private": true,
   "version": "1.0.0",
   "type": "module",
-  "description": "Locus admin console \u2014 manage codes, clients, releases and tiers from a browser.",
+  "description": "Chrysalis admin console \u2014 manage codes, clients, releases and tiers from a browser.",
   "scripts": {
     "dev": "vite",
     "build": "vite build",

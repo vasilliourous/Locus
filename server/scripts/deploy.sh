@@ -39,7 +39,7 @@
 #   server/scripts/deploy.sh --no-console    # skip the console build (slow)
 #
 # Environment:
-#   VPS      ssh target (default: the `locus-hub` alias, then the canonical hub name)
+#   VPS      ssh target (default: the `chrysalis-hub` alias, then the canonical hub name)
 #   PB_API   hub base URL for verification
 #
 # Exit codes: 0 success, 1 usage, 2 transfer failure, 3 restart failure,
@@ -51,12 +51,12 @@ HOOKS_SRC="${REPO_ROOT}/server/pb_hooks"
 CONSOLE_DIR="${REPO_ROOT}/server/console"
 STAGING_SRC="${REPO_ROOT}/server"
 
-# Prefer the `locus-hub` ssh alias, which carries the deploy key and needs no
+# Prefer the `chrysalis-hub` ssh alias, which carries the deploy key and needs no
 # password. Fall back to the bare host so this still works on a machine that has
 # key auth set up differently.
 if [ -z "${VPS:-}" ]; then
-    if ssh -o BatchMode=yes -o ConnectTimeout=5 locus-hub true 2>/dev/null; then
-        VPS="locus-hub"
+    if ssh -o BatchMode=yes -o ConnectTimeout=5 chrysalis-hub true 2>/dev/null; then
+        VPS="chrysalis-hub"
     else
         VPS="root@networkingguides.jadedns.uk"
     fi
@@ -74,7 +74,7 @@ REMOTE_STAGING="/root/server"
 # modules/05-caddy.sh extracts it. Two callers, one filename — asserted by
 # check-consistency.sh rather than trusted, because that is the drift that
 # produced the 2026-10-01 Windows outage.
-LANDING_DOMAIN="${LANDING_DOMAIN:-locusvpn.jadedns.uk}"
+LANDING_DOMAIN="${LANDING_DOMAIN:-chrysalisvpn.jadedns.uk}"
 
 DO_HOOKS=1
 DO_CONSOLE=1
@@ -256,7 +256,7 @@ if [ "$DO_SITE" = "1" ]; then
     if [ "$CHECK_ONLY" = "1" ]; then
         ok "(skipped in --check: renders and uploads)"
     else
-        SITE_LOG=/tmp/locus-site-deploy.log
+        SITE_LOG=/tmp/chrysalis-site-deploy.log
         if ! VPS="$VPS" LANDING_DOMAIN="$LANDING_DOMAIN" \
              bash "${REPO_ROOT}/server/scripts/deploy-site.sh" > "$SITE_LOG" 2>&1; then
             tail -30 "$SITE_LOG" >&2
@@ -291,15 +291,15 @@ if [ "$DO_STAGING" = "1" ]; then
         # in memory. Restart only when the script actually differs, so a deploy
         # that touched nothing does not interrupt a fetch in progress.
         if [ "$CHECK_ONLY" != "1" ]; then
-            running=$(remote 'systemctl is-active locus-fetch 2>/dev/null || echo inactive')
+            running=$(remote 'systemctl is-active chrysalis-fetch 2>/dev/null || echo inactive')
             if [ "$running" = "active" ]; then
-                remote 'systemctl restart locus-fetch' || warn "could not restart locus-fetch"
+                remote 'systemctl restart chrysalis-fetch' || warn "could not restart chrysalis-fetch"
                 sleep 2
-                after=$(remote 'systemctl is-active locus-fetch 2>/dev/null || echo inactive')
-                [ "$after" = "active" ] && ok "locus-fetch restarted (picks up script changes)" \
-                    || warn "locus-fetch is '$after' after restart — check its journal"
+                after=$(remote 'systemctl is-active chrysalis-fetch 2>/dev/null || echo inactive')
+                [ "$after" = "active" ] && ok "chrysalis-fetch restarted (picks up script changes)" \
+                    || warn "chrysalis-fetch is '$after' after restart — check its journal"
             else
-                ok "locus-fetch not running (skipped)"
+                ok "chrysalis-fetch not running (skipped)"
             fi
         fi
     fi

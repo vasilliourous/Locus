@@ -1,8 +1,8 @@
 {
   "boundary": {
-    "client_rust": "client/src-tauri/src/locus/contract.rs",
+    "client_rust": "client/src-tauri/src/chrysalis/contract.rs",
     "hub_routes": "server/pb_hooks/*.js \u2014 routerAdd() calls",
-    "ipc": "client/src-tauri/src/cmd/locus.rs + lib.rs + client/src/**/*.ts*"
+    "ipc": "client/src-tauri/src/cmd/chrysalis.rs + lib.rs + client/src/**/*.ts*"
   },
   "endpoints": {
     "client_calls": [
@@ -42,55 +42,55 @@
   },
   "ipc_commands": {
     "called": [
-      "locus_activate",
-      "locus_cancel_connect",
-      "locus_check_code",
-      "locus_check_subscription",
-      "locus_connect",
-      "locus_disconnect",
-      "locus_dismiss_update",
-      "locus_hub_url",
-      "locus_install_update",
-      "locus_js_log",
-      "locus_sign_out",
-      "locus_status",
-      "locus_update_staging_dir",
-      "locus_update_status",
-      "locus_validate_code"
+      "chrysalis_activate",
+      "chrysalis_cancel_connect",
+      "chrysalis_check_code",
+      "chrysalis_check_subscription",
+      "chrysalis_connect",
+      "chrysalis_disconnect",
+      "chrysalis_dismiss_update",
+      "chrysalis_hub_url",
+      "chrysalis_install_update",
+      "chrysalis_js_log",
+      "chrysalis_sign_out",
+      "chrysalis_status",
+      "chrysalis_update_staging_dir",
+      "chrysalis_update_status",
+      "chrysalis_validate_code"
     ],
     "defined": [
-      "locus_activate",
-      "locus_cancel_connect",
-      "locus_check_code",
-      "locus_check_subscription",
-      "locus_connect",
-      "locus_disconnect",
-      "locus_dismiss_update",
-      "locus_hub_url",
-      "locus_install_update",
-      "locus_js_log",
-      "locus_sign_out",
-      "locus_status",
-      "locus_update_staging_dir",
-      "locus_update_status",
-      "locus_validate_code"
+      "chrysalis_activate",
+      "chrysalis_cancel_connect",
+      "chrysalis_check_code",
+      "chrysalis_check_subscription",
+      "chrysalis_connect",
+      "chrysalis_disconnect",
+      "chrysalis_dismiss_update",
+      "chrysalis_hub_url",
+      "chrysalis_install_update",
+      "chrysalis_js_log",
+      "chrysalis_sign_out",
+      "chrysalis_status",
+      "chrysalis_update_staging_dir",
+      "chrysalis_update_status",
+      "chrysalis_validate_code"
     ],
     "registered": [
-      "locus_activate",
-      "locus_cancel_connect",
-      "locus_check_code",
-      "locus_check_subscription",
-      "locus_connect",
-      "locus_disconnect",
-      "locus_dismiss_update",
-      "locus_hub_url",
-      "locus_install_update",
-      "locus_js_log",
-      "locus_sign_out",
-      "locus_status",
-      "locus_update_staging_dir",
-      "locus_update_status",
-      "locus_validate_code"
+      "chrysalis_activate",
+      "chrysalis_cancel_connect",
+      "chrysalis_check_code",
+      "chrysalis_check_subscription",
+      "chrysalis_connect",
+      "chrysalis_disconnect",
+      "chrysalis_dismiss_update",
+      "chrysalis_hub_url",
+      "chrysalis_install_update",
+      "chrysalis_js_log",
+      "chrysalis_sign_out",
+      "chrysalis_status",
+      "chrysalis_update_staging_dir",
+      "chrysalis_update_status",
+      "chrysalis_validate_code"
     ]
   },
   "platforms": {
@@ -112,9 +112,9 @@
     }
   },
   "proxy_names": {
-    "GROUP_NAME": "Locus Auto",
-    "PROXY_NAME": "Locus",
-    "UOT_PROXY_NAME": "Locus-UoT"
+    "GROUP_NAME": "Chrysalis Auto",
+    "PROXY_NAME": "Chrysalis",
+    "UOT_PROXY_NAME": "Chrysalis-UoT"
   },
   "structs": {
     "ActivateResponse": {
@@ -264,5 +264,5 @@
     }
   },
   "version": 1,
-  "what": "The Locus wire contract. See server/scripts/contract-snapshot.py."
+  "what": "The Chrysalis wire contract. See server/scripts/contract-snapshot.py."
 }

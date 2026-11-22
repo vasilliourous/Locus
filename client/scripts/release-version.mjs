@@ -22,7 +22,7 @@
  *
  *   1. cd client && pnpm release-version X.Y.Z
  *   2. git add -A && git commit -m "chore(release): X.Y.Z"
- *   3. git tag -a vX.Y.Z -m "Locus client vX.Y.Z" && git push origin vX.Y.Z
+ *   3. git tag -a vX.Y.Z -m "Chrysalis client vX.Y.Z" && git push origin vX.Y.Z
  *
  * Skipping step 1 and tagging anyway is what shipped 3.2.12 binaries under a
  * v3.2.13 tag on 2026-09-30. The `verify` job now fails a tag whose name does
@@ -190,13 +190,13 @@ async function updateCargoLockVersion(newVersion) {
   const versionWithoutV = newVersion.startsWith('v')
     ? newVersion.slice(1)
     : newVersion
-  // The workspace package is `locus` (renamed from upstream `clash-verge`); this
+  // The workspace package is `chrysalis` (renamed from upstream `clash-verge`); this
   // pattern still matched the old name and so failed the whole bump with
   // "clash-verge package entry was not found", after having already written the
   // other version sites. Kept name-aware so a rename cannot silently skip the
   // lockfile again.
   const packageVersionPattern =
-    /(\[\[package\]\]\r?\nname = "locus"\r?\nversion = )"[^"]+"/
+    /(\[\[package\]\]\r?\nname = "chrysalis"\r?\nversion = )"[^"]+"/
 
   try {
     const data = await fs.readFile(cargoLockPath, 'utf8')
@@ -210,7 +210,7 @@ async function updateCargoLockVersion(newVersion) {
     if (updatedData === data) {
       if (
         new RegExp(
-          `\\[\\[package\\]\\]\\r?\\nname = "locus"\\r?\\nversion = "${versionWithoutV}"`,
+          `\\[\\[package\\]\\]\\r?\\nname = "chrysalis"\\r?\\nversion = "${versionWithoutV}"`,
         ).test(data)
       ) {
         console.log(
@@ -218,7 +218,7 @@ async function updateCargoLockVersion(newVersion) {
         )
         return
       }
-      throw new Error('locus package entry was not found in Cargo.lock')
+      throw new Error('chrysalis package entry was not found in Cargo.lock')
     }
 
     await fs.writeFile(cargoLockPath, updatedData, 'utf8')

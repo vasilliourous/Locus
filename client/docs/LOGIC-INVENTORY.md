@@ -1,34 +1,34 @@
-# Locus logic inventory — the module map for `locus/`
+# Chrysalis logic inventory — the module map for `chrysalis/`
 
 ```
 audience:    builder
 status:      design-record
-authoritative-for: the module map and the behaviour each Locus module owns
-verified-against: client/src-tauri/src/locus/
+authoritative-for: the module map and the behaviour each Chrysalis module owns
+verified-against: client/src-tauri/src/chrysalis/
 ```
 
-> **Design record — only partly a to-do.** `client/src-tauri/src/locus/` exists and
+> **Design record — only partly a to-do.** `client/src-tauri/src/chrysalis/` exists and
 > carries this behaviour: `contract`, `activation`, `device`, `heartbeat`, `tier`,
 > `store`, `apply`, `runtime`, and `update/`. Where this document and the code
 > disagree, **the code is right** and this file is a bug — fix it in the same
 > change. Companion to `ARCHITECTURE.md` (what to cut) and
 > `UPDATE-ARCHITECTURE.md` (updater).
 >
-> Convention: `locus/…` is new Rust we own. `cmd/`, `core/`, `config/`, `feat/` are
+> Convention: `chrysalis/…` is new Rust we own. `cmd/`, `core/`, `config/`, `feat/` are
 > inherited from Verge and are touched only as noted.
 
 ---
 
 ## 0. Module map
 
-> **As built.** The tree below is the actual layout of `src-tauri/src/locus/`. The
+> **As built.** The tree below is the actual layout of `src-tauri/src/chrysalis/`. The
 > original blueprint named `update/contract.rs` and `update/public.rs`, which were
 > never created — the contract lives in the top-level `contract.rs`, and the public
 > manifest is decoded in `update/signal.rs` (`decode_public_manifest`).
 
 ```
 src-tauri/src/
-├─ locus/
+├─ chrysalis/
 │  ├─ mod.rs
 │  ├─ contract.rs        # every wire name (HUB_URL, tier payload, platform keys, artifact names)
 │  ├─ hub.rs             # the one HTTP client: platform roots, bundled-roots fallback
@@ -47,7 +47,7 @@ src-tauri/src/
 │     ├─ signal.rs       # decode heartbeat update fields + the public manifest
 │     ├─ apply.rs        # download, verify SHA-256 (fail closed), stage
 │     └─ install.rs      # drive the Tauri plugin's installer
-└─ cmd/locus.rs          # thin Tauri commands -> locus/*
+└─ cmd/chrysalis.rs          # thin Tauri commands -> chrysalis/*
 ```
 
 > `egress.rs` (the public-IP check) existed in an earlier round and was **removed**
@@ -56,7 +56,7 @@ src-tauri/src/
 
 ---
 
-## 1. `locus/activation.rs`
+## 1. `chrysalis/activation.rs`
 
 **Reference:** `legacy/wails-client/internal/activation/activation.go` (~400 lines) and
 `luhn.go`.
@@ -168,7 +168,7 @@ retries separately from heartbeat. Port both; a school network drops requests.
 
 ---
 
-## 1b. `locus/hub.rs` — the one hub HTTP client
+## 1b. `chrysalis/hub.rs` — the one hub HTTP client
 
 Every call to the hub — activation, heartbeat, the update download — goes through
 `hub::client`, which returns a client **and**, when the platform store was
@@ -196,7 +196,7 @@ naming its crypto provider.
 
 ---
 
-## 2. `locus/heartbeat.rs`
+## 2. `chrysalis/heartbeat.rs`
 
 **Reference:** `legacy/wails-client/internal/heartbeat/heartbeat.go`.
 
@@ -231,7 +231,7 @@ Verge's `singleton!` pattern is a reasonable model to follow.
 
 ---
 
-## 3. `locus/store.rs`
+## 3. `chrysalis/store.rs`
 
 **Reference:** `legacy/wails-client/internal/storage/storage.go` (476 lines).
 
@@ -258,7 +258,7 @@ pub update_pending_sha256: Option<String>,
 ```
 
 …and keep **only** what does not belong in a user-editable config in a small private
-`locus/state.json` (heartbeat counters, crash sentinel). Rationale: one store, one
+`chrysalis/state.json` (heartbeat counters, crash sentinel). Rationale: one store, one
 backup mechanism, one migration path; a second JSON file next to Verge's would be a
 second thing to corrupt.
 
@@ -270,7 +270,7 @@ diagnostics export, and match the old client's file mode discipline (`configDirP
 
 ---
 
-## 4. `locus/tier.rs`
+## 4. `chrysalis/tier.rs`
 
 Converts an activation/heartbeat `ServerConfig` into a mihomo config, then hands it to
 **Verge's existing pipeline**:
@@ -322,7 +322,7 @@ toggling one without the other is editing a half-configured tier (noted in
 `admin_console.pb.js`). The client should treat `udp_relay && uot_port > 0` as the
 single condition to enable UoT, not `udp_relay` alone.
 
-**Where the flag is read (fixed 2026-09-27).** `locus_connect` passed a literal
+**Where the flag is read (fixed 2026-09-27).** `chrysalis_connect` (then `locus_connect`) passed a literal
 `false` to `apply_tier`, so no tier ever built a UoT profile regardless of what the
 hub sent. It now reads `store::udp_relay()`, which returns the value activation
 stored, defaulting to `false` for devices activated before the flag existed. If you
@@ -330,7 +330,7 @@ add a connect path, take the flag from `store` — do not pass a literal.
 
 ---
 
-## 5. `locus/device.rs`
+## 5. `chrysalis/device.rs`
 
 **Reference:** `legacy/wails-client/internal/activation/fingerprint_{linux,darwin,windows}.go`.
 
@@ -353,7 +353,7 @@ Windows is the priority platform; Linux is best-effort (~2% of clients).
 
 ---
 
-## 5a. `locus/credential.rs`
+## 5a. `chrysalis/credential.rs`
 
 **Rewritten 2026-10.** The activation code mirrored to a machine-scoped store,
 so a reinstall, an update or an unexpected shutdown does not lose it. The full
@@ -371,7 +371,7 @@ this is the module summary.
   mirror. The grace-period path (`store::record_lapsed_grace`) keeps it, because
   a local inability to confirm the entitlement must never destroy the credential.
 
-## 6. `locus/update/*`
+## 6. `chrysalis/update/*`
 
 Fully specified in `UPDATE-ARCHITECTURE.md`. Summary of files:
 
@@ -390,7 +390,7 @@ Fully specified in `UPDATE-ARCHITECTURE.md`. Summary of files:
 | File | Change | Why |
 |---|---|---|
 | `config/verge.rs` | add product fields (§3) | activation/tier persistence |
-| `lib.rs` | register `cmd/locus.rs` handlers | Tauri command surface |
+| `lib.rs` | register `cmd/chrysalis.rs` handlers | Tauri command surface |
 | `core/updater.rs` | **delete** | replaced |
 | `capabilities/*.json` | drop `updater:*`, tighten `fs`/`http`/asset scopes | shipping requirement |
 | `core/handle.rs`, `core/tray/*` | tray menu → Connect/Disconnect/Open/Quit | product surface |

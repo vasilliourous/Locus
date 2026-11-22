@@ -144,7 +144,7 @@ impl IProfiles {
     }
 
     pub async fn save_file(&self) -> Result<()> {
-        help::save_yaml(&dirs::profiles_path()?, self, Some("# Profiles Config for Locus")).await
+        help::save_yaml(&dirs::profiles_path()?, self, Some("# Profiles Config for Chrysalis")).await
     }
 
     /// 只修改current，valid和chain

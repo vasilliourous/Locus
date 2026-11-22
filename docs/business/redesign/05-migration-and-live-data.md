@@ -127,7 +127,7 @@ Reviewed against the wire ([`07-wire-contract-and-compatibility.md`](07-wire-con
 ## 5.6 One place old clients get worse, and the mitigation
 
 If a second code is refused with a new status code, an **old** client
-(`classify()` in `locus/activation.rs`) hits its default arm:
+(`classify()` in chrysalis/activation.rs`) hits its default arm:
 
 ```rust
 code => ActivationOutcome::ServerError { code, message: response.message },

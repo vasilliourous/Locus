@@ -39,7 +39,7 @@ import { formatSpeed } from '@/utils/format-speed'
  * One decision, made obvious: the tunnel is on or off. A vendor VPN app shows a
  * single control and the evidence it is working; everything a student should not
  * have to reason about (which core, which mode, which node, which port) is
- * decided for them by Locus and the hub.
+ * decided for them by Chrysalis and the hub.
  *
  * What replaced what:
  *   - the raw "system proxy / TUN" switches  → the one Connect control
@@ -219,8 +219,8 @@ const ConnectionPage = () => {
                   : 'none',
               transition: 'background-color 0.2s, box-shadow 0.2s',
               ...(busy && {
-                animation: 'locus-pulse 1.4s ease-in-out infinite',
-                '@keyframes locus-pulse': {
+                animation: 'chrysalis-pulse 1.4s ease-in-out infinite',
+                '@keyframes chrysalis-pulse': {
                   '0%, 100%': { opacity: 1 },
                   '50%': { opacity: 0.45 },
                 },
@@ -307,7 +307,7 @@ const ConnectionPage = () => {
         )}
 
         {/* The backend's sentence, shown as-is.
-            `LOCUS_TUN_NOT_AVAILABLE` and `SERVICE_ELEVATION_FAILED` land here;
+            `CHRYSALIS_TUN_NOT_AVAILABLE` and `SERVICE_ELEVATION_FAILED` land here;
             both are written to be actionable, and paraphrasing them would throw
             away the part that says what to do. */}
         {error && (

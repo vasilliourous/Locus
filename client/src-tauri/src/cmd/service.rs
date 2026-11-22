@@ -24,11 +24,11 @@ const ELEVATION_FAILED_CODE: &str = "SERVICE_ELEVATION_FAILED";
 ///
 /// One sentence for every platform. It names what to do — approve the prompt —
 /// and nothing else: the previous version ended "if no prompt appeared, run
-/// Locus from a terminal so it can ask for a password there", which is a Linux
+/// Chrysalis from a terminal so it can ask for a password there", which is a Linux
 /// route shown on Windows and macOS too, on the one screen where the student has
 /// least room to work out that the second half does not apply to them. The
 /// remedy that is common to all three is the one this app actually raises.
-const ELEVATION_FAILED_MESSAGE: &str = "Locus asked for permission to install its service, but the \
+const ELEVATION_FAILED_MESSAGE: &str = "Chrysalis asked for permission to install its service, but the \
      request was not approved. Approve the permission prompt and try again.";
 
 /// Recognise the installer's elevation failure and describe it usefully.
@@ -71,8 +71,8 @@ const MISSING_HELPER_CODE: &str = "SERVICE_HELPER_MISSING";
 /// Reinstall first, then contact support — the runtime detail is in the log.
 fn missing_helper_message(tool: &str) -> std::string::String {
     format!(
-        "Locus could not install its service: a file it needs, {tool}, is missing from this \
-         installation. Reinstall Locus from the installer you downloaded and try again. If the \
+        "Chrysalis could not install its service: a file it needs, {tool}, is missing from this \
+         installation. Reinstall Chrysalis from the installer you downloaded and try again. If the \
          same message appears after a fresh install, contact support from the Account page."
     )
 }
@@ -102,8 +102,8 @@ fn missing_helper_failure(error: &anyhow::Error) -> Option<super::CommandFailure
         return Some(super::coded_error(
             MISSING_HELPER_CODE,
             format!(
-                "Locus could not install its service: a system file it needs is missing.{runtime} \
-                 Reinstall Locus from the installer you downloaded and try again; if it still \
+                "Chrysalis could not install its service: a system file it needs is missing.{runtime} \
+                 Reinstall Chrysalis from the installer you downloaded and try again; if it still \
                  fails, contact support from the Account page."
             ),
         ));
@@ -229,7 +229,7 @@ mod tests {
     /// The sentence must tell the student what to do, and must not name an
     /// action that only one platform has.
     ///
-    /// It previously offered "run Locus from a terminal" as the no-prompt route,
+    /// It previously offered "run Chrysalis from a terminal" as the no-prompt route,
     /// which is a Linux remedy printed on a Windows and macOS dialog. The rule
     /// now is the one a single sentence can keep everywhere: name the approval
     /// step, and leave the mechanism out.
@@ -260,7 +260,7 @@ mod tests {
     fn a_missing_helper_is_not_reported_as_an_install_or_elevation_failure() {
         let error = anyhow::Error::new(crate::core::service::MissingServiceTool {
             tool: "clash-verge-service-install.exe".to_owned(),
-            path: std::path::PathBuf::from(r"C:\Program Files\Locus\resources\clash-verge-service-install.exe"),
+            path: std::path::PathBuf::from(r"C:\Program Files\Chrysalis\resources\clash-verge-service-install.exe"),
         })
         .context("install service failed");
 

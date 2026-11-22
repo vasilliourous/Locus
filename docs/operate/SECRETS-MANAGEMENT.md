@@ -13,7 +13,7 @@ verified-against: server/secrets.env.age, server/setup.sh, server/scripts/secret
 
 ## Problem
 
-The Locus server needs several credentials to run:
+The Chrysalis server needs several credentials to run:
 
 | Credential | Used by |
 |---|---|
@@ -28,7 +28,7 @@ The Locus server needs several credentials to run:
 | `STEALTH_PASS` | **Retired tier's password (port 8444).** Still validated and written to `/root/.tier_passwords` for compatibility, but no service consumes it on a fresh box. Keep it in the secrets file so an upgraded host does not fork, and so removing the old service is not blocked by a missing key. |
 | `PB_ADMIN_EMAIL`, `PB_ADMIN_PASS` | PocketBase admin credentials |
 | `VPS_USER`, `VPS_PW` | **Root SSH access to the hub** (added 2026-11-04). Not consumed by any module: `setup.sh` sources it only to strip it back out of the child environment, and `scripts/vps-test/sshp.py` uses it for password-auth deploys. See *Root SSH credentials live here on purpose*. |
-| `ACTIVATION_TUNNEL_KEY` | The pre-activation activation tunnel's Shadowsocks password (port 8453). **Shipped compiled into the client**, so treat it as public: what bounds it is the forwarder's allowlist and rate limit, not secrecy. Set once and never rotate — rotating it strands every deployed client, and the heartbeat that could deliver a replacement is the call this tunnel exists to make possible. On the box it is written twice by `setup_key`, both mode `0600`: `/etc/locus/activation-tunnel.key` (the copy an operator reads to compile into a release) and `/etc/locus/activation-tunnel.key.env` (an `EnvironmentFile` for the path filter, which keys each client's rate-limit identity with it — see [`../reference/ACTIVATION-TUNNEL.md`](../reference/ACTIVATION-TUNNEL.md) §3.2). See §3.3 there. |
+| `ACTIVATION_TUNNEL_KEY` | The pre-activation activation tunnel's Shadowsocks password (port 8453). **Shipped compiled into the client**, so treat it as public: what bounds it is the forwarder's allowlist and rate limit, not secrecy. Set once and never rotate — rotating it strands every deployed client, and the heartbeat that could deliver a replacement is the call this tunnel exists to make possible. On the box it is written twice by `setup_key`, both mode `0600`: `/etc/chrysalis/activation-tunnel.key` (the copy an operator reads to compile into a release) and `/etc/chrysalis/activation-tunnel.key.env` (an `EnvironmentFile` for the path filter, which keys each client's rate-limit identity with it — see [`../reference/ACTIVATION-TUNNEL.md`](../reference/ACTIVATION-TUNNEL.md) §3.2). See §3.3 there. |
 
 The bundle also carries one **non-credential** on the same terms: a base64 copy of
 the update signing key (`LOCUS_UPDATE_KEY_B64`, added 2026-10-16 — see the FAQ).
@@ -158,16 +158,16 @@ anything you cannot regenerate. Every secret lives in `server/secrets.env.age`.
 |---|---|---|
 | `server/secrets.env.age` | **The durable copy of every secret.** Committed ciphertext. | Recoverable from git — that is the point |
 | `server/secrets.env.age` **passphrase** | Gitignored, e.g. `decryptionkeyforsecretsdeleteafteruse.txt` | **Unrecoverable, and it takes every secret with it.** Keep it in a password manager as well |
-| `.locus-keys/locus_update.key` | Cache of the update-signing key, extracted per session | Harmless — re-extract from the bundle |
+| `.chrysalis-keys/chrysalis_update.key` | Cache of the update-signing key, extracted per session | Harmless — re-extract from the bundle |
 | `.secrets.env` | A plaintext working copy during an edit | **Should not exist.** The flow is decrypt → edit → re-encrypt → `shred -u` |
 
 The update-signing key is stored in the bundle as `LOCUS_UPDATE_KEY_B64`
 (and as the `LOCUS_UPDATE_KEY` Actions secret for CI, which is write-only and
-therefore not a backup). `.locus-keys/` is emptied after each signing session
+therefore not a backup). `.chrysalis-keys/` is emptied after each signing session
 precisely so that nobody mistakes it for the key's home — the 2026-10-16 loss was
 that mistake, and it cost the fleet a manual reinstall. The extraction command and
-its verification live in [`../../.locus-keys/README.md`](../../.locus-keys/README.md)
-and `server/scripts/locus-key-extract.sh`.
+its verification live in [`../../.chrysalis-keys/README.md`](../../.chrysalis-keys/README.md)
+and `server/scripts/chrysalis-key-extract.sh`.
 
 ### The fresh-clone guarantee
 
@@ -227,7 +227,7 @@ tracked — but neither of those is a substitute for not writing it down nearby.
 
 ```bash
 cat > .secrets.env << 'EOF'
-# Locus Production Secrets
+# Chrysalis Production Secrets
 DOMAIN=networkingguides.jadedns.uk
 ADMIN_API_TOKEN=<generate with: openssl rand -base64 32>
 B2_APPLICATION_KEY_ID=your-backblaze-key-id
@@ -289,7 +289,7 @@ Use the script — it is the supported path, and it verifies its own output:
 
 ```bash
 cd server/scripts
-LOCUS_SECRETS_PASSPHRASE_FILE=~/passphrase.txt ./secrets-encrypt.sh ../../.secrets.env
+CHRYSALIS_SECRETS_PASSPHRASE_FILE=~/passphrase.txt ./secrets-encrypt.sh ../../.secrets.env
 ```
 
 Or, interactively (age will prompt twice):
@@ -331,18 +331,18 @@ git status
 `setup.sh` and `restore.sh` share the same block. They read the passphrase from
 two sources, in order, and **fail** if neither is set:
 
-### Source 1: `LOCUS_SECRETS_PASSPHRASE`
+### Source 1: `CHRYSALIS_SECRETS_PASSPHRASE`
 
 ```bash
-LOCUS_SECRETS_PASSPHRASE='...' ssh root@vps '/root/server/setup.sh'
+CHRYSALIS_SECRETS_PASSPHRASE='...' ssh root@vps '/root/server/setup.sh'
 ```
 
-### Source 2: `LOCUS_SECRETS_PASSPHRASE_FILE`
+### Source 2: `CHRYSALIS_SECRETS_PASSPHRASE_FILE`
 
 ```bash
 # Better: the passphrase stays out of your shell history and out of `ps`
 scp passphrase.txt root@vps:/root/.pw
-ssh root@vps "LOCUS_SECRETS_PASSPHRASE_FILE=/root/.pw /root/server/setup.sh"
+ssh root@vps "CHRYSALIS_SECRETS_PASSPHRASE_FILE=/root/.pw /root/server/setup.sh"
 ```
 
 Use `chmod 600` on that file, and delete it when the deploy is done.
@@ -384,21 +384,21 @@ present by default on Ubuntu 22.04.
 ```bash
 scp -r server root@your-vps:/root/
 scp passphrase.txt root@your-vps:/root/.pw
-ssh root@your-vps "chmod 600 /root/.pw && LOCUS_SECRETS_PASSPHRASE_FILE=/root/.pw /root/server/setup.sh && rm -f /root/.pw"
+ssh root@your-vps "chmod 600 /root/.pw && CHRYSALIS_SECRETS_PASSPHRASE_FILE=/root/.pw /root/server/setup.sh && rm -f /root/.pw"
 ```
 
 ### From local machine (passphrase inline)
 
 ```bash
 scp -r server root@your-vps:/root/
-ssh root@your-vps "LOCUS_SECRETS_PASSPHRASE='...' /root/server/setup.sh"
+ssh root@your-vps "CHRYSALIS_SECRETS_PASSPHRASE='...' /root/server/setup.sh"
 ```
 
 ### Disaster recovery (`restore.sh`)
 
 ```bash
 scp -r server root@new-vps:/root/
-ssh root@new-vps "LOCUS_SECRETS_PASSPHRASE='...' /root/server/restore.sh"
+ssh root@new-vps "CHRYSALIS_SECRETS_PASSPHRASE='...' /root/server/restore.sh"
 ```
 
 ### Manual env vars (no secrets file at all)
@@ -421,7 +421,7 @@ server/scripts/secrets-decrypt.sh > /tmp/.secrets.env
 
 # Edit, then re-encrypt and shred
 $EDITOR /tmp/.secrets.env
-LOCUS_SECRETS_PASSPHRASE_FILE=~/passphrase.txt server/scripts/secrets-encrypt.sh /tmp/.secrets.env
+CHRYSALIS_SECRETS_PASSPHRASE_FILE=~/passphrase.txt server/scripts/secrets-encrypt.sh /tmp/.secrets.env
 shred -u /tmp/.secrets.env
 
 git add server/secrets.env.age
@@ -434,10 +434,10 @@ git commit -m "Update secrets"
 
 ```bash
 # 1. Decrypt with the CURRENT passphrase
-LOCUS_SECRETS_PASSPHRASE_FILE=~/old-passphrase.txt server/scripts/secrets-decrypt.sh > /tmp/.secrets.env
+CHRYSALIS_SECRETS_PASSPHRASE_FILE=~/old-passphrase.txt server/scripts/secrets-decrypt.sh > /tmp/.secrets.env
 
 # 2. Re-encrypt with the NEW one
-LOCUS_SECRETS_PASSPHRASE_FILE=~/new-passphrase.txt server/scripts/secrets-encrypt.sh /tmp/.secrets.env
+CHRYSALIS_SECRETS_PASSPHRASE_FILE=~/new-passphrase.txt server/scripts/secrets-encrypt.sh /tmp/.secrets.env
 shred -u /tmp/.secrets.env
 
 # 3. Commit, and update your password manager
@@ -490,7 +490,7 @@ replaced the key; it did not recover it.
 That was a custody failure, not a tooling one, and the fix is an order of
 operations:
 
-1. **Generate the key locally first**, into the repo root's `.locus-keys/`.
+1. **Generate the key locally first**, into the repo root's `.chrysalis-keys/`.
 2. **Back that copy up immediately** — offline, and as `LOCUS_UPDATE_KEY_B64` in
    this bundle.
 3. **Then** set the Actions secret.

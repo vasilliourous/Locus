@@ -1,16 +1,16 @@
 import { invoke } from '@tauri-apps/api/core'
 
 import type {
-  LocusStatus,
+  ChrysalisStatus,
   ValidateCodeResult,
   ActivationResult,
   ConnectionResult,
   UpdateStatus,
   SignOutResult,
-} from './locus.generated'
+} from './chrysalis.generated'
 
 /**
- * The Locus product surface.
+ * The Chrysalis product surface.
  *
  * Every call returns a TYPED result rather than a string, because the situations
  * a student can hit are genuinely different and only some of them are their
@@ -22,9 +22,9 @@ import type {
 // ── The wire types, generated from the Rust ──────────────────────────────────
 //
 // These types cross the Tauri IPC boundary and are MIRRORS of the Rust types in
-// `src-tauri/src/cmd/locus.rs`. They are generated, not hand-written:
+// `src-tauri/src/cmd/chrysalis.rs`. They are generated, not hand-written:
 // `server/scripts/gen-ts-contract.py` reads the Rust and emits
-// `./locus.generated.ts`, and CI fails if the committed output disagrees with
+// `./chrysalis.generated.ts`, and CI fails if the committed output disagrees with
 // the Rust.
 //
 // WHY. Before this, each interface was hand-maintained beside its `invoke()`
@@ -47,7 +47,7 @@ import type {
 // `docs/reference/CONTRACT.md` (the contract as data) and in the Rust doc
 // comments, which the generator carries across verbatim.
 export type {
-  LocusStatus,
+  ChrysalisStatus,
   UdpStatus,
   AllowanceStatus,
   SubscriptionStatus,
@@ -63,10 +63,10 @@ export type {
   // public surface, not reach into the generated file. `HubEnforcement` is read by
   // the Account page (it is the one field that says the hub is deployed behind),
   // and it was generated without a re-export — so the only way to use it was
-  // `import type … from './locus.generated'`, which is how a generated type
+  // `import type … from './chrysalis.generated'`, which is how a generated type
   // becomes a hand-written habit.
   HubEnforcement,
-} from './locus.generated'
+} from './chrysalis.generated'
 
 export interface CodeCheck {
   ready: boolean
@@ -75,27 +75,27 @@ export interface CodeCheck {
   message: string
 }
 
-export const locusStatus = () => invoke<LocusStatus>('locus_status')
+export const chrysalisStatus = () => invoke<ChrysalisStatus>('chrysalis_status')
 
 /** Offline checksum check. No network — safe to call on every keystroke. */
-export const locusValidateCode = (code: string) =>
-  invoke<ValidateCodeResult>('locus_validate_code', { code })
+export const chrysalisValidateCode = (code: string) =>
+  invoke<ValidateCodeResult>('chrysalis_validate_code', { code })
 
 /** Read-only hub pre-check: is this code real, and is it usable here? */
-export const locusCheckCode = (code: string) =>
-  invoke<CodeCheck>('locus_check_code', { code })
+export const chrysalisCheckCode = (code: string) =>
+  invoke<CodeCheck>('chrysalis_check_code', { code })
 
-// `RecognitionResult` and `locusRecognise` — REMOVED.
+// `RecognitionResult` and `chrysalisRecognise` — REMOVED.
 //
 // Device recognition is gone: the client no longer asks the hub whether it
 // remembers this device, because nothing identifies a device any more. A student
 // who reinstalls keeps their access because the activation code itself is
-// persisted to a machine-scoped store (see locus/credential.rs).
+// persisted to a machine-scoped store (see chrysalis/credential.rs).
 
-export const locusActivate = (code: string) =>
-  invoke<ActivationResult>('locus_activate', { code })
+export const chrysalisActivate = (code: string) =>
+  invoke<ActivationResult>('chrysalis_activate', { code })
 
-export const locusHubUrl = () => invoke<string>('locus_hub_url')
+export const chrysalisHubUrl = () => invoke<string>('chrysalis_hub_url')
 
 /**
  * Asks the client to confirm the subscription with the hub right now, and waits
@@ -118,11 +118,11 @@ export const locusHubUrl = () => invoke<string>('locus_hub_url')
  * progress indicator must bracket the operation, and this resolve point is now
  * that boundary.
  */
-export const locusCheckSubscription = () =>
-  invoke<boolean>('locus_check_subscription')
+export const chrysalisCheckSubscription = () =>
+  invoke<boolean>('chrysalis_check_subscription')
 
-export const locusUpdateStagingDir = () =>
-  invoke<string>('locus_update_staging_dir')
+export const chrysalisUpdateStagingDir = () =>
+  invoke<string>('chrysalis_update_staging_dir')
 
 /**
  * Brings the tunnel up, and waits for the core to actually be ready.
@@ -133,7 +133,7 @@ export const locusUpdateStagingDir = () =>
  * backend's own explanation rather than hanging, so the button can always be
  * pressed again.
  */
-export const locusConnect = () => invoke<ConnectionResult>('locus_connect')
+export const chrysalisConnect = () => invoke<ConnectionResult>('chrysalis_connect')
 
 /**
  * Abandons an in-flight connect.
@@ -142,7 +142,7 @@ export const locusConnect = () => invoke<ConnectionResult>('locus_connect')
  * cancelled is the failure mode where a student is left with a spinner and no
  * move but to kill the app.
  */
-export const locusCancelConnect = () => invoke<void>('locus_cancel_connect')
+export const chrysalisCancelConnect = () => invoke<void>('chrysalis_cancel_connect')
 
 /**
  * Brings the tunnel down.
@@ -151,12 +151,12 @@ export const locusCancelConnect = () => invoke<void>('locus_cancel_connect')
  * unconditionally, which is what prevents the "engine still running but the app
  * thinks it is not" state the retired client could not escape from.
  */
-export const locusDisconnect = () =>
-  invoke<ConnectionResult>('locus_disconnect')
+export const chrysalisDisconnect = () =>
+  invoke<ConnectionResult>('chrysalis_disconnect')
 
 /** Reports the update state. Never touches the network. */
-export const locusUpdateStatus = () =>
-  invoke<UpdateStatus>('locus_update_status')
+export const chrysalisUpdateStatus = () =>
+  invoke<UpdateStatus>('chrysalis_update_status')
 
 /**
  * Downloads and installs the offered update.
@@ -166,7 +166,7 @@ export const locusUpdateStatus = () =>
  * exits, so this may never resolve — callers must treat completion as "expect a
  * restart" rather than assuming the promise settles.
  */
-export const locusInstallUpdate = () => invoke<void>('locus_install_update')
+export const chrysalisInstallUpdate = () => invoke<void>('chrysalis_install_update')
 
 /**
  * Forgets an offered update without installing it.
@@ -174,7 +174,7 @@ export const locusInstallUpdate = () => invoke<void>('locus_install_update')
  * Called when the student dismisses the prompt, so they are not asked again for
  * the same version on every launch. A newer offer still prompts.
  */
-export const locusDismissUpdate = () => invoke<void>('locus_dismiss_update')
+export const chrysalisDismissUpdate = () => invoke<void>('chrysalis_dismiss_update')
 
 /**
  * Signs this computer out of its activation code.
@@ -188,7 +188,7 @@ export const locusDismissUpdate = () => invoke<void>('locus_dismiss_update')
  *
  * Resolves with a {@link SignOutResult}, and the `hub` field is the part callers
  * must not flatten: `released` and `nothingToRelease` both mean the student is
- * free to move on, while `notConfirmed` means the device is signed out but Locus
+ * free to move on, while `notConfirmed` means the device is signed out but Chrysalis
  * was never told — which is a different sentence, and a true one. Rendering all
  * three as "signed out" would tell a student on a dead network that their key had
  * been released.
@@ -196,4 +196,4 @@ export const locusDismissUpdate = () => invoke<void>('locus_dismiss_update')
  * Rejects only when the LOCAL half failed, in which case nothing changed on this
  * computer and the message says so.
  */
-export const locusSignOut = () => invoke<SignOutResult>('locus_sign_out')
+export const chrysalisSignOut = () => invoke<SignOutResult>('chrysalis_sign_out')

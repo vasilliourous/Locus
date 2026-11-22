@@ -4,7 +4,7 @@
 audience:    builder
 status:      live
 authoritative-for: the order to bring a checkout up to a state where you can build, test and sign
-verified-against: .locus-keys/README.md, server/scripts/locus-key-extract.sh, server/scripts/secrets-decrypt.sh
+verified-against: .chrysalis-keys/README.md, server/scripts/chrysalis-key-extract.sh, server/scripts/secrets-decrypt.sh
 ```
 
 The steps below are in order because each one's failure mode is confusing if you
@@ -23,7 +23,7 @@ buys you.
 ## 1. Check out, and clear the environment
 
 ```sh
-git clone https://github.com/vasilliourous/Locus.git && cd Locus
+git clone https://github.com/vasilliourous/Chrysalis.git && cd Chrysalis
 direnv allow            # or: set -a; . ./.envrc; set +a
 ```
 
@@ -75,7 +75,7 @@ secret at all. You need this step to **deploy**, **seed the hub**, or **sign an
 update**.
 
 ```sh
-export LOCUS_SECRETS_PASSPHRASE_FILE=<path to the passphrase file>
+export CHRYSALIS_SECRETS_PASSPHRASE_FILE=<path to the passphrase file>
 
 # Prove the bundle is readable and current before relying on it:
 server/scripts/secrets-decrypt.sh --check
@@ -93,12 +93,12 @@ manager as well as on disk. See
 
 ## 4. Extract the signing key — only if this session will sign
 
-`.locus-keys/` is **empty after a clone, and that is correct.** It is a cache, not
+`.chrysalis-keys/` is **empty after a clone, and that is correct.** It is a cache, not
 the key's home. The durable copy is `LOCUS_UPDATE_KEY_B64` inside the bundle.
 
 ```sh
-server/scripts/locus-key-extract.sh --check   # verify, write nothing
-server/scripts/locus-key-extract.sh           # extract: 0700 dir, 0600 files
+server/scripts/chrysalis-key-extract.sh --check   # verify, write nothing
+server/scripts/chrysalis-key-extract.sh           # extract: 0700 dir, 0600 files
 ```
 
 The script refuses to write a key that does not match
@@ -109,7 +109,7 @@ installed client refuses, and nothing fails until a student tries to update.
 **When the session is over:**
 
 ```sh
-server/scripts/locus-key-extract.sh --remove
+server/scripts/chrysalis-key-extract.sh --remove
 ```
 
 Removing it is the point, not housekeeping. The 2026-10-16 incident happened
@@ -118,7 +118,7 @@ lost, the key went with it, and the fleet paid a manual reinstall. Keeping the
 cache empty by default means the *recovery* path is the path used every day — so
 it is exercised rather than discovered broken.
 
-[`.locus-keys/README.md`](../../.locus-keys/README.md) owns the detail.
+[`.chrysalis-keys/README.md`](../../.chrysalis-keys/README.md) owns the detail.
 
 ## 5. Build and run the gates
 
@@ -192,7 +192,7 @@ another person or another machine.
 | Lost | Consequence | Recoverable? |
 |---|---|---|
 | The passphrase | Every secret, including the signing key. The ciphertext is public — the passphrase is its only protection. | **No.** Keep it in a password manager. |
-| `.locus-keys/*` | Nothing. Re-extract. | ✅ by design |
+| `.chrysalis-keys/*` | Nothing. Re-extract. | ✅ by design |
 | `.secrets.env` | Nothing. It should not exist. | ✅ by design |
 | `client/dist/`, `src-tauri/sidecar/`, `node_modules/` | Nothing. All regenerated. | ✅ |
 | `vendor/build-inputs/` | Would require the network — but it is **committed**, so this cannot happen from a clone. | ✅ |
@@ -216,8 +216,8 @@ direnv allow
 (cd client && pnpm install && pnpm run prebuild && pnpm web:build)
 
 # Only if deploying or signing:
-export LOCUS_SECRETS_PASSPHRASE_FILE=~/locus-passphrase
-server/scripts/locus-key-extract.sh        # only if signing
+export CHRYSALIS_SECRETS_PASSPHRASE_FILE=~/chrysalis-passphrase
+server/scripts/chrysalis-key-extract.sh        # only if signing
 #  ...work...
-server/scripts/locus-key-extract.sh --remove
+server/scripts/chrysalis-key-extract.sh --remove
 ```

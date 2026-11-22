@@ -1,4 +1,4 @@
-// Locus Admin Unbind Hook — PocketBase 0.22 compatible
+// Chrysalis Admin Unbind Hook — PocketBase 0.22 compatible
 //
 // Auth is BODY-ONLY (`admin_token` in the JSON body). The sibling
 // admin_console.pb.js also accepts an `X-Admin-Token` header; this endpoint does

@@ -72,9 +72,9 @@ Enforce **one live code per fingerprint**. On activation, before binding:
 
 The refusal must be a distinct, legible outcome, not a generic 403. The client
 already has a vocabulary for exactly this shape of problem: `ActivationOutcome`
-(`ActivationOutcome` in `locus/activation.rs`) has separate arms for `BoundToAnotherDevice`,
+(`ActivationOutcome` in chrysalis/activation.rs`) has separate arms for `BoundToAnotherDevice`,
 `Suspended`, `Expired`, `NotFound`, `RateLimited`, `ServerError`, and
-`describe_outcome` (`cmd/locus.rs:~490`) gives each one a sentence written for a
+`describe_outcome` (`cmd/chrysalis.rs:~490`) gives each one a sentence written for a
 student. **Add a new arm, e.g. `DeviceAlreadyActivated`**, rather than
 overloading an existing one — overloading is how the `403` ambiguity in §3.3
 happened.
@@ -155,7 +155,7 @@ changed.
 
 ### Why the fingerprint changes
 
-`locus/device.rs` computes the fingerprint by `sha256` over whatever hardware
+chrysalis/device.rs` computes the fingerprint by `sha256` over whatever hardware
 identity is available, degrading through weaker combinations, and **finally to
 a random value**:
 
@@ -194,7 +194,7 @@ no self-service recovery.
 **Part A — persist the fingerprint where a reinstall cannot lose it.**
 
 Today the fingerprint is written into the app's own config (the same store that
-holds `activation_code`, `locus_tier`, etc., the Locus fields on `IVerge` in `config/verge.rs`). It
+holds `activation_code`, `chrysalis_tier`, etc., the Chrysalis fields on `IVerge` in `config/verge.rs`). It
 must instead live somewhere that survives the app being removed and
 reinstalled, and is machine-scoped rather than user-scoped:
 
@@ -266,7 +266,7 @@ design, not a caveat to it.
 * `"Code suspended"` (line 151)
 * `"Code bound to another device"` (line 150)
 
-The client disambiguates **by wording** (the 403 classifier in `locus/activation.rs`):
+The client disambiguates **by wording** (the 403 classifier in chrysalis/activation.rs`):
 
 ```rust
 403 => {

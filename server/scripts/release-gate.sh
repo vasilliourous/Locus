@@ -97,10 +97,10 @@ if [ "$state_ver" = "$VERSION" ]; then
 else
     fail "docs/state.toml says '${state_ver:-<unreadable>}', expected '$VERSION'"
 fi
-lock_ver=$(grep -m1 -A1 'name = "locus"' client/Cargo.lock 2>/dev/null \
+lock_ver=$(grep -m1 -A1 'name = "chrysalis"' client/Cargo.lock 2>/dev/null \
     | grep -m1 'version' | sed 's/.*=[[:space:]]*"\([^"]*\)".*/\1/')
 if [ -n "$lock_ver" ] && [ "$lock_ver" != "$VERSION" ]; then
-    fail "client/Cargo.lock pins locus $lock_ver, package.json says $VERSION (run: pnpm release-version)"
+    fail "client/Cargo.lock pins chrysalis $lock_ver, package.json says $VERSION (run: pnpm release-version)"
 else
     pass "client/Cargo.lock agrees"
 fi
@@ -167,7 +167,7 @@ echo
 
 echo "5. The signing key is present and is the key tauri.conf.json publishes"
 PUBKEY_FILE="client/src-tauri/tauri.conf.json"
-KEY_PRIV=".locus-keys/locus_update.key"
+KEY_PRIV=".chrysalis-keys/chrysalis_update.key"
 if [ ! -f "$KEY_PRIV" ]; then
     fail "no private signing key at $KEY_PRIV — every signed build will fail, and"
     fail "  a lost key means no installed client can ever be updated again."
@@ -186,11 +186,11 @@ else
     # to decide "is this signed by the key I trust", so it is the right thing
     # to compare.
     # The key ID is carried in the comment line of the PUBLIC key file. The
-    # private key's own comment is an arbitrary label ("Locus client update
+    # private key's own comment is an arbitrary label ("Chrysalis client update
     # signing key") and carries no ID, so reading the ID from the private file
     # finds nothing and the check cannot pass — which is how this failed the
     # first time. The `.pub` beside the private key is the right source.
-    KEY_PUB_SIBLING="$(dirname "$KEY_PRIV")/locus_update.pub"
+    KEY_PUB_SIBLING="$(dirname "$KEY_PRIV")/chrysalis_update.pub"
     key_id_priv=""
     if [ -f "$KEY_PUB_SIBLING" ]; then
         key_id_priv=$(grep -m1 -oE 'key ([0-9A-F]{16})' "$KEY_PUB_SIBLING" 2>/dev/null \
@@ -257,7 +257,7 @@ if [ "$FAIL" -eq 0 ]; then
     echo -e "${GREEN}Ready to tag ${VERSION}.${NC}"
     echo
     echo "   Next, in this order (docs/operate/RELEASING.md):"
-    echo "     git tag -a v${VERSION} -m \"Locus client v${VERSION}\""
+    echo "     git tag -a v${VERSION} -m \"Chrysalis client v${VERSION}\""
     echo "     git push origin main && git push origin v${VERSION}"
     echo "   Then publish, then RE-RENDER THE PAGE (deploy.sh --site),"
     echo "   then confirm with verify-release.sh ${VERSION}."

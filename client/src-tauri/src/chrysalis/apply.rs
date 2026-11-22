@@ -7,7 +7,7 @@
 //!
 //! ```text
 //! tier::build_profile()            -> the mihomo document
-//! write it as a local profile      -> app_profiles_dir()/locus.yaml
+//! write it as a local profile      -> app_profiles_dir()/chrysalis.yaml
 //! register it + make it current    -> IProfiles (profiles.yaml)
 //! CoreManager::update_config_forced()  -> validate -> apply -> reload/restart
 //! ```
@@ -30,9 +30,9 @@
 //! machinery works unmodified, and there is exactly one code path from "a tier
 //! arrived" to "the core is running it".
 
+use crate::chrysalis::{contract::TierConfig, tier};
 use crate::config::{Config, PrfItem, profiles};
 use crate::core::CoreManager;
-use crate::locus::{contract::TierConfig, tier};
 use crate::utils::dirs;
 use anyhow::{Context as _, Result};
 use clash_verge_logging::{Type, logging};
@@ -44,10 +44,10 @@ use smartstring::alias::String as SmartString;
 /// REPLACE the existing profile rather than accumulate one per heartbeat. A new
 /// file each time would leave the student's config directory growing by a few
 /// kilobytes every five minutes.
-const TIER_PROFILE_FILE: &str = "locus.yaml";
+const TIER_PROFILE_FILE: &str = "chrysalis.yaml";
 
 /// The profile's display name, shown wherever Verge lists profiles.
-const TIER_PROFILE_NAME: &str = "Locus";
+const TIER_PROFILE_NAME: &str = "Chrysalis";
 
 /// What applying a tier did, so the caller can report accurately.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -63,7 +63,7 @@ pub enum ApplyOutcome {
     /// the manager's guard.
     ///
     /// This is not a refusal and must never be reported as one. It is the shape of
-    /// the macOS Intel report: `locus_connect` polls the readiness loop every
+    /// the macOS Intel report: `chrysalis_connect` polls the readiness loop every
     /// 250 ms, each iteration re-enters the apply path, and every iteration after
     /// the first met the guard and came back `Busy` — which used to be formatted
     /// into "The tunnel configuration was refused: Configuration validation is
@@ -94,7 +94,7 @@ pub async fn apply_tier(config: &TierConfig, udp_relay: bool) -> Result<ApplyOut
             logging!(
                 info,
                 Type::Config,
-                "[locus] tier config applied ({} bytes)",
+                "[chrysalis] tier config applied ({} bytes)",
                 profile.yaml.len()
             );
             Ok(ApplyOutcome::Applied)
@@ -111,7 +111,7 @@ pub async fn apply_tier(config: &TierConfig, udp_relay: bool) -> Result<ApplyOut
                 logging!(
                     info,
                     Type::Config,
-                    "[locus] tier config written but not judged yet: {reason}"
+                    "[chrysalis] tier config written but not judged yet: {reason}"
                 );
                 return Ok(ApplyOutcome::Deferred { reason });
             }
@@ -120,11 +120,15 @@ pub async fn apply_tier(config: &TierConfig, udp_relay: bool) -> Result<ApplyOut
             // failure: "the tunnel will not start" is not actionable, "the proxy
             // port is already in use" is.
             let reason = outcome.to_string();
-            logging!(warn, Type::Config, "[locus] tier config rejected: {reason}");
+            logging!(warn, Type::Config, "[chrysalis] tier config rejected: {reason}");
             Ok(ApplyOutcome::Rejected { reason })
         }
         Err(error) => {
-            logging!(warn, Type::Config, "[locus] could not apply the tier config: {error:#}");
+            logging!(
+                warn,
+                Type::Config,
+                "[chrysalis] could not apply the tier config: {error:#}"
+            );
             Ok(ApplyOutcome::Rejected {
                 reason: format!("{error:#}"),
             })
@@ -139,7 +143,7 @@ pub async fn apply_tier(config: &TierConfig, udp_relay: bool) -> Result<ApplyOut
 /// manipulating `profiles.yaml` directly.
 async fn write_tier_profile(yaml: &str) -> Result<()> {
     let mut item = PrfItem {
-        uid: Some(SmartString::from("locus-tier")),
+        uid: Some(SmartString::from("chrysalis-tier")),
         // "local" rather than "remote": there is no URL to refresh from, and
         // marking it remote would make Verge try to fetch it on a timer and fail
         // every time.
@@ -147,7 +151,7 @@ async fn write_tier_profile(yaml: &str) -> Result<()> {
         name: Some(SmartString::from(TIER_PROFILE_NAME)),
         file: Some(SmartString::from(TIER_PROFILE_FILE)),
         desc: Some(SmartString::from(
-            "Your Locus tier. Managed automatically — do not edit.",
+            "Your Chrysalis tier. Managed automatically — do not edit.",
         )),
         // The YAML is handed over rather than pre-written so the existing helper
         // performs the write, the same way every other profile is created.
@@ -186,15 +190,15 @@ async fn write_tier_profile(yaml: &str) -> Result<()> {
             .await
             .with_context(|| format!("could not write {}", path.display()))?;
 
-        logging!(debug, Type::Config, "[locus] tier profile updated in place");
+        logging!(debug, Type::Config, "[chrysalis] tier profile updated in place");
         return Ok(());
     }
 
     profiles::profiles_append_item_safe(&mut item)
         .await
-        .context("could not create the Locus tier profile")?;
+        .context("could not create the Chrysalis tier profile")?;
 
-    logging!(debug, Type::Config, "[locus] tier profile created");
+    logging!(debug, Type::Config, "[chrysalis] tier profile created");
     Ok(())
 }
 
@@ -239,11 +243,11 @@ pub async fn remove_tier_profile() {
         .await;
 
     match result {
-        Ok(()) => logging!(info, Type::Config, "[locus] tier profile removed"),
+        Ok(()) => logging!(info, Type::Config, "[chrysalis] tier profile removed"),
         Err(error) => logging!(
             warn,
             Type::Config,
-            "[locus] could not remove the tier profile: {error:#}"
+            "[chrysalis] could not remove the tier profile: {error:#}"
         ),
     }
 }
@@ -256,7 +260,7 @@ mod tests {
     fn the_tier_profile_file_is_stable() {
         // Re-applying must overwrite, not accumulate. If this ever changed to a
         // generated name, every heartbeat would leave another file behind.
-        assert_eq!(TIER_PROFILE_FILE, "locus.yaml");
+        assert_eq!(TIER_PROFILE_FILE, "chrysalis.yaml");
     }
 
     /// The generated document must be valid YAML and carry the tier's server —
@@ -264,7 +268,7 @@ mod tests {
     /// document surfaces as an opaque engine error.
     #[test]
     fn the_document_handed_to_verge_is_well_formed() {
-        use crate::locus::tier::build_profile;
+        use crate::chrysalis::tier::build_profile;
 
         let config = TierConfig {
             server: "networkingguides.duckdns.org".into(),
@@ -287,7 +291,7 @@ mod tests {
     /// because the free plan is the common case.
     #[test]
     fn a_tier_without_uot_is_still_applicable() {
-        use crate::locus::tier::build_profile;
+        use crate::chrysalis::tier::build_profile;
 
         let config = TierConfig {
             server: "networkingguides.duckdns.org".into(),

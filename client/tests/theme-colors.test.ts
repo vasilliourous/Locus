@@ -7,11 +7,11 @@ import { describe, expect, it } from 'vitest'
 import {
   DEFAULT_SHAPE,
   defaultTheme,
-  locusFontFamily,
-  LOCUS_COLORS,
+  chrysalisFontFamily,
+  CHRYSALIS_COLORS,
   TIER_COLORS,
 } from '../src/pages/_theme'
-import { locusTheme } from '../src/services/theme'
+import { chrysalisTheme } from '../src/services/theme'
 
 /**
  * The palette, and the fact that there is exactly one.
@@ -88,7 +88,7 @@ const contrast = (a: string, b: string) => {
   return (hi + 0.05) / (lo + 0.05)
 }
 
-const palette = LOCUS_COLORS
+const palette = CHRYSALIS_COLORS
 
 describe('the one palette is legible', () => {
   it('body text clears 4.5:1 on both the page and the card', () => {
@@ -208,7 +208,7 @@ describe('the paint layers agree', () => {
 
   it('the pre-bundle bootstrap script carries the palette ground and text', () => {
     // `window_script.rs` paints the page before the bundle runs, and it cannot
-    // import `LOCUS_COLORS`. Its fallback values are a fourth copy of both.
+    // import `CHRYSALIS_COLORS`. Its fallback values are a fourth copy of both.
     //
     // Demonstrated failing by changing either fallback alone.
     const script = read('../src-tauri/src/utils/resolve/window_script.rs')
@@ -291,7 +291,7 @@ describe('the paint layers agree', () => {
 
 describe('there is exactly one appearance', () => {
   it('the palette is Dawn', () => {
-    // The decision (`/COLOURS.md` §0) is that Locus is permanently Dawn. Pinned
+    // The decision (`/COLOURS.md` §0) is that Chrysalis is permanently Dawn. Pinned
     // here so a change to any of these is a deliberate edit to the decision
     // rather than a tweak nobody noticed.
     //
@@ -326,7 +326,7 @@ describe('there is exactly one appearance', () => {
     expect(defaultTheme.warning_color).toBe(palette.warning)
     expect(defaultTheme.success_color).toBe(palette.success)
     expect(defaultTheme.background_color).toBe(palette.background)
-    expect(defaultTheme.font_family).toBe(locusFontFamily)
+    expect(defaultTheme.font_family).toBe(chrysalisFontFamily)
   })
 
   it('the MUI theme is dark, and reads the palette rather than repeating it', () => {
@@ -334,24 +334,24 @@ describe('there is exactly one appearance', () => {
     // app would have two palettes that gradually diverged. `mode` is asserted
     // because a light `mode` would make MUI compute its own light defaults for
     // every component that does not read a colour directly.
-    expect(locusTheme.palette.mode).toBe('dark')
-    expect(locusTheme.palette.background.default).toBe(palette.background)
-    expect(locusTheme.palette.background.paper).toBe(palette.background)
-    expect(locusTheme.palette.text.primary).toBe(palette.textPrimary)
-    expect(locusTheme.palette.text.secondary).toBe(palette.textSecondary)
-    expect(locusTheme.palette.primary.main).toBe(palette.accent)
-    expect(locusTheme.palette.success.main).toBe(palette.success)
-    expect(locusTheme.palette.warning.main).toBe(palette.warning)
-    expect(locusTheme.palette.error.main).toBe(palette.error)
-    expect(locusTheme.shape.borderRadius).toBe(DEFAULT_SHAPE.controlRadius)
+    expect(chrysalisTheme.palette.mode).toBe('dark')
+    expect(chrysalisTheme.palette.background.default).toBe(palette.background)
+    expect(chrysalisTheme.palette.background.paper).toBe(palette.background)
+    expect(chrysalisTheme.palette.text.primary).toBe(palette.textPrimary)
+    expect(chrysalisTheme.palette.text.secondary).toBe(palette.textSecondary)
+    expect(chrysalisTheme.palette.primary.main).toBe(palette.accent)
+    expect(chrysalisTheme.palette.success.main).toBe(palette.success)
+    expect(chrysalisTheme.palette.warning.main).toBe(palette.warning)
+    expect(chrysalisTheme.palette.error.main).toBe(palette.error)
+    expect(chrysalisTheme.shape.borderRadius).toBe(DEFAULT_SHAPE.controlRadius)
   })
 
   it('the shadow scale is zeroed, so nothing relies on elevation', () => {
     // `_surfaces.ts` documents that a card is separated by a border and a
     // surface step. That is only true while every shadow is `none`; an MUI
     // default shadow reappearing would make the border look doubled.
-    expect(new Set(locusTheme.shadows).size).toBe(1)
-    expect(locusTheme.shadows[24]).toBe('none')
+    expect(new Set(chrysalisTheme.shadows).size).toBe(1)
+    expect(chrysalisTheme.shadows[24]).toBe('none')
   })
 
   it('no theme machinery survives in the source tree', () => {
@@ -378,7 +378,7 @@ describe('there is exactly one appearance', () => {
       'ThemeModeProvider',
       'useThemeMode',
       'resolveThemeMode',
-      'LOCUS_LIGHT',
+      'CHRYSALIS_LIGHT',
     ]
     const offenders: string[] = []
     for (const file of files) {

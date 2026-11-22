@@ -5,8 +5,8 @@ audience:    builder + human-operator
 status:      live
 authoritative-for: the free-tier tunnel used for hub calls and plan establishment on a network that
                    blocks the hub by name, and what is not yet proven about it
-verified-against: client/src-tauri/src/locus/activation_tunnel.rs, client/src-tauri/src/locus/tier.rs,
-                  client/src-tauri/src/locus/hub/client.rs, client/src-tauri/build.rs
+verified-against: client/src-tauri/src/chrysalis/activation_tunnel.rs, client/src-tauri/src/chrysalis/tier.rs,
+                  client/src-tauri/src/chrysalis/hub/client.rs, client/src-tauri/build.rs
 ```
 
 ## 1. What it is
@@ -76,7 +76,7 @@ the reasoning; the short version is that the engine is stopped only after the pl
 tunnel has carried traffic for a **sustained** `TUNNEL_HOLD`, not on the first
 sample that says so.
 
-Warm at app setup (`lib.rs`, `setup`); driven from `locus_status` via
+Warm at app setup (`lib.rs`, `setup`); driven from `chrysalis_status` via
 `activation_tunnel::supervise`, which is the only hook that observes both
 transitions. The 60 s idle TTL in `endpoint()` governs the per-request activation
 engine, **not** this one — they occupy separate slots, so the maintenance engine is
@@ -87,7 +87,7 @@ plan tunnel is carrying traffic", which was true but unstable: it acted on one
 sample. The measured consequence was a start/stop cycle across every TUN-up on the
 network this exists for.
 
-Nothing auto-reconnects (`use-connection.ts:315` is the only `locusConnect`
+Nothing auto-reconnects (`use-connection.ts:315` is the only `chrysalisConnect`
 caller), so a dropped tunnel is re-warmed within one poll of the drop — up to 15 s
 on the idle interval. Do not expect the drop itself to wake maintenance.
 
@@ -95,7 +95,7 @@ on the idle interval. Do not expect the drop itself to wake maintenance.
 
 The plan's `server` comes from the hub as a **hostname**. Once the session has seen
 a transport failure, `tier.rs::dial_server` substitutes the hub's compiled address
-for the name; both the plan proxy and `LocusUoT` take it, since they share one
+for the name; both the plan proxy and `chrysalis_uot` take it, since they share one
 builder.
 
 Chaining via `dialer-proxy` was rejected for two independent reasons: it severs
@@ -106,11 +106,11 @@ anyway. Substitution is one field and has neither problem.
 
 ## 6. Operating it
 
-**The key.** `LOCUS_FREE_TIER_KEY` is the hub's `ECO_PASS` from
+**The key.** `CHRYSALIS_FREE_TIER_KEY` is the hub's `ECO_PASS` from
 `server/secrets.env.age`, injected at build time (`build.rs`) and compiled in.
 
 ```bash
-gh secret set LOCUS_FREE_TIER_KEY --repo <owner>/<repo>
+gh secret set CHRYSALIS_FREE_TIER_KEY --repo <owner>/<repo>
 ```
 
 A tagged build **fails** without it (`.github/workflows/client.yml`); a branch
@@ -119,7 +119,7 @@ build simply has no maintenance tunnel.
 **School-network test, three scenarios:**
 
 1. **Fresh start** — cold launch on the school network, enter a code. Expected:
-   enrolment succeeds, and the activation screen shows *"Using the Locus backup
+   enrolment succeeds, and the activation screen shows *"Using the Chrysalis backup
    route to reach the server."*
 2. **Tunnel drop** — press Disconnect, then Connect. Expected: the plan tunnel
    re-establishes without leaving the network.
@@ -163,12 +163,12 @@ So every premise this document rests on holds on that network, and the failure
 is in the app's own path. The candidates, none yet eliminated:
 
 - **The engine is never warm when it is needed.** `warm_maintenance` runs from
-  `lib.rs` setup and from `locus_status`; enrolment can be submitted before
+  `lib.rs` setup and from `chrysalis_status`; enrolment can be submitted before
   either has finished loading a 60 MB sidecar.
 - **The switch never fires.** The rule is "no HTTP status at all"; the direct
   call must actually produce that, and `retry_over_maintenance` must be reached
   before the response is parsed.
-- **The build carries no free-tier key.** `LOCUS_FREE_TIER_KEY` is
+- **The build carries no free-tier key.** `CHRYSALIS_FREE_TIER_KEY` is
   `option_env!`; `Bootstrap::maintenance()` returns `None` silently and the
   routing rule takes the direct branch forever. The Actions secret exists
   (2026-11-13) but the *installed* binary is only as good as the build that
@@ -227,15 +227,15 @@ maintenance tunnel dead and the log would still say "available" — true about t
 wrong tunnel. It now reports both. Guard:
 `the_build_stamp_reports_the_maintenance_tunnel_too`.
 
-`LOCUS_FREE_TIER_KEY` also gained a `_PRESENT` build stamp
+`CHRYSALIS_FREE_TIER_KEY` also gained a `_PRESENT` build stamp
 (`build.rs`), the same shape the activation key has had since three releases went
 out keyless.
 
 ### 9.5 The screen said nothing during the slow part
 
-`LocusStatus.bootstrapping` required a warm engine, so during the on-demand start
+`ChrysalisStatus.bootstrapping` required a warm engine, so during the on-demand start
 — precisely the window where the student is waiting — the caption *"Using the
-Locus backup route to reach the server"* was absent. It now reports the session's
+Chrysalis backup route to reach the server"* was absent. It now reports the session's
 preference plus whether the build carries a key.
 
 ### 9.6 What is still not guaranteed

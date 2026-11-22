@@ -33,7 +33,7 @@ available'; on macOS the version in the menu does not update."* Four requests, t
 which turned out to be one root cause and one genuine latent bug.
 
 - **The update prompt loop — two defects, both real.**
-  1. `locus_install_update` cleared the recorded offer **only after `install()`
+  1. `chrysalis_install_update` (then `locus_install_update`) cleared the recorded offer **only after `install()`
      succeeded**. On Windows the installer exits the process before that line is
      reached, so the offer survived every successful update — which is why the
      symptom is worst on Windows. `PendingInstall::check` then returned `Ok(None)`
@@ -42,16 +42,16 @@ which turned out to be one root cause and one genuine latent bug.
      outcome clears the offer, and `Ok(None)` says so **and** clears it: "you are
      already up to date, the prompt has been cleared" is the true sentence, and it
      is the last one they see about that version.
-  2. `locus_update_status` reported whatever offer was stored, without comparing it
+  2. `chrysalis_update_status` (then `locus_update_status`) reported whatever offer was stored, without comparing it
      to the running version. It now applies the same `rejection_reason` gate the
      install path uses, so an offer for the running build can never render a prompt.
-- **Updates now check while the app is open.** Locus is a background VPN; "check on
-  launch" is "check approximately never". `locus::update::poll` adds an hourly check
+- **Updates now check while the app is open.** Chrysalis is a background VPN; "check on
+  launch" is "check approximately never". `chrysalis::update::poll` (then `locus::update::poll`) adds an hourly check
   (`CHECK_INTERVAL`) that reuses `PendingInstall::check` — no new protocol, one
-  unauthenticated GET — records the offer, and emits `locus://update-offered` so the
+  unauthenticated GET — records the offer, and emits `chrysalis://update-offered` (then `locus://update-offered`) so the
   prompt appears mid-session instead of at the next relaunch. It never installs.
 - **Version surfaces read the running app, not the compile-time constant.** The tray
-  and `locus_update_status` now use `app.package_info().version`. The menu rebuild
+  and `chrysalis_update_status` (then `locus_update_status`) now use `app.package_info().version`. The menu rebuild
   logs the version it used, so "the tray still shows the old number" becomes a log
   line to read rather than a repro to request. *(The macOS-specific staleness is the
   one part I could not confirm — see STILL-OPEN.)*
@@ -61,7 +61,7 @@ which turned out to be one root cause and one genuine latent bug.
   on the frozen "suspended" wording, so a suspension goes through
   `store::record_suspension` (code, tier and expiry kept) while every other refusal
   still clears. The gate branches to a kick-out screen, and the backend emits
-  `locus://entitlement-changed` so it reaches the window immediately instead of at
+  `chrysalis://entitlement-changed` (then `locus://entitlement-changed`) so it reaches the window immediately instead of at
   the 5-minute poll. Un-suspending restores the session from `handle_success` — no
   re-entry, no restart.
 - **A latent bug found on the way, and fixed.** `credential::read_code()` did not
@@ -182,7 +182,7 @@ on sign-out) would have created a worse defect than the one reported.
 
 ## THE ONLY COPY OF THE UPDATE-SIGNING KEY WAS IN A GITIGNORED DIRECTORY, TWICE OVER (2026-11-18, unreleased)
 
-- **What broke.** `.locus-keys/` held the minisign private key that signs every
+- **What broke.** `.chrysalis-keys/` (then `.locus-keys/`) held the minisign private key that signs every
   client update, and the directory is gitignored. Losing the working tree on
   2026-10-16 took the key with it; it survived only because an unencrypted copy
   happened to still sit on the deployed host, and the fleet still paid a manual
@@ -198,9 +198,9 @@ on sign-out) would have created a worse defect than the one reported.
 
 - **Fix.** The rule now: **a secret that is not in git is not backed up.**
   `LOCUS_UPDATE_KEY_B64` in the committed `server/secrets.env.age` is the durable
-  copy; `.locus-keys/` is emptied after every signing session and is *empty after a
+  copy; `.chrysalis-keys/` (then `.locus-keys/`) is emptied after every signing session and is *empty after a
   clone by design*, so the recovery path is the path used daily rather than one
-  discovered broken. `server/scripts/locus-key-extract.sh` is the only route to
+  discovered broken. `server/scripts/chrysalis-key-extract.sh` (then `locus-key-extract.sh`) is the only route to
   the key, and it verifies what it extracted before writing it.
 
 - **A guard defect found while writing it.** The script first derived the public
@@ -271,7 +271,7 @@ on sign-out) would have created a worse defect than the one reported.
   you back to the registration page, leaving you trapped in a broken app that
   doesn't let you re-enter the code."
 - **Root cause, in the config plumbing rather than in `signout.rs`.** All 18
-  writers in `locus/store.rs` had the shape
+  writers in `chrysalis/store.rs` had the shape
   `verge.edit_draft(|d| …)` followed by `verge.data_arc().save_file()`. The two
   reads target different slots: `edit_draft` mutates the **draft**, and
   `data_arc()` returns the **committed** snapshot (`crates/clash-verge-draft`).
@@ -282,7 +282,7 @@ on sign-out) would have created a worse defect than the one reported.
   clear and a `discard()`, `latest_arc().activation_code` was `Some("CODE")`
   again and the file on disk had never changed.
 - **Why that produced *this* symptom, and not just "sign-out does nothing".**
-  `locus_status` reads `latest_arc()`, which prefers the draft. So the gate did
+  `chrysalis_status` (then `locus_status`) reads `latest_arc()`, which prefers the draft. So the gate did
   flip to the activation screen for as long as the draft lived — and then the
   code came back, the gate re-read "activated", and the student was returned to a
   connection screen for a device whose key the hub had already released. The
@@ -339,7 +339,7 @@ produces had no route at all.
 *Fixed:* the outbound is built from an ordered candidate list
 (`bootstrap_targets`) — the resolved name first, then
 `contract::ACTIVATION_TUNNEL_ADDR`, a compiled IPv4 literal overridable at build
-time via `LOCUS_ACTIVATION_TUNNEL_ADDR`. `Dns` is now retryable and its remedy
+time via `LOCUS_ACTIVATION_TUNNEL_ADDR` (now `CHRYSALIS_ACTIVATION_TUNNEL_ADDR`). `Dns` is now retryable and its remedy
 sentence names the retry. *Guarded by* two unit tests and
 `check-consistency.sh` §48, which also refuses a **hostname** in that constant
 (tried: substituting the hub's name fails the guard) and refuses the address being
@@ -352,7 +352,7 @@ fingerprint. The first five students in a class would activate and the rest woul
 be told "too many attempts" — which the client reports as a network failure.
 Nothing on the hub reported it, and the per-source limit looked enforced.
 
-*Fixed:* the forwarder sets `X-Locus-Bootstrap` to
+*Fixed:* the forwarder sets `X-Locus-Bootstrap` (now `X-Chrysalis-Bootstrap`) to
 `sha256(bootstrap key | peer)`, a per-source unforgeable digest that reveals no
 address (it overwrites anything the client sent), and both hooks key on
 `fp || bootstrapId || ip`. The audit column is left empty on that path rather than
@@ -726,12 +726,12 @@ three independent ways, all measured against the live hub with `curl`.
 
 3. **The update CHECK bypassed every hub-client rule.** `updater_builder()` gave
    the plugin a plain `reqwest` client: OS certificate store only, the
-   environment's proxy, redirects followed. That is the exact client `locus::hub`
+   environment's proxy, redirects followed. That is the exact client `chrysalis::hub`
    exists to replace (an unpatched Windows store cannot verify the hub's chain and
    reports it as `Expired`), and the update path is where that trap bites hardest.
    `install::check` now overrides it with `configure_client` — no proxy, no
    redirects, and the same ceiling as an activation call. The artifact fetch also
-   goes through `locus::hub::client_refusing_redirects`, and the consistency
+   goes through `chrysalis::hub::client_refusing_redirects`, and the consistency
    checker's "no hub-facing module builds its own client" rule refused the
    hand-built one I first reached for, which is the guard doing its job.
 
@@ -795,7 +795,7 @@ against the old `127.0.0.1` value.
 
 ### 3. THE KEY WAS ABSENT FROM EVERY SHIPPED BUILD, SILENTLY
 
-`option_env!("LOCUS_ACTIVATION_TUNNEL_KEY")` was read directly in
+`option_env!("LOCUS_ACTIVATION_TUNNEL_KEY")` (now `CHRYSALIS_ACTIVATION_TUNNEL_KEY`) was read directly in
 `activation_tunnel.rs`, and `build.rs` did not re-emit it. Cargo does not reliably
 rebuild a crate for an `option_env!` that was absent last time, so a key that
 appeared after a cached build could leave the constant stale; and CI reported a
@@ -885,7 +885,8 @@ package."*
 - **What broke.** `hub::Failure::classify` folded DNS failures into `Transport`,
   and `Transport::remedy()` returns **`None`**. A student on a school network
   therefore got `could not reach the Locus hub at …: error sending request for
-  url (…)` and nothing else — a sentence that reads as "the hub is down" when the
+  url (…)` and nothing else — "Locus" because that is what the product was
+  called when the message shipped — a sentence that reads as "the hub is down" when the
   true state is "your network did not translate the name, so nothing was
   dialled". The remedy needed to exist and could not be written for a bucket that
   also contained timeouts and drops.
@@ -930,8 +931,9 @@ recovery was uninstalling and wiping app data.*
   now validates the code itself and, on failure, skips the hub request and
   completes the **local half** — the destructive statements were already outside
   the hub arm, and a guard now pins that. `locus_connect` refuses with its own
-  `LOCUS_STORED_CODE_DAMAGED` rather than `LOCUS_NOT_ACTIVATED`, because the
-  student *did* activate; `locus_status` carries `storedCodeDamaged` and the
+  `LOCUS_STORED_CODE_DAMAGED` rather than `LOCUS_NOT_ACTIVATED` — the connect
+  command and both codes are `CHRYSALIS_*` now — because the
+  student *did* activate; `chrysalis_status` (then `locus_status`) carries `storedCodeDamaged` and the
   Account page says the sign-in is damaged instead of showing a fresh-device
   screen.
   **Guards, each observed failing.** Removing the `validate_code` call from
@@ -988,7 +990,7 @@ sentence is why it stayed unfixed — none of them produced an `error` to log.
   config-update guard) or *refused* with
   `message.contains("already running")`. That is a string match across a module
   boundary against a sentence raised two modules away. Any rewording moved a
-  scheduler collision into a hard `LOCUS_CONNECT_FAILED`, or a genuine refusal
+  scheduler collision into a hard `LOCUS_CONNECT_FAILED` (now `CHRYSALIS_CONNECT_FAILED`), or a genuine refusal
   into a 30 s wait. Neither direction fails a test.
   **Fix:** `CoreStartRefusal::{Held, Refused}`, raised by `start_core` and
   classified by the caller. The text is still what a log shows; nothing *decides*
@@ -1015,7 +1017,7 @@ sentence is why it stayed unfixed — none of them produced an `error` to log.
   so every layer above treated it as a start in progress. The student waited out
   the whole 30 s readiness budget and was told the tunnel was "taking longer than
   usual", which is not what happened. Nothing was logged and nothing was on screen.
-  **Fix:** the `Wait` path now logs a warning naming the cause, and `locus_status`
+  **Fix:** the `Wait` path now logs a warning naming the cause, and `chrysalis_status` (then `locus_status`)
   carries `connect_blocker` — computed from **the same run-state snapshot the
   connect gate reads**, so the screen and the gate cannot disagree. The Connection
   screen renders it with the OS prompt as the next step, because "try again in the
@@ -1037,7 +1039,7 @@ sentence is why it stayed unfixed — none of them produced an `error` to log.
   assumption in probe.rs needs re-deriving"*. **That was false.** The parsing had
   not changed; the test had asked too early.
 - **The mechanism, from the engine's own log.** `RESTful API listening at …` is
-  logged **29 ms before** `Start initial compatible provider "Locus Auto"`.
+  logged **29 ms before** `Start initial compatible provider "Locus Auto"` — the group is `Chrysalis Auto` now.
   `wait_for_controller` polls `/version`, which is served at the first line, so a
   test that runs before the proxy table exists gets a `404` for
   `/proxies/<name>/delay` — the route is real, the outbound is not registered yet.
@@ -1635,7 +1637,7 @@ and the hub went on serving 3.3.2.
 
 ## 3.3.3 — THE WINDOWS TLS FIX SHIPS, AND THE BUILD BECOMES REPRODUCIBLE (2026-10-26, release)
 
-- **What went out.** The `locus::hub` TLS fix from 2026-10-18, which sat in the
+- **What went out.** The `chrysalis::hub` TLS fix from 2026-10-18, which sat in the
   tree labelled *unreleased* for eight days and three commits. The student it was
   written for was still affected; the fix was correct and never shipped. That gap
   is the one this entry exists to name: work is not done when it is in `main`.
@@ -1750,7 +1752,7 @@ shape: **a check that reads correct and does not do what its comment says.**
   valid, the served chain is complete (leaf → `YE1` → `Root YE` → `ISRG Root X2`
   → cross-signed by `ISRG Root X1`), and both TLS 1.2 and 1.3 verify against
   OpenSSL and Python on a machine with a current trust store.
-- **The mechanism.** `locus/activation.rs` built its own `reqwest::Client`, and a
+- **The mechanism.** `chrysalis/activation.rs` built its own `reqwest::Client`, and a
   bare builder uses `rustls-platform-verifier`, which on Windows reads **only the
   Windows certificate store**. The chain's top anchor is `ISRG Root X2`, an ECDSA
   root that reaches Windows machines solely through root-certificate update
@@ -1758,7 +1760,7 @@ shape: **a check that reads correct and does not do what its comment says.**
   without that root has no path to an anchor — and `webpki` reports that as
   `InvalidCertificate(Expired)`. The message accuses the hub's certificate of
   something that is false, which is why it read as a hub outage.
-- **The fix.** One shared client in `locus::hub`, used by activation, heartbeat
+- **The fix.** One shared client in `chrysalis::hub`, used by activation, heartbeat
   and the update download: try the platform store, and on a **certificate** error
   only, retry with the compiled-in `webpki-roots` store, which ships with the
   binary and needs no OS update. The failure is logged with the store that
@@ -2067,7 +2069,7 @@ defects — and the last one is the rule that matters.
 
 - **Sign-out inherited the suspension, and the kick-out page has no controls.**
   `store::clear_entitlement` removed the code, tier and expiry and left
-  `locus_suspended` set. Signing out of a suspended device therefore produced
+  `chrysalis_suspended` (then `locus_suspended`) set. Signing out of a suspended device therefore produced
   `activated: false, suspended: true` — a pair that describes nothing, because a
   suspension is a statement about a *code* — and the gate rendered `SuspendedScreen`,
   which deliberately offers no sign-out, no retry and no alternative code (its remedy
@@ -2096,7 +2098,7 @@ defects — and the last one is the rule that matters.
   and nothing read it. A stale deployment and a console that never set the flag were
   the same non-event: the student was told nothing, and the operator was left
   comparing a file tree against a live server. The client now records the version and
-  reports `HubEnforcement` in `locus_status`; the Account page says, in the student's
+  reports `HubEnforcement` in `chrysalis_status` (then `locus_status`); the Account page says, in the student's
   words, that the server is behind and which number to quote. It reports and never
   gates — refusing service over a slow deploy would be a worse defect than the one it
   reports.
@@ -2105,14 +2107,14 @@ defects — and the last one is the rule that matters.
   timer and on two Tauri events. It now also re-reads on window focus, `pageshow`,
   `online`, and `visibilitychange`, through one hook (`use-entitlement.ts`) that the
   kick-out screen and the activation screen read instead of each issuing their own
-  `locusStatus()`. A failed read no longer clears a suspension — keeping what we have
+  `chrysalisStatus()` (then `locusStatus()`). A failed read no longer clears a suspension — keeping what we have
   is the safe direction, since the other one silently re-admits a device an operator
   just kicked out.
 
 - **Guards, each observed failing.** `a_suspension_without_a_code_is_not_a_suspension`
   and `clearing_the_entitlement_clears_the_suspension` (`store.rs`),
   `a_suspension_keeps_the_heartbeat_beating` (`runtime.rs`),
-  `a_hub_that_never_answered_is_not_a_hub_that_is_behind` (`cmd/locus.rs`), and
+  `a_hub_that_never_answered_is_not_a_hub_that_is_behind` (`cmd/chrysalis.rs`), and
   `gateScreen`'s five cases (`use-entitlement.test.ts`). Each was reverted to the
   defective behaviour and confirmed red before the fix was restored.
 
@@ -2171,7 +2173,7 @@ defects — and the last one is the rule that matters.
 - **What broke.** The connect path needed elevation and never requested it.
 - **Rule kept.** Request elevation before the operation, not after it fails.
 
-## THE APP NOW LOOKS LIKE LOCUS, NOT LIKE CLASH VERGE REV (2026-09-26)
+## THE APP NOW LOOKS LIKE LOCUS, NOT LIKE CLASH VERGE REV (2026-09-26; the product is `Chrysalis` from 2026-11-23)
 
 - **What changed.** The rebrand: the shipping two-tab UI —
   [`../../client/docs/FRONTEND.md`](../../client/docs/FRONTEND.md).
@@ -2194,7 +2196,7 @@ defects — and the last one is the rule that matters.
   bundle loaded nothing.
 - **Rule kept.** §16: no absolute `frontendDist` is compiled into the client.
 
-## "LOCUS HAS NO LINUX ELEVATION PATH" WAS A CLAIM ABOUT THE RETIRED CLIENT, NOT THE FORK (2026-09-26)
+## "LOCUS HAS NO LINUX ELEVATION PATH" WAS A CLAIM ABOUT THE RETIRED CLIENT, NOT THE FORK (2026-09-26; the product is `Chrysalis` from 2026-11-23)
 
 - **What broke.** A limitation of the retired client was read as a constraint of
   the live one.

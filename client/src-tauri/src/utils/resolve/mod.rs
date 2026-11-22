@@ -88,8 +88,8 @@ async fn resolve_setup() {
         init_hotkey(),
         init_auto_lightweight_boot(),
         init_auto_backup(),
-        init_locus_heartbeat(),
-        async { init_locus_update_poll() },
+        init_chrysalis_heartbeat(),
+        async { init_chrysalis_update_poll() },
     );
 
     Handle::refresh_clash();
@@ -160,7 +160,7 @@ async fn init_auto_backup() {
 
 /// Starts the periodic update check.
 ///
-/// Deliberately NOT inside [`init_locus_heartbeat`], and not gated on activation.
+/// Deliberately NOT inside [`init_chrysalis_heartbeat`], and not gated on activation.
 ///
 /// Two different reasons for the same placement:
 ///
@@ -168,14 +168,14 @@ async fn init_auto_backup() {
 ///    connect, cannot reach the hub through the tunnel, and an update is the only
 ///    thing that can fix a broken build. The check itself is unauthenticated
 ///    (`/api/update`), so there is nothing to be entitled to.
-///  * Locus is a background VPN. "Check on launch" is approximately "check
+///  * Chrysalis is a background VPN. "Check on launch" is approximately "check
 ///    never", because the app stays open for days — see
-///    [`crate::locus::update::poll`] for the cadence and its reasoning.
+///    [`crate::chrysalis::update::poll`] for the cadence and its reasoning.
 ///
 /// `handle` is available here; the heartbeat needs none because it is reached
 /// through a stored credential rather than a live window.
-fn init_locus_update_poll() {
-    crate::locus::update::poll::start(Handle::app_handle().clone());
+fn init_chrysalis_update_poll() {
+    crate::chrysalis::update::poll::start(Handle::app_handle().clone());
 }
 
 /// Resumes the heartbeat for an already-activated device.
@@ -184,26 +184,26 @@ fn init_locus_update_poll() {
 /// a student opening the app on a device that was activated last term. Without
 /// this the entitlement would never refresh, a suspension would go unnoticed,
 /// and the grace period would silently run out.
-async fn init_locus_heartbeat() {
+async fn init_chrysalis_heartbeat() {
     // Rehydrate from the durable mirror BEFORE reading the record. An uninstall
     // or a config reset can leave `verge.yaml` without the code while the
     // machine-scoped copy still holds it; without this the device would resume
     // as if unactivated and send the student back to the code screen for a code
     // they already own. This also writes the recovered code back, so the launch
     // is not a one-off.
-    let _ = crate::locus::store::read_code_rehydrating().await;
+    let _ = crate::chrysalis::store::read_code_rehydrating().await;
 
     let verge = crate::config::Config::verge().await;
-    let activation = match crate::locus::store::read(&verge.latest_arc()) {
+    let activation = match crate::chrysalis::store::read(&verge.latest_arc()) {
         Some(activation) => activation,
         None => {
             // Not activated yet is the normal first-run state, not an error.
-            logging!(debug, Type::Setup, "[locus] no activation stored; heartbeat idle");
+            logging!(debug, Type::Setup, "[chrysalis] no activation stored; heartbeat idle");
             return;
         }
     };
 
-    crate::locus::runtime::start(activation);
+    crate::chrysalis::runtime::start(activation);
 }
 
 pub(crate) fn init_signal() {

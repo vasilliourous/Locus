@@ -4,11 +4,11 @@
 audience:    builder
 status:      design-record
 authoritative-for: why the updater is hub-mediated, and how it differs from Tauri's
-verified-against: client/src-tauri/src/locus/update/, server/pb_hooks/release.pb.js
+verified-against: client/src-tauri/src/chrysalis/update/, server/pb_hooks/release.pb.js
 ```
 
 > **Design record — implemented, with one correction.** The hub-mediated path is
-> built (`locus/update/`). See `UPSTREAM-CHANGES.md` §3 and
+> built (`chrysalis/update/`). See `UPSTREAM-CHANGES.md` §3 and
 > `../../docs/operate/UPDATE-SYSTEM.md` for what is live.
 >
 > **Correction: the Tauri updater plugin is not removed — it is used as the
@@ -16,7 +16,7 @@ verified-against: client/src-tauri/src/locus/update/, server/pb_hooks/release.pb
 > plugin's Tauri registration, the WebView-facing `updater:*` capabilities, and the
 > whole `@tauri-apps/plugin-updater` frontend surface.
 >
-> `locus/update/install.rs` still calls `Update::install()`, which is what gives us
+> `chrysalis/update/install.rs` still calls `Update::install()`, which is what gives us
 > NSIS/macOS/Linux installation and the mandatory minisign verification. We feed it
 > our own URL, hash and signature via `UpdaterBuilder::endpoints(..)`.
 >
@@ -77,7 +77,7 @@ plan below removes the code, not just the config.
 
 ---
 
-## 2. How Locus updates (what we are porting)
+## 2. How Chrysalis updates (what we are porting)
 
 The old client's path, `legacy/wails-client/internal/updatecfg` + `internal/updater`.
 It is not a "simpler" updater — it is a **hub-mediated, entitlement-aware, per-platform,
@@ -110,7 +110,7 @@ checksum. That is FIXES #31.
 identifiers, artifact filenames, and field names. Do not re-derive them.
 
 ```rust
-// locus/update/contract.rs
+// chrysalis/update/contract.rs
 pub const PLATFORMS: [&str; 4] = ["linux", "windows", "macos_intel", "macos_arm"];
 // layer 1 (record)  -> layer 2 (heartbeat) names
 // download_linux    -> update_linux   ...
@@ -180,7 +180,7 @@ The old client had a genuine deadlock: **updates were only reachable through an
 activation code**, so a user whose code had expired or whose device was unbound could
 not update to the version that might fix their problem.
 
-The resolution, ported into `locus/update/signal.rs` as `decode_public_manifest`, is a
+The resolution, ported into `chrysalis/update/signal.rs` as `decode_public_manifest`, is a
 **public fallback**: an unauthenticated release manifest fetched from the hub
 (`GET /api/release`, implemented by `server/pb_hooks/release.pb.js`), used when the
 heartbeat path cannot serve an update:
@@ -228,7 +228,7 @@ problem — that is precisely what it is for. So the fork should:
 - **Keep** Verge's *install mechanics* (the plugin's `update.install()`), driven by
   our own metadata rather than by a signed static manifest.
 - **Delete** the hand-rolled backup/swap/revert/fork machinery. Those exist because a
-  portable `locus.exe` had to replace itself; an NSIS install does not, and every one
+  portable `locus.exe` (the updater payload name, a retained alias) had to replace itself; an NSIS install does not, and every one
   of them was a source of field bugs.
 
 **The hybrid (as built):** use `tauri-plugin-updater` as a downloader/installer, but
@@ -246,8 +246,8 @@ Three options, in preference order:
    the hub, signed, with our endpoints. Keeps the plugin's model intact (signature
    verification, installer args) but reintroduces a static file and loses the rollout
    gate unless the manifest URL itself is rollout-gated. **Problem:** a static manifest
-   is the same for every client, which is the thing Locus explicitly does not want.
-2. **Runtime metadata override** — keep the entitlement/rollout logic in `locus/update/`,
+   is the same for every client, which is the thing Chrysalis explicitly does not want.
+2. **Runtime metadata override** — keep the entitlement/rollout logic in `chrysalis/update/`,
    and hand the chosen `(version, url, sha256)` to a lower-level install call. Loses
    the plugin's signature check but keeps our SHA-256 check plus the hub's TLS.
    **This is the recommended path**, and it is what the old client effectively did.
@@ -274,7 +274,7 @@ Three options, in preference order:
 ## 5. Implementation checklist
 
 - [ ] Port `updatecfg` constants + artifact filename contract to
-      `src-tauri/src/locus/update/contract.rs`, with the `macos_*` / `darwin-*`
+      `src-tauri/src/chrysalis/update/contract.rs`, with the `macos_*` / `darwin-*`
       asymmetry preserved and commented.
 - [ ] Port version comparison (`CompareVersions`/`IsNewer` semantics — numeric
       segments, zero-padding, prerelease ordering, build metadata ignored) and unit-test

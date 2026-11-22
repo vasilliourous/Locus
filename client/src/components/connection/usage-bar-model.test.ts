@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import type { AllowanceStatus } from '@/services/locus'
+import type { AllowanceStatus } from '@/services/chrysalis'
 
 import {
   formatBytes,

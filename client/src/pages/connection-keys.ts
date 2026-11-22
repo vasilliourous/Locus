@@ -21,7 +21,7 @@
  *    even though the app has no rich-text surface today, because a future one
  *    would otherwise silently start a VPN behind the cursor.
  * 3. **It is a repeat.** Holding Enter must not fire a connect per auto-repeat
- *    frame; `locus_connect` is expensive and the cancel path would be racing
+ *    frame; `chrysalis_connect` is expensive and the cancel path would be racing
  *    itself.
  *
  * A fourth is checked by the caller rather than here, because it is about the

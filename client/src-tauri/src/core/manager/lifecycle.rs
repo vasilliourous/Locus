@@ -40,11 +40,11 @@ const fn should_request_install_for_absent_service(absent: bool, no_pending_acti
 /// # Why this is a type and not a sentence
 ///
 /// It used to be a bare `anyhow::bail!("configuration update is already running")`
-/// and the caller in `cmd/locus.rs` decided whether to wait or to report a
+/// and the caller in `cmd/chrysalis.rs` decided whether to wait or to report a
 /// refusal with `message.contains("already running")`. That is a **string** across
 /// a crate boundary: rewording the bail — or any other error whose text happened
 /// to carry those two words — silently converted "somebody else is applying, wait
-/// for them" into a hard `LOCUS_CONNECT_FAILED`, or the reverse. Neither direction
+/// for them" into a hard `CHRYSALIS_CONNECT_FAILED`, or the reverse. Neither direction
 /// fails a test, and both reach a student as a sentence about their tunnel that is
 /// not true.
 ///
@@ -241,14 +241,14 @@ fn restart_readiness_failure(running_mode: &RunningMode, has_readiness_generatio
     if matches!(running_mode, RunningMode::NotRunning) {
         return Some(anyhow::anyhow!(
             "the tunnel engine did not start, so the new configuration could not be applied. This \
-             usually means Locus needs permission to install or repair its background service: \
+             usually means Chrysalis needs permission to install or repair its background service: \
              approve the prompt if one is showing, or use Repair in Settings, then try again."
         ));
     }
     if !has_readiness_generation {
         return Some(anyhow::anyhow!(
             "the tunnel engine started but did not report that it is running, so the new \
-             configuration was not applied. Try again; if it keeps happening, restart Locus."
+             configuration was not applied. Try again; if it keeps happening, restart Chrysalis."
         ));
     }
     None
@@ -598,7 +598,7 @@ impl CoreManager {
         //
         // A real student hit exactly this: installed from the `.dmg`, got the
         // "damaged and can't be opened" Gatekeeper message (fixed separately),
-        // then "the Locus service is not available on this device", with no way
+        // then "the Chrysalis service is not available on this device", with no way
         // forward. The three service binaries were sitting in the bundle's
         // `Contents/Resources/resources/` the whole time, never invoked.
         //
@@ -606,7 +606,7 @@ impl CoreManager {
         // preference. Requesting the install raises the state the UI renders as
         // the install prompt; it deliberately does NOT write `enable_tun_mode`,
         // because a refusal or a failed elevation must not leave the preference
-        // flipped on for the next launch to trip over (the bug `cmd/locus.rs`
+        // flipped on for the next launch to trip over (the bug `cmd/chrysalis.rs`
         // documents at the refusal).
         #[cfg(target_os = "macos")]
         if should_request_install_for_absent_service(
@@ -630,7 +630,7 @@ impl CoreManager {
             logging!(
                 warn,
                 Type::Core,
-                "[locus] core start deferred: the Locus service is not installed and the install \
+                "[chrysalis] core start deferred: the Chrysalis service is not installed and the install \
                  request could not be raised (elevation refused, cancelled, or already pending)"
             );
             return StartupDecision::Wait;

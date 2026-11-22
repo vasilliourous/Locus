@@ -6,12 +6,12 @@ import {
 } from '@/components/connection/phase'
 import { useSystemState } from '@/hooks/use-system-state'
 import {
-  locusCancelConnect,
-  locusConnect,
-  locusDisconnect,
-  locusStatus,
-  type LocusStatus,
-} from '@/services/locus'
+  chrysalisCancelConnect,
+  chrysalisConnect,
+  chrysalisDisconnect,
+  chrysalisStatus,
+  type ChrysalisStatus,
+} from '@/services/chrysalis'
 import { errorDetail } from '@/services/notice-service'
 
 /** Re-exported so existing importers of the hook keep working. */
@@ -26,11 +26,11 @@ export type { ConnectionPhase }
  * a restart must still do a real read before saying anything about the account,
  * and a stale on-disk value surviving a reinstall would be worse than a spinner.
  *
- * It is a *rendering* cache only. No decision is made from it — `locus_connect`
+ * It is a *rendering* cache only. No decision is made from it — `chrysalis_connect`
  * re-checks entitlement in Rust — so a value that is a few seconds old can only
  * affect what is painted, never what is allowed.
  */
-let statusSeed: { phase: ConnectionPhase; status: LocusStatus } | null = null
+let statusSeed: { phase: ConnectionPhase; status: ChrysalisStatus } | null = null
 
 /**
  * The tunnel state machine, lifted from the home card that used to own it.
@@ -45,7 +45,7 @@ export interface ConnectionState {
   /** The backend's own sentence, shown verbatim. `null` when there is none. */
   error: string | null
   /** The activation/subscription state, once read. */
-  status: LocusStatus | null
+  status: ChrysalisStatus | null
   toggle: () => Promise<void>
   /**
    * Force a status re-read, e.g. after an action elsewhere changes it.
@@ -108,13 +108,13 @@ export const useConnection = (): ConnectionState => {
   //
   // Deliberately NOT persisted to storage — this is a lifetime-of-process cache,
   // so a restart still does a real read before claiming anything about the
-  // account. Nothing here is trusted for a decision either: `locus_connect` makes
+  // account. Nothing here is trusted for a decision either: `chrysalis_connect` makes
   // its own checks in Rust, and this seed only decides what is painted first.
   const [phase, setPhase] = useState<ConnectionPhase>(
     () => statusSeed?.phase ?? 'checking',
   )
   const [error, setError] = useState<string | null>(null)
-  const [status, setStatus] = useState<LocusStatus | null>(
+  const [status, setStatus] = useState<ChrysalisStatus | null>(
     () => statusSeed?.status ?? null,
   )
 
@@ -136,7 +136,7 @@ export const useConnection = (): ConnectionState => {
   // the student started (a command is running, and a press means "cancel" — the
   // backend sets its own flag and unwinds), and a core a *previous* session left
   // half-dialled, which the first status read reports as `connecting` with no
-  // command running. In the second case there is nothing for `locusCancelConnect`
+  // command running. In the second case there is nothing for `chrysalisCancelConnect`
   // to unwind — it only raises a flag — so the press would do nothing and the
   // button would look dead. A press there means "stop this half-formed tunnel",
   // which is a disconnect. This ref is what tells the two apart.
@@ -149,7 +149,7 @@ export const useConnection = (): ConnectionState => {
    * one says "the connect is ours, so a press means cancel". This one says
    * "do not start a second transition", and it is set for disconnects too.
    *
-   * The phase cannot stand in for it. `locus_connect` takes up to the backend's
+   * The phase cannot stand in for it. `chrysalis_connect` takes up to the backend's
    * whole readiness budget to resolve, and the phase is re-derived by the poll in
    * the meantime, so there is a real window in which the screen reads
    * `disconnected` while a connect is still in flight. Without this guard a press
@@ -164,7 +164,7 @@ export const useConnection = (): ConnectionState => {
   // previous read finishes. A status read is not instant — the backend proves
   // the tunnel with a real request through it, so a settling or failing read can
   // take seconds — and without this guard every interval tick stacks another
-  // `locusStatus` call on top of the last. The reads then race to set `phase`,
+  // `chrysalisStatus` call on top of the last. The reads then race to set `phase`,
   // and a slow, stale one can land *after* a newer good one and drag a connected
   // tunnel back to "connecting". One read in flight at a time is the fix.
   const readingRef = useRef(false)
@@ -179,7 +179,7 @@ export const useConnection = (): ConnectionState => {
     if (readingRef.current) return 'busy' as const
     readingRef.current = true
     try {
-      const next = await locusStatus()
+      const next = await chrysalisStatus()
       setStatus(next)
       setPhase((current) => {
         // Never stomp an in-flight transition with a *stale* reading. A poll that
@@ -244,13 +244,13 @@ export const useConnection = (): ConnectionState => {
     // transition you cannot abandon is the retired client's forever-spinner.
     //
     // But `connecting` can also mean a half-dialled core found on app open, with
-    // no connect of ours running. `locusCancelConnect` only raises a flag for an
+    // no connect of ours running. `chrysalisCancelConnect` only raises a flag for an
     // in-flight command to notice, so with none running it would do nothing and
     // the button would look dead. In that case the useful action is to take the
     // half-formed tunnel down — a disconnect — which is what the student means.
     if (current === 'connecting') {
       // A disconnect while a connect of ours is still running is deliberately
-      // NOT issued: `locus_disconnect` and `locus_connect` would then race, and
+      // NOT issued: `chrysalis_disconnect` and `chrysalis_connect` would then race, and
       // whichever finished last would decide the tunnel. The cancel flag is the
       // one supported way to abandon, and the connect unwinds itself by stopping
       // the core.
@@ -258,7 +258,7 @@ export const useConnection = (): ConnectionState => {
         setError(null)
         setPhase('disconnecting')
         try {
-          const result = await locusDisconnect()
+          const result = await chrysalisDisconnect()
           setError(result.connected ? null : result.message)
         } catch (err) {
           setError(errorDetail(err))
@@ -268,18 +268,18 @@ export const useConnection = (): ConnectionState => {
       }
       // Raised, but the command stays in flight and this hook keeps watching it.
       //
-      // The press must not settle the screen itself: `locus_connect` resolves with
+      // The press must not settle the screen itself: `chrysalis_connect` resolves with
       // its own verdict ("Cancelled", or a real reason), and a screen that reset
       // here instead would show a settled state for a command still unwinding —
       // then flip again when it resolved. Leaving the phase on `connecting` is
       // also what keeps the button's cancel affordance live if the first press was
       // lost.
       try {
-        await locusCancelConnect()
+        await chrysalisCancelConnect()
       } catch (err) {
         // Reporting a failed cancel would be noise: the connect is still running
         // and the next poll will settle the screen either way.
-        console.error('[locus] cancel failed:', err)
+        console.error('[chrysalis] cancel failed:', err)
       }
       return
     }
@@ -298,7 +298,7 @@ export const useConnection = (): ConnectionState => {
     //
     // `connectInFlightRef` used to be raised only on the connect branch, after
     // this point, so a press that arrived in the window between two reads could
-    // start a second `locus_connect` while the first was still running: the
+    // start a second `chrysalis_connect` while the first was still running: the
     // backend flag is global, so the second connect's own cancel check could
     // consume the first one's cancellation, or one of them could stop the core
     // the other had just started. The guard belongs here, before anything is
@@ -312,7 +312,7 @@ export const useConnection = (): ConnectionState => {
     connectInFlightRef.current = connecting
 
     try {
-      const result = connecting ? await locusConnect() : await locusDisconnect()
+      const result = connecting ? await chrysalisConnect() : await chrysalisDisconnect()
       // The backend's sentence is shown when it carries an explanation rather
       // than a bare confirmation. A timed-out connect returns `connected: false`
       // WITH the reason, and swallowing it would leave a student watching a
@@ -320,7 +320,7 @@ export const useConnection = (): ConnectionState => {
       if (!result.connected && connecting) {
         setError(result.message)
       }
-      // Settle from the command's own verdict. `locusConnect` resolves only once
+      // Settle from the command's own verdict. `chrysalisConnect` resolves only once
       // the core reports ready, so `connected: true` here does imply ready; a false
       // is "the tunnel did not come up". The status re-read below re-settles the
       // phase from the backend either way, which is what promotes a success that

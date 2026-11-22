@@ -431,7 +431,7 @@ const backendWhere = (key) => {
   if (k.startsWith('tray.')) return 'Native tray menu (`core/tray/menu_def.rs`)'
   if (k.startsWith('notifications.'))
     return 'OS notification (`utils/notification.rs`)'
-  if (k.startsWith('service.')) return 'macOS privilege prompt (`cmd/locus.rs`)'
+  if (k.startsWith('service.')) return 'macOS privilege prompt (`cmd/chrysalis.rs`)'
   if (k.startsWith('launchGuard.'))
     return 'macOS first-run guard (`utils/macos_launch_guard.rs`)'
   return 'Native dialog'
@@ -444,7 +444,7 @@ const backendCode = (key) => {
     'client/src-tauri/src/core/tray/menu_def.rs',
     'client/src-tauri/src/utils/notification.rs',
     'client/src-tauri/src/utils/macos_launch_guard.rs',
-    'client/src-tauri/src/cmd/locus.rs',
+    'client/src-tauri/src/cmd/chrysalis.rs',
   ]
   const hits = []
   for (const rel of roots) {

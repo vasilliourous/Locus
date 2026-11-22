@@ -3,7 +3,7 @@
 <plist version="1.0">
 <dict>
     <!--
-        Locus is NOT sandboxed.
+        Chrysalis is NOT sandboxed.
 
         The app installs routes and manages a privileged helper, neither of which
         an App Sandbox container permits, so `app-sandbox` is false and the bundle
@@ -28,7 +28,7 @@
           whose validity is judged per signature slice rather than per bundle,
           which is why the same .app can behave differently on two architectures.
 
-        * The app group names ANOTHER PRODUCT's identifier. Locus' identifier is
+        * The app group names ANOTHER PRODUCT's identifier. Chrysalis' identifier is
           `com.locus.client` (tauri.macos.conf.json). Nothing in this tree creates
           or reads a group container, and a non-Developer-ID signature cannot
           carry a group it does not own.

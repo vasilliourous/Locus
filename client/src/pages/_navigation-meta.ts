@@ -1,5 +1,5 @@
 /**
- * The two destinations Locus has.
+ * The two destinations Chrysalis has.
  *
  * This used to be four (Home, Proxies, Logs, Settings), and three of them were
  * Clash Verge surfaces a student should never meet: a node picker for a product

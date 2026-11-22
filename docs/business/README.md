@@ -1,4 +1,4 @@
-# BUSINESS — Locus Operator Playbook
+# BUSINESS — Chrysalis Operator Playbook
 
 ```
 audience:    human-operator

@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
-# Locus VPS Restore — Provision + restore from B2 backup
+# Chrysalis VPS Restore — Provision + restore from B2 backup
 # Usage:
 #   From-scratch restore (passphrase env var):
 #     scp -r server root@new-vps:/root/
-#     ssh root@new-vps "LOCUS_SECRETS_PASSPHRASE='...' /root/server/restore.sh"
+#     ssh root@new-vps "CHRYSALIS_SECRETS_PASSPHRASE='...' /root/server/restore.sh"
 #
 #   From-scratch restore (passphrase in a file — avoids shell history):
 #     scp -r server root@new-vps:/root/
-#     ssh root@new-vps "LOCUS_SECRETS_PASSPHRASE_FILE=/root/pw /root/server/restore.sh"
+#     ssh root@new-vps "CHRYSALIS_SECRETS_PASSPHRASE_FILE=/root/pw /root/server/restore.sh"
 #
 #   Manual override (no secrets file):
 #     B2_APPLICATION_KEY_ID=xxx \
@@ -60,14 +60,26 @@ if [ -f "$SECRETS_FILE" ]; then
     log "Decrypting ${SECRETS_FILE}..."
     SECRETS_TMP="/tmp/.secrets-$$.env"
 
-    if [ -n "${LOCUS_SECRETS_PASSPHRASE:-}" ]; then
+    if [ -n "${CHRYSALIS_SECRETS_PASSPHRASE:-}" ]; then
+        PASSPHRASE_FEED="${CHRYSALIS_SECRETS_PASSPHRASE}"
+        PASSPHRASE_SRC="CHRYSALIS_SECRETS_PASSPHRASE"
+    elif [ -n "${CHRYSALIS_SECRETS_PASSPHRASE_FILE:-}" ]; then
+        [ -f "${CHRYSALIS_SECRETS_PASSPHRASE_FILE}" ] || \
+            fail "CHRYSALIS_SECRETS_PASSPHRASE_FILE is not a file: ${CHRYSALIS_SECRETS_PASSPHRASE_FILE}"
+        PASSPHRASE_FEED="$(cat "${CHRYSALIS_SECRETS_PASSPHRASE_FILE}")"
+        PASSPHRASE_SRC="CHRYSALIS_SECRETS_PASSPHRASE_FILE"
+
+    # DEPRECATED ALIAS: the pre-rename names are still accepted, because a host
+    # that has not been re-provisioned passes them and a mid-upgrade deploy must
+    # not fail on a variable name. See docs/reference/NAME-MIGRATION.md.
+    elif [ -n "${LOCUS_SECRETS_PASSPHRASE:-}" ]; then
         PASSPHRASE_FEED="${LOCUS_SECRETS_PASSPHRASE}"
-        PASSPHRASE_SRC="LOCUS_SECRETS_PASSPHRASE"
+        PASSPHRASE_SRC="LOCUS_SECRETS_PASSPHRASE (deprecated alias)"
     elif [ -n "${LOCUS_SECRETS_PASSPHRASE_FILE:-}" ]; then
         [ -f "${LOCUS_SECRETS_PASSPHRASE_FILE}" ] || \
             fail "LOCUS_SECRETS_PASSPHRASE_FILE is not a file: ${LOCUS_SECRETS_PASSPHRASE_FILE}"
         PASSPHRASE_FEED="$(cat "${LOCUS_SECRETS_PASSPHRASE_FILE}")"
-        PASSPHRASE_SRC="LOCUS_SECRETS_PASSPHRASE_FILE"
+        PASSPHRASE_SRC="LOCUS_SECRETS_PASSPHRASE_FILE (deprecated alias)"
     else
         cat >&2 << 'KEYERR'
 
@@ -75,8 +87,8 @@ if [ -f "$SECRETS_FILE" ]; then
 ║  FATAL: secrets.env.age found but no passphrase available.  ║
 ║                                                            ║
 ║  Provide it in one of these ways:                          ║
-║    1. Set LOCUS_SECRETS_PASSPHRASE=<passphrase>            ║
-║    2. Set LOCUS_SECRETS_PASSPHRASE_FILE=<path>             ║
+║    1. Set CHRYSALIS_SECRETS_PASSPHRASE=<passphrase>            ║
+║    2. Set CHRYSALIS_SECRETS_PASSPHRASE_FILE=<path>             ║
 ║                                                            ║
 ║  There is deliberately NO prompt — restore runs over ssh    ║
 ║  and a prompt would hang forever.                          ║
@@ -149,7 +161,7 @@ export DOMAIN
 : "${BACKUP_PATH:=}"  # Optional: specific backup path. Auto-detects latest if empty.
 
 log "══════════════════════════════════════════"
-log " Locus VPS — Full Restore from B2 Backup"
+log " Chrysalis VPS — Full Restore from B2 Backup"
 log " Domain: ${DOMAIN}"
 log " Bucket: ${B2_BUCKET}"
 log "══════════════════════════════════════════"

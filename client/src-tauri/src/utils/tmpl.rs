@@ -1,4 +1,4 @@
-pub const ITEM_LOCAL: &str = "# Profile Template for Locus
+pub const ITEM_LOCAL: &str = "# Profile Template for Chrysalis
 
 proxies: []
 
@@ -7,13 +7,13 @@ proxy-groups: []
 rules: []
 ";
 
-pub const ITEM_MERGE: &str = "# Profile Enhancement Merge Template for Locus
+pub const ITEM_MERGE: &str = "# Profile Enhancement Merge Template for Chrysalis
 
 profile:
   store-selected: true
 ";
 
-pub const ITEM_MERGE_EMPTY: &str = "# Profile Enhancement Merge Template for Locus
+pub const ITEM_MERGE_EMPTY: &str = "# Profile Enhancement Merge Template for Chrysalis
 
 ";
 
@@ -24,7 +24,7 @@ function main(config, profileName) {
 }
 ";
 
-pub const ITEM_RULES: &str = "# Profile Enhancement Rules Template for Locus
+pub const ITEM_RULES: &str = "# Profile Enhancement Rules Template for Chrysalis
 
 prepend: []
 
@@ -33,7 +33,7 @@ append: []
 delete: []
 ";
 
-pub const ITEM_PROXIES: &str = "# Profile Enhancement Proxies Template for Locus
+pub const ITEM_PROXIES: &str = "# Profile Enhancement Proxies Template for Chrysalis
 
 prepend: []
 
@@ -42,7 +42,7 @@ append: []
 delete: []
 ";
 
-pub const ITEM_GROUPS: &str = "# Profile Enhancement Groups Template for Locus
+pub const ITEM_GROUPS: &str = "# Profile Enhancement Groups Template for Chrysalis
 
 prepend: []
 

@@ -26,8 +26,8 @@
 //! boundary and must not be treated as one; it is a cache of an entitlement the
 //! hub owns.
 
+use crate::chrysalis::contract::TierConfig;
 use crate::config::{Config, IVerge};
-use crate::locus::contract::TierConfig;
 use anyhow::Result;
 // `IVerge` uses smartstring, not std String. Importing the alias makes the
 // conversions below unnecessary and keeps this module in step with the config
@@ -62,14 +62,14 @@ pub fn is_usable(activation: &Activation) -> bool {
 /// struct that looks populated but is not usable.
 ///
 /// When the config has no code, this falls back to the durable machine-store
-/// mirror ([`crate::locus::credential`]) so a device whose `verge.yaml` was
+/// mirror ([`crate::chrysalis::credential`]) so a device whose `verge.yaml` was
 /// wiped by an uninstall can still be seen as activated. The tier and
 /// fingerprint must still be present in the config for the record to be usable —
 /// those are refreshed by the next heartbeat, and [`read_code_rehydrating`]
 /// is the path that also writes the recovered code back.
 #[must_use]
 pub fn read(verge: &IVerge) -> Option<Activation> {
-    activation_from(verge, crate::locus::credential::read_code())
+    activation_from(verge, crate::chrysalis::credential::read_code())
 }
 
 /// The pure decision behind [`read`], with the mirror value injected.
@@ -82,7 +82,7 @@ fn activation_from(verge: &IVerge, mirrored_code: Option<String>) -> Option<Acti
     let code = config_code(verge).or(mirrored_code)?;
     let activation = Activation {
         code,
-        tier: verge.locus_tier.as_deref().unwrap_or_default().to_owned(),
+        tier: verge.chrysalis_tier.as_deref().unwrap_or_default().to_owned(),
         fingerprint: verge.device_fingerprint.as_deref().unwrap_or_default().to_owned(),
     };
     is_usable(&activation).then_some(activation)
@@ -93,7 +93,7 @@ fn activation_from(verge: &IVerge, mirrored_code: Option<String>) -> Option<Acti
 /// `verge.yaml` is the primary store, but it is the app's own config and an
 /// uninstall or a reset takes it — along with the code the student may no longer
 /// have a card for. So a second copy lives in a machine-scoped file
-/// ([`crate::locus::credential`]) and this is the read that consults both.
+/// ([`crate::chrysalis::credential`]) and this is the read that consults both.
 ///
 /// The config wins when it holds a code, because that is the value the rest of
 /// the app has been running on and it is refreshed by every write. The mirror is
@@ -117,11 +117,11 @@ pub async fn read_code_rehydrating() -> Option<String> {
 
     // The config lost it. A mirror is the only thing that can recover the
     // student's entitlement, so adopt it and write it back to the config too.
-    let code = crate::locus::credential::read_code()?;
+    let code = crate::chrysalis::credential::read_code()?;
     // Adopt only something that could be a code at all. A mirror holding a
     // mangled value is worse than an empty one: it is written back into the
     // config below, and every later read would treat it as an entitlement.
-    if let Err(error) = crate::locus::activation::validate_code(&code) {
+    if let Err(error) = crate::chrysalis::activation::validate_code(&code) {
         logging::warn_stored_code_is_unusable(&error.to_string());
         return None;
     }
@@ -150,7 +150,7 @@ pub async fn read_code_rehydrating() -> Option<String> {
 #[must_use]
 pub fn read_valid_code(verge: &IVerge) -> Option<String> {
     let activation = read(verge)?;
-    match crate::locus::activation::validate_code(&activation.code) {
+    match crate::chrysalis::activation::validate_code(&activation.code) {
         Ok(_) => Some(activation.code),
         Err(error) => {
             logging::warn_stored_code_is_unusable(&error.to_string());
@@ -168,7 +168,7 @@ pub fn read_valid_code(verge: &IVerge) -> Option<String> {
 /// was cleared or whether re-entering the code will work.
 #[must_use]
 pub fn stored_code_is_damaged(verge: &IVerge) -> bool {
-    read(verge).is_some_and(|activation| crate::locus::activation::validate_code(&activation.code).is_err())
+    read(verge).is_some_and(|activation| crate::chrysalis::activation::validate_code(&activation.code).is_err())
 }
 
 /// Writes `edit` into the verge config and **commits it** before saving.
@@ -241,7 +241,7 @@ async fn store_code_in_config(code: &str) -> Result<()> {
 pub async fn store(activation: &Activation) -> Result<()> {
     let saved = save_verge(|draft| {
         draft.activation_code = Some(SmartString::from(activation.code.as_str()));
-        draft.locus_tier = Some(SmartString::from(activation.tier.as_str()));
+        draft.chrysalis_tier = Some(SmartString::from(activation.tier.as_str()));
         draft.device_fingerprint = Some(SmartString::from(activation.fingerprint.as_str()));
     })
     .await;
@@ -254,7 +254,7 @@ pub async fn store(activation: &Activation) -> Result<()> {
     // Best-effort and logged, never fatal: the config write above is what the
     // session needs, and a device with no writable machine store should still
     // activate — it simply cannot promise to survive a reinstall.
-    if !activation.code.trim().is_empty() && !crate::locus::credential::write_code(&activation.code) {
+    if !activation.code.trim().is_empty() && !crate::chrysalis::credential::write_code(&activation.code) {
         logging::warn_could_not_mirror();
     }
 
@@ -267,9 +267,9 @@ pub async fn store(activation: &Activation) -> Result<()> {
 // These were the app-config half of the durable device identity and the
 // session token minted at device recognition. Both features are gone: a client
 // keeps its activation code in a machine-scoped store
-// (`crate::locus::credential`) and authenticates with that code alone.
+// (`crate::chrysalis::credential`) and authenticates with that code alone.
 //
-// The `locus_device_*` / `locus_identity_store` / `locus_device_token` fields
+// The `chrysalis_device_*` / `chrysalis_identity_store` / `chrysalis_device_token` fields
 // still exist on `IVerge` so an upgrade does not fail to deserialize a config
 // that holds them. They are simply never read or written any more.
 /// Records a successful heartbeat.
@@ -298,7 +298,7 @@ pub async fn record_heartbeat_failure(failures: u32) -> Result<()> {
 ///
 /// Stores the hub's own string verbatim. The client never converts it to a
 /// timestamp: that conversion is where a timezone bug would enter, and the only
-/// consumer is a display that parses it once via [`crate::locus::expiry`].
+/// consumer is a display that parses it once via [`crate::chrysalis::expiry`].
 ///
 /// Takes an `Option` rather than a `&str` because the hub may legitimately send
 /// `null` for a code with no expiry recorded. The caller decides whether that is
@@ -306,7 +306,7 @@ pub async fn record_heartbeat_failure(failures: u32) -> Result<()> {
 /// an older hub must not overwrite a date we already hold.
 pub async fn record_expiry(expires_at: Option<String>) -> Result<()> {
     save_verge(|draft| {
-        draft.locus_expires_at = expires_at.map(Into::into);
+        draft.chrysalis_expires_at = expires_at.map(Into::into);
     })
     .await
 }
@@ -332,7 +332,7 @@ pub async fn record_expiry(expires_at: Option<String>) -> Result<()> {
 /// override just because one beat was produced by a hub that does not know about
 /// them.
 pub async fn record_hub_override(offered: &str) -> Result<()> {
-    use crate::locus::contract::{HUB_URL, resolve_hub_url};
+    use crate::chrysalis::contract::{HUB_URL, resolve_hub_url};
 
     let resolved = resolve_hub_url(Some(offered));
     let accept = resolved != HUB_URL;
@@ -345,7 +345,7 @@ pub async fn record_hub_override(offered: &str) -> Result<()> {
     }
 
     save_verge(|draft| {
-        draft.locus_hub_override = if accept { Some(resolved.as_str().into()) } else { None };
+        draft.chrysalis_hub_override = if accept { Some(resolved.as_str().into()) } else { None };
     })
     .await
 }
@@ -370,7 +370,7 @@ pub async fn record_hub_override(offered: &str) -> Result<()> {
 ///
 /// # It clears the suspension too, and that is not cosmetic
 ///
-/// `locus_suspended` is a fact about a code that is STILL on this device. Once
+/// `chrysalis_suspended` is a fact about a code that is STILL on this device. Once
 /// the code is gone the flag describes nothing, and leaving it set produced a
 /// state the UI could not escape from: the student signed out of a suspended
 /// device, the credential was removed correctly, and the kick-out screen — which
@@ -386,21 +386,21 @@ pub async fn record_hub_override(offered: &str) -> Result<()> {
 pub async fn clear_entitlement() -> Result<()> {
     let saved = save_verge(|draft| {
         draft.activation_code = None;
-        draft.locus_tier = None;
-        draft.locus_expires_at = None;
+        draft.chrysalis_tier = None;
+        draft.chrysalis_expires_at = None;
         draft.last_heartbeat_ok = None;
         draft.heartbeat_failures = None;
         // The invariant. See this function's note and [`is_suspended`].
-        draft.locus_suspended = None;
+        draft.chrysalis_suspended = None;
         // The hub's enforcement version describes the code that is gone, so a
         // stale value would make the next activation's diagnostics claim the
         // deployment was checked when it was not.
-        draft.locus_hub_enforcement = None;
+        draft.chrysalis_hub_enforcement = None;
     })
     .await;
     // The mirror goes with it, and this one IS the durable copy — leaving it
     // behind would let the next launch re-adopt a code the hub has refused.
-    crate::locus::credential::remove_code();
+    crate::chrysalis::credential::remove_code();
     saved
 }
 
@@ -416,7 +416,7 @@ pub async fn clear_entitlement() -> Result<()> {
 /// recorded as a STATE, with the credential left in place:
 ///
 ///   * the code, tier and expiry stay exactly as they were;
-///   * `locus_suspended` is set, which is what the gate and the UI read;
+///   * `chrysalis_suspended` is set, which is what the gate and the UI read;
 ///   * the heartbeat loop is stopped by the caller, so nothing keeps working.
 ///
 /// The next successful beat clears it ([`clear_suspension`]), so unsuspending
@@ -428,19 +428,19 @@ pub async fn clear_entitlement() -> Result<()> {
 /// explicit trade, and it is bounded on both sides: the TUNNEL is down, so the
 /// code cannot carry a packet while suspended, and the only thing it is sent to
 /// is a heartbeat that the hub refuses; and a sign-out
-/// ([`crate::locus::signout`]) still goes through [`clear_entitlement`] and
+/// ([`crate::chrysalis::signout`]) still goes through [`clear_entitlement`] and
 /// removes it entirely. A device left suspended forever is a device whose owner
 /// was cut off — the operator's decision, visible in the console, not a leak.
 ///
 /// The bound is the tunnel, **not** a stopped heartbeat: the loop deliberately
 /// keeps running while suspended, because it is the only thing that can learn the
-/// suspension was lifted (see [`crate::locus::runtime`]). A suspended device
+/// suspension was lifted (see [`crate::chrysalis::runtime`]). A suspended device
 /// therefore sends one refused beat every `SUSPENDED_INTERVAL` — no config, no
 /// traffic — which is what makes the kick-out reversible without a restart.
 pub async fn record_suspension(reason: &str) -> Result<()> {
     save_verge(|draft| {
-        draft.locus_suspended = Some(true);
-        draft.locus_refusal_reason = Some(reason.to_owned().into());
+        draft.chrysalis_suspended = Some(true);
+        draft.chrysalis_refusal_reason = Some(reason.to_owned().into());
         // The account is not confirmed healthy, and saying otherwise would let a
         // suspended device render a green "last checked" line.
         draft.last_heartbeat_ok = None;
@@ -457,15 +457,15 @@ pub async fn record_suspension(reason: &str) -> Result<()> {
 /// comes back to life.
 pub async fn clear_suspension() -> Result<()> {
     save_verge(|draft| {
-        draft.locus_suspended = None;
-        draft.locus_refusal_reason = None;
+        draft.chrysalis_suspended = None;
+        draft.chrysalis_refusal_reason = None;
     })
     .await
 }
 
 /// Whether this device is currently suspended by an operator.
 ///
-/// Read by [`crate::cmd::locus_status`] and, through it, by the gate that decides
+/// Read by [`crate::cmd::chrysalis_status`] and, through it, by the gate that decides
 /// between the kick-out screen and the normal app.
 ///
 /// # The flag can be set, and still be false
@@ -482,35 +482,35 @@ pub async fn clear_suspension() -> Result<()> {
 /// a config already written by a build that had the bug.
 #[must_use]
 pub fn is_suspended(verge: &IVerge) -> bool {
-    verge.locus_suspended.unwrap_or(false) && activation_from(verge, None).is_some()
+    verge.chrysalis_suspended.unwrap_or(false) && activation_from(verge, None).is_some()
 }
 
 /// Clears the per-device state that belongs to a signed-out student, not to the
 /// machine.
 ///
-/// Used by [`crate::locus::signout`] **after** [`clear_entitlement`], which has
+/// Used by [`crate::chrysalis::signout`] **after** [`clear_entitlement`], which has
 /// already removed the code, the tier and the expiry. What remains is the state a
 /// heartbeat left behind while that student was signed in:
 ///
-///  * `locus_refusal_reason` — why the hub ended their access. It survives
+///  * `chrysalis_refusal_reason` — why the hub ended their access. It survives
 ///    [`clear_entitlement`] on purpose (it explains an event that outlives the
 ///    entitlement), but it is *their* account's history. Left in place, the next
 ///    person to activate this machine is greeted with a message about someone
 ///    else's suspension.
-///  * `locus_usage` — the free tier's consumed allowance window. Left in place,
+///  * `chrysalis_usage` — the free tier's consumed allowance window. Left in place,
 ///    the next activation on this machine asks for no allowance at all: a student
 ///    who bought a cheap second-hand laptop would silently lose their free data.
-///  * `locus_allowance_mb` / `locus_throttle_mbps` — the previous tier's policy.
+///  * `chrysalis_allowance_mb` / `chrysalis_throttle_mbps` — the previous tier's policy.
 ///    A paying tier does not send an allowance, so a stale value would make the
 ///    next student's Connection screen describe a cap that no longer applies.
-///  * `locus_update_check_reason` — why the previous account was not being
+///  * `chrysalis_update_check_reason` — why the previous account was not being
 ///    offered updates.
-///  * `locus_hub_enforcement` — which version of the hub's enforcement logic last
+///  * `chrysalis_hub_enforcement` — which version of the hub's enforcement logic last
 ///    answered THIS code. It is a property of the deployment, but it is recorded
 ///    per device-session because that is the only thing that observed it; a
 ///    value left behind would describe a hub the next student never contacted.
 ///
-/// `locus_suspended` is cleared too, for the reason [`clear_entitlement`]
+/// `chrysalis_suspended` is cleared too, for the reason [`clear_entitlement`]
 /// gives: signing out must never leave a device looking kicked out.
 ///
 /// Deliberately does **not** touch preferences (language, theme, auto-update,
@@ -525,17 +525,17 @@ pub fn is_suspended(verge: &IVerge) -> bool {
 /// more", so the history goes with them.
 pub async fn clear_device_state() -> Result<()> {
     save_verge(|draft| {
-        draft.locus_refusal_reason = None;
-        draft.locus_usage = None;
-        draft.locus_allowance_mb = None;
-        draft.locus_throttle_mbps = None;
-        draft.locus_update_check_reason = None;
-        draft.locus_update_offered = None;
-        draft.locus_hub_enforcement = None;
+        draft.chrysalis_refusal_reason = None;
+        draft.chrysalis_usage = None;
+        draft.chrysalis_allowance_mb = None;
+        draft.chrysalis_throttle_mbps = None;
+        draft.chrysalis_update_check_reason = None;
+        draft.chrysalis_update_offered = None;
+        draft.chrysalis_hub_enforcement = None;
         // Belt to `clear_entitlement`'s braces: a suspension belongs to the
         // student who was signed in, and this is the one path that says "not
         // them any more". See [`is_suspended`].
-        draft.locus_suspended = None;
+        draft.chrysalis_suspended = None;
     })
     .await
 }
@@ -553,8 +553,8 @@ pub async fn clear_device_state() -> Result<()> {
 /// code it still holds rather than sending the student hunting for their card.
 pub async fn record_lapsed_grace() -> Result<()> {
     save_verge(|draft| {
-        draft.locus_tier = None;
-        draft.locus_expires_at = None;
+        draft.chrysalis_tier = None;
+        draft.chrysalis_expires_at = None;
         draft.last_heartbeat_ok = None;
         draft.heartbeat_failures = None;
     })
@@ -574,7 +574,7 @@ pub async fn record_lapsed_grace() -> Result<()> {
 /// code itself is gone.
 pub async fn record_refusal(reason: &str) -> Result<()> {
     save_verge(|draft| {
-        draft.locus_refusal_reason = Some(reason.to_owned().into());
+        draft.chrysalis_refusal_reason = Some(reason.to_owned().into());
     })
     .await
 }
@@ -589,7 +589,7 @@ pub async fn record_refusal(reason: &str) -> Result<()> {
 /// benefit, since the fetch is cheap and already required.
 pub async fn record_update_offer(version: &str) -> Result<()> {
     save_verge(|draft| {
-        draft.locus_update_offered = Some(version.to_owned().into());
+        draft.chrysalis_update_offered = Some(version.to_owned().into());
     })
     .await
 }
@@ -601,15 +601,15 @@ pub async fn record_update_offer(version: &str) -> Result<()> {
 /// predates the field — so the caller records that separately rather than this
 /// function writing `None` over a value a previous beat legitimately delivered. A
 /// hub that stops sending it (an operator rolling the box back) is reported as
-/// [`crate::cmd::locus::HubEnforcement::Unreported`], which is honest about not
+/// [`crate::cmd::chrysalis::HubEnforcement::Unreported`], which is honest about not
 /// knowing rather than silently keeping a stale "current".
 ///
 /// Nothing reads this to make a decision. It exists so that "I suspended a device
 /// and nothing happened" can be answered from the product instead of from an SSH
-/// session — see [`crate::locus::contract::ENFORCEMENT_VERSION`].
+/// session — see [`crate::chrysalis::contract::ENFORCEMENT_VERSION`].
 pub async fn record_hub_enforcement(version: Option<u32>) -> Result<()> {
     save_verge(|draft| {
-        draft.locus_hub_enforcement = version;
+        draft.chrysalis_hub_enforcement = version;
     })
     .await
 }
@@ -621,7 +621,7 @@ pub async fn record_hub_enforcement(version: Option<u32>) -> Result<()> {
 /// what is running.
 pub async fn clear_update_offer() -> Result<()> {
     save_verge(|draft| {
-        draft.locus_update_offered = None;
+        draft.chrysalis_update_offered = None;
     })
     .await
 }
@@ -635,10 +635,10 @@ pub async fn clear_update_offer() -> Result<()> {
 /// Persisted so the Account page can answer "why is this device not updating?"
 /// on demand. It is per-heartbeat state, not an event log: the latest beat wins,
 /// because the question a student asks is about *now*.
-pub async fn record_update_check_reason(reason: Option<&crate::locus::update::NoOfferReason>) -> Result<()> {
+pub async fn record_update_check_reason(reason: Option<&crate::chrysalis::update::NoOfferReason>) -> Result<()> {
     let encoded = reason.map(|r| r.describe());
     save_verge(|draft| {
-        draft.locus_update_check_reason = encoded.map(Into::into);
+        draft.chrysalis_update_check_reason = encoded.map(Into::into);
     })
     .await
 }
@@ -650,7 +650,7 @@ pub async fn record_update_check_reason(reason: Option<&crate::locus::update::No
 /// working — a stale explanation is its own kind of wrong answer.
 pub async fn clear_refusal() -> Result<()> {
     save_verge(|draft| {
-        draft.locus_refusal_reason = None;
+        draft.chrysalis_refusal_reason = None;
     })
     .await
 }
@@ -663,8 +663,8 @@ pub async fn clear_refusal() -> Result<()> {
 /// device that believes it is activated but has nothing to dial.
 pub async fn store_tier_config(config: &TierConfig, udp_relay: bool) -> Result<()> {
     save_verge(|draft| {
-        draft.locus_tier_server = Some(serde_json::to_string(config).unwrap_or_default().into());
-        draft.locus_udp_relay = Some(udp_relay);
+        draft.chrysalis_tier_server = Some(serde_json::to_string(config).unwrap_or_default().into());
+        draft.chrysalis_udp_relay = Some(udp_relay);
     })
     .await
 }
@@ -673,15 +673,15 @@ pub async fn store_tier_config(config: &TierConfig, udp_relay: bool) -> Result<(
 ///
 /// Returns [`Usage::default`] — not an error — when nothing is stored or the
 /// stored JSON is unreadable. Both cases mean "no window recorded", which
-/// [`crate::locus::usage::Usage::window`] starts lazily on the first reading.
+/// [`crate::chrysalis::usage::Usage::window`] starts lazily on the first reading.
 /// An unreadable value is treated as absent rather than as fatal because a
 /// corrupt counter must never block the connection: the worst case is a student
 /// who gets a fresh allowance, and the alternative is an app that will not
 /// connect over bookkeeping.
-pub async fn usage() -> crate::locus::usage::Usage {
+pub async fn usage() -> crate::chrysalis::usage::Usage {
     let verge = Config::verge().await;
     let data = verge.latest_arc();
-    decode_usage(data.locus_usage.as_deref())
+    decode_usage(data.chrysalis_usage.as_deref())
 }
 
 /// Decodes a stored usage window, treating anything unreadable as absent.
@@ -694,17 +694,17 @@ pub async fn usage() -> crate::locus::usage::Usage {
 /// never block a connection, and the worst case is a student who gets a fresh
 /// allowance. The log is equally deliberate — without it, "my free data keeps
 /// resetting" is a report with no diagnosable cause.
-fn decode_usage(raw: Option<&str>) -> crate::locus::usage::Usage {
+fn decode_usage(raw: Option<&str>) -> crate::chrysalis::usage::Usage {
     let Some(raw) = raw else {
         // Never written: a paying tier, or a free student before their first
         // byte. Not an error, and not worth a log line on every poll.
-        return crate::locus::usage::Usage::default();
+        return crate::chrysalis::usage::Usage::default();
     };
-    match serde_json::from_str::<crate::locus::usage::Usage>(raw) {
+    match serde_json::from_str::<crate::chrysalis::usage::Usage>(raw) {
         Ok(usage) => usage,
         Err(error) => {
             logging::warn_corrupt_usage(&error.to_string());
-            crate::locus::usage::Usage::default()
+            crate::chrysalis::usage::Usage::default()
         }
     }
 }
@@ -713,10 +713,10 @@ fn decode_usage(raw: Option<&str>) -> crate::locus::usage::Usage {
 ///
 /// The whole window is written at once, because a count without its window is
 /// the corrupt state this shape exists to prevent.
-pub async fn store_usage(usage: &crate::locus::usage::Usage) -> Result<()> {
+pub async fn store_usage(usage: &crate::chrysalis::usage::Usage) -> Result<()> {
     let encoded = serde_json::to_string(usage).unwrap_or_default();
     save_verge(|draft| {
-        draft.locus_usage = Some(encoded.into());
+        draft.chrysalis_usage = Some(encoded.into());
     })
     .await
 }
@@ -737,7 +737,10 @@ pub async fn store_usage(usage: &crate::locus::usage::Usage) -> Result<()> {
 /// it. See `STILL-OPEN.md`.
 #[must_use]
 pub async fn throttle_mbps() -> Option<u32> {
-    crate::config::Config::verge().await.latest_arc().locus_throttle_mbps
+    crate::config::Config::verge()
+        .await
+        .latest_arc()
+        .chrysalis_throttle_mbps
 }
 
 /// Caches the throttle speed the hub advertised, in Mbps.
@@ -747,7 +750,7 @@ pub async fn throttle_mbps() -> Option<u32> {
 /// they go once it is gone.
 pub async fn store_throttle_mbps(mbps: Option<u32>) -> Result<()> {
     save_verge(|draft| {
-        draft.locus_throttle_mbps = mbps.filter(|m| *m > 0);
+        draft.chrysalis_throttle_mbps = mbps.filter(|m| *m > 0);
     })
     .await
 }
@@ -757,11 +760,11 @@ pub async fn store_throttle_mbps(mbps: Option<u32>) -> Result<()> {
 /// `None` is written through deliberately — it is the hub saying "no allowance
 /// applies" (a paying tier, or the quota switched off), and leaving a stale
 /// value in place would throttle a student the hub had released. See the call
-/// site in `locus::runtime::handle_success` for why this differs from the
+/// site in `chrysalis::runtime::handle_success` for why this differs from the
 /// expiry rule.
 pub async fn store_allowance(allowance_mb: Option<u64>) -> Result<()> {
     save_verge(|draft| {
-        draft.locus_allowance_mb = allowance_mb.filter(|mb| *mb > 0);
+        draft.chrysalis_allowance_mb = allowance_mb.filter(|mb| *mb > 0);
     })
     .await
 }
@@ -774,7 +777,7 @@ pub async fn store_allowance(allowance_mb: Option<u64>) -> Result<()> {
 pub async fn tier_config(tier: &str) -> Option<TierConfig> {
     let verge = crate::config::Config::verge().await;
     let data = verge.latest_arc();
-    let raw = data.locus_tier_server.as_deref()?;
+    let raw = data.chrysalis_tier_server.as_deref()?;
     let config: TierConfig = serde_json::from_str(raw).ok()?;
     // Guard against a stored config for a different tier: a re-activation that
     // changed tier must not keep dialling the old server.
@@ -800,7 +803,7 @@ pub async fn udp_relay() -> bool {
     crate::config::Config::verge()
         .await
         .latest_arc()
-        .locus_udp_relay
+        .chrysalis_udp_relay
         .unwrap_or(false)
 }
 
@@ -810,7 +813,7 @@ mod logging {
         clash_verge_logging::logging!(
             warn,
             clash_verge_logging::Type::Config,
-            "[locus] stored tier config is unusable for the {tier} tier"
+            "[chrysalis] stored tier config is unusable for the {tier} tier"
         );
     }
 
@@ -824,7 +827,7 @@ mod logging {
         clash_verge_logging::logging!(
             warn,
             clash_verge_logging::Type::Config,
-            "[locus] ignoring the hub address the hub offered ({offered:?}): it is not an \
+            "[chrysalis] ignoring the hub address the hub offered ({offered:?}): it is not an \
              absolute https URL with no path"
         );
     }
@@ -836,7 +839,7 @@ mod logging {
         clash_verge_logging::logging!(
             warn,
             clash_verge_logging::Type::Config,
-            "[locus] the stored free-tier usage window was unreadable and has been reset: {detail}"
+            "[chrysalis] the stored free-tier usage window was unreadable and has been reset: {detail}"
         );
     }
 
@@ -845,7 +848,7 @@ mod logging {
         clash_verge_logging::logging!(
             info,
             clash_verge_logging::Type::Config,
-            "[locus] recovered the activation code from the machine store after the config lost it"
+            "[chrysalis] recovered the activation code from the machine store after the config lost it"
         );
     }
 
@@ -854,7 +857,7 @@ mod logging {
         clash_verge_logging::logging!(
             warn,
             clash_verge_logging::Type::Config,
-            "[locus] recovered the code but could not write it back to the config: {error:#}"
+            "[chrysalis] recovered the code but could not write it back to the config: {error:#}"
         );
     }
 
@@ -869,7 +872,7 @@ mod logging {
         clash_verge_logging::logging!(
             warn,
             clash_verge_logging::Type::Config,
-            "[locus] the stored activation code is not a valid Locus code and will not be used \
+            "[chrysalis] the stored activation code is not a valid Chrysalis code and will not be used \
              ({reason}); this device must be activated again"
         );
     }
@@ -879,7 +882,7 @@ mod logging {
         clash_verge_logging::logging!(
             warn,
             clash_verge_logging::Type::Config,
-            "[locus] could not mirror the activation code to the machine store"
+            "[chrysalis] could not mirror the activation code to the machine store"
         );
     }
 }
@@ -897,12 +900,12 @@ pub async fn tier_changed(config: &TierConfig, udp_relay: bool) -> bool {
     let verge = Config::verge().await;
     let data = verge.latest_arc();
 
-    let stored_udp = data.locus_udp_relay.unwrap_or(false);
+    let stored_udp = data.chrysalis_udp_relay.unwrap_or(false);
     if stored_udp != udp_relay {
         return true;
     }
 
-    match data.locus_tier_server.as_deref() {
+    match data.chrysalis_tier_server.as_deref() {
         Some(raw) => match serde_json::from_str::<TierConfig>(raw) {
             Ok(stored) => stored != *config,
             // Unreadable stored config: treat as changed so it gets replaced.
@@ -925,7 +928,7 @@ pub fn redacted_for_diagnostics(verge: &IVerge) -> serde_json::Value {
         // Presence, not value. Support needs to know a code is set; nobody needs
         // to know what it is, and a support log is a thing people paste around.
         "has_activation_code": verge.activation_code.as_deref().is_some_and(|c| !c.is_empty()),
-        "tier": verge.locus_tier,
+        "tier": verge.chrysalis_tier,
         "device_id": verge.device_fingerprint.as_deref().map(redact),
         "last_heartbeat_ok": verge.last_heartbeat_ok,
         "heartbeat_failures": verge.heartbeat_failures,
@@ -950,7 +953,7 @@ mod tests {
     fn verge_with(code: Option<&str>, tier: Option<&str>, fingerprint: Option<&str>) -> IVerge {
         IVerge {
             activation_code: code.map(SmartString::from),
-            locus_tier: tier.map(SmartString::from),
+            chrysalis_tier: tier.map(SmartString::from),
             device_fingerprint: fingerprint.map(SmartString::from),
             ..Default::default()
         }
@@ -973,7 +976,7 @@ mod tests {
     /// # The defect this is written against
     ///
     /// `clear_entitlement` removed the code, tier and expiry and left
-    /// `locus_suspended` set. Signing out of a suspended device therefore produced
+    /// `chrysalis_suspended` set. Signing out of a suspended device therefore produced
     /// `activated: false, suspended: true` — a pair that describes nothing — and the
     /// gate rendered the kick-out screen, which deliberately offers no controls
     /// because its remedy is a conversation with the middleman. The student's only
@@ -988,7 +991,7 @@ mod tests {
             Some("strike"),
             Some("a".repeat(64).as_str()),
         );
-        verge.locus_suspended = Some(true);
+        verge.chrysalis_suspended = Some(true);
 
         // PRECONDITION: with the code present this IS a suspension. If this ever
         // stops holding, the assertion below proves nothing about the invariant.
@@ -1026,8 +1029,8 @@ mod tests {
         let body = &body[..body.find("\n}\n").unwrap_or(body.len())];
 
         assert!(
-            body.contains("draft.locus_suspended = None;"),
-            "clear_entitlement must clear `locus_suspended`. It removes the very code the \
+            body.contains("draft.chrysalis_suspended = None;"),
+            "clear_entitlement must clear `chrysalis_suspended`. It removes the very code the \
              flag is a statement about, and leaving the flag set is what put a signed-out \
              student on a screen with no way out."
         );
@@ -1041,7 +1044,7 @@ mod tests {
         let body = &source[start..];
         let body = &body[..body.find("\n}\n").unwrap_or(body.len())];
         assert!(
-            body.contains("draft.locus_suspended = None;"),
+            body.contains("draft.chrysalis_suspended = None;"),
             "sign-out must not leave a suspension behind: the kick-out screen explains \
              someone else's kick-out, and it has no controls to escape it with"
         );
@@ -1131,7 +1134,7 @@ mod tests {
     /// two cannot disagree about what "usable" means.
     #[test]
     fn an_offered_hub_address_is_adopted_only_when_it_survives_validation() {
-        use crate::locus::contract::{HUB_URL, resolve_hub_url};
+        use crate::chrysalis::contract::{HUB_URL, resolve_hub_url};
 
         // Adoption is decided by the resolver, not by a second rule here.
         let adopted = |offered: &str| {
@@ -1331,7 +1334,7 @@ mod tests {
     /// A stored usage window round-trips.
     #[test]
     fn a_stored_usage_window_decodes() {
-        let stored = crate::locus::usage::Usage {
+        let stored = crate::chrysalis::usage::Usage {
             used_bytes: 1234,
             window_start_ms: 1_700_000_000_000,
             warned: true,
@@ -1348,7 +1351,7 @@ mod tests {
     #[test]
     fn a_corrupt_usage_window_resets_rather_than_failing() {
         let decoded = decode_usage(Some("{ this is not json"));
-        assert_eq!(decoded, crate::locus::usage::Usage::default());
+        assert_eq!(decoded, crate::chrysalis::usage::Usage::default());
         assert_eq!(decoded.used_bytes, 0, "a corrupt count must not be honoured");
     }
 
@@ -1500,7 +1503,7 @@ mod tests {
 
     #[test]
     fn decoding_does_not_pre_repair_a_skewed_window() {
-        let skewed = crate::locus::usage::Usage {
+        let skewed = crate::chrysalis::usage::Usage {
             used_bytes: 99,
             window_start_ms: u64::MAX,
             warned: false,

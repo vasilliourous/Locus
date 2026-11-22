@@ -8,7 +8,7 @@
 // and proved on every launch, and the recovery it promised is now provided by
 // the activation code itself — which the client persists to a machine-scoped
 // store precisely so a reinstall does not lose it. See
-// `client/src-tauri/src/locus/credential.rs`.
+// `client/src-tauri/src/chrysalis/credential.rs`.
 //
 // WHY IT IS NOT SIMPLY DELETED
 //

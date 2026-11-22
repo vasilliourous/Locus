@@ -33,6 +33,31 @@ gone: root `VERSION`, `bump.sh`, the bump/syso scripts, `release-cut.sh`, the
 the client has its own version sites and its own CI
 ([`../operate/RELEASING.md`](../operate/RELEASING.md)).
 
+## The 2026-11-23 rename (Locus → Chrysalis)
+
+A **naming** migration, not a layout one. Only the paths moved:
+
+| Old name (dead) | Current file |
+|---|---|
+| `client/src-tauri/src/locus/` | `client/src-tauri/src/chrysalis/` |
+| `client/src-tauri/src/cmd/locus.rs` | `client/src-tauri/src/cmd/chrysalis.rs` |
+| `client/src/services/locus.ts` | `client/src/services/chrysalis.ts` |
+| `client/src/services/locus.generated.ts` | `client/src/services/chrysalis.generated.ts` |
+| `server/scripts/locus-key-extract.sh` | `server/scripts/chrysalis-key-extract.sh` |
+| `server/templates/locus-fetch.service` | `server/templates/chrysalis-fetch.service` |
+| `.locus-keys/` | `.chrysalis-keys/` |
+
+Also renamed without moving a file: the Cargo package (`locus` → `chrysalis`), the
+`APP_ID`-adjacent backup directory names the *app creates* (not `APP_ID` itself —
+see below), and every `crate::locus::` reference.
+
+**What this rename deliberately did not move** — the bundle identifier, the
+signing keys, the artefact file names, the bootstrap header and one landing-page
+hostname — is the subject of
+[`../reference/NAME-MIGRATION.md`](../reference/NAME-MIGRATION.md). Those are
+identity and infrastructure, not paths, and they are the names that would break a
+deployed client if a later reader "completed" the rename.
+
 ## The three passes
 
 | When | What it did |

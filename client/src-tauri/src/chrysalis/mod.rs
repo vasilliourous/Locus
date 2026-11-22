@@ -1,4 +1,4 @@
-//! Locus product logic.
+//! Chrysalis product logic.
 //!
 //! Everything in this module tree is ours. The rest of `src-tauri/src/` is
 //! inherited from Clash Verge Rev, and the seam matters: Verge owns core

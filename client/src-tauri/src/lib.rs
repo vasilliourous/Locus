@@ -27,13 +27,13 @@
     )
 )]
 
+pub mod chrysalis;
 mod cmd;
 pub mod config;
 mod constants;
 mod core;
 mod enhance;
 mod feat;
-pub mod locus;
 mod module;
 mod process;
 pub mod utils;
@@ -83,7 +83,7 @@ mod app_init {
             .plugin(tauri_plugin_http::init())
             // The updater, registered at last.
             //
-            // It was a declared dependency used by `locus::update::install`, but
+            // It was a declared dependency used by `chrysalis::update::install`, but
             // never registered here — so `app.updater_builder()` would have
             // failed at runtime on the one code path that reaches it, and no
             // amount of `cargo check` could see it. That is the second half of
@@ -160,7 +160,7 @@ mod app_init {
             cmd::upgrade_clash_core,
             cmd::get_runtime_state,
             cmd::get_pending_failures,
-            cmd::locus_js_log,
+            cmd::chrysalis_js_log,
             cmd::entry_lightweight_mode,
             cmd::install_service,
             cmd::uninstall_service,
@@ -192,20 +192,20 @@ mod app_init {
             cmd::get_dns_config_content,
             cmd::validate_dns_config,
             cmd::get_clash_logs,
-            cmd::locus_status,
-            cmd::locus_validate_code,
-            cmd::locus_check_code,
-            cmd::locus_activate,
-            cmd::locus_connect,
-            cmd::locus_cancel_connect,
-            cmd::locus_disconnect,
-            cmd::locus_hub_url,
-            cmd::locus_check_subscription,
-            cmd::locus_sign_out,
-            cmd::locus_update_staging_dir,
-            cmd::locus_update_status,
-            cmd::locus_install_update,
-            cmd::locus_dismiss_update,
+            cmd::chrysalis_status,
+            cmd::chrysalis_validate_code,
+            cmd::chrysalis_check_code,
+            cmd::chrysalis_activate,
+            cmd::chrysalis_connect,
+            cmd::chrysalis_cancel_connect,
+            cmd::chrysalis_disconnect,
+            cmd::chrysalis_hub_url,
+            cmd::chrysalis_check_subscription,
+            cmd::chrysalis_sign_out,
+            cmd::chrysalis_update_staging_dir,
+            cmd::chrysalis_update_status,
+            cmd::chrysalis_install_update,
+            cmd::chrysalis_dismiss_update,
             cmd::get_verge_config,
             cmd::patch_verge_config,
             cmd::test_delay,
@@ -264,7 +264,7 @@ pub fn run() -> std::process::ExitCode {
         return std::process::ExitCode::SUCCESS;
     }
 
-    // Adopts a pre-Locus data directory on the first launch under this identity.
+    // Adopts a pre-Chrysalis data directory on the first launch under this identity.
     //
     // MUST run before anything can touch the app data root: the Windows owner
     // repair below, the singleton check (which opens a lock file in it), and the
@@ -273,7 +273,7 @@ pub fn run() -> std::process::ExitCode {
     match utils::dirs::migrate_legacy_app_data_dir() {
         Ok(Some(adopted)) => {
             // The logger is not installed yet, so record it on stderr as well.
-            eprintln!("[locus] adopted pre-Locus application data from {adopted:?}");
+            eprintln!("[chrysalis] adopted pre-Chrysalis application data from {adopted:?}");
         }
         Ok(None) => {}
         Err(error) => {
@@ -281,7 +281,7 @@ pub fn run() -> std::process::ExitCode {
             // from starting. The user gets an empty profile set and re-activates,
             // and the original directory is left untouched for a manual move —
             // which is strictly better than refusing to launch.
-            eprintln!("[locus] WARNING: {error:#}");
+            eprintln!("[chrysalis] WARNING: {error:#}");
         }
     }
 
@@ -298,7 +298,7 @@ pub fn run() -> std::process::ExitCode {
         utils::dirs::preinit_app_data_dir().and_then(|root| core::owner_identity::repair_app_data_root_owner(&root))
     {
         // The logger is installed later in setup(), so this would otherwise be lost.
-        eprintln!("[locus] 应用数据目录所有权修复失败: {error:#}");
+        eprintln!("[chrysalis] 应用数据目录所有权修复失败: {error:#}");
         clash_verge_logging::logging!(
             error,
             clash_verge_logging::Type::Setup,
@@ -326,7 +326,7 @@ pub fn run() -> std::process::ExitCode {
                     .map(|s| (*s).to_string())
                     .or_else(|| panic.downcast_ref::<String>().cloned())
                     .unwrap_or_else(|| "unknown panic payload".to_string());
-                eprintln!("[locus] panic during app setup ({stage}), continuing in degraded mode: {msg}");
+                eprintln!("[chrysalis] panic during app setup ({stage}), continuing in degraded mode: {msg}");
                 logging!(
                     error,
                     Type::Setup,
@@ -365,7 +365,7 @@ pub fn run() -> std::process::ExitCode {
                         logging!(
                             error,
                             Type::Setup,
-                            "[locus] PANIC: {info}\n(if you are reading this from a bug report, \
+                            "[chrysalis] PANIC: {info}\n(if you are reading this from a bug report, \
                              include this line and the lines above it)"
                         );
                         previous(info);
@@ -383,11 +383,11 @@ pub fn run() -> std::process::ExitCode {
                 // releases went out keyless while every check stayed green, and
                 // the student's only evidence was "the tunnel never triggers".
                 // This line is the evidence, in the file a support report carries.
-                let stamp = crate::locus::activation_tunnel::build_stamp();
-                if crate::locus::activation_tunnel::activation_tunnel_available() {
-                    logging!(info, Type::Setup, "[locus] {stamp}");
+                let stamp = crate::chrysalis::activation_tunnel::build_stamp();
+                if crate::chrysalis::activation_tunnel::activation_tunnel_available() {
+                    logging!(info, Type::Setup, "[chrysalis] {stamp}");
                 } else {
-                    logging!(warn, Type::Setup, "[locus] {stamp}");
+                    logging!(warn, Type::Setup, "[chrysalis] {stamp}");
                 }
 
                 // Warm the maintenance tunnel in the background.
@@ -409,7 +409,7 @@ pub fn run() -> std::process::ExitCode {
                 // proven yet — and it starts the engine because that is what
                 // `Warming` does.
                 AsyncHandler::spawn(|| async {
-                    crate::locus::activation_tunnel::supervise(false).await;
+                    crate::chrysalis::activation_tunnel::supervise(false).await;
                 });
 
                 if let Err(e) = app_init::setup_autostart(app) {
@@ -467,7 +467,7 @@ pub fn run() -> std::process::ExitCode {
 
             #[cfg(target_os = "macos")]
             if let Some(window) = _app_handle.get_webview_window("main") {
-                let _ = window.set_title("Locus");
+                let _ = window.set_title("Chrysalis");
             }
         }
 

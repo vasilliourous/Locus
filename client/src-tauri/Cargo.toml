@@ -1,14 +1,14 @@
 [package]
-name = "locus"
+name = "chrysalis"
 version = "3.4.4"
-description = "Locus VPN client"
-authors = ["Locus"]
+description = "Chrysalis VPN client"
+authors = ["Chrysalis"]
 # GPL-3.0-only, not the root CC BY-NC-ND 4.0: client/ is a fork of Clash Verge
 # Rev (GPL-3.0-only) and cannot be relicensed. The root LICENSE carves client/
 # out explicitly. Keep this in step with client/package.json — both are checked
 # by check-consistency.sh §11.
 license = "GPL-3.0-only"
-default-run = "locus"
+default-run = "chrysalis"
 build = "build.rs"
 edition = "2024"
 rust-version = "1.95"
@@ -29,6 +29,11 @@ clippy = ["tauri/test"]
 perf-harness = ["dep:tauri-plugin-wdio-webdriver"]
 
 [package.metadata.bundle]
+# DEPRECATED ALIAS — retained deliberately. This is the updater identity AND the
+# app-data root: a fielded client only accepts an update whose manifest is keyed
+# by the id it was built with, and its activation code lives under this directory.
+# Renaming it is an identity release, not a rename. See
+# docs/reference/NAME-MIGRATION.md.
 identifier = "com.locus.client"
 
 [build-dependencies]

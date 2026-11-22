@@ -8,11 +8,11 @@ use std::process::{Command, Output};
 use windows::Win32::Globalization::{GetACP, GetOEMCP, MULTI_BYTE_TO_WIDE_CHAR_FLAGS, MultiByteToWideChar};
 
 const CREATE_NO_WINDOW: u32 = 0x08000000;
-const TASK_NAME_USER: &str = "Locus";
-const TASK_NAME_ADMIN: &str = "Locus (Admin)";
+const TASK_NAME_USER: &str = "Chrysalis";
+const TASK_NAME_ADMIN: &str = "Chrysalis (Admin)";
 const TASK_XML_DIR: &str = "tasks";
-const TASK_XML_USER: &str = "locus-task-user.xml";
-const TASK_XML_ADMIN: &str = "locus-task-admin.xml";
+const TASK_XML_USER: &str = "chrysalis-task-user.xml";
+const TASK_XML_ADMIN: &str = "chrysalis-task-admin.xml";
 
 #[derive(Clone, Copy)]
 pub enum TaskMode {

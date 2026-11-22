@@ -64,7 +64,7 @@ pub mod tun {
     /// The TUN interface MTU.
     ///
     /// **1280, not the conventional 1500.** This is a deliberate product
-    /// decision for the network Locus is built for, not a default inherited
+    /// decision for the network Chrysalis is built for, not a default inherited
     /// from upstream.
     ///
     /// Why it matters on N4L: a TUN at 1500 hands the stack an effective

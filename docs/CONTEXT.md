@@ -1,4 +1,4 @@
-# Locus — project context: what it is, the names, and the layout
+# Chrysalis — project context: what it is, the names, and the layout
 
 ```
 audience:    all
@@ -66,7 +66,7 @@ derived facts live in [`state.toml`](state.toml), world claims in
 
 | Directory | What it is | Read next |
 |---|---|---|
-| `client/` | **The shipping client.** Tauri 2 + React on Clash Verge Rev; Locus logic in `src-tauri/src/locus/`. | [`../client/AGENTS.md`](../client/AGENTS.md), [`../client/docs/ARCHITECTURE.md`](../client/docs/ARCHITECTURE.md) |
+| `client/` | **The shipping client.** Tauri 2 + React on Clash Verge Rev; Chrysalis logic in `src-tauri/src/chrysalis/`. | [`../client/AGENTS.md`](../client/AGENTS.md), [`../client/docs/ARCHITECTURE.md`](../client/docs/ARCHITECTURE.md) |
 | `server/` | **The live hub:** deploy modules (`modules/00-env.sh` … `08-firewall.sh`, with the numbering deliberately skipping `03` — see `setup.sh`'s module list; the reason is unrecorded and its absence is not a missing file), `pb_hooks/`, `scripts/`, the operator console at `console/`, and the public landing page at `site/`. | [`operate/DEPLOY.md`](operate/DEPLOY.md), [`operate/OPS.md`](operate/OPS.md) |
 | `docs/` | This set. Index: [`README.md`](README.md). | — |
 | `docs/archive/`, `docs/history/` | Retired material. Read for *why*, never for *what is*. | [`history/README.md`](history/README.md) |
@@ -88,7 +88,7 @@ Two traps in the layout itself:
 
 ## 3. Naming rule — read before "tidying up" a `myvpn` string
 
-The product is **Locus**. Two classes of legacy `myvpn` name survive **on
+The product is **Chrysalis**. Two classes of legacy `myvpn` name survive **on
 purpose**, because they exist on deployed machines:
 
 1. **Live server paths and unit names** — `/usr/local/bin/myvpn-backup.sh`,
@@ -100,7 +100,7 @@ purpose**, because they exist on deployed machines:
    disk. Renaming it orphans existing rollback copies.
 
 Everything else — user-visible strings, hook headers, log banners, document text,
-the Windows executable's product name — is **Locus** and should be fixed on
+the Windows executable's product name — is **Chrysalis** and should be fixed on
 sight.
 
 No live file carries the old name any more.

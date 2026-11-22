@@ -864,7 +864,7 @@ interface IVergeConfig {
   /**
    * `theme_mode` and `theme_id` were removed on 2026-11-19.
    *
-   * Locus has one permanent appearance (`/COLOURS.md` §0), so there is no mode
+   * Chrysalis has one permanent appearance (`/COLOURS.md` §0), so there is no mode
    * and no theme to select. The fields stay out of this interface on purpose —
    * but a `verge.yaml` written by an older build may still carry them, and
    * `IVerge` has no `deny_unknown_fields`, so they are simply ignored on read.

@@ -1,4 +1,4 @@
-# Locus Server Deployment Guide
+# Chrysalis Server Deployment Guide
 
 ```
 audience:    human-operator
@@ -7,13 +7,15 @@ authoritative-for: deploying the hub to a blank VPS
 verified-against: server/setup.sh, server/modules/
 ```
 
-> Deploy the complete Locus server infrastructure on a blank Ubuntu 22.04 VPS.
+> Deploy the complete Chrysalis server infrastructure on a blank Ubuntu 22.04 VPS.
 
-> **Rebrand note:** The product is now **Locus**, but the live VPS and every
-> deployment script under `server/` still name their installed artifacts
-> **`myvpn-*`** (`/etc/myvpn`, `/usr/local/bin/myvpn-*.sh`, `/var/log/myvpn-*.log`,
-> `/root/…`, systemd units). Those literal `myvpn` paths remain **correct as
-> written** until the server is redeployed/renamed — do not "fix" them to `locus`.
+> **Naming note.** The product is **Chrysalis**; `Locus` is retained only as a
+> low-level alias where renaming would break a deployed client, a published
+> artefact or the encrypted bundle. Everything in this deployment *is* renamed —
+> the units and paths below are `chrysalis-*` / `/etc/chrysalis/`. The full list
+> of names that stay spelled `locus`, and why, is
+> [`../reference/NAME-MIGRATION.md`](../reference/NAME-MIGRATION.md) — read it
+> before "fixing" any `locus` string you find in this tree.
 
 ---
 
@@ -170,7 +172,7 @@ openssl rand -base64 24    # store it in your password manager
 #    (See SECRETS-MANAGEMENT.md for the full template)
 
 # 4. Encrypt it — the script verifies its own round trip
-LOCUS_SECRETS_PASSPHRASE_FILE=~/passphrase.txt \
+CHRYSALIS_SECRETS_PASSPHRASE_FILE=~/passphrase.txt \
   server/scripts/secrets-encrypt.sh .secrets.env
 shred -u .secrets.env
 
@@ -237,7 +239,7 @@ hostname, and for the same reason.
 
 The public landing page lives on a **second hostname** on the same box —
 `[site.domain]` in [`../state.toml`](../state.toml), currently
-`locusvpn.jadedns.uk`. It is the one hostname here that is meant to be indexed;
+`chrysalisvpn.jadedns.uk`. It is the one hostname here that is meant to be indexed;
 the hub keeps its own name because that name is baked into every deployed client.
 
 | Piece | Where |
@@ -308,7 +310,7 @@ server/scripts/deploy.sh --site       # landing page only
 server/scripts/deploy.sh --no-site    # everything except the landing page
 ```
 
-It relies on the installed SSH key (see below); it probes for the `locus-hub`
+It relies on the installed SSH key (see below); it probes for the `chrysalis-hub`
 alias and falls back to `root@<domain>`. Full step table and the staging/live
 drift check are in [`OPS.md`](OPS.md) → "One-command deploy".
 
@@ -317,12 +319,12 @@ drift check are in [`OPS.md`](OPS.md) → "One-command deploy".
 Key auth is installed, so nothing prompts:
 
 ```bash
-ssh locus-hub 'uptime'
+ssh chrysalis-hub 'uptime'
 ```
 
-- The deploy key is `.deploy/locus_deploy` — **passphrase-free**, gitignored,
+- The deploy key is `.deploy/chrysalis_deploy` — **passphrase-free**, gitignored,
   installed in `/root/.ssh/authorized_keys`.
-- `~/.ssh/config` defines `Host locus-hub` (HostName = the hub domain, User
+- `~/.ssh/config` defines `Host chrysalis-hub` (HostName = the hub domain, User
   root, IdentityFile the deploy key).
 - This dedicated key exists because the machine's only other usable private key
   was passphrase-protected (so `ssh` invoked `ssh-askpass`, which is not
@@ -339,11 +341,11 @@ scp passphrase.txt root@your-vps:/root/.pw
 
 # One-command deploy — secrets auto-decrypt from the passphrase file
 ssh root@your-vps "chmod 600 /root/.pw && \
-  LOCUS_SECRETS_PASSPHRASE_FILE=/root/.pw /root/server/setup.sh && \
+  CHRYSALIS_SECRETS_PASSPHRASE_FILE=/root/.pw /root/server/setup.sh && \
   rm -f /root/.pw"
 ```
 
-`LOCUS_SECRETS_PASSPHRASE_FILE` is preferred over passing the passphrase inline:
+`CHRYSALIS_SECRETS_PASSPHRASE_FILE` is preferred over passing the passphrase inline:
 it keeps it out of your shell history and out of `ps`.
 
 `DOMAIN`, `ADMIN_API_TOKEN`, B2 creds, tier passwords, and PB admin credentials
@@ -352,7 +354,7 @@ are all decrypted from `secrets.env.age` automatically.
 ### Option B: Pipe with the Passphrase Inline
 
 ```bash
-LOCUS_SECRETS_PASSPHRASE='...' ssh root@your-vps 'bash -s' < server/setup.sh
+CHRYSALIS_SECRETS_PASSPHRASE='...' ssh root@your-vps 'bash -s' < server/setup.sh
 ```
 
 > ⚠️ An inline passphrase is visible to anything that can read your shell history
@@ -385,7 +387,7 @@ The setup script does **everything** automatically:
    it used to be a warning, which made a hub serving 500s look deployed)
 8. Deploys the **admin console** to `/admin/` (required, not optional — a
    missing bundle fails the deploy; see "Staging the server tree" below)
-   and installs the **release fetch service** (`locus-fetch` on
+   and installs the **release fetch service** (`chrysalis-fetch` on
    `127.0.0.1:8091`, required — it is what the console's Releases page
    calls to pull a GitHub Release onto the hub)
 9. Configures hourly B2 backup systemd timer
@@ -438,7 +440,7 @@ After deployment, verify:
       upgraded box (retired; remove by hand — `business/14-risks.md` §14.8)
 - [ ] `systemctl is-active pocketbase-backup.timer` → active (hourly B2 backups; setup auto-runs the first backup)
 - [ ] `tail -5 /var/log/myvpn-backup.log` → last line "Backup completed (exit 0)"
-- [ ] `systemctl is-active locus-fetch` → active (only if publishing releases)
+- [ ] `systemctl is-active chrysalis-fetch` → active (only if publishing releases)
 - [ ] `curl -sf https://networkingguides.jadedns.uk/api/health` → 200
 - [ ] `curl -s -o /dev/null -w '%{http_code}' https://networkingguides.jadedns.uk/admin/` → 200 (and `/admin` → 301)
 - [ ] `ufw status` → active with all rules
@@ -460,7 +462,7 @@ After deployment, verify:
 > `ufw limit 22/tcp` (6 conns/30s), which locked out legitimate automation, and a
 > custom limiter chain in `/etc/ufw/before.rules` locked SSH out **completely**
 > (port 22 timed out while 80/443 served), needing provider-console recovery.
-> SSH protection is **fail2ban** (`/etc/fail2ban/jail.d/locus-sshd.local`,
+> SSH protection is **fail2ban** (`/etc/fail2ban/jail.d/chrysalis-sshd.local`,
 > 6 fails/10m → 1h ban, `banaction=ufw`).
 
 > **⚠️ Backup timer gotcha:** the timer has `Requires=pocketbase.service`, so
@@ -551,9 +553,9 @@ When credentials change (e.g., B2 application key rotated):
 
 ```bash
 # Decrypt, edit, re-encrypt — use the scripts, which verify the round trip
-LOCUS_SECRETS_PASSPHRASE_FILE=~/passphrase.txt server/scripts/secrets-decrypt.sh > /tmp/.secrets.env
+CHRYSALIS_SECRETS_PASSPHRASE_FILE=~/passphrase.txt server/scripts/secrets-decrypt.sh > /tmp/.secrets.env
 vim /tmp/.secrets.env
-LOCUS_SECRETS_PASSPHRASE_FILE=~/passphrase.txt server/scripts/secrets-encrypt.sh /tmp/.secrets.env
+CHRYSALIS_SECRETS_PASSPHRASE_FILE=~/passphrase.txt server/scripts/secrets-encrypt.sh /tmp/.secrets.env
 shred -u /tmp/.secrets.env
 git add server/secrets.env.age
 git commit -m "Update credentials"
@@ -571,7 +573,7 @@ passphrase rotation, CI/CD integration, and troubleshooting.
 ```bash
 # With the passphrase in a temp file on the VPS:
 scp -r server root@new-vps:/root/
-ssh root@new-vps "LOCUS_SECRETS_PASSPHRASE='...' /root/server/restore.sh"
+ssh root@new-vps "CHRYSALIS_SECRETS_PASSPHRASE='...' /root/server/restore.sh"
 ```
 
 ### Manual Override

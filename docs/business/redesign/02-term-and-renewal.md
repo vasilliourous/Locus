@@ -67,7 +67,7 @@ client wire:
 * the `expiryForWire` helper in `activation.pb.js`, the `expires_at` response field in `heartbeat.pb.js` — the `expiryForWire` helpers
   that send the date to the client,
 
-and on the client by `locus/expiry.rs` in its entirety — the `Expiry` enum, the
+and on the client by chrysalis/expiry.rs` in its entirety — the `Expiry` enum, the
 `is_lapsed` enforcement rule, `as_state`, and `EXPIRY_WARNING_DAYS`.
 
 > **Design rule: `expires_at` remains the single enforcement field, and remains
@@ -84,8 +84,8 @@ shape, **none of them change**:
 |---|---|
 | The 410 gates in `activation.pb.js` / `heartbeat.pb.js` | **No** — still compares an instant to `Date.now()` |
 | `expiryForWire` → the client's `expires_at` | **No** — still an instant string, or `null` |
-| `locus/expiry.rs` — parse, `is_lapsed`, `ExpiryState` | **No** — identical contract |
-| The connect gate `subscription_allows_connect` (`subscription_allows_connect` in `cmd/locus.rs`) | **No** |
+| chrysalis/expiry.rs` — parse, `is_lapsed`, `ExpiryState` | **No** — identical contract |
+| The connect gate `subscription_allows_connect` (`subscription_allows_connect` in `cmd/chrysalis.rs`) | **No** |
 | The client's Account row and the `rename_all_fields` wire shape | **No** |
 
 The alternative — teaching every consumer to compute `activated_at + term` — would
@@ -201,7 +201,7 @@ keeping `expires_at` as an instant. The next heartbeat
 Two details worth pinning, because they are where a renewal would visibly fail:
 
 1. **`store::record_expiry` only writes when the hub sent something.**
-   `cmd/locus.rs:~450` guards with `if expires_at.is_some()`. This must stay:
+   `cmd/chrysalis.rs:~450` guards with `if expires_at.is_some()`. This must stay:
    an older hub sends `null`, and writing `None` would wipe a date the client
    legitimately holds. A renewal always sends a value, so it passes the guard.
 2. **The client must accept a *later* date without a restart.** The heartbeat

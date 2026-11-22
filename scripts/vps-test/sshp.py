@@ -34,7 +34,7 @@ import time
 # Priority: an explicit environment variable, then the decrypted secrets bundle.
 # The bundle is the source of truth (DOMAIN, VPS_HOST, VPS_USER, VPS_PW) so that
 # neither a credential nor a host address lives in this file. Reading it costs one
-# `age -d` per invocation and requires LOCUS_SECRETS_PASSPHRASE — the same
+# `age -d` per invocation and requires CHRYSALIS_SECRETS_PASSPHRASE — the same
 # contract as server/setup.sh; see docs/operate/SECRETS-MANAGEMENT.md.
 _HERE = os.path.dirname(os.path.abspath(__file__))
 SECRETS_AGE = os.path.abspath(os.path.join(_HERE, "..", "..", "server", "secrets.env.age"))
@@ -46,15 +46,15 @@ _bundle_cache = {}
 def _from_bundle(name):
     """Look `name` up in the decrypted secrets bundle. Never printed, never logged.
 
-    Requires LOCUS_SECRETS_PASSPHRASE (or _FILE) to be set. If it is not, return
+    Requires CHRYSALIS_SECRETS_PASSPHRASE (or _FILE) to be set. If it is not, return
     "" immediately rather than invoking the decryptor: `age -d` opens /dev/tty and
     would block forever on an unattended run. Same contract as server/setup.sh.
     """
     if not _bundle_cache:
         if not os.path.exists(SECRETS_DECRYPT):
             return ""
-        if not (os.environ.get("LOCUS_SECRETS_PASSPHRASE") or
-                os.environ.get("LOCUS_SECRETS_PASSPHRASE_FILE")):
+        if not (os.environ.get("CHRYSALIS_SECRETS_PASSPHRASE") or
+                os.environ.get("CHRYSALIS_SECRETS_PASSPHRASE_FILE")):
             _bundle_cache["__err__"] = (
                 "no passphrase: set LOCUS_SECRETS_PASSPHRASE to read secrets.env.age"
             )

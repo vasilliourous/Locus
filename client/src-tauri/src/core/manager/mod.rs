@@ -427,7 +427,7 @@ impl CoreManager {
     /// VPN. Connecting is a deliberate act — the single interaction the product
     /// is built around — and it must be the student's, not the launcher's.
     ///
-    /// The core is now started only by `locus_connect` (and by the config/restart
+    /// The core is now started only by `chrysalis_connect` (and by the config/restart
     /// paths, which are themselves already the result of a user action). Nothing
     /// else depends on a launch-time start: status reads report a genuine
     /// `disconnected` until the first connect, which is the honest answer.

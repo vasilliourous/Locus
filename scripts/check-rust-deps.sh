@@ -25,7 +25,7 @@
 # for a reason unrelated to this check. Stated so the gap is visible.
 #
 # WHERE IT MUST RUN: a job that has run `pnpm prebuild`. The scan compiles the
-# locus build script, `tauri_build` reads the gitignored `sidecar/` binaries, and
+# chrysalis build script, `tauri_build` reads the gitignored `sidecar/` binaries, and
 # without them it panics — so this is not a tree condition any job can skip, it is
 # a precondition of the check. See the precondition block below the cargo lookup.
 #
@@ -58,7 +58,7 @@ fi
 # ⚠️ THIS NEEDS THE SIDECAR, SO IT NEEDS `prebuild` FIRST.
 #
 # `tauri_build` copies `bundle.externalBin` (`sidecar/verge-mihomo`, …) into the
-# target dir during the locus build script, and those files are gitignored in
+# target dir during the chrysalis build script, and those files are gitignored in
 # full — `prebuild.mjs` is what fetches them. In a tree where `prebuild` has not
 # run, `tauri_build` panics and this scan fails with a message about a proc macro
 # rather than about a missing engine.

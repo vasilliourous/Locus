@@ -88,13 +88,13 @@ TUNNEL_PORT="${ACTIVATION_TUNNEL_PORT:-8453}"
 FORWARD_PORT="${ACTIVATION_FORWARD_PORT:-18090}"
 
 CONFIG_FILE="/etc/shadowsocks/activation-tunnel.json"
-PASS_FILE="/etc/locus/activation-tunnel.key"
+PASS_FILE="/etc/chrysalis/activation-tunnel.key"
 # The same key in `EnvironmentFile` form for the path filter, which keys each
 # client's rate-limit identity with it. Written by `setup_key`, mode 0600.
-PASS_ENV_FILE="/etc/locus/activation-tunnel.key.env"
-UNIT_FILE="/etc/systemd/system/locus-activation-tunnel.service"
-FORWARDER="/usr/local/bin/locus-activation-forwarder.py"
-FORWARD_UNIT="/etc/systemd/system/locus-activation-forwarder.service"
+PASS_ENV_FILE="/etc/chrysalis/activation-tunnel.key.env"
+UNIT_FILE="/etc/systemd/system/chrysalis-activation-tunnel.service"
+FORWARDER="/usr/local/bin/chrysalis-activation-forwarder.py"
+FORWARD_UNIT="/etc/systemd/system/chrysalis-activation-forwarder.service"
 
 # ── The bootstrap key ──
 # Generated once and PERSISTED. Rotating it would strand every deployed client —
@@ -222,7 +222,7 @@ _seen: dict[str, list[float]] = {}
 # The header this process sets on every forwarded request, and the ONLY thing
 # the hub uses to tell one tunnelled client from another. See the `identity`
 # docstring for why the hub cannot work it out for itself.
-IDENTITY_HEADER = "X-Locus-Bootstrap"
+IDENTITY_HEADER = "X-Chrysalis-Bootstrap"
 
 
 def identity(peer: str) -> str:
@@ -293,7 +293,7 @@ def main() -> None:
             # body from a bootstrap client is not worth supporting and silently
             # truncating one would corrupt the code.
             #
-            # The client's own `X-Locus-Bootstrap` header is NOT forwarded: it is
+            # The client's own `X-Chrysalis-Bootstrap` header is NOT forwarded: it is
             # the client's claim about itself, and PocketBase must not be told a
             # rate-limit identity by the party being limited.
             length = 0
@@ -318,7 +318,7 @@ def main() -> None:
             # client reports as a connection failure.
             #
             # What goes here is the tunnel's OWN per-peer derivation, not anything
-            # the client sent: `X-Locus-Bootstrap: <sha256 of the peer address and
+            # the client sent: `X-Chrysalis-Bootstrap: <sha256 of the peer address and
             # the bootstrap key>`. It is a stable per-source pseudonym that reveals
             # no address and cannot be forged by the client, because this process
             # writes it and drops any copy the client supplied.
@@ -330,7 +330,7 @@ def main() -> None:
             try:
                 conn.request(method, target, body=body, headers={
                     "Content-Type": "application/json",
-                    "X-Locus-Bootstrap": identity(peer),
+                    "X-Chrysalis-Bootstrap": identity(peer),
                 })
                 resp = conn.getresponse()
                 data = resp.read()
@@ -359,10 +359,10 @@ def main() -> None:
     try:
         server = socketserver.ThreadingTCPServer(LISTEN, Handler)
     except OSError as exc:
-        print(f"locus-activation-forwarder: cannot bind {LISTEN[0]}:{LISTEN[1]}: {exc}",
+        print(f"chrysalis-activation-forwarder: cannot bind {LISTEN[0]}:{LISTEN[1]}: {exc}",
               file=sys.stderr, flush=True)
         raise SystemExit(1)
-    print(f"locus-activation-forwarder: listening on {LISTEN[0]}:{LISTEN[1]} -> {UPSTREAM[0]}:{UPSTREAM[1]}",
+    print(f"chrysalis-activation-forwarder: listening on {LISTEN[0]}:{LISTEN[1]} -> {UPSTREAM[0]}:{UPSTREAM[1]}",
           flush=True)
     with server:
         server.serve_forever()
@@ -375,7 +375,7 @@ PY
 
     cat > "$FORWARD_UNIT" <<SERVICE
 [Unit]
-Description=Locus activation tunnel path filter (allowlist for the bootstrap SS listener)
+Description=Chrysalis activation tunnel path filter (allowlist for the bootstrap SS listener)
 After=network.target pocketbase.service
 Before=shadowsocks-activation-tunnel.service
 
@@ -386,7 +386,7 @@ Environment=ACTIVATION_FORWARD_PORT=${FORWARD_PORT}
 # process needs it. It is read from the 0600 file at start rather than written
 # into this unit: a unit file is world-readable, and the key is the only value
 # standing between "one rate-limit bucket per client" and "one per class".
-EnvironmentFile=-/etc/locus/activation-tunnel.key.env
+EnvironmentFile=-/etc/chrysalis/activation-tunnel.key.env
 ExecStart=/usr/bin/env python3 ${FORWARDER}
 Restart=on-failure
 RestartSec=2
@@ -507,8 +507,8 @@ write_service() {
     cat > "$UNIT_FILE" <<SERVICE
 [Unit]
 Description=Shadowsocks server (pre-activation activation tunnel)
-After=network.target locus-activation-forwarder.service
-Requires=locus-activation-forwarder.service
+After=network.target chrysalis-activation-forwarder.service
+Requires=chrysalis-activation-forwarder.service
 
 [Service]
 Type=simple
@@ -531,7 +531,7 @@ if [ "$ACTIVATION_TUNNEL" != "1" ]; then
     log "ACTIVATION_TUNNEL=0 — not configuring the activation tunnel"
     # Disable rather than leave running: an operator who turns this off means
     # the port is closed, not merely unmanaged.
-    systemctl disable --now locus-activation-tunnel.service 2>/dev/null || true
+    systemctl disable --now chrysalis-activation-tunnel.service 2>/dev/null || true
     exit 0
 fi
 
@@ -550,18 +550,18 @@ write_service
 verify_key_consistency
 
 systemctl daemon-reload
-systemctl enable locus-activation-forwarder.service 2>/dev/null || true
-systemctl enable locus-activation-tunnel.service 2>/dev/null || true
-systemctl restart locus-activation-forwarder.service 2>/dev/null || \
-    warn "Could not start locus-activation-forwarder — start it by hand"
-systemctl restart locus-activation-tunnel.service 2>/dev/null || \
-    warn "Could not start locus-activation-tunnel — start it by hand"
+systemctl enable chrysalis-activation-forwarder.service 2>/dev/null || true
+systemctl enable chrysalis-activation-tunnel.service 2>/dev/null || true
+systemctl restart chrysalis-activation-forwarder.service 2>/dev/null || \
+    warn "Could not start chrysalis-activation-forwarder — start it by hand"
+systemctl restart chrysalis-activation-tunnel.service 2>/dev/null || \
+    warn "Could not start chrysalis-activation-tunnel — start it by hand"
 
-if systemctl is-active --quiet locus-activation-tunnel.service; then
+if systemctl is-active --quiet chrysalis-activation-tunnel.service; then
     log "✓ Activation tunnel is active on :${TUNNEL_PORT}"
 else
     warn "Activation tunnel is NOT running — enrolment over the tunnel is DEAD."
-    warn "  Check: journalctl -u locus-activation-tunnel -n 20 --no-pager"
+    warn "  Check: journalctl -u chrysalis-activation-tunnel -n 20 --no-pager"
 fi
 
 log ""

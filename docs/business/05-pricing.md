@@ -99,7 +99,7 @@ effort belongs on that step:
 The competition's price anchor is **free** (the free VPNs,
 [`13-competition.md`](13-competition.md)), not the legacy $8. Every paid
 price is judged against "I could just not pay." Free is also now *our* offer, so
-the comparison the student makes is not "Locus vs a free VPN" but "Lose the data
+the comparison the student makes is not "Chrysalis vs a free VPN" but "Lose the data
 limit, or keep it" — a comparison the product controls.
 
 ### 5.3.4 The free gap is huge, and that is the point

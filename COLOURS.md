@@ -23,18 +23,18 @@ verified-against: client/tests/theme-colors.test.ts (values + contrast floors), 
 
 ## 0. The state of colour right now
 
-**Permanent Dawn, decided 2026-11-19.** Locus has exactly one appearance. There is
+**Permanent Dawn, decided 2026-11-19.** Chrysalis has exactly one appearance. There is
 no theme registry, no theme id, no light/dark switch, no user-selectable palette
 and no theme hook — the value of every colour in the app is a constant, and the
 machinery that could produce a second one has been deleted rather than disabled.
 
 This supersedes the **monochrome reset of 2026-11-11** (recorded in §11). That
-decision reduced every Locus-owned colour to grey so a real colour design could
+decision reduced every Chrysalis-owned colour to grey so a real colour design could
 start from a neutral base. This is that design, and it is the only one.
 
 What "permanent Dawn" means concretely:
 
-- **One mode: dark.** There is no light appearance. `LOCUS_LIGHT`, the
+- **One mode: dark.** There is no light appearance. `CHRYSALIS_LIGHT`, the
   `prefers-color-scheme` blocks in the app, the landing page and the console, and
   every `mode === 'light'` branch are gone. A student on a bright laptop cannot
   choose a light UI; that is the cost of the decision, not an oversight.
@@ -62,9 +62,9 @@ consequences above were read from the code, not seen on a screen.
 One chain, one input, built once at module load:
 
 ```
-LOCUS_COLORS                     _theme.tsx   → the palette, the only one
+CHRYSALIS_COLORS                     _theme.tsx   → the palette, the only one
    └─> defaultTheme              _theme.tsx   → the legacy { primary_color, … } shape
-        └─> createTheme(...)     services/theme.ts → `locusTheme`, the MUI theme
+        └─> createTheme(...)     services/theme.ts → `chrysalisTheme`, the MUI theme
              └─> ThemeProvider   main.tsx     → every screen, including the gate
 ```
 
@@ -74,7 +74,7 @@ and the global stylesheet, once, through `applyThemeWhenReady()`. It is a functi
 rather than a module side effect so importing the module has no DOM requirement —
 the palette test imports it under Node.
 
-**The rule: a future colour pass edits `LOCUS_COLORS` and stops there.** It does
+**The rule: a future colour pass edits `CHRYSALIS_COLORS` and stops there.** It does
 not edit `services/theme.ts`, and it does not edit a component. A colour written
 into a component is the defect the guard in §10 catches.
 
@@ -108,7 +108,7 @@ on every launch.**
 
 ## 2. The one palette
 
-Authority: `client/src/pages/_theme.tsx` (`LOCUS_COLORS`), projected into MUI by
+Authority: `client/src/pages/_theme.tsx` (`CHRYSALIS_COLORS`), projected into MUI by
 `client/src/services/theme.ts`. This table is the single source for every value in
 the product, the landing page, the console and every native window frame.
 
@@ -198,7 +198,7 @@ suspension screen — the only other decorative paint in the product — were re
 at the same time: three screens carrying the same gradient is a placeholder, not a
 design.
 
-The `<style id="locus-theme-decoration">` element that `use-custom-theme` wrote no
+The `<style id="chrysalis-theme-decoration">` element that `use-custom-theme` wrote no
 longer exists, because the hook does not. Nothing injects decoration CSS, so there
 is no scope for a preset to escape into — the `[data-theme-skin]` scoping rules and
 the tests that guarded them went with the mechanism.
@@ -330,7 +330,7 @@ between the light and dark glyph from the resolved mode; with one appearance tha
 choice collapsed, and the file had no remaining reference.
 
 **The tray icons and the application icon are still Clash Verge Rev's**, and
-`client/docs/FRONTEND.md` §6 records that no Locus mark exists. Replacing them is
+`client/docs/FRONTEND.md` §6 records that no Chrysalis mark exists. Replacing them is
 a brand decision plus a release-asset change, and it has not been taken.
 
 ---
@@ -387,7 +387,7 @@ renamed module fails here rather than silently widening the allowlist to nothing
 
 | Allowlisted source | Holds |
 |---|---|
-| `client/src/pages/_theme.tsx` | `LOCUS_COLORS`, `defaultTheme`, `TIER_COLORS` |
+| `client/src/pages/_theme.tsx` | `CHRYSALIS_COLORS`, `defaultTheme`, `TIER_COLORS` |
 | `client/src/index.html` | the pre-bundle document ground |
 | `client/src/assets/styles/index.scss` | the pre-theme stylesheet fallback |
 | `client/src-tauri/src/utils/resolve/window.rs` | the native window ground |
@@ -412,7 +412,7 @@ anywhere. In order:
 |---|---|---|
 | — | the original green-black specification | the redesign below |
 | — | the 3.3.x palette | the monochrome reset |
-| 2026-11-11 | **monochrome reset** — every Locus-owned surface neutral, so a colour design could start from a neutral base | **permanent Dawn (§0)** |
+| 2026-11-11 | **monochrome reset** — every Chrysalis-owned surface neutral, so a colour design could start from a neutral base | **permanent Dawn (§0)** |
 | 2026-11-19 | **nine-theme registry** — `default-dark`, `default-light`, `slate`, `dawn`, `ember`, `moss`, `linen`, `sepia`, `contrast`, five decoration presets and a theme hook | **one appearance (§0, §3)** — the registry, the resolver, the hook, the dropdown and the decorations were deleted |
 
 The pre-reset palette, the original green-black specification and the retired

@@ -1,12 +1,12 @@
-# Agent guidelines — Locus client
+# Agent guidelines — Chrysalis client
 
-Instructions for AI coding agents working in `client/`, the Locus desktop client.
+Instructions for AI coding agents working in `client/`, the Chrysalis desktop client.
 The root [`../AGENTS.md`](../AGENTS.md) covers the four rules that apply
 everywhere and the repository-wide traps; this file covers only what is specific
 to the client.
 
-> **`client/` is the Locus client and it is functional.** It began as a copy of
-> Clash Verge Rev v2.5.5 and now carries Locus logic in `src-tauri/src/locus/`.
+> **`client/` is the Chrysalis client and it is functional.** It began as a copy of
+> Clash Verge Rev v2.5.5 and now carries Chrysalis logic in `src-tauri/src/chrysalis/`.
 > The contract docs in `client/docs/` were written before the port and several
 > describe intent rather than the code — **the code wins, and the doc gets fixed
 > in the same change.**

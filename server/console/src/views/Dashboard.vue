@@ -49,7 +49,7 @@ onMounted(load)
  * 7-day warning threshold.
  */
 function openWorklist() {
-  window.dispatchEvent(new CustomEvent('locus:open-worklist', { detail: { days: 30 } }))
+  window.dispatchEvent(new CustomEvent('chrysalis:open-worklist', { detail: { days: 30 } }))
 }
 </script>
 

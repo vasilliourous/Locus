@@ -49,7 +49,7 @@ twice in this project's history.
 * `"Code bound to another device"`
 
 and the client disambiguates **by substring** — it looks for the word
-`suspended` in the 403's message (the 403 classifier in `locus/activation.rs`). That is
+`suspended` in the 403's message (the 403 classifier in chrysalis/activation.rs`). That is
 fragile, and the code says so: it is the existing contract with deployed
 clients, pinned by `activation_contract_test`
 (`client/src-tauri/tests/activation_contract.rs`; added 2026-10-01 — the claim
@@ -204,7 +204,7 @@ Repairing it is the ordinary path: re-activating the device calls
 ## 3.7 What is deliberately NOT enforced, and what that costs
 
 The client's fingerprint still falls back to a value persisted **only in the
-client's own config** (`locus/device.rs`). Lose that file — a reinstall, a
+client's own config** (chrysalis/device.rs`). Lose that file — a reinstall, a
 reset, a wiped AppData — and the device presents a new identity.
 
 With the binding rule now enforced, that means: **a reinstalling student is

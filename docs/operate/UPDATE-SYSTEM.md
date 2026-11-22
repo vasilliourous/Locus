@@ -1,10 +1,10 @@
-# The Locus update system
+# The Chrysalis update system
 
 ```
 audience:    builder
 status:      live
 authoritative-for: how a released build reaches an installed client, end to end
-verified-against: server/pb_hooks/release.pb.js, client/src-tauri/src/locus/update/
+verified-against: server/pb_hooks/release.pb.js, client/src-tauri/src/chrysalis/update/
 ```
 
 > How a released build reaches an installed client, end to end. Read this with
@@ -24,7 +24,7 @@ CI builds 4 raw binaries + manifest.json + .sig
 GitHub Release (tag v<version>)  ──────────┐
                                            │  fetch by version
 console: "Fetch & publish" ────────────────┤
-  locus-fetch pulls from GitHub,           │
+  chrysalis-fetch pulls from GitHub,           │
   verifies format + SHA-256 + signature    │
         │                                  │
         ▼                                  │
@@ -54,7 +54,7 @@ Publishing is **one action**, from the console:
 
 > **Releases → enter the version → Fetch & publish**
 
-That runs `locus-fetch` (`server/scripts/fetch-release.py`), which:
+That runs `chrysalis-fetch` (`server/scripts/fetch-release.py`), which:
 
 1. Resolves the four platform payloads **and their `.sig` files** from the GitHub
    Release tagged `v<version>`.
@@ -79,8 +79,8 @@ updater can install, and the two are not interchangeable:
 | Slot | Payload | Why that one |
 |---|---|---|
 | `linux` | `locus-linux-amd64` (ELF) | The plugin replaces the AppImage/installs the package directly. |
-| `windows` | `installer-Locus_<v>_x64-setup.exe` (NSIS) | The plugin ShellExecutes **any** PE as an installer, so the raw app would make a client re-execute itself (`FIXES.md`, 2026-09-30). |
-| `macos_intel` / `macos_arm` | `locus-darwin-<arch>.app.tar.gz` | The plugin's macOS path is `GzDecoder` + `tar::Archive` over an `.app` bundle — **a bare Mach-O is not installable there**. |
+| `windows` | `installer-Chrysalis_<v>_x64-setup.exe` (NSIS) | The plugin ShellExecutes **any** PE as an installer, so the raw app would make a client re-execute itself (`FIXES.md`, 2026-09-30). |
+| `macos_intel` / `macos_arm` | `chrysalis-darwin-<arch>.app.tar.gz` | The plugin's macOS path is `GzDecoder` + `tar::Archive` over an `.app` bundle — **a bare Mach-O is not installable there**. |
 
 > **The macOS row is a fix, not a detail (2026-10-04).** Both the CI manifest and
 > the hub named the bare `locus-darwin-arm64` for the macOS slots, so a macOS
@@ -230,7 +230,7 @@ Two independent gates, on purpose.
 
 ### Gate 1 — the version (client-side)
 
-`locus/update/version.rs`. The hub is not trusted to advertise only newer
+`chrysalis/update/version.rs`. The hub is not trusted to advertise only newer
 versions: a stale or rolled-back `update_config` row would otherwise downgrade
 the fleet, and there is no server-driven downgrade to recover from. So the
 client refuses anything not **strictly newer**.
@@ -252,7 +252,7 @@ SHA-256 **fails closed**: a missing checksum is a refusal, never a warning.
 
 Download, verify, hand to the platform installer.
 
-**The download is the client's own** (`locus/update/apply.rs`): it streams to a
+**The download is the client's own** (`chrysalis/update/apply.rs`): it streams to a
 file in the app data root, hashing incrementally, so the artifact is never held
 in memory. This matters — the plugin's own `download_and_install` reads the
 **whole artifact into a `Vec<u8>`** before verifying it, and that buffering is

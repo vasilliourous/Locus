@@ -4,7 +4,7 @@
 audience:    builder
 status:      live
 authoritative-for: how the client keeps a student's entitlement across an update, an uninstall or a reset, and why device identity was removed
-verified-against: client/src-tauri/src/locus/credential.rs, client/src-tauri/src/locus/store.rs, server/pb_hooks/activation.pb.js
+verified-against: client/src-tauri/src/chrysalis/credential.rs, client/src-tauri/src/chrysalis/store.rs, server/pb_hooks/activation.pb.js
 ```
 
 > **Read this before touching the activation gate, `store::read`/`clear`, or the
@@ -48,9 +48,9 @@ The activation code is the whole credential. Two things make it durable.
 | Store | Where | Survives |
 |---|---|---|
 | `verge.yaml` (primary) | the app's config | an app update and a restart; **not** an uninstall, and not a config reset |
-| the machine store (mirror) | `/var/lib/locus` (Linux), `/Library/Application Support/Locus` (macOS), `%PROGRAMDATA%\Locus` (Windows) | an uninstall and a reinstall |
+| the machine store (mirror) | `/var/lib/chrysalis` (Linux), `/Library/Application Support/Chrysalis` (macOS), `%PROGRAMDATA%\Chrysalis` (Windows) | an uninstall and a reinstall |
 
-`crate::locus::credential` owns the mirror. It is written owner-only (`0o600`)
+`crate::chrysalis::credential` owns the mirror. It is written owner-only (`0o600`)
 on every `store::store`, because the code is a bearer credential. On read,
 `store::read` prefers the config and falls back to the mirror; `read_code_rehydrating`
 writes a recovered code back into the config so the launch is not a one-off.
@@ -83,7 +83,7 @@ redemption from a repeat one, not to lock a code to a machine.
 
 ## 3. What the fingerprint is still for
 
-`client/src-tauri/src/locus/device.rs` still computes a hardware fingerprint.
+`client/src-tauri/src/chrysalis/device.rs` still computes a hardware fingerprint.
 It is **not** a binding key, an identity, or a credential. It survives for two
 non-authoritative uses:
 

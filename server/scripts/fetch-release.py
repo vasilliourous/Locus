@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Locus release-fetch service — pull a release straight from GitHub.
+"""Chrysalis release-fetch service — pull a release straight from GitHub.
 
 WHY THIS EXISTS
 ---------------
@@ -97,6 +97,11 @@ LINK_TTL_SECONDS = int(os.environ.get("FETCH_LINK_TTL", "900"))  # 15 minutes
 #
 # The name carries `<version>` because Tauri names the bundle with it. It is
 # filled per publish by `installer_name()`, below.
+#
+# DEPRECATED ALIAS: the `Locus_` infix here is the FILENAME Tauri produces from
+# `productName`, and it is what CI publishes and this fetcher resolves. It is
+# paired by literal with `publish-release.sh` and `check-consistency.sh` §1e.
+# See docs/reference/NAME-MIGRATION.md.
 INSTALLER_NAME_TEMPLATE = "installer-Locus_%s_x64-setup.exe"
 
 
@@ -120,8 +125,8 @@ def installer_name(version):
 ## `tauri_plugin_updater` does not consume a bare binary on macOS. Its install
 ## path is `GzDecoder` + `tar::Archive` expecting
 ##
-##     Locus.app.tar.gz
-##     └── Locus.app/
+##     Chrysalis.app.tar.gz
+##     └── Chrysalis.app/
 ##         └── Contents/...
 ##
 ## and its `extract_path` there is the `.app` BUNDLE, not a single file
@@ -136,6 +141,11 @@ def installer_name(version):
 ## `resolve_platform_names` below falls back to the bare name when the tarball
 ## is absent from a release, so publishing a version built before this fix
 ## degrades rather than failing outright.
+## DEPRECATED ALIAS: these four names are the artefact filenames CI publishes and
+## the hub resolves out of the GitHub Release. They keep the `locus-` prefix
+## deliberately - renaming them is an ARTEFACT migration (publish both name sets,
+## resolve both, then drop the old one), not a rename. See
+## docs/reference/NAME-MIGRATION.md. Do not "finish" this file.
 NEW_PLATFORMS = [
     ("linux", "locus-linux-amd64", "download_linux"),
     ("windows", None, "download_windows"),  # resolved by installer_name()
@@ -165,7 +175,7 @@ MANIFEST_NAME = "manifest.json"
 ## is the raw-Windows-PE mistake again, in a different costume: a legitimate
 ## release asset that is wrong in the update slot.
 ##
-## The macOS zip carries the ad-hoc-signed `Locus.app`. It exists because the
+## The macOS zip carries the ad-hoc-signed `Chrysalis.app`. It exists because the
 ## `.dmg` cannot serve the one case that matters: a student whose download is
 ## quarantined and refused, where the remedy is a bundle that survives
 ## transport intact so macOS reports the bypassable "unidentified developer"
@@ -209,7 +219,7 @@ MAX_ASSET_BYTES = int(os.environ.get("MAX_ASSET_BYTES", str(200 * 1024 * 1024)))
 API_TIMEOUT = int(os.environ.get("FETCH_API_TIMEOUT", "30"))
 DOWNLOAD_TIMEOUT = int(os.environ.get("FETCH_TIMEOUT", "60"))
 
-USER_AGENT = "locus-hub-fetch/1.0 (+https://github.com/%s)" % GITHUB_REPO
+USER_AGENT = "chrysalis-hub-fetch/1.0 (+https://github.com/%s)" % GITHUB_REPO
 
 
 def log(msg):
@@ -706,7 +716,7 @@ def fetch_release(version, force=False):
     #
     # THE DEFECT THIS EXISTS FOR. `manifest.json` names, per platform, the file
     # CI intends a client to install from itself — and for Windows that has been
-    # `installer-Locus_<v>_x64-setup.exe` since v3.2.12, the fix for the client
+    # `installer-Chrysalis_<v>_x64-setup.exe` since v3.2.12, the fix for the client
     # that re-executed its own binary. This list was not updated alongside it.
     #
     # Nothing caught that, and the reason is worth stating precisely: the
@@ -924,7 +934,7 @@ def verify_artifact_kind(path, platform_key):
         #
         # What separates them is the NSIS firstheader makensis writes into the
         # overlay: the 0xDEADBEEF magic followed by `NullsoftInst`. This mirrors
-        # `is_installer_payload` in client/src-tauri/src/locus/update/install.rs:
+        # `is_installer_payload` in client/src-tauri/src/chrysalis/update/install.rs:
         # the hub refuses the same payload the client would refuse, so a mistake
         # is caught here at publish time rather than on a student's machine.
         if not _is_nsis_installer(path):
@@ -996,7 +1006,7 @@ def _check_macos_app_tarball(path, platform_key, is_macho_thin, is_macho_fat):
                             "(first member: %r) — the updater strips one leading "
                             "path component and would find no bundle" % member.name
                         )
-                if member.name.endswith("/Contents/MacOS/locus") or (
+                if member.name.endswith("/Contents/MacOS/chrysalis") or (
                     "/Contents/MacOS/" in member.name
                     and not member.name.endswith("/")
                 ):
@@ -1133,7 +1143,7 @@ def verify_and_report(result):
 
 # ── HTTP surface ────────────────────────────────────────────────────────────
 class Handler(BaseHTTPRequestHandler):
-    server_version = "locus-fetch/1.0"
+    server_version = "chrysalis-fetch/1.0"
 
     def log_message(self, fmt, *args):
         # Default logging writes to stderr unformatted; route it through log().
@@ -1220,7 +1230,7 @@ class Handler(BaseHTTPRequestHandler):
         query = urllib.parse.parse_qs(parsed.query)
 
         if parsed.path == "/health":
-            return self._send(200, {"ok": True, "service": "locus-fetch",
+            return self._send(200, {"ok": True, "service": "chrysalis-fetch",
                                     "repo": GITHUB_REPO})
 
         if parsed.path == "/api/admin/fetch-link":
@@ -1290,7 +1300,7 @@ def main():
     if not os.path.isdir(UPDATES_DIR):
         log("FATAL: UPDATES_DIR does not exist: %s" % UPDATES_DIR)
         sys.exit(1)
-    log("Locus release-fetch service listening on %s:%d -> %s (repo %s)"
+    log("Chrysalis release-fetch service listening on %s:%d -> %s (repo %s)"
         % (LISTEN_HOST, LISTEN_PORT, UPDATES_DIR, GITHUB_REPO))
     log("one-shot links expire after %ds" % LINK_TTL_SECONDS)
     server = ThreadingHTTPServer((LISTEN_HOST, LISTEN_PORT), Handler)

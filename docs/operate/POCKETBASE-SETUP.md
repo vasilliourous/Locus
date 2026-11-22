@@ -1,4 +1,4 @@
-# Locus PocketBase Setup Guide
+# Chrysalis PocketBase Setup Guide
 
 ```
 audience:    human-operator

@@ -8,8 +8,8 @@ import {
 import {
   DEFAULT_SHAPE,
   defaultTheme,
-  locusFontFamily,
-  LOCUS_COLORS,
+  chrysalisFontFamily,
+  CHRYSALIS_COLORS,
 } from '@/pages/_theme'
 
 /**
@@ -63,29 +63,29 @@ const buildTheme = (): MuiTheme =>
         default: defaultTheme.background_color,
       },
     },
-    // Zeroed app-wide, deliberately: Locus separates surfaces with a 1px border
+    // Zeroed app-wide, deliberately: Chrysalis separates surfaces with a 1px border
     // and a one-step-up surface (`_surfaces.ts`), not with elevation. A card that
     // relied on `elevation` would be invisible.
     shadows: Array(25).fill('none') as Shadows,
     shape: { borderRadius: CONTROL_RADIUS },
-    typography: { fontFamily: locusFontFamily },
+    typography: { fontFamily: chrysalisFontFamily },
   })
 
 /** The application theme. Built once; never rebuilt. */
-export const locusTheme = buildTheme()
+export const chrysalisTheme = buildTheme()
 
 /**
  * Writes the window-chrome variables and the global stylesheet.
  *
  * Called once at module load. These values are all derived from
- * {@link LOCUS_COLORS}, so this is a projection rather than a second palette:
+ * {@link CHRYSALIS_COLORS}, so this is a projection rather than a second palette:
  * change the palette and the scrollbars, selection colour and dialog paper follow
  * without an edit here.
  *
  * Idempotent and safe to call again — which is what makes it usable from a
  * `theme_setting` change (a stored preference) without rebuilding the theme.
  */
-export const applyTheme = (theme: MuiTheme = locusTheme) => {
+export const applyTheme = (theme: MuiTheme = chrysalisTheme) => {
   // Guarded rather than assumed. This module is imported by the palette test,
   // which runs under Node with no DOM, so an unguarded `document` would make the
   // guard itself unimportable. Calling it before the document exists is a no-op
@@ -94,10 +94,10 @@ export const applyTheme = (theme: MuiTheme = locusTheme) => {
   const root = document.documentElement
   if (!root) return
 
-  const backgroundColor = LOCUS_COLORS.background
-  const selectColor = LOCUS_COLORS.surfaceHover
-  const scrollColor = alpha(LOCUS_COLORS.textSecondary, 0.5)
-  const dividerColor = alpha(LOCUS_COLORS.textPrimary, 0.08)
+  const backgroundColor = CHRYSALIS_COLORS.background
+  const selectColor = CHRYSALIS_COLORS.surfaceHover
+  const scrollColor = alpha(CHRYSALIS_COLORS.textSecondary, 0.5)
+  const dividerColor = alpha(CHRYSALIS_COLORS.textPrimary, 0.08)
 
   root.style.setProperty('--divider-color', dividerColor)
   root.style.setProperty('--background-color', backgroundColor)
@@ -108,9 +108,9 @@ export const applyTheme = (theme: MuiTheme = locusTheme) => {
     '--background-color-alpha',
     alpha(theme.palette.primary.main, 0.1),
   )
-  root.style.setProperty('--window-border-color', LOCUS_COLORS.border)
-  root.style.setProperty('--scrollbar-bg', LOCUS_COLORS.surface)
-  root.style.setProperty('--scrollbar-thumb', LOCUS_COLORS.border)
+  root.style.setProperty('--window-border-color', CHRYSALIS_COLORS.border)
+  root.style.setProperty('--scrollbar-bg', CHRYSALIS_COLORS.surface)
+  root.style.setProperty('--scrollbar-thumb', CHRYSALIS_COLORS.border)
   root.style.setProperty('--card-radius', `${DEFAULT_SHAPE.cardRadius}px`)
   root.style.setProperty('--control-radius', `${CONTROL_RADIUS}px`)
   root.setAttribute('data-css-injection-root', 'true')
@@ -148,11 +148,11 @@ export const applyTheme = (theme: MuiTheme = locusTheme) => {
       border-radius: 4px;
     }
     ::-webkit-scrollbar-thumb:hover {
-      background-color: ${LOCUS_COLORS.textSecondary};
+      background-color: ${CHRYSALIS_COLORS.textSecondary};
     }
 
     body {
-      font-family: ${locusFontFamily};
+      font-family: ${chrysalisFontFamily};
       background-color: var(--background-color);
     }
 
@@ -161,7 +161,7 @@ export const applyTheme = (theme: MuiTheme = locusTheme) => {
     }
 
     .MuiDialog-paper {
-      background-color: ${LOCUS_COLORS.surface} !important;
+      background-color: ${CHRYSALIS_COLORS.surface} !important;
     }
   `
 }

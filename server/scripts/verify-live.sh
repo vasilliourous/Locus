@@ -96,7 +96,7 @@ echo "════════════════════════�
 # stale probe. Emit the same dateline the docs are written in.
 #
 # TZ is set on the command, not exported, so the rest of the script is unchanged.
-today_local() { TZ="${LOCUS_TZ:-Pacific/Auckland}" date +%Y-%m-%d; }
+today_local() { TZ="${CHRYSALIS_TZ:-Pacific/Auckland}" date +%Y-%m-%d; }
 
 echo "  time:    $(now_utc)  (register date: $(today_local))"
 echo "  domain:  $DOMAIN"

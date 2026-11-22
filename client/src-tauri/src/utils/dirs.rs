@@ -8,10 +8,18 @@ use std::{
 };
 use tauri::Manager as _;
 
-/// Locus's application identity. This is the app-data directory name, and it is
-/// also what the privileged Service uses to recognise this app: on Windows the
+/// Chrysalis's application identity. This is the app-data directory name, and it
+/// is also what the privileged Service uses to recognise this app: on Windows the
 /// owner SID of this directory plus the token file inside it are the
 /// credentials the Service checks. See `core::owner_identity`.
+///
+/// **DEPRECATED ALIAS — `com.locus.client` is retained on purpose.** The value
+/// is an identity, not a label: the fielded client keeps its activation code,
+/// device fingerprint and tier under this directory, and on Windows the
+/// privileged Service authenticates the app by this directory's owner SID. A
+/// rename here is an identity release with a data-root migration (the
+/// [`LEGACY_APP_IDS`] path exists for exactly that), not part of the branding
+/// change. See docs/reference/NAME-MIGRATION.md.
 #[cfg(not(feature = "verge-dev"))]
 pub static APP_ID: &str = "com.locus.client";
 #[cfg(not(feature = "verge-dev"))]
@@ -22,7 +30,7 @@ pub static APP_ID: &str = "com.locus.client.dev";
 #[cfg(feature = "verge-dev")]
 pub static BACKUP_DIR: &str = "locus-backup-dev";
 
-/// Application identities this product used BEFORE it was Locus.
+/// Application identities this product used BEFORE it was Chrysalis.
 ///
 /// Kept so one launch can adopt an existing data directory rather than
 /// abandoning it — see [`migrate_legacy_app_data_dir`]. These are historical
@@ -55,7 +63,7 @@ pub fn app_home_dir() -> Result<PathBuf> {
         .ok_or_else(|| anyhow::anyhow!("Failed to get the app home directory"))
 }
 
-/// Adopts a pre-Locus data directory, once, on the first launch under the
+/// Adopts a pre-Chrysalis data directory, once, on the first launch under the
 /// current identity.
 ///
 /// WHY THIS EXISTS: `APP_ID` is not a cosmetic string. It is the app-data root,
@@ -68,7 +76,7 @@ pub fn app_home_dir() -> Result<PathBuf> {
 /// The rule is deliberately conservative, because the cost of being wrong is a
 /// half-copied config directory:
 ///
-///   * Runs only when the CURRENT root does not exist. An existing Locus root is
+///   * Runs only when the CURRENT root does not exist. An existing Chrysalis root is
 ///     never touched, so this can run on every launch and is a no-op after the
 ///     first one.
 ///   * Renames rather than copies. `rename` is atomic within a filesystem, so a
@@ -110,7 +118,7 @@ fn adopt_legacy_app_data_dir(data_root: &Path, app_id: &str, legacy_ids: &[&str]
                 // profile set and rewrite it, and the original would look like
                 // the stale copy. Report it and let the caller decide.
                 return Err(anyhow::anyhow!(
-                    "could not adopt the pre-Locus data directory {legacy:?} as {current:?}: {error}. \
+                    "could not adopt the pre-Chrysalis data directory {legacy:?} as {current:?}: {error}. \
                      Move it manually (the app will otherwise start with an empty profile set)."
                 ));
             }
@@ -420,7 +428,7 @@ mod app_data_migration_tests {
 
     impl Scratch {
         fn new(name: &str) -> Self {
-            let root = std::env::temp_dir().join(format!("locus-migrate-{name}-{}", std::process::id()));
+            let root = std::env::temp_dir().join(format!("chrysalis-migrate-{name}-{}", std::process::id()));
             let _ = fs::remove_dir_all(&root);
             fs::create_dir_all(&root).expect("create scratch root");
             Self { root }
@@ -464,10 +472,10 @@ mod app_data_migration_tests {
         );
     }
 
-    /// An existing Locus root is never touched. This is what makes it safe to
+    /// An existing Chrysalis root is never touched. This is what makes it safe to
     /// call the migration unconditionally on every launch.
     #[test]
-    fn never_overwrites_an_existing_locus_root() {
+    fn never_overwrites_an_existing_chrysalis_root() {
         let scratch = Scratch::new("idempotent");
         let current = scratch.dir(APP_ID);
         fs::create_dir_all(&current).expect("create current root");

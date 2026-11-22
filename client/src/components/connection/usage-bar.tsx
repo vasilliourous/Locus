@@ -1,7 +1,7 @@
 import { Box, LinearProgress, Typography } from '@mui/material'
 import { useTranslation } from 'react-i18next'
 
-import type { AllowanceStatus } from '@/services/locus'
+import type { AllowanceStatus } from '@/services/chrysalis'
 
 import { usageDisplay, usageSummary } from './usage-bar-model'
 

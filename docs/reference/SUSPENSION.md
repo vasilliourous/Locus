@@ -6,10 +6,10 @@ status:      live
 authoritative-for: the four states a device can be in, which surface each selects,
                    and the invariant that a suspension is only ever true of a device
                    that still holds its code
-verified-against: client/src-tauri/src/locus/store.rs,
-                  client/src-tauri/src/locus/runtime.rs,
+verified-against: client/src-tauri/src/chrysalis/store.rs,
+                  client/src-tauri/src/chrysalis/runtime.rs,
                   client/src/hooks/use-entitlement.ts,
-                  client/src-tauri/src/cmd/locus.rs
+                  client/src-tauri/src/cmd/chrysalis.rs
 ```
 
 **What this is.** The four states the gate can be in, what moves a device between
@@ -24,8 +24,8 @@ are four places holding one fact apart.
 | State | Stored | Gate shows | Moved out by |
 |---|---|---|---|
 | **Activated** | code + tier + expiry | the app | a refusal, or a sign-out |
-| **Suspended** | the same, **plus** `locus_suspended` | `SuspendedScreen` | the hub answering 200 again |
-| **Refused** | no code; `locus_refusal_reason` kept | `ActivationScreen`, with the reason | a new activation |
+| **Suspended** | the same, **plus** `chrysalis_suspended` (then `locus_suspended`) | `SuspendedScreen` | the hub answering 200 again |
+| **Refused** | no code; `chrysalis_refusal_reason` (then `locus_refusal_reason`) kept | `ActivationScreen`, with the reason | a new activation |
 | **Signed out** | no code, and no history | `ActivationScreen` | a new activation |
 | **Lapsed grace** | code kept; tier/expiry cleared | the app, unconnected | a successful beat |
 
@@ -45,7 +45,7 @@ the field survived the code.
 Enforced three times, deliberately:
 
 1. **On write** — `store::clear_entitlement` and `store::clear_device_state` both
-   clear `locus_suspended`. Any future path that removes a credential must go
+   clear `chrysalis_suspended` (then `locus_suspended`). Any future path that removes a credential must go
    through one of them; `clear_entitlement` is the only function that deletes the
    code.
 2. **On read** — `store::is_suspended` returns `false` unless an activation is
@@ -66,7 +66,7 @@ The screen promises "ask them to lift it and you will be back in without
 re-entering your code or restarting the app". That sentence is only true if
 something is still asking the hub. So a refusal no longer ends the heartbeat loop:
 it switches to `SUSPENDED_INTERVAL` (2 minutes) until the hub says 200, at which
-point `handle_success` clears the flag and emits `locus://entitlement-changed`.
+point `handle_success` clears the flag and emits `chrysalis://entitlement-changed`.
 
 `runtime::resume()` is the companion: idempotent, it starts a loop from the stored
 activation when none is running, so a device that was suspended when the app quit

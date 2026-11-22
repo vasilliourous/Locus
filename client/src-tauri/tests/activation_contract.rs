@@ -12,7 +12,7 @@
 //! The contract itself is genuinely fragile and genuinely load-bearing:
 //!
 //! The client classifies an activation refusal by **status code first, then by
-//! the wording of a 403** (`classify` in `locus/activation.rs`). `403` carries
+//! the wording of a 403** (`classify` in `chrysalis/activation.rs`). `403` carries
 //! two different conditions — "code bound to another device" and "code
 //! suspended" — and the ONLY thing distinguishing them is whether the message
 //! contains the substring `suspended`. Deployed clients in the field run that
@@ -34,7 +34,7 @@
 //! `publish-release.sh`, for the same reason.
 //!
 //! It does NOT re-implement the client's classifier — that is unit-tested in
-//! `locus::activation::tests`. If it did, the two could drift together and
+//! `chrysalis::activation::tests`. If it did, the two could drift together and
 //! agree on the wrong thing. This test pins the *hub's* side, which is the
 //! side that can change without any Rust building differently.
 
@@ -134,7 +134,7 @@ fn the_suspension_wording_still_contains_the_substring_the_client_matches() {
         has_suspension_403,
         "no 403 emitted by the activation hook contains the substring \
          `suspended`. The client's classifier (`classify` in \
-         locus/activation.rs) uses exactly that substring to separate a \
+         chrysalis/activation.rs) uses exactly that substring to separate a \
          suspension from any other refusal, and deployed clients cannot be \
          changed."
     );
@@ -302,7 +302,7 @@ fn a_redeemed_code_reports_a_status_deployed_clients_accept() {
 /// authority and answers the same question.
 #[test]
 fn an_unknown_lookup_status_does_not_block_activation() {
-    let activation = read_code(&repo_root().join("client/src-tauri/src/locus/activation.rs"));
+    let activation = read_code(&repo_root().join("client/src-tauri/src/chrysalis/activation.rs"));
 
     // Find the Unknown arm and assert it is `true` (proceed), not `false`.
     let unknown_arm = activation
@@ -325,11 +325,11 @@ fn an_unknown_lookup_status_does_not_block_activation() {
 /// this is the property that makes the vocabulary above safe to extend.
 #[test]
 fn the_lookup_enum_degrades_unknown_statuses_safely() {
-    let source = read(&repo_root().join("client/src-tauri/src/locus/contract.rs"));
+    let source = read(&repo_root().join("client/src-tauri/src/chrysalis/contract.rs"));
 
     assert!(
         source.contains("#[serde(other)]"),
-        "`LookupStatus` in locus/contract.rs no longer has a `#[serde(other)]` \
+        "`LookupStatus` in chrysalis/contract.rs no longer has a `#[serde(other)]` \
          catch-all. Without it, a hub that adds a status fails to deserialize, \
          and the activation screen reports a transport error for a code that is \
          perfectly fine. Guessing \"ready\" is worse still — it tells a student \
@@ -483,7 +483,7 @@ fn the_claimed_contract_test_exists() {
 // a device identity, the hub no longer stores one, and there is no session
 // token: a client authenticates with its activation code, which it persists to a
 // machine-scoped store so a reinstall does not lose it (see
-// `client/src-tauri/src/locus/credential.rs`).
+// `client/src-tauri/src/chrysalis/credential.rs`).
 //
 // What replaces the old guarantees is asserted below: the endpoint is gone, and
 // the retired machinery cannot still be live.
@@ -519,7 +519,7 @@ fn the_recognition_endpoint_is_a_tombstone() {
 /// The hub must have no live device-identity or token machinery.
 ///
 /// This is the two-sided removal contract: the client half is asserted by the
-/// absence of `locus_recognise` (checked below), and this is the hub half. If a
+/// absence of `chrysalis_recognise` (checked below), and this is the hub half. If a
 /// hook still reads or writes either collection, the feature is half-removed and
 /// the two sides can disagree.
 #[test]
@@ -555,19 +555,19 @@ fn the_hub_has_no_live_device_identity_machinery() {
 /// as clean while leaving a dead IPC surface a later change could revive.
 #[test]
 fn the_client_has_no_recognition_surface() {
-    let cmd = read_code(&repo_root().join("client/src-tauri/src/cmd/locus.rs"));
+    let cmd = read_code(&repo_root().join("client/src-tauri/src/cmd/chrysalis.rs"));
     let lib = read_code(&repo_root().join("client/src-tauri/src/lib.rs"));
 
-    for forbidden in ["locus_recognise", "RecognitionResult", "resolve_identity"] {
+    for forbidden in ["chrysalis_recognise", "RecognitionResult", "resolve_identity"] {
         assert!(
             !cmd.contains(forbidden),
-            "`{forbidden}` is still present in cmd/locus.rs. Device recognition \
+            "`{forbidden}` is still present in cmd/chrysalis.rs. Device recognition \
              was removed from the client; a leftover symbol is a dead surface."
         );
     }
     assert!(
-        !lib.contains("locus_recognise"),
-        "`locus_recognise` is still registered in the Tauri handler list. The \
+        !lib.contains("chrysalis_recognise"),
+        "`chrysalis_recognise` is still registered in the Tauri handler list. The \
          command no longer exists, so this would fail to build — but the point \
          is that the frontend can still invoke a name the hub no longer serves."
     );
@@ -577,7 +577,7 @@ fn the_client_has_no_recognition_surface() {
 /// frozen empty fields a deployed hub expects.
 #[test]
 fn the_activation_request_omits_the_identity() {
-    let contract = read_code(&repo_root().join("client/src-tauri/src/locus/contract.rs"));
+    let contract = read_code(&repo_root().join("client/src-tauri/src/chrysalis/contract.rs"));
 
     // The recognised types are gone.
     for forbidden in ["RecogniseRequest", "RecogniseResponse", "pub enum Recognised"] {

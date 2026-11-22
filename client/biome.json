@@ -40,7 +40,7 @@
       "!target",
       "!Cargo.lock",
       "!pnpm-lock.yaml",
-      "!src/services/locus.generated.ts",
+      "!src/services/chrysalis.generated.ts",
       "!README.md",
       "!CONTRIBUTING.md",
       "!.pnpm-lock.yaml",

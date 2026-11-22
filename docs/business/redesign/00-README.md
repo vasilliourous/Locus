@@ -1,4 +1,4 @@
-# Locus — Terms, Customers and Device Binding: Redesign
+# Chrysalis — Terms, Customers and Device Binding: Redesign
 
 ```
 audience:    human-operator
@@ -215,7 +215,7 @@ Recorded here so a successor can tell design from code without diffing.
 | Term admin | `codes.set-term` — sets a term, never moves an expiry | same |
 | Search | `codes.list` matches `label`/`notes`/`middleman`, not just the code | same |
 | Migration | `backfill-terms.py` with `--dry-run`, never writes `expires_at` | `server/scripts/` |
-| Client | 409 → its own `DeviceAlreadyActivated` outcome, pinned by a test | `client/src-tauri/src/locus/activation.rs` |
+| Client | 409 → its own `DeviceAlreadyActivated` outcome, pinned by a test | `client/src-tauri/src/chrysalis/activation.rs` |
 | Console | Renew (row + detail), Set term, Move to another device, term at mint, search placeholder | `server/console/src/views/Codes.vue` |
 
 > **2026-10 status.** The **device-binding** half of this table was removed, not

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Locus cross-language consistency check.
+# Chrysalis cross-language consistency check.
 #
 # WHY THIS EXISTS
 #
@@ -33,7 +33,7 @@ set -uo pipefail
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 HOOKS="$REPO/server/pb_hooks"
 SCRIPTS="$REPO/server/scripts"
-RUST="$REPO/client/src-tauri/src/locus"
+RUST="$REPO/client/src-tauri/src/chrysalis"
 
 FAIL=0
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; NC='\033[0m'
@@ -42,7 +42,7 @@ ok()   { echo -e "  ${GREEN}OK${NC}   $*"; }
 bad()  { echo -e "  ${RED}BAD${NC}  $*"; FAIL=1; }
 warn() { echo -e "  ${YELLOW}WARN${NC} $*"; }
 
-echo "Locus cross-language consistency check"
+echo "Chrysalis cross-language consistency check"
 echo "════════════════════════════════════════════════════════════"
 
 # ─────────────────────────────────────────────────────────────
@@ -111,7 +111,7 @@ fi
 # The stale name must be GONE. Checked separately from the positive above so
 # that keeping both (e.g. a fallback) cannot slip through: a fallback to the raw
 # binary is the bug, not a safety net.
-if grep -qE '"windows"[^,]*locus-windows-amd64\.exe|locus-windows-amd64\.exe"' "$SCRIPTS/fetch-release.py" 2>/dev/null; then
+if grep -qE '"windows"[^,]*chrysalis-windows-amd64\.exe|chrysalis-windows-amd64\.exe"' "$SCRIPTS/fetch-release.py" 2>/dev/null; then
     bad "fetch-release.py still names 'locus-windows-amd64.exe' as a fetchable asset"
     bad "  that is the raw updater payload; the Windows slot must be the NSIS installer"
 else
@@ -128,7 +128,7 @@ else
     bad "  the CLI publish path would write download_windows pointing at the raw binary"
 fi
 
-if grep -qE '"windows:locus-windows-amd64\.exe:update_windows"' "$SCRIPTS/publish-release.sh" 2>/dev/null; then
+if grep -qE '"windows:chrysalis-windows-amd64\.exe:update_windows"' "$SCRIPTS/publish-release.sh" 2>/dev/null; then
     bad "publish-release.sh still publishes the raw Windows binary as the update"
 else
     ok "publish-release.sh no longer publishes the raw Windows binary"
@@ -229,7 +229,7 @@ fi
 # WHY THIS EXISTS
 #
 # The `.zip` is the one artifact that is deliberately NOT an update payload: it
-# is the compressed, ad-hoc-signed `Locus.app` a PERSON downloads. The Windows
+# is the compressed, ad-hoc-signed `Chrysalis.app` a PERSON downloads. The Windows
 # outage of 2026-10-01 was a filename that had to agree across three systems and
 # was checked on only one of them, so this name gets the same treatment from the
 # start rather than after it drifts.
@@ -237,7 +237,7 @@ fi
 # Three sites must agree:
 #
 #   1. CI       — `.github/workflows/client.yml`, "Package the macOS app for
-#                 download", which BUILDS `Locus_<v>_<arch>.zip` and the release
+#                 download", which BUILDS `Chrysalis_<v>_<arch>.zip` and the release
 #                 job which prefixes it to `installer-...`
 #   2. the hub  — `fetch-release.py`'s `MACOS_ZIP_TEMPLATE`, which RESOLVES it
 #                 from the GitHub Release
@@ -279,10 +279,10 @@ done
 # CI must produce both, and the release job must assert them present. The
 # assertion is what stops a build job that silently stopped packaging from
 # publishing a release with no macOS download at all.
-if grep -qE 'Locus_\$\{ver\}_\$\{arch\}\.zip|Locus_\$\{ver\}_' "$WORKFLOW" 2>/dev/null; then
+if grep -qE 'Chrysalis_\$\{ver\}_\$\{arch\}\.zip|Chrysalis_\$\{ver\}_' "$WORKFLOW" 2>/dev/null; then
     ok "CI builds the macOS zip under the versioned name"
 else
-    bad "no CI step builds 'Locus_<v>_<arch>.zip'"
+    bad "no CI step builds 'Chrysalis_<v>_<arch>.zip'"
     bad "  the macOS packaging step is what makes the bypassable Gatekeeper path exist"
 fi
 if grep -q 'expected two macOS download zips' "$WORKFLOW" 2>/dev/null; then
@@ -303,7 +303,7 @@ if [ -f "$CONSOLE_VUE" ]; then
     fi
     # The console must NOT enumerate the zip among the update platforms, or the
     # "all four platforms published" gate would start counting a human download.
-    if grep -qE "zip_macos_amd64', *filename: *'locus-" "$CONSOLE_VUE" 2>/dev/null; then
+    if grep -qE "zip_macos_amd64', *filename: *'chrysalis-" "$CONSOLE_VUE" 2>/dev/null; then
         bad "the console treats the macOS zip as an update platform"
     else
         ok "the console keeps the macOS zip out of the platform list"
@@ -487,7 +487,7 @@ fi
 
 # ── 5b. The signing-key directory carries a README and nothing else ──
 #
-# WHY. `.locus-keys/` holds the minisign private key that every installed client
+# WHY. `.chrysalis-keys/` holds the minisign private key that every installed client
 # verifies updates against, so the directory is gitignored — which also means a
 # clone gets an EMPTY directory, with nothing in it to say what it is for or why
 # deleting its contents is unrecoverable. The README is carved back out of that
@@ -499,30 +499,30 @@ fi
 # is effective (the README is trackable) and that nothing else in the directory
 # can ever be staged (no other file is trackable). Both directions, because a
 # carve that silently stopped working would look exactly like one that works.
-locus_key_tracked=$(cd "$REPO" && git ls-files .locus-keys/ 2>/dev/null)
-if [ "$locus_key_tracked" = ".locus-keys/README.md" ]; then
-    ok ".locus-keys/ carries exactly its README, and no key is trackable"
+chrysalis_key_tracked=$(cd "$REPO" && git ls-files .chrysalis-keys/ 2>/dev/null)
+if [ "$chrysalis_key_tracked" = ".chrysalis-keys/README.md" ]; then
+    ok ".chrysalis-keys/ carries exactly its README, and no key is trackable"
 else
-    bad ".locus-keys/ tracked contents are '${locus_key_tracked:-nothing}'; expected exactly '.locus-keys/README.md'"
+    bad ".chrysalis-keys/ tracked contents are '${chrysalis_key_tracked:-nothing}'; expected exactly '.chrysalis-keys/README.md'"
 fi
 # The negative half: a key file placed there must still be ignored.
-if [ -f "$REPO/.locus-keys/README.md" ] && (cd "$REPO" && git check-ignore -q .locus-keys/locus_update.key 2>/dev/null); then
-    ok "a private key in .locus-keys/ remains ignored"
+if [ -f "$REPO/.chrysalis-keys/README.md" ] && (cd "$REPO" && git check-ignore -q .chrysalis-keys/chrysalis_update.key 2>/dev/null); then
+    ok "a private key in .chrysalis-keys/ remains ignored"
 else
-    bad "a private key in .locus-keys/ is NOT ignored — check the .gitignore carve"
+    bad "a private key in .chrysalis-keys/ is NOT ignored — check the .gitignore carve"
 fi
 
 # ── 5c. The extractable key never becomes a dependency, and never a backup ──
 #
-# WHY. `.locus-keys/` is DELIBERATELY EMPTY after a clone: the signing key is a
+# WHY. `.chrysalis-keys/` is DELIBERATELY EMPTY after a clone: the signing key is a
 # build input extracted from `server/secrets.env.age` per session (see
-# .locus-keys/README.md and OPERATE/SECRETS-MANAGEMENT.md). The 2026-10-16 loss
+# .chrysalis-keys/README.md and OPERATE/SECRETS-MANAGEMENT.md). The 2026-10-16 loss
 # happened because that directory was treated as the key's home rather than as a
 # cache, so when the working tree went the key went with it. Two things keep that
 # from recurring, and neither is a sentence in a document:
 #
 #   1. No tracked file may READ the key as though it were always present. A build
-#      that assumes `.locus-keys/locus_update.key` exists fails on a fresh clone,
+#      that assumes `.chrysalis-keys/chrysalis_update.key` exists fails on a fresh clone,
 #      which is precisely the state that must be the normal one. The CI signing
 #      step writes the key to a runner-temp path from the Actions secret instead,
 #      so the working copy is never on the critical path.
@@ -533,29 +533,29 @@ fi
 # needed one would be skipped on the only machine that runs it. What it asserts
 # is recomputable from the checkout: the README is present and names the bundle,
 # and the key directory carries no tracked file other than it (5b, above).
-if [ -f "$REPO/.locus-keys/README.md" ]; then
+if [ -f "$REPO/.chrysalis-keys/README.md" ]; then
     # BOTH facts are required, and they are checked as whole tokens rather than
     # as one substring. A first version of this check only looked for
     # `secrets.env.age` anywhere in the file — so mutating the prose but leaving
     # the markdown link's href intact PASSED, which is a guard reporting on a
     # document that no longer said the thing. Verified by breaking it.
     readme_ok=1
-    grep -qF '`server/secrets.env.age`' "$REPO/.locus-keys/README.md" 2>/dev/null || readme_ok=0
-    grep -qF 'locus-key-extract.sh' "$REPO/.locus-keys/README.md" 2>/dev/null || readme_ok=0
+    grep -qF '`server/secrets.env.age`' "$REPO/.chrysalis-keys/README.md" 2>/dev/null || readme_ok=0
+    grep -qF 'chrysalis-key-extract.sh' "$REPO/.chrysalis-keys/README.md" 2>/dev/null || readme_ok=0
     if [ "$readme_ok" = 1 ]; then
-        ok ".locus-keys/README.md names the bundle AND the extraction script by exact path"
+        ok ".chrysalis-keys/README.md names the bundle AND the extraction script by exact path"
     else
-        bad ".locus-keys/README.md must name BOTH 'server/secrets.env.age' (as code) and 'locus-key-extract.sh' — it is the only text a clone sees before the directory fills"
+        bad ".chrysalis-keys/README.md must name BOTH 'server/secrets.env.age' (as code) and 'chrysalis-key-extract.sh' — it is the only text a clone sees before the directory fills"
     fi
 else
-    bad ".locus-keys/README.md is missing — a clone gets an empty directory that explains nothing"
+    bad ".chrysalis-keys/README.md is missing — a clone gets an empty directory that explains nothing"
 fi
 # The extraction script must exist and be executable: the README's recipe is a
 # citation, and a cited command that is not there is the defect 5b records.
-if [ -x "$REPO/server/scripts/locus-key-extract.sh" ]; then
-    ok "server/scripts/locus-key-extract.sh exists and is executable"
+if [ -x "$REPO/server/scripts/chrysalis-key-extract.sh" ]; then
+    ok "server/scripts/chrysalis-key-extract.sh exists and is executable"
 else
-    bad "server/scripts/locus-key-extract.sh is missing or not executable — the README cites it"
+    bad "server/scripts/chrysalis-key-extract.sh is missing or not executable — the README cites it"
 fi
 # The plaintext bundle must NOT be tracked: it is the pre-encryption copy, and
 # committing it would put every credential in git in the clear.
@@ -630,7 +630,7 @@ fi
 #
 # WHY. The whole point of the bundle model is that a fresh clone plus the
 # passphrase is sufficient. That claim dies quietly if the extraction path depends
-# on a file OUTSIDE the repository — a `~/.locus-secrets/` copy, a hardcoded home
+# on a file OUTSIDE the repository — a `~/.chrysalis-secrets/` copy, a hardcoded home
 # directory, an absolute path from the machine it was written on. Such a script
 # works perfectly for its author and fails for everyone else, which is the worst
 # kind of working.
@@ -638,7 +638,7 @@ fi
 # So: the script must resolve everything relative to its own location, and must
 # name nothing outside the checkout. HOME-relative paths are the specific trap —
 # they are how "it works on my machine" gets committed.
-EXTRACT="$REPO/server/scripts/locus-key-extract.sh"
+EXTRACT="$REPO/server/scripts/chrysalis-key-extract.sh"
 if [ -f "$EXTRACT" ]; then
     # Absolute home paths, `~/`, and `$HOME` would all mean the route depends on
     # this machine. `$HOME` was MISSED by the first version of this check, which
@@ -648,27 +648,27 @@ if [ -f "$EXTRACT" ]; then
     machine_paths=$(grep -nE '(\$HOME|\$\{HOME\}|~\/|/home/[a-z]|/Users/[A-Za-z])' "$EXTRACT" 2>/dev/null \
                     | grep -vE '^[0-9]+:\s*#' || true)
     if [ -z "$machine_paths" ]; then
-        ok "locus-key-extract.sh names no machine-local path (portable to a clone)"
+        ok "chrysalis-key-extract.sh names no machine-local path (portable to a clone)"
     else
-        bad "locus-key-extract.sh references a machine-local path — it will work for its author and fail for a clone:"
+        bad "chrysalis-key-extract.sh references a machine-local path — it will work for its author and fail for a clone:"
         printf '%s\n' "$machine_paths" | head -5 | sed 's/^/         /'
     fi
     # It must resolve the repo from its own location, not from $PWD: a reader may
     # run it as `./server/scripts/...` from the root or from anywhere else.
     if grep -q 'BASH_SOURCE' "$EXTRACT"; then
-        ok "locus-key-extract.sh resolves the repo from its own path, not the caller's cwd"
+        ok "chrysalis-key-extract.sh resolves the repo from its own path, not the caller's cwd"
     else
-        bad "locus-key-extract.sh does not use BASH_SOURCE — it will resolve paths against the caller's cwd"
+        bad "chrysalis-key-extract.sh does not use BASH_SOURCE — it will resolve paths against the caller's cwd"
     fi
     # And it must not print the key. A script that extracts a secret and echoes it
     # puts the key in shell history, scrollback and CI logs.
     if grep -qE 'echo[^|]*"\$(key_b64|TMP_KEY)"' "$EXTRACT" 2>/dev/null; then
-        bad "locus-key-extract.sh echoes the key material"
+        bad "chrysalis-key-extract.sh echoes the key material"
     else
-        ok "locus-key-extract.sh never echoes the key material"
+        ok "chrysalis-key-extract.sh never echoes the key material"
     fi
 else
-    bad "server/scripts/locus-key-extract.sh is missing"
+    bad "server/scripts/chrysalis-key-extract.sh is missing"
 fi
 
 # ─────────────────────────────────────────────────────────────
@@ -1367,7 +1367,7 @@ def legacy_hub_domain():
     the server actually still serves it.
     """
     m = re.search(r'pub const LEGACY_HUB_URL: &str = "https://([^"]+)"',
-                  read("client/src-tauri/src/locus/contract.rs"))
+                  read("client/src-tauri/src/chrysalis/contract.rs"))
     return m.group(1) if m else None
 
 def publish_api_base():
@@ -1388,7 +1388,7 @@ def setup_log_path(marker):
 def platform_keys():
     """The four platform keys, from the Rust contract — the frozen definition."""
     found = re.findall(r'pub const PLATFORM_[A-Z_]+: &str = "([a-z_]+)";',
-                       read("client/src-tauri/src/locus/contract.rs"))
+                       read("client/src-tauri/src/chrysalis/contract.rs"))
     return found or None
 
 def landing_domain():
@@ -1402,6 +1402,21 @@ def landing_domain():
     m = re.search(r'LANDING_DOMAIN="\$\{LANDING_DOMAIN:-([^}]+)\}"',
                   read("server/modules/05-caddy.sh"))
     return m.group(1) if m else None
+
+def landing_domain_legacy():
+    """The landing page's PREVIOUS hostname, from the Caddyfile generator.
+
+    It is `derived` on purpose, for the same reason `hub.domain_legacy` is: the
+    value is load-bearing only while an old DNS name resolves, so it must agree
+    with what the daemon is actually told to serve. Empty means "dropped", which
+    this returns as the empty string rather than None, so `value = ""` is a
+    checkable answer and not an unverifiable one.
+    """
+    m = re.search(r'LANDING_DOMAIN_LEGACY="\$\{LANDING_DOMAIN_LEGACY-([^}]*)\}"',
+                  read("server/modules/05-caddy.sh"))
+    if m is None:
+        return None
+    return m.group(1)
 
 def landing_docroot():
     """The landing page document root, from deploy_site()'s own target.
@@ -1580,7 +1595,7 @@ def activation_tunnel_port(kind):
     fails here rather than at a school.
     """
     srv = read("server/modules/09-activation-tunnel.sh")
-    cli = read("client/src-tauri/src/locus/activation_tunnel.rs")
+    cli = read("client/src-tauri/src/chrysalis/activation_tunnel.rs")
     if kind == "bootstrap":
         m1 = re.search(r'TUNNEL_PORT="\$\{ACTIVATION_TUNNEL_PORT:-([0-9]+)\}?"', srv) or \
              re.search(r'ACTIVATION_TUNNEL_PORT="?([0-9]+)"?', srv)
@@ -1609,6 +1624,7 @@ CHECKERS = {
     "tiers.budget":         budget_tier,
     "tiers.paid":           paid_tier,
     "site.domain":           landing_domain,
+    "site.domain_legacy":    landing_domain_legacy,
     "site.document_root":    landing_docroot,
     "site.download_path":    landing_download_path,
     "activation_tunnel.bootstrap_port": lambda: activation_tunnel_port("bootstrap"),
@@ -1908,7 +1924,7 @@ fi
 # artifact into a `Vec<u8>` in memory before verifying it — enough to abort the
 # allocation on a school laptop, killing the process.
 #
-# The streaming, disk-hashing downloader that avoids this (`locus/update/apply.rs`)
+# The streaming, disk-hashing downloader that avoids this (`chrysalis/update/apply.rs`)
 # already existed and was DEAD CODE. The two modules were written from
 # incompatible plans and only the unsafe one got wired up. Nothing noticed,
 # because nothing checked.
@@ -1919,9 +1935,9 @@ fi
 echo
 echo "12. Update install path uses the streaming downloader"
 
-INSTALL_RS="$REPO/client/src-tauri/src/locus/update/install.rs"
-APPLY_RS="$REPO/client/src-tauri/src/locus/update/apply.rs"
-CMD_RS="$REPO/client/src-tauri/src/cmd/locus.rs"
+INSTALL_RS="$REPO/client/src-tauri/src/chrysalis/update/install.rs"
+APPLY_RS="$REPO/client/src-tauri/src/chrysalis/update/apply.rs"
+CMD_RS="$REPO/client/src-tauri/src/cmd/chrysalis.rs"
 
 if [ ! -f "$INSTALL_RS" ] || [ ! -f "$APPLY_RS" ] || [ ! -f "$CMD_RS" ]; then
     bad "the update path files are missing — this guard cannot run"
@@ -1931,7 +1947,7 @@ else
     #     is avoided does not trip it.
     if grep -qE '\.download_and_install[[:space:]]*\(' "$INSTALL_RS" "$CMD_RS"; then
         bad "the install path calls the plugin's download_and_install, which buffers the whole artifact in memory"
-        bad "  use PendingInstall::download_to_file + ReadyInstall::install instead (see client/src-tauri/src/locus/update/install.rs)"
+        bad "  use PendingInstall::download_to_file + ReadyInstall::install instead (see client/src-tauri/src/chrysalis/update/install.rs)"
     else
         ok "no call to the memory-buffering download_and_install in the install path"
     fi
@@ -1951,13 +1967,13 @@ else
     if grep -q 'update install requested' "$CMD_RS"; then
         ok "the install command logs at the start of the attempt"
     else
-        bad "locus_install_update has no start-of-attempt log line — a crash mid-download would again leave nothing behind"
+        bad "chrysalis_install_update has no start-of-attempt log line — a crash mid-download would again leave nothing behind"
     fi
 
     # (d) The hub's checksum must be read and enforced. Installing without a
     #     hash is installing unverified bytes.
     if grep -qE 'sha256_from_manifest|\.sha256\(\)' "$INSTALL_RS" \
-       && grep -q 'LOCUS_UPDATE_NO_CHECKSUM' "$CMD_RS"; then
+       && grep -q 'CHRYSALIS_UPDATE_NO_CHECKSUM' "$CMD_RS"; then
         ok "the install path reads the hub checksum and refuses when it is absent"
     else
         bad "the install path does not enforce the hub's sha256 — an unverified install would be possible"
@@ -1978,7 +1994,7 @@ fi
 #     {"...","frontendDist":"${{ github.workspace }}/client/dist"}
 #
 # `TAURI_CONFIG` is JSON, parsed by `serde_json::from_str` in tauri-utils. On
-# Windows `github.workspace` is `D:\a\Locus\Locus`, so the raw interpolation
+# Windows `github.workspace` is `D:\a\Locus\Locus` (the pre-rename repo name), so the raw interpolation
 # produced `"D:\a\Locus\..."` — where `\a` is an INVALID JSON ESCAPE (`\a` sits
 # at exactly column 54 for this path). Linux and macOS have forward slashes and
 # stayed green, so the failure existed only on the one runner the author could
@@ -2134,7 +2150,7 @@ fi
 # The two halves are deliberately independent:
 #   - the manifest must not advertise a raw updater payload for self-install;
 #   - the client must refuse one even if a manifest does (see
-#     `is_installer_payload` in `client/src-tauri/src/locus/update/install.rs`).
+#     `is_installer_payload` in `client/src-tauri/src/chrysalis/update/install.rs`).
 # Either alone would have prevented the bug; both together mean a future
 # regression has to defeat two mechanisms in two different languages.
 # ─────────────────────────────────────────────────────────────
@@ -2143,7 +2159,7 @@ echo "15. No manifest platform entry advertises a raw updater binary for self-in
 
 # The name CI stages as the Windows updater payload. It is what the hub serves
 # to a client that is going to EXECUTE the bytes, so it must be an installer.
-if grep -qE '"windows"[[:space:]]*:[[:space:]]*"locus-windows-amd64\.exe"' "$WORKFLOW" 2>/dev/null; then
+if grep -qE '"windows"[[:space:]]*:[[:space:]]*"chrysalis-windows-amd64\.exe"' "$WORKFLOW" 2>/dev/null; then
     bad "the workflow's manifest platform map advertises 'locus-windows-amd64.exe' for windows"
     bad "  that is the raw updater executable, which a client cannot install from itself:"
     bad "  tauri_plugin_updater treats any PE as an NSIS installer and would ShellExecute it"
@@ -2171,9 +2187,9 @@ fi
 # Demonstrated 2026-10-02: with `if true /* was: if !is_installer_payload(&bytes) */`
 # in install(), this section passed. The pattern below is anchored to the
 # negated call over the downloaded bytes, so it fails when the call goes away.
-INSTALL_GUARD="$REPO/client/src-tauri/src/locus/update/install.rs"
+INSTALL_GUARD="$REPO/client/src-tauri/src/chrysalis/update/install.rs"
 if [ ! -f "$INSTALL_GUARD" ]; then
-    bad "client/src-tauri/src/locus/update/install.rs is missing — the payload guard cannot be checked"
+    bad "client/src-tauri/src/chrysalis/update/install.rs is missing — the payload guard cannot be checked"
 elif grep -qE 'if[[:space:]]*![[:space:]]*is_installer_payload\(&bytes\)' "$INSTALL_GUARD"; then
     ok "the client refuses to execute a payload that is not an installer"
 else
@@ -2396,17 +2412,17 @@ echo "18. The Windows installer is signed, under the name the release job prefix
 #   1. the step was gated on `matrix.os == 'windows-latest'` while the matrix
 #      pins `windows-2022`, so it never ran at all (see §18's sibling check);
 #   2. once it did run, it globbed `installer-Locus_*` in a directory that only
-#      ever holds `Locus_*`.
+#      ever holds `Chrysalis_*`.
 # Both are the same failure shape: a name asserted in one half and not the other.
 # This check asserts the AGREEMENT between the two jobs rather than either half
 # (AGENTS.md, "assert the agreement").
 wf_installer="$WORKFLOW"
 if [ -f "$wf_installer" ]; then
-    # Scoped to `installer/Locus_*` deliberately. Several steps iterate
+    # Scoped to `installer/Chrysalis_*` deliberately. Several steps iterate
     # `installer/*` now (the macOS .dmg repack does), and a bare `head -1` would
     # grab whichever comes first in the file — so this check would silently stop
     # testing the step it exists for, which is the failure mode it is about.
-    sign_glob="$(grep -oE 'for f in installer/Locus_[^;]+' "$wf_installer" | head -1 || true)"
+    sign_glob="$(grep -oE 'for f in installer/Chrysalis_[^;]+' "$wf_installer" | head -1 || true)"
     prefix_src="$(grep -oE 'cp "\$f" "release/installer-\$base"' "$wf_installer" | head -1 || true)"
     # The `if:` line follows the step name, but a comment block may sit between
     # them (the file explains WHY at the point of contact). Scan forward from the
@@ -2437,8 +2453,8 @@ PY
     else
         # The glob must NOT carry the prefix: it runs before the rename.
         case "$sign_glob" in
-            *installer/Locus_*)
-                ok "the sign step globs the pre-prefix name (installer/Locus_*)"
+            *installer/Chrysalis_*)
+                ok "the sign step globs the pre-prefix name (installer/Chrysalis_*)"
                 ;;
             *)
                 bad "the sign step globs '${sign_glob#for f in }' in the BUILD job"
@@ -2565,7 +2581,7 @@ echo "20. The macOS disk image is signed ad-hoc, and carries no README"
 # still no Developer ID and no notarization — but it changes WHICH Gatekeeper
 # outcome the student meets, and that difference is the whole point:
 #
-#   unsigned  -> "Locus is damaged and can't be opened"   -> NO "Open Anyway"
+#   unsigned  -> "Chrysalis is damaged and can't be opened"   -> NO "Open Anyway"
 #   ad-hoc    -> "Apple cannot check it for malicious
 #                software" (unidentified developer)        -> "Open Anyway" in
 #                                                             Privacy & Security
@@ -2719,7 +2735,7 @@ echo "21. macOS asks for the Service install when it is absent"
 # ─────────────────────────────────────────────────────────────
 # WHY THIS EXISTS
 #
-# macOS has no installer that registers the Locus Service. On Windows the NSIS
+# macOS has no installer that registers the Chrysalis Service. On Windows the NSIS
 # setup does it during install, so a fresh install is never `NotInstalled` — but
 # a `.app` dragged out of the `.dmg` is, on first launch, with `enable_tun_mode`
 # defaulting to false. The only writer of that flag was the Connect path, which
@@ -3025,9 +3041,9 @@ fi
 # macOS does not render — a student followed it, found no such control, and had
 # nowhere left to go. A message naming UI that does not exist is worse than no
 # message, because it sends someone looking.
-REFUSAL="$REPO/client/src-tauri/src/cmd/locus.rs"
+REFUSAL="$REPO/client/src-tauri/src/cmd/chrysalis.rs"
 if [ ! -f "$REFUSAL" ]; then
-    warn "no cmd/locus.rs — this guard cannot run"
+    warn "no cmd/chrysalis.rs — this guard cannot run"
 else
     # Scoped to the CONSTANT, not the file. The explanatory comments above it
     # quote the old wording to say why it was wrong, and a bare file-wide grep
@@ -3042,7 +3058,7 @@ PY
 )"
 
     if [ -z "$refusal_value" ]; then
-        bad "TUN_UNAVAILABLE_MESSAGE was not found in cmd/locus.rs"
+        bad "TUN_UNAVAILABLE_MESSAGE was not found in cmd/chrysalis.rs"
         bad "  if it was renamed, update this guard so the wording stays checked"
     elif printf '%s' "$refusal_value" | grep -q 'from Settings'; then
         bad "the TUN refusal still tells the student to install the service 'from Settings'"
@@ -3232,7 +3248,7 @@ else
     #     with no client reader is a silent no-op, which is precisely how the
     #     UoT endpoint stayed dead fleet-wide (FIXES.md 29). The heartbeat
     #     response struct is where the wire keys are declared.
-    CLIENT_HB="$REPO/client/src-tauri/src/locus/heartbeat.rs"
+    CLIENT_HB="$REPO/client/src-tauri/src/chrysalis/heartbeat.rs"
     if [ -f "$CLIENT_HB" ]; then
         # Anchor on the FIELD DECLARATION, not a bare mention: the doc comments
         # and tests also name the key, so a plain grep passes even when the
@@ -3258,7 +3274,7 @@ else
     #     uses it. `throttle_mbps` is the live example of this being worth
     #     checking — it is deliberately stored-but-not-yet-applied, and the guard
     #     makes that an explicit, greppable fact rather than a missing call.
-    CLIENT_STORE="$REPO/client/src-tauri/src/locus/store.rs"
+    CLIENT_STORE="$REPO/client/src-tauri/src/chrysalis/store.rs"
     if [ -f "$CLIENT_STORE" ]; then
         if grep -Eq 'pub async fn throttle_mbps\(' "$CLIENT_STORE"; then
             ok "the client can read back the stored throttle speed"
@@ -3815,6 +3831,8 @@ done
 #
 # So this reads the lines that BUILD the payload list.
 if [ -f "$FETCH" ]; then
+    # The artefact names are a DEPRECATED ALIAS (docs/reference/NAME-MIGRATION.md),
+    # so a bare `locus-darwin-<arch>` is what must not reach an update slot.
     if sed -n '/^NEW_PLATFORMS = \[/,/^\]/p' "$FETCH" | grep -E 'locus-darwin-(amd64|arm64)["'"'"',:)]' \
         | grep -v 'app\.tar\.gz' >/dev/null 2>&1; then
         bad "fetch-release.py's NEW_PLATFORMS advertises a bare Mach-O in a macOS slot"
@@ -3843,7 +3861,7 @@ fi
 # The client side of the contract: the updater's own guard must accept a gzip
 # and refuse a Mach-O. A hub that publishes the right artifact is useless if the
 # client refuses it, or — worse — if the client accepts the wrong one.
-INSTALL_RS="$REPO/client/src-tauri/src/locus/update/install.rs"
+INSTALL_RS="$REPO/client/src-tauri/src/chrysalis/update/install.rs"
 if [ -f "$INSTALL_RS" ]; then
     if grep -q 'app\.tar\.gz\|gzip' "$INSTALL_RS"; then
         ok "the client's payload guard is aware of the macOS tarball"
@@ -3922,7 +3940,7 @@ if [ -f "$INSTALL_RS" ]; then
     #     This is exactly what happened on the first 3.2.27 run: all four builds
     #     passed, packaging printed a clean 85 MB tarball, and the release job
     #     then failed with "refusing to publish a partial release — missing:
-    #     locus-darwin-*.app.tar.gz". The manifest guard caught it correctly, but
+    #     chrysalis-darwin-*.app.tar.gz". The manifest guard caught it correctly, but
     #     only after a ~30 minute build. This makes the same mistake a two-second
     #     local failure instead.
     pack_line=$(grep -n 'name: Package the macOS updater payload' "$WORKFLOW" | head -1 | cut -d: -f1)
@@ -4110,8 +4128,18 @@ LANDING_TOML=$(awk '/^\[site\.domain\]/{f=1;next} /^\[/{f=0} f && /^value/{n=spl
     "$REPO/docs/state.toml" 2>/dev/null)
 LANDING_MODULE=$(grep -oE 'LANDING_DOMAIN="\$\{LANDING_DOMAIN:-[^}]*\}"' "$REPO/server/modules/05-caddy.sh" 2>/dev/null \
     | sed 's/.*:-\(.*\)}"/\1/' | head -1)
-LANDING_TEMPLATE=$(grep -oE '^[a-z0-9.-]+ \{' "$REPO/server/templates/Caddyfile" 2>/dev/null \
-    | grep -vi 'domain' | sed 's/ {//' | head -1)
+# The landing block's address line may carry SEVERAL names (the canonical one and
+# the deprecated alias kept serving until DNS moves), so take the first of the
+# comma-separated list on the one block that is not the hub's placeholder.
+#
+# Read with awk, not grep: this grep build needs a bracket expression's last
+# element to be an ordinary member (a trailing `-` or `.` makes the reader match
+# nothing, silently), and the address line may carry several comma-separated
+# names. awk has no such ambiguity.
+LANDING_TEMPLATE=$(awk '
+    /^[[:alnum:].-]+(, *[[:alnum:].-]+)* *\{$/ && $0 !~ /domain/ {
+        sub(/ *\{$/, ""); split($0, names, ","); gsub(/ /, "", names[1]); print names[1]; exit
+    }' "$REPO/server/templates/Caddyfile" 2>/dev/null)
 LANDING_PAGE=$(grep -oE '<link rel="canonical" href="https://[^/"]+' "$REPO/server/site/index.html" 2>/dev/null \
     | sed 's|.*https://||' | head -1)
 
@@ -4158,8 +4186,16 @@ fi
 
 # The landing block must never serve the hub's surfaces. This is the property a
 # future "just add a handle" edit removes with no symptom on the page itself.
-if awk '/^locusvpn\.jadedns\.uk \{/,/^\}/' "$REPO/server/templates/Caddyfile" 2>/dev/null \
-    | grep -qE '^[[:space:]]*(handle|handle_path|reverse_proxy|try_files)'; then
+#
+# Read by LINE RANGE from the LAST non-hub address line to EOF, capturing
+# `handle` only at the block's own indentation. Scoping matters here: the hub
+# block precedes this one and legitimately contains handles, so reading the whole
+# file (or every chunk) would report the hub's handles as the landing page's.
+if awk '
+    { line[NR] = $0; if ($0 ~ /^[[:alnum:].-]+(, *[[:alnum:].-]+)* *\{$/ && $0 !~ /domain/) last = NR }
+    END { for (j = last; j <= NR; j++) print line[j] }
+' "$REPO/server/templates/Caddyfile" 2>/dev/null \
+    | grep -qE '^    (handle|handle_path|reverse_proxy|try_files)'; then
     bad "the landing block in templates/Caddyfile contains a handle/proxy directive"
     bad "  It must be a bare file_server: the hub's /updates/, /api/* and /admin/"
     bad "  must not be reachable from the indexable hostname."
@@ -4565,7 +4601,7 @@ RULES = [
      '2026-10-16 — sat at the repo root during the passphrase migration'),
     (r'(^|/)secrets-passphrase[^/]*$',
      'secrets passphrase',
-     'documented name for the LOCUS_SECRETS_PASSPHRASE_FILE convention'),
+     'documented name for the CHRYSALIS_SECRETS_PASSPHRASE_FILE convention'),
     (r'(^|/)secrets-pass[^/]*$',
      'secrets passphrase',
      'short form of the above'),
@@ -4638,11 +4674,11 @@ echo "30. The macOS bundle claims no entitlement it does not own"
 #
 # `client/src-tauri/packages/macos/entitlements.plist` is inherited from the
 # upstream Clash Verge Rev fork, and for the whole life of this fork nobody had
-# asked what its keys ASSERT about Locus rather than about Verge. Two of them
+# asked what its keys ASSERT about Chrysalis rather than about Verge. Two of them
 # asserted things that are not true of this bundle:
 #
 #   * `com.apple.security.inherit = true` — meaningful ONLY on a child process of
-#     a sandboxed parent. Locus is `app-sandbox = false` and is not sandboxed, so
+#     a sandboxed parent. Chrysalis is `app-sandbox = false` and is not sandboxed, so
 #     the key says "my entitlements come from my parent" about a process that has
 #     no sandboxed parent. It is also the one entitlement whose validity is judged
 #     per SIGNATURE SLICE, which is why an identical .app can behave differently
@@ -4701,7 +4737,7 @@ if inherit and not sandboxed:
     )
 if inherit and sandboxed:
     problems.append(
-        "com.apple.security.inherit is true — Locus is a top-level app, not a child "
+        "com.apple.security.inherit is true — Chrysalis is a top-level app, not a child "
         "process; remove it unless a sandboxed parent is introduced deliberately"
     )
 
@@ -4887,7 +4923,7 @@ echo "32. The hub alias and the client's hub override agree"
 #
 #   * `modules/05-caddy.sh` serves a second hostname (`HUB_ALIAS_DOMAIN`) that
 #     redirects to the canonical hub — the SERVER half;
-#   * `locus::contract::resolve_hub_url` honours a stored override — the CLIENT
+#   * `chrysalis::contract::resolve_hub_url` honours a stored override — the CLIENT
 #     half, which only helps if a build carrying it is already installed.
 #
 # The failure this guard prevents is the two halves disagreeing: an alias block
@@ -5135,7 +5171,7 @@ echo "33. The status wire struct and the TypeScript interface agree"
 
 # ── WHY THIS GUARD EXISTS ──
 #
-# `LocusStatus` is serialised by Rust with `rename_all = "camelCase"` and was
+# `ChrysalisStatus` is serialised by Rust with `rename_all = "camelCase"` and was
 # consumed by a hand-written TypeScript interface. Nothing connected them. A
 # field added on one side only is invisible: Rust serialises it and the UI
 # ignores it (a feature that does nothing), or the UI reads a key that is never
@@ -5148,8 +5184,8 @@ echo "33. The status wire struct and the TypeScript interface agree"
 #
 # ── WHAT THIS CHECKS NOW, AND WHY IT CHANGED ──
 #
-# The interface is no longer hand-written. `client/src/services/locus.ts`
-# re-exports the types from `locus.generated.ts`, which
+# The interface is no longer hand-written. `client/src/services/chrysalis.ts`
+# re-exports the types from `chrysalis.generated.ts`, which
 # `gen-ts-contract.py` derives from the Rust. Section 38 asserts that the
 # generated file matches the Rust, for ALL NINE IPC types rather than this one.
 #
@@ -5158,16 +5194,16 @@ echo "33. The status wire struct and the TypeScript interface agree"
 # guarantee, which is where a hand-edit or a half-finished migration would show
 # up:
 #
-#   1. `services/locus.ts` imports/re-exports the generated types rather than
+#   1. `services/chrysalis.ts` imports/re-exports the generated types rather than
 #      redeclaring them. A redeclaration is the old failure mode returning, and
 #      it would shadow the generated type while §38 stayed green.
-#   2. `LocusStatus` is actually among them — the type this section has always
+#   2. `ChrysalisStatus` is actually among them — the type this section has always
 #      been about must still be a generated export, not quietly dropped from the
 #      re-export list.
 # ─────────────────────────────────────────────────────────────
-WIRE_RUST="$REPO/client/src-tauri/src/cmd/locus.rs"
-WIRE_TS="$REPO/client/src/services/locus.ts"
-WIRE_GEN="$REPO/client/src/services/locus.generated.ts"
+WIRE_RUST="$REPO/client/src-tauri/src/cmd/chrysalis.rs"
+WIRE_TS="$REPO/client/src/services/chrysalis.ts"
+WIRE_GEN="$REPO/client/src/services/chrysalis.generated.ts"
 if [ ! -f "$WIRE_RUST" ] || [ ! -f "$WIRE_TS" ] || [ ! -f "$WIRE_GEN" ]; then
     bad "cannot check the status wire shape: one of $WIRE_RUST, $WIRE_TS, $WIRE_GEN is missing"
 else
@@ -5176,30 +5212,30 @@ import re, sys
 
 rust, ts, gen = (open(p, encoding="utf-8").read() for p in sys.argv[1:4])
 
-if not re.search(r'pub struct LocusStatus \{', rust):
-    print("BAD\tcould not find `pub struct LocusStatus` in cmd/locus.rs")
+if not re.search(r'pub struct ChrysalisStatus \{', rust):
+    print("BAD\tcould not find `pub struct ChrysalisStatus` in cmd/chrysalis.rs")
 
 # (1) A redeclaration in the hand-written file shadows the generated type and
 # reintroduces exactly the drift this section exists to prevent.
-for name in ("LocusStatus", "UdpStatus", "AllowanceStatus", "SubscriptionStatus",
+for name in ("ChrysalisStatus", "UdpStatus", "AllowanceStatus", "SubscriptionStatus",
              "ValidateCodeResult", "ActivationResult", "ConnectionResult",
              "UpdateStatus", "UpdateProgress"):
     if re.search(r'^export (?:interface|type) %s\b' % name, ts, re.M):
-        print("BAD\tservices/locus.ts redeclares %s instead of re-exporting the "
+        print("BAD\tservices/chrysalis.ts redeclares %s instead of re-exporting the "
               "generated type — a hand-written mirror shadows the generated one" % name)
 
 # (2) The type this section is about must still be generated and re-exported.
-if not re.search(r'^export interface LocusStatus \{', gen, re.M):
-    print("BAD\tLocusStatus is not in locus.generated.ts — the generator dropped it")
+if not re.search(r'^export interface ChrysalisStatus \{', gen, re.M):
+    print("BAD\tChrysalisStatus is not in chrysalis.generated.ts — the generator dropped it")
 reexport = re.search(r'export type \{(.*?)\} from', ts, re.S)
 if not reexport:
-    print("BAD\tservices/locus.ts no longer re-exports the generated types")
-elif "LocusStatus" not in reexport.group(1):
-    print("BAD\tservices/locus.ts does not re-export LocusStatus")
+    print("BAD\tservices/chrysalis.ts no longer re-exports the generated types")
+elif "ChrysalisStatus" not in reexport.group(1):
+    print("BAD\tservices/chrysalis.ts does not re-export ChrysalisStatus")
 PY
 )
     if [ -z "$wire_report" ]; then
-        ok "LocusStatus is generated, not hand-mirrored, and still re-exported"
+        ok "ChrysalisStatus is generated, not hand-mirrored, and still re-exported"
     else
         while IFS="$(printf '\t')" read -r _kind message; do
             bad "STATUS WIRE: $message"
@@ -5211,7 +5247,7 @@ fi
 
 echo
 echo "════════════════════════════════════════════════════════════"
-echo "34. Every Locus IPC command is defined, registered, and called"
+echo "34. Every Chrysalis IPC command is defined, registered, and called"
 
 # ── WHY THIS GUARD EXISTS ──
 #
@@ -5249,26 +5285,26 @@ for path in rust_sources:
     for name in re.findall(r'#\[tauri::command\]\s*\npub (?:async )?fn (\w+)', src):
         # Scope to the product's own surface; upstream Verge commands have their
         # own callers and are not this project's contract to police.
-        if name.startswith("locus_"):
+        if name.startswith("chrysalis_"):
             defined.add(name)
 
-registered = set(n for n in re.findall(r'\bcmd::(\w+)', lib) if n.startswith("locus_"))
+registered = set(n for n in re.findall(r'\bcmd::(\w+)', lib) if n.startswith("chrysalis_"))
 
 called = set()
 for path in glob.glob(f"{ts_dir}/**/*.ts*", recursive=True):
     src = open(path, encoding="utf-8").read()
-    for name in re.findall(r"invoke(?:<[^>]*>)?\(\s*['\"](locus_\w+)['\"]", src):
+    for name in re.findall(r"invoke(?:<[^>]*>)?\(\s*['\"](chrysalis_\w+)['\"]", src):
         called.add(name)
 
 # Some commands are called from JavaScript this repository INJECTS into a page
-# rather than from a .ts file — `locus_js_log` is the console bridge, called from
+# rather than from a .ts file — `chrysalis_js_log` is the console bridge, called from
 # the injected script in utils/resolve/window_script.rs. A guard that only read
 # .ts/.tsx reported it as dead, which is a false positive of exactly the kind this
 # project documents: the check was scoped narrower than the thing it claims to
 # cover (§15's lesson, one layer down).
 for path in rust_sources:
     src = open(path, encoding="utf-8").read()
-    for name in re.findall(r"invoke\(\s*['\"](locus_\w+)['\"]", src):
+    for name in re.findall(r"invoke\(\s*['\"](chrysalis_\w+)['\"]", src):
         called.add(name)
 
 for name in sorted(defined - registered):
@@ -5283,7 +5319,7 @@ PY
 )
 
 if [ -z "$command_report" ]; then
-    ok "every Locus IPC command is defined, registered and called"
+    ok "every Chrysalis IPC command is defined, registered and called"
 else
     while IFS="$(printf '\t')" read -r _kind message; do
         bad "IPC: $message"
@@ -5359,7 +5395,7 @@ echo "36. Every hub call can verify the hub on a machine with an old root store"
 # time: "client error (Connect): invalid peer certificate: Expired" for a hub
 # certificate issued that morning and valid for three months.
 #
-# The cause was not the hub. `locus/activation.rs` built its own
+# The cause was not the hub. `chrysalis/activation.rs` built its own
 # `reqwest::Client`, and a bare builder uses `rustls-platform-verifier`, which on
 # Windows reads ONLY the Windows certificate store. The hub's chain is anchored at
 # `ISRG Root X2`, an ECDSA root that reaches Windows machines solely through
@@ -5371,17 +5407,17 @@ echo "36. Every hub call can verify the hub on a machine with an old root store"
 # several places drifts. Activation, heartbeat and the update download each had
 # their own client, and only the shared one in `utils::network` had a fallback.
 #
-# The rule this asserts: a hub call is made through `locus::hub::client`, which
+# The rule this asserts: a hub call is made through `chrysalis::hub::client`, which
 # tries the platform store and falls back to the compiled-in roots. A hand-built
 # `reqwest::Client::builder()` in the hub-facing modules is the defect.
 #
 # VERIFIED TO FAIL: adding `.build()` on a `reqwest::Client::builder()` to
-# `locus/heartbeat.rs` produces the BAD line below. Removing the bundled-roots
+# `chrysalis/heartbeat.rs` produces the BAD line below. Removing the bundled-roots
 # fallback from the hub client produces the second.
 #
 # ── THE CLIENT MOVED, AND THIS GUARD HAD TO LEARN WHERE ──
 #
-# `locus/hub.rs` became `locus/hub/{mod,client,roots}.rs` so that the "which
+# `chrysalis/hub.rs` became `chrysalis/hub/{mod,client,roots}.rs` so that the "which
 # store first" DECISION could be tested as a pure function of the platform (see
 # the doc comment in `roots.rs`: a `cfg!`-based test only ever asserts the host's
 # branch, so it passes on Linux CI whatever the macOS rule says). The rule this
@@ -5396,19 +5432,19 @@ echo "36. Every hub call can verify the hub on a machine with an old root store"
 #     `hub/client.rs` now, and the `builder_with_provider` pin is in the same
 #     file.
 #
-# So the guard keys on the DIRECTORY `locus/hub/`, accepts the single-file form
+# So the guard keys on the DIRECTORY `chrysalis/hub/`, accepts the single-file form
 # (`hub.rs`) for any checkout that predates the split, and requires that ONE of
 # them exists — "the hub client is gone" must still fail, which is the assertion
 # that made this section worth having.
 # ─────────────────────────────────────────────────────────────
-LOCUS_DIR="$REPO/client/src-tauri/src/locus"
+LOCUS_DIR="$REPO/client/src-tauri/src/chrysalis"
 HUB_DIR="$LOCUS_DIR/hub"
 
 if [ ! -d "$LOCUS_DIR" ]; then
-    warn "no client/src-tauri/src/locus — this guard cannot run"
+    warn "no client/src-tauri/src/chrysalis — this guard cannot run"
 else
     # Only the hub-facing modules: these are the ones that talk to the hub over
-    # TLS. The hub client itself — `locus/hub/` as a directory, or `hub.rs` as the
+    # TLS. The hub client itself — `chrysalis/hub/` as a directory, or `hub.rs` as the
     # pre-split single file — is where the client belongs and is allowed to build
     # one.
     #
@@ -5434,7 +5470,7 @@ else
             bad "  A bare client trusts only the OS certificate store. On a Windows"
             bad "  machine without the ISRG Root X2 update that cannot verify the hub,"
             bad "  and the student sees \"invalid peer certificate: Expired\" for a"
-            bad "  valid certificate. Use locus::hub::client instead."
+            bad "  valid certificate. Use chrysalis::hub::client instead."
         done
     else
         ok "no hub-facing module builds its own reqwest client"
@@ -5444,7 +5480,7 @@ else
     # checkout from before the split is still a valid tree to check.
     HUB_SRC=$(find "$LOCUS_DIR" -maxdepth 2 \( -path "$HUB_DIR/*.rs" -o -path "$LOCUS_DIR/hub.rs" \) -type f 2>/dev/null | sort)
     if [ -z "$HUB_SRC" ]; then
-        bad "neither locus/hub/ nor locus/hub.rs exists — nothing provides the root-store fallback"
+        bad "neither chrysalis/hub/ nor chrysalis/hub.rs exists — nothing provides the root-store fallback"
     else
         # The assertion is about the client that BUILDS the TLS config, and that is
         # `client.rs` once the module is split. Searching the whole hub module
@@ -5572,7 +5608,7 @@ echo "38. The generated TypeScript IPC types match the Rust types"
 
 # ── WHY THIS GUARD EXISTS ──
 #
-# Section 33 asserts that `LocusStatus`'s fields agree across Rust and
+# Section 33 asserts that `ChrysalisStatus`'s fields agree across Rust and
 # TypeScript. It asserted that for ONE type out of nine, by regex, against two
 # hand-maintained files. The other eight — ValidateCodeResult, ActivationResult,
 # ConnectionResult, UpdateStatus, UpdateProgress, and the three tagged unions
@@ -5583,7 +5619,7 @@ echo "38. The generated TypeScript IPC types match the Rust types"
 # identical failure for `udp`: added to the Rust struct, forgotten in the
 # interface, serialised and ignored.
 #
-# `client/src/services/locus.generated.ts` is now derived from the Rust by
+# `client/src/services/chrysalis.generated.ts` is now derived from the Rust by
 # `gen-ts-contract.py`. There is one side to write. This section fails when the
 # committed output disagrees with what the Rust currently says — which is what a
 # developer who edits the Rust without regenerating produces.
@@ -5976,7 +6012,7 @@ else
     #    number from the listener: naming the listener would loop the decrypted
     #    stream back at the process that terminates it.
     client_filter_port=$(sed -n 's/^pub const FILTER_PORT: u16 = \([0-9][0-9]*\);/\1/p' \
-        "$REPO/client/src-tauri/src/locus/activation_tunnel.rs" 2>/dev/null | head -1)
+        "$REPO/client/src-tauri/src/chrysalis/activation_tunnel.rs" 2>/dev/null | head -1)
     hub_filter_port=$(sed -n 's/.*ACTIVATION_FORWARD_PORT:-\([0-9][0-9]*\).*/\1/p' "$TUNNEL_MODULE" | head -1)
     hub_filter_port=${hub_filter_port:-18090}
     if [ -z "$client_filter_port" ]; then
@@ -6005,7 +6041,7 @@ else
     #          loopback address when it is present;
     #      (c) the value is derived from the peer, not taken from the client — a
     #          client-supplied header would let one device drain another's budget.
-    tunnel_identity_header="X-Locus-Bootstrap"
+    tunnel_identity_header="X-Chrysalis-Bootstrap"
     if ! grep -q "\"${tunnel_identity_header}\": identity(peer)" "$TUNNEL_MODULE"; then
         bad "09-activation-tunnel.sh does not set ${tunnel_identity_header} on the forwarded request — every tunnelled client would share one rate-limit bucket"
     else
@@ -6022,7 +6058,7 @@ else
 
     for hook in activation code_lookup; do
         hook_file="$REPO/server/pb_hooks/${hook}.pb.js"
-        if ! grep -q "x-locus-bootstrap" "$hook_file" 2>/dev/null; then
+        if ! grep -q "x-chrysalis-bootstrap" "$hook_file" 2>/dev/null; then
             bad "${hook}.pb.js does not read ${tunnel_identity_header} — a tunnelled client would be bucketed by loopback"
         elif ! grep -qE 'rateKey = "(activate|lookup)_" \+ \(fp \|\| bootstrapId \|\| ip\)' "$hook_file"; then
             bad "${hook}.pb.js does not use the bootstrap identity in its rate key (expected \`fp || bootstrapId || ip\`)"
@@ -6250,10 +6286,10 @@ NODE
     # satisfied by a doc comment that mentions it, so deleting the array entry
     # still reported OK. The pattern below requires the `crate::…::LEGACY_HUB_URL`
     # form that only an expression can produce.
-    if grep -qE '^[^/]*crate::locus::contract::LEGACY_HUB_URL,' "$REPO/client/src-tauri/src/locus/update/signal.rs"; then
+    if grep -qE '^[^/]*crate::chrysalis::contract::LEGACY_HUB_URL,' "$REPO/client/src-tauri/src/chrysalis/update/signal.rs"; then
         ok "the client's artifact allowlist accepts the legacy hub name"
     else
-        bad "client update/signal.rs no longer LISTS crate::locus::contract::LEGACY_HUB_URL"
+        bad "client update/signal.rs no longer LISTS crate::chrysalis::contract::LEGACY_HUB_URL"
         bad "  in the artifact allowlist — the published download URLs point at that"
         bad "  name, so every update download would be refused"
     fi
@@ -6842,11 +6878,11 @@ echo "48. The bootstrap address exists once, and it is an address"
 # Each assertion below was observed failing against the defect it catches before
 # being kept (see the commit that added this section).
 # ─────────────────────────────────────────────────────────────
-CLIENT_CONTRACT="$REPO/client/src-tauri/src/locus/contract.rs"
+CLIENT_CONTRACT="$REPO/client/src-tauri/src/chrysalis/contract.rs"
 ADDR_VALUE=$(sed -n 's/^pub const ACTIVATION_TUNNEL_ADDR: &str = "\(.*\)";/\1/p' "$CLIENT_CONTRACT" 2>/dev/null | head -1)
 
 if [ -z "$ADDR_VALUE" ]; then
-    bad "could not read ACTIVATION_TUNNEL_ADDR from client/src-tauri/src/locus/contract.rs"
+    bad "could not read ACTIVATION_TUNNEL_ADDR from client/src-tauri/src/chrysalis/contract.rs"
 elif ! printf '%s' "$ADDR_VALUE" | grep -qE '^([0-9]{1,3}\.){3}[0-9]{1,3}$'; then
     bad "ACTIVATION_TUNNEL_ADDR is '${ADDR_VALUE}', which is not an IPv4 literal"
     bad "  A name here re-introduces the DNS lookup the constant exists to remove."
@@ -6868,8 +6904,8 @@ fi
 
 # The bootstrap path must be BUILT from the candidate list rather than a single
 # hardcoded server — that is what makes the address reachable at all.
-if grep -q 'fn bootstrap_targets' "$REPO/client/src-tauri/src/locus/activation_tunnel.rs" \
-   && grep -q 'ACTIVATION_TUNNEL_ADDR' "$REPO/client/src-tauri/src/locus/activation_tunnel.rs"; then
+if grep -q 'fn bootstrap_targets' "$REPO/client/src-tauri/src/chrysalis/activation_tunnel.rs" \
+   && grep -q 'ACTIVATION_TUNNEL_ADDR' "$REPO/client/src-tauri/src/chrysalis/activation_tunnel.rs"; then
     ok "the client builds its bootstrap candidates from the named and address targets"
 else
     bad "activation_tunnel.rs no longer builds candidates from ACTIVATION_TUNNEL_ADDR — "
@@ -6878,7 +6914,7 @@ fi
 
 # And the failure that candidate exists for must actually reach the tunnel.
 if grep -q 'Self::ResetDuringHandshake | Self::Refused | Self::Dns' \
-        "$REPO/client/src-tauri/src/locus/hub/client.rs"; then
+        "$REPO/client/src-tauri/src/chrysalis/hub/client.rs"; then
     ok "a DNS failure is retried over the tunnel (the address needs no resolver)"
 else
     bad "Failure::Dns is not retryable over the tunnel — the address candidate is never dialled"
@@ -7055,12 +7091,12 @@ echo "51. Every section header announces itself with a banner"
 # inconsistency this check is deliberately not the place to fix.
 # ─────────────────────────────────────────────────────────────
 banner_report=$(grep -oE '^# [0-9]+[a-z]?\. ' "$REPO/server/scripts/check-consistency.sh" \
-      | sed 's/^# //;s/\. $//' | sort -u > /tmp/locus_hdr.$$ ; \
+      | sed 's/^# //;s/\. $//' | sort -u > /tmp/chrysalis_hdr.$$ ; \
     grep -oE '^echo "[0-9]+[a-z]?\. ' "$REPO/server/scripts/check-consistency.sh" \
-      | sed 's/^echo "//;s/\. $//' | sort -u > /tmp/locus_echo.$$ ; \
-    comm -23 /tmp/locus_hdr.$$ /tmp/locus_echo.$$ \
+      | sed 's/^echo "//;s/\. $//' | sort -u > /tmp/chrysalis_echo.$$ ; \
+    comm -23 /tmp/chrysalis_hdr.$$ /tmp/chrysalis_echo.$$ \
       | awk '{printf "%s\t%s\n", "NOBANNER", $0}' )
-rm -f /tmp/locus_hdr.$$ /tmp/locus_echo.$$
+rm -f /tmp/chrysalis_hdr.$$ /tmp/chrysalis_echo.$$
 if [ -z "$banner_report" ]; then
     ok "every numbered '#' section header has a matching echo banner"
 else
@@ -7332,6 +7368,115 @@ else
     done <<EOF
 $price_report
 EOF
+fi
+
+# -------------------------------------------------------------
+# 53. The retained `locus` names are exactly the ones the register documents
+#
+# WHY THIS EXISTS. On 2026-11-23 the product was renamed Chrysalis and a set of
+# low-level names deliberately stayed where a deployed client can see them. Each
+# one is load-bearing: an installed client's update identity, a published
+# artefact name the hub resolves, the signing-secret key names, the header that
+# keeps tunnelled clients in separate rate-limit buckets, and one landing-page
+# hostname that resolves today while its replacement does not yet.
+#
+# That makes the tree fail the obvious completeness test: a later reader greps
+# for `locus`, finds these, and concludes the rename was left half-finished. Two
+# failure modes follow, and this section catches both:
+#
+#   1. **Completing the rename.** Someone renames `com.locus.client` or
+#      `locus-linux-amd64`. The tree still builds and every Rust and frontend
+#      test still passes; installed clients stop updating and stop activating.
+#      No test can catch it, because the client that breaks is not in this
+#      checkout - only the fleet has it.
+#   2. **Deleting the register.** Someone decides the document is stale, removes
+#      it, and the reason those names stayed goes with it.
+#
+# WHAT IT DOES NOT DO: forbid every `locus` in the tree. `legacy/`,
+# `docs/archive/`, `vendor/` (a geosite category tag) and dated quotations in the
+# defect log are all legitimately old. This asserts only the deployed set named
+# in the register's section 3.
+#
+# See docs/reference/NAME-MIGRATION.md.
+# -------------------------------------------------------------
+echo
+echo "53. Retained 'locus' names match the register"
+
+REGISTER="$REPO/docs/reference/NAME-MIGRATION.md"
+if [ ! -f "$REGISTER" ]; then
+    bad "docs/reference/NAME-MIGRATION.md is missing - the record of WHICH names stay"
+    bad "  'locus', and why, is gone. The next grep will 'finish' the rename and break"
+    bad "  the deployed fleet. Restore it from git."
+else
+    retain_report=$(cd "$REPO" && python3 - <<'PY'
+def read(path):
+    try:
+        with open(path, encoding="utf-8", errors="replace") as fh:
+            return fh.read()
+    except OSError:
+        return None
+
+# (register anchor, file, literal that must survive in that file)
+# The anchor is the substring the register uses to introduce that name, so a row
+# dropped from the register fails here separately: the two halves cannot drift
+# into agreeing on a shorter list.
+CHECKS = [
+    ("com.locus.client",         "client/src-tauri/tauri.conf.json",          "com.locus.client"),
+    ("com.locus.client",         "client/src-tauri/src/utils/dirs.rs",        "com.locus.client"),
+    ("locus-backup",             "client/src-tauri/src/utils/dirs.rs",        "locus-backup"),
+    ("locus-linux-amd64",        "client/src-tauri/src/chrysalis/contract.rs","locus-linux-amd64"),
+    ("locus-linux-amd64",        "server/scripts/fetch-release.py",           "locus-linux-amd64"),
+    ("LOCUS_UPDATE_KEY_B64",     "server/scripts/chrysalis-key-extract.sh",   "LOCUS_UPDATE_KEY_B64"),
+    ("LOCUS_UPDATE_KEY",         ".github/workflows/client.yml",              "LOCUS_UPDATE_KEY"),
+    ("X-Locus-Bootstrap",        "server/modules/09-activation-tunnel.sh",    "X-Chrysalis-Bootstrap"),
+    ("X-Locus-Bootstrap",        "server/pb_hooks/activation.pb.js",          "x-chrysalis-bootstrap"),
+    ("X-Locus-Bootstrap",        "server/pb_hooks/code_lookup.pb.js",         "x-chrysalis-bootstrap"),
+    ("LOCUS_SECRETS_PASSPHRASE", "server/scripts/secrets-decrypt.sh",         "LOCUS_SECRETS_PASSPHRASE"),
+    ("locusvpn.jadedns.uk",      "server/modules/05-caddy.sh",                "locusvpn.jadedns.uk"),
+    ("locus-hub",                "server/scripts/deploy.sh",                  "chrysalis-hub"),
+    ("vasilliourous/Locus",      "server/scripts/fetch-release.py",           "vasilliourous/Locus"),
+]
+
+reg = read("docs/reference/NAME-MIGRATION.md") or ""
+
+for anchor, path, literal in CHECKS:
+    body = read(path)
+    if body is None:
+        print("BAD\t%s is missing - the retained name it holds cannot be checked" % path)
+        continue
+    if literal not in body:
+        print("BAD\t%s no longer contains `%s`." % (path, literal))
+        print("BAD\t  That spelling is a contract with deployed clients or a live")
+        print("BAD\t  hostname, not a leftover. If it was deliberately retired, remove")
+        print("BAD\t  its row from docs/reference/NAME-MIGRATION.md in the SAME change.")
+    else:
+        print("OK\t%s - `%s` present" % (path, literal))
+
+for anchor, _path, _literal in CHECKS:
+    if anchor not in reg:
+        print("BAD\tthe register no longer documents `%s` - a retained name lost its reason" % anchor)
+
+# The register must keep its REASONING, not just its names: a stub that lists
+# identifiers without a retirement condition is a second copy of a fact that can
+# disagree with section 3 the moment someone edits one of them.
+for phrase in ("Retires when", "updater identity", "LANDING_DOMAIN_LEGACY"):
+    if phrase.lower() not in reg.lower():
+        print("BAD\tthe register has lost its '%s' reasoning - it is listing names, not explaining them" % phrase)
+PY
+)
+    if [ -z "$retain_report" ]; then
+        bad "the retained-name check produced no output - it did not run"
+    else
+        while IFS="$(printf '\t')" read -r _kind message; do
+            case "$_kind" in
+                OK)  ok "$message" ;;
+                BAD) bad "$message" ;;
+                *)   bad "retained-names: $message" ;;
+            esac
+        done <<EOF
+$retain_report
+EOF
+    fi
 fi
 
 echo

@@ -198,7 +198,7 @@ if not token_valid:
     # Write with restrictive permissions atomically (0o600 = owner read/write only)
     fd = os.open(ADMIN_CREDS, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     with os.fdopen(fd, "w") as f:
-        f.write(f"# Locus PocketBase Admin Credentials\n"
+        f.write(f"# Chrysalis PocketBase Admin Credentials\n"
                 f"PB_ADMIN_EMAIL={ADMIN_EMAIL}\n"
                 f"PB_ADMIN_PASS={admin_pass}\n"
                 f"PB_TOKEN={token}\n")
@@ -323,7 +323,7 @@ collections = [
     # Both are gone. Codes are single-use and not tied to a device — the record
     # of use is `codes.activated_at` — and the client persists its activation
     # code itself so a reinstall does not lose it (see
-    # client/src-tauri/src/locus/credential.rs). See activation.pb.js for the
+    # client/src-tauri/src/chrysalis/credential.rs). See activation.pb.js for the
     # hub side of the change.
     #
     # An EXISTING hub keeps these collections and any rows in them; nothing

@@ -1,5 +1,5 @@
 [Unit]
-Description=PocketBase — Locus Admin Backend
+Description=PocketBase — Chrysalis Admin Backend
 After=network.target
 
 [Service]

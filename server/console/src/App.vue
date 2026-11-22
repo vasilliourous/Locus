@@ -35,8 +35,8 @@ onMounted(() => {
     const detail = (e as CustomEvent).detail
     if (detail && typeof detail.days === 'number') openWorklist(detail.days)
   }
-  window.addEventListener('locus:open-worklist', handler)
-  onUnmounted(() => window.removeEventListener('locus:open-worklist', handler))
+  window.addEventListener('chrysalis:open-worklist', handler)
+  onUnmounted(() => window.removeEventListener('chrysalis:open-worklist', handler))
 })
 
 const pages: { id: Page; label: string }[] = [
@@ -66,7 +66,7 @@ function signOut() {
   <div v-else class="shell">
     <nav class="sidebar">
       <div class="brand">
-        Locus Console
+        Chrysalis Console
         <small>networkingguides.jadedns.uk</small>
       </div>
       <button

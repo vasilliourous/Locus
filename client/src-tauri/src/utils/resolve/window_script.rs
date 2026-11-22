@@ -43,7 +43,7 @@ pub const WINDOW_INITIAL_SCRIPT: &str = r##"
             try {
                 // An application command, so the bare name: the `plugin:name|cmd`
                 // form is only for plugin-registered commands.
-                window.__TAURI_INTERNALS__?.invoke('locus_js_log', {
+                window.__TAURI_INTERNALS__?.invoke('chrysalis_js_log', {
                     level: level,
                     message: String(text).slice(0, 4000),
                 });
@@ -165,7 +165,7 @@ pub const WINDOW_INITIAL_SCRIPT: &str = r##"
     //
     // This used to query `prefers-color-scheme`, read a `theme_mode` the backend
     // had passed in, and pick a ground, a text colour and a `color-scheme` from
-    // the pair. Locus is permanently dark (`/COLOURS.md` §0), so all three are
+    // the pair. Chrysalis is permanently dark (`/COLOURS.md` §0), so all three are
     // constants and the two flash risks that came with choosing — a wrong ground,
     // and a colour-scheme that disagreed with the painted page — are gone.
     const initialColors = (() => {
@@ -181,7 +181,7 @@ pub const WINDOW_INITIAL_SCRIPT: &str = r##"
             console.warn("[Tauri] 读取初始主题颜色失败:", error);
         }
         // The palette's ground and text, by value: this script runs before any
-        // module can be imported, so it cannot read `LOCUS_COLORS`.
+        // module can be imported, so it cannot read `CHRYSALIS_COLORS`.
         return { darkBg: "#1A1B26", textFg: "#C0CAF5" };
     })();
 

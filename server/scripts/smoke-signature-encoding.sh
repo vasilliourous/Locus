@@ -58,7 +58,7 @@ echo "════════════════════════�
 
 # ── 1. The encode step in fetch-release.py must be base64(), applied once. ──
 # A real four-line minisign signature (ASCII), the shape minisign produces.
-SIG_TEXT=$'untrusted comment: signature from minisign secret key\nRUT9eeTiJVDWZMJ1eXBiMS4qlMaGGVF6hE8xEXlBcUdHu0YLdfXUAhs6l6ZH6GgA6b8K6hWD30nVZOrF4zO9MffNdy/LGbvIbwI=\ntrusted comment: Locus linux\nnkBxj2PmjuWWrQy+uZhSupAZZZ35WQ9Np2d+hRWLjVwAT7R24JTo0zRePetJDzCgDJcIwxUaxRYKhbtdoVbiBg=='
+SIG_TEXT=$'untrusted comment: signature from minisign secret key\nRUT9eeTiJVDWZMJ1eXBiMS4qlMaGGVF6hE8xEXlBcUdHu0YLdfXUAhs6l6ZH6GgA6b8K6hWD30nVZOrF4zO9MffNdy/LGbvIbwI=\ntrusted comment: Chrysalis linux\nnkBxj2PmjuWWrQy+uZhSupAZZZ35WQ9Np2d+hRWLjVwAT7R24JTo0zRePetJDzCgDJcIwxUaxRYKhbtdoVbiBg=='
 
 CORRECT_WIRE=$(printf '%s' "$SIG_TEXT" | python3 -c 'import base64,sys; print(base64.b64encode(sys.stdin.buffer.read().decode().encode()).decode())')
 

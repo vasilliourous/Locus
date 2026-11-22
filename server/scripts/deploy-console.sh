@@ -67,7 +67,7 @@ log "✓ Build OK ($(du -sh dist | cut -f1))"
 # index.html at the top level. Packing `dist` itself (i.e. `tar czf x dist`)
 # yields `./dist/index.html` and fails the deploy with "Console bundle has no
 # index.html". Assert it here so the mistake cannot leave this machine.
-TARBALL="$(mktemp -t locus-console-XXXXXX.tar.gz)"
+TARBALL="$(mktemp -t chrysalis-console-XXXXXX.tar.gz)"
 trap 'rm -f "$TARBALL"' EXIT
 tar czf "$TARBALL" -C dist .
 if ! tar tzf "$TARBALL" | grep -qx './index.html'; then

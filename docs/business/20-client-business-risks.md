@@ -4,7 +4,7 @@
 audience:    human-operator
 status:      live
 authoritative-for: client-side commercial risks, ranked, with the evidence for each
-verified-against: client/src/, client/src-tauri/src/locus/, server/pb_hooks/ (2026-11-04)
+verified-against: client/src/, client/src-tauri/src/chrysalis/, server/pb_hooks/ (2026-11-04)
 ```
 
 > **How to read this.** Each item is one of the four claim kinds this repo uses
@@ -51,7 +51,7 @@ requires `ADMIN_API_TOKEN`. A student cannot have one.
 
 **What changed.** "Sign out on this device" (Account page) forgets the key
 locally — including the machine-scoped mirror that survives an uninstall
-(`locus/credential.rs`) — and records the release on the hub.
+(chrysalis/credential.rs`) — and records the release on the hub.
 
 **What is left, and why it matters commercially.** Sign-out requires the student
 to *press a button on the machine they are leaving*. The case that generates the
@@ -75,8 +75,8 @@ support conversation into a self-service one.**
 
 ## 3. The free tier's throttle is described in the UI and never applied
 
-**Verified.** `locus_throttle_mbps` is parsed from the heartbeat
-(`locus/heartbeat.rs:174`), persisted (`locus/runtime.rs:519`), and read by
+**Verified.** `chrysalis_throttle_mbps` is parsed from the heartbeat
+(chrysalis/heartbeat.rs:174`), persisted (chrysalis/runtime.rs:519`), and read by
 nothing. `usage.rs` says so itself, and `docs/reference/STILL-OPEN.md` carries it
 as open.
 
@@ -118,13 +118,13 @@ officially support that" an answer the operator can give, instead of a feeling.
 
 ## 5. The app cannot tell a student "this is your network, not your purchase"
 
-**Verified.** `locus/hub/client.rs` and `locus/activation_tunnel.rs` already
+**Verified.** `chrysalis/hub/client.rs` and `chrysalis/activation_tunnel.rs` already
 distinguish censorship-shaped failures (a reset during the TLS handshake) from
 ordinary ones, and the activation tunnel exists precisely because a school filter
 can block the hub by name.
 
 **The gap.** That distinction is used to *retry*, not to *explain*. Where it
-surfaces to a student it is as "could not reach the Locus hub at …", which reads
+surfaces to a student it is as "could not reach the Chrysalis hub at …", which reads
 as "the product is broken" to someone whose school is blocking it. That student
 then emails, and the operator's reply is "try your phone's hotspot" — a correct
 answer delivered late, one student at a time.
@@ -137,7 +137,7 @@ reply is identical each time.
 
 ## 6. `describe_outcome` is English-only in a translated app
 
-**Verified.** `client/src-tauri/src/cmd/locus.rs:791` — `describe_outcome` — every activation refusal
+**Verified.** `client/src-tauri/src/cmd/chrysalis.rs:791` — `describe_outcome` — every activation refusal
 ("This code has already been activated on a different device…", "You will need a
 new one") is a Rust string literal. The UI is translated into 13 locales; these
 sentences are not.
@@ -160,7 +160,7 @@ Recorded so a successor does not re-litigate them:
   resting on a single source. The earlier worry was overstated — the second source
   is independent and real.
 - **The free allowance being client-side is a stated decision, not an oversight**
-  (`locus/usage.rs` module docs; `docs/business/04-tiers.md` §4.4.3). It is soft
+  (chrysalis/usage.rs` module docs; `docs/business/04-tiers.md` §4.4.3). It is soft
   by design, with the threat model written down. Item 3 above is about the
   *throttle*, which is a different mechanism and is not applied at all.
 - **Single shared per-tier passwords** — same trade-off, same recorded reasoning.

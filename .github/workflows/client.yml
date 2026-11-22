@@ -1,4 +1,4 @@
-# Locus client — build, sign, release.
+# Chrysalis client — build, sign, release.
 #
 # WHY THIS MUST LIVE AT THE REPO ROOT
 # GitHub only runs workflows from `.github/workflows/` at the repository root. A
@@ -17,7 +17,7 @@
 #
 # The filenames are a frozen contract spanning three systems (CI, the hub's
 # fetcher, and the client's updater). `macos_*` platform keys pair with
-# `darwin-*` filenames deliberately — see client/src-tauri/src/locus/contract.rs.
+# `darwin-*` filenames deliberately — see client/src-tauri/src/chrysalis/contract.rs.
 # Renaming either side breaks publishing for that platform.
 #
 # WHY `.sig` FILES ARE MANDATORY
@@ -187,7 +187,7 @@ jobs:
     # was added (audit F-21), and it was then used as the justification for
     # putting that scan in THIS job — where it could never work, because this job
     # has neither `prebuild` (which fills the gitignored `sidecar/` binaries the
-    # locus build script reads) nor Tauri's Linux headers. The scan panicked on
+    # chrysalis build script reads) nor Tauri's Linux headers. The scan panicked on
     # every run from 431abd5 to 2026-11-22, and `release` needs
     # `[verify, build]`, so nothing published.
     #
@@ -260,7 +260,7 @@ jobs:
             echo "::error::CI does not bump versions. Bump first, commit, then tag:"
             echo "::error::  cd client && pnpm release-version ${want}"
             echo "::error::  git add -A && git commit -m 'chore(release): ${want}'"
-            echo "::error::  git tag -a ${tag} -m 'Locus client ${tag}' && git push origin ${tag}"
+            echo "::error::  git tag -a ${tag} -m 'Chrysalis client ${tag}' && git push origin ${tag}"
             echo "::error::Publishing this would ship ${have} binaries under a ${want} tag, and"
             echo "::error::the hub would offer an 'update' that installs the same version forever."
             exit 1
@@ -291,7 +291,7 @@ jobs:
           set -euo pipefail
           if [ -z "${LOCUS_UPDATE_KEY:-}" ]; then
             echo "::error::LOCUS_UPDATE_KEY is not set, so every build job would fail at signing."
-            echo "::error::Set it with: gh secret set LOCUS_UPDATE_KEY --repo ${GITHUB_REPOSITORY:-<owner>/<repo>} < .locus-keys/locus_update.key"
+            echo "::error::Set it with: gh secret set LOCUS_UPDATE_KEY --repo ${GITHUB_REPOSITORY:-<owner>/<repo>} < .chrysalis-keys/chrysalis_update.key"
             echo "::error::Secrets do not survive a repository copy. See client/docs/SIGNING.md §4a."
             exit 1
           fi
@@ -429,9 +429,9 @@ jobs:
       - name: Report the activation tunnel key
         working-directory: .
         env:
-          LOCUS_ACTIVATION_TUNNEL_KEY: ${{ secrets.LOCUS_ACTIVATION_TUNNEL_KEY }}
-          LOCUS_ACTIVATION_TUNNEL_ADDR: ${{ vars.LOCUS_ACTIVATION_TUNNEL_ADDR }}
-          LOCUS_FREE_TIER_KEY: ${{ secrets.LOCUS_FREE_TIER_KEY }}
+          CHRYSALIS_ACTIVATION_TUNNEL_KEY: ${{ secrets.CHRYSALIS_ACTIVATION_TUNNEL_KEY }}
+          CHRYSALIS_ACTIVATION_TUNNEL_ADDR: ${{ vars.CHRYSALIS_ACTIVATION_TUNNEL_ADDR }}
+          CHRYSALIS_FREE_TIER_KEY: ${{ secrets.CHRYSALIS_FREE_TIER_KEY }}
         run: |
           set -euo pipefail
           # Report the bootstrap ADDRESS as well as the key. The address is not a
@@ -439,13 +439,13 @@ jobs:
           # checked-in default in `contract.rs` is a working value. It is reported
           # here because an override that silently did not reach the build would
           # look exactly like a hub that had not moved.
-          if [ -n "${LOCUS_ACTIVATION_TUNNEL_ADDR:-}" ]; then
-            echo "LOCUS_ACTIVATION_TUNNEL_ADDR override is set (${LOCUS_ACTIVATION_TUNNEL_ADDR})"
+          if [ -n "${CHRYSALIS_ACTIVATION_TUNNEL_ADDR:-}" ]; then
+            echo "CHRYSALIS_ACTIVATION_TUNNEL_ADDR override is set (${CHRYSALIS_ACTIVATION_TUNNEL_ADDR})"
           else
-            echo "LOCUS_ACTIVATION_TUNNEL_ADDR is unset — the checked-in default in contract.rs is compiled in."
+            echo "CHRYSALIS_ACTIVATION_TUNNEL_ADDR is unset — the checked-in default in contract.rs is compiled in."
           fi
-          if [ -n "${LOCUS_ACTIVATION_TUNNEL_KEY:-}" ]; then
-            echo "LOCUS_ACTIVATION_TUNNEL_KEY is present (value not printed; length ${#LOCUS_ACTIVATION_TUNNEL_KEY} bytes)"
+          if [ -n "${CHRYSALIS_ACTIVATION_TUNNEL_KEY:-}" ]; then
+            echo "CHRYSALIS_ACTIVATION_TUNNEL_KEY is present (value not printed; length ${#CHRYSALIS_ACTIVATION_TUNNEL_KEY} bytes)"
           elif [ "${{ github.ref_type }}" = "tag" ]; then
             # AN ERROR on a tag, since 2026-11-06. It used to be a warning, and
             # three releases went out keyless while this step printed one line
@@ -457,13 +457,13 @@ jobs:
             # A branch build without it is still fine and still builds: the point
             # of failing HERE, before any artifact is produced, is that a tagged
             # release is a promise to a deployment.
-            echo "::error::LOCUS_ACTIVATION_TUNNEL_KEY is not set, so this RELEASE would ship without the activation tunnel."
+            echo "::error::CHRYSALIS_ACTIVATION_TUNNEL_KEY is not set, so this RELEASE would ship without the activation tunnel."
             echo "::error::No device on a network that blocks the hub by name could activate with it, and nothing in the artifact would say so."
-            echo "::error::Set it with: gh secret set LOCUS_ACTIVATION_TUNNEL_KEY --repo ${GITHUB_REPOSITORY:-<owner>/<repo>}"
+            echo "::error::Set it with: gh secret set CHRYSALIS_ACTIVATION_TUNNEL_KEY --repo ${GITHUB_REPOSITORY:-<owner>/<repo>}"
             echo "::error::The value is the hub's ACTIVATION_TUNNEL_KEY (server/secrets.env.age). See docs/operate/SECRETS-MANAGEMENT.md."
             exit 1
           else
-            echo "LOCUS_ACTIVATION_TUNNEL_KEY is not set — this build has no activation tunnel. Fine for a branch build; see docs/reference/ACTIVATION-TUNNEL.md before tagging."
+            echo "CHRYSALIS_ACTIVATION_TUNNEL_KEY is not set — this build has no activation tunnel. Fine for a branch build; see docs/reference/ACTIVATION-TUNNEL.md before tagging."
           fi
 
           # The free tier's key, for the maintenance tunnel.
@@ -475,15 +475,15 @@ jobs:
           # tag, a note on a branch build — because a release that ships without it
           # has no maintenance tunnel and, on a network that blocks the hub by
           # name, cannot reach the plan port at all.
-          if [ -n "${LOCUS_FREE_TIER_KEY:-}" ]; then
-            echo "LOCUS_FREE_TIER_KEY is present (value not printed; length ${#LOCUS_FREE_TIER_KEY} bytes)"
+          if [ -n "${CHRYSALIS_FREE_TIER_KEY:-}" ]; then
+            echo "CHRYSALIS_FREE_TIER_KEY is present (value not printed; length ${#CHRYSALIS_FREE_TIER_KEY} bytes)"
           elif [ "${{ github.ref_type }}" = "tag" ]; then
-            echo "::error::LOCUS_FREE_TIER_KEY is not set, so this RELEASE would ship without the maintenance tunnel."
-            echo "::error::Set it with: gh secret set LOCUS_FREE_TIER_KEY --repo ${GITHUB_REPOSITORY:-<owner>/<repo>}"
+            echo "::error::CHRYSALIS_FREE_TIER_KEY is not set, so this RELEASE would ship without the maintenance tunnel."
+            echo "::error::Set it with: gh secret set CHRYSALIS_FREE_TIER_KEY --repo ${GITHUB_REPOSITORY:-<owner>/<repo>}"
             echo "::error::The value is the hub's ECO_PASS (server/secrets.env.age). See docs/operate/SECRETS-MANAGEMENT.md."
             exit 1
           else
-            echo "LOCUS_FREE_TIER_KEY is not set — this build has no maintenance tunnel. Fine for a branch build."
+            echo "CHRYSALIS_FREE_TIER_KEY is not set — this build has no maintenance tunnel. Fine for a branch build."
           fi
 
       - uses: pnpm/action-setup@v4
@@ -577,7 +577,7 @@ jobs:
       # THIS CHECK USED TO LIVE HERE, AND IT COULD NEVER PASS HERE. It was added to
       # this job on the strength of the header's claim that "the gate no longer
       # compiles any Rust" — but `check-rust-deps.sh` runs `cargo check
-      # --all-targets`, which compiles the locus build script, and `tauri_build`
+      # --all-targets`, which compiles the chrysalis build script, and `tauri_build`
       # reads `bundle.externalBin` from `client/src-tauri/sidecar/`.
       #
       # Those binaries are gitignored in full and only `prebuild` fetches them, and
@@ -608,7 +608,7 @@ jobs:
       # `TAURI_CONFIG` — see the build job for why that is an override rather
       # than an edit to `tauri.conf.json`.
       # The TypeScript IPC types are generated from the Rust types in
-      # `src-tauri/src/cmd/locus.rs`. This fails when the committed generated
+      # `src-tauri/src/cmd/chrysalis.rs`. This fails when the committed generated
       # file disagrees with the Rust — i.e. when someone changed a wire type and
       # forgot to regenerate. `web:build` below would NOT catch that: the
       # committed file still type-checks, it is simply the previous shape.
@@ -886,7 +886,7 @@ jobs:
           # `macos-arm` are independent compiles at different triples and would
           # evict each other.
           add-job-id-key: false
-          shared-key: locus-${{ matrix.triple }}
+          shared-key: chrysalis-${{ matrix.triple }}
           # Kept as an extra discriminator alongside the automatic keys.
           key: ${{ matrix.label }}
           # On a push to `main` all four runners would race to write the cache;
@@ -969,13 +969,13 @@ jobs:
       # (`client/src-tauri/src/lib.rs`) resolves it at COMPILE time and BAKES the
       # resolved path into the binary, where it becomes the runtime asset root for
       # `WebviewUrl::App(..)`. An absolute path from the runner therefore ships
-      # inside the artifact: a Windows build from `D:\a\Locus\Locus` carries
-      # `D:/a/Locus/Locus/client/dist` as the place it expects its web assets.
+      # inside the artifact: a Windows build from `D:\a\Locus\Locus` (the pre-rename repo path) carries
+      # `D:/a/Locus/Locus/client/dist` (pre-rename) as the place it expects its web assets.
       #
       # On a student's machine that directory does not exist, so Tauri resolves the
       # start page against a missing root and WebView2 renders Chromium's own
       # "File not found / ERR_FILE_NOT_FOUND" page — with an Edge logo, in a window
-      # titled Locus, on a perfectly healthy install. Nothing in that message names
+      # titled Chrysalis, on a perfectly healthy install. Nothing in that message names
       # the cause.
       #
       # An earlier revision set the absolute path to dodge a `tauri` build-script
@@ -1262,8 +1262,8 @@ jobs:
       # --target X` sends it to Cargo instead (the extra `--` makes everything
       # after it a cargo argument), so Tauri compiles WITHOUT the triple while
       # its bundler then looks for a triple-qualified path — producing
-      #   "Built application at: target/release/locus"
-      #   "failed to bundle project: can't open main binary .../target/release/locus"
+      #   "Built application at: target/release/chrysalis"
+      #   "failed to bundle project: can't open main binary .../target/release/chrysalis"
       # Passing it through `pnpm exec` gives the flag to Tauri, which is what
       # actually needs it.
       #
@@ -1303,12 +1303,12 @@ jobs:
           # Static JSON, not built by the shell: with no path interpolated there
           # is nothing to escape, so the earlier JSON-escape panic ("invalid
           # escape at line 1 column 54") cannot recur — that panic came from
-          # interpolating `D:\a\Locus\Locus` into JSON, a path that no longer
+          # interpolating `D:\a\Locus\Locus` (pre-rename repo path) into JSON, a path that no longer
           # appears here at all.
           TAURI_CONFIG: '{"build":{"beforeBuildCommand":""}}'
           # The activation tunnel's bootstrap key, compiled in via
-          # `option_env!("LOCUS_ACTIVATION_TUNNEL_KEY")` in
-          # `locus/activation_tunnel.rs`.
+          # `option_env!("CHRYSALIS_ACTIVATION_TUNNEL_KEY")` in
+          # `chrysalis/activation_tunnel.rs`.
           #
           # NOT presence-checked HERE, unlike LOCUS_UPDATE_KEY: on a branch build
           # its absence degrades a capability (a device on a school network cannot
@@ -1327,11 +1327,11 @@ jobs:
           # The value is not a normal secret: it ships in the binary, so it must
           # be assumed public. The hub's allowlist and rate limit are what bound
           # it (docs/reference/ACTIVATION-TUNNEL.md §3.1).
-          LOCUS_ACTIVATION_TUNNEL_KEY: ${{ secrets.LOCUS_ACTIVATION_TUNNEL_KEY }}
+          CHRYSALIS_ACTIVATION_TUNNEL_KEY: ${{ secrets.CHRYSALIS_ACTIVATION_TUNNEL_KEY }}
           # The compiled address fallback the tunnel dials when DNS is filtered.
           # A repository VARIABLE rather than a secret: it is not confidential and
           # it is meant to be readable by anyone auditing what a release dials.
-          LOCUS_ACTIVATION_TUNNEL_ADDR: ${{ vars.LOCUS_ACTIVATION_TUNNEL_ADDR }}
+          CHRYSALIS_ACTIVATION_TUNNEL_ADDR: ${{ vars.CHRYSALIS_ACTIVATION_TUNNEL_ADDR }}
         run: |
           set -euo pipefail
 
@@ -1393,7 +1393,7 @@ jobs:
       # minutes of backoff.
       # ── THE ENGINE SUITE RUNS FOR REAL, AND SAYS SO WHEN IT DOES NOT ──
       #
-      # `LOCUS_REQUIRE_EGRESS=1` makes "this runner has no network" a FAILURE
+      # `CHRYSALIS_REQUIRE_EGRESS=1` makes "this runner has no network" a FAILURE
       # rather than a skip for the one test that must complete a public round
       # trip. That case — a working tunnel reading as `connected` — is the
       # direction three shipped defects failed in, and until now nothing enforced
@@ -1407,7 +1407,7 @@ jobs:
       # The rest of the engine suite needs no network at all — `tier_profile_engine`
       # parses YAML with `mihomo -t`, and `tunnel_end_to_end` runs a real
       # Shadowsocks-2022 listener and client on loopback. Both are enforced by
-      # `LOCUS_REQUIRE_LIVE_ENGINE` being unnecessary: a missing sidecar here is a
+      # `CHRYSALIS_REQUIRE_LIVE_ENGINE` being unnecessary: a missing sidecar here is a
       # broken run, not a fact about the machine, because `prebuild` runs above.
       # ── sing-box, for the tunnel end-to-end test ──
       #
@@ -1482,7 +1482,7 @@ jobs:
       # divergence this suite exists to catch.
       #
       # This step exists because the test did not have it: the test is gated on
-      # `LOCUS_REQUIRE_LIVE_ENGINE`, which the step below sets, so its own
+      # `CHRYSALIS_REQUIRE_LIVE_ENGINE`, which the step below sets, so its own
       # missing-peer SKIP became a hard failure — `ssserver is not installed`.
       # The test was right to demand a real listener; the job was wrong to claim
       # it had installed every peer the engine suites need.
@@ -1512,8 +1512,8 @@ jobs:
           # Both peers are installed above, so nothing in the engine suites is
           # allowed to skip. A missing sidecar or a missing listener now FAILS
           # instead of printing a line nobody reads.
-          LOCUS_REQUIRE_LIVE_ENGINE: '1'
-          LOCUS_REQUIRE_EGRESS: '1'
+          CHRYSALIS_REQUIRE_LIVE_ENGINE: '1'
+          CHRYSALIS_REQUIRE_EGRESS: '1'
         run: |
           set -o pipefail
           delay=5
@@ -1679,8 +1679,8 @@ jobs:
           set -euo pipefail
           src=""
           for candidate in \
-            "target/${{ matrix.triple }}/release/locus" \
-            "target/${{ matrix.triple }}/fast-release/locus"
+            "target/${{ matrix.triple }}/release/chrysalis" \
+            "target/${{ matrix.triple }}/fast-release/chrysalis"
           do
             [ -f "$candidate" ] && { src="$candidate"; break; }
           done
@@ -1701,8 +1701,8 @@ jobs:
           set -euo pipefail
           src=""
           for candidate in \
-            "target/${{ matrix.triple }}/release/locus.exe" \
-            "target/${{ matrix.triple }}/fast-release/locus.exe"
+            "target/${{ matrix.triple }}/release/chrysalis.exe" \
+            "target/${{ matrix.triple }}/fast-release/chrysalis.exe"
           do
             [ -f "$candidate" ] && { src="$candidate"; break; }
           done
@@ -1861,8 +1861,8 @@ jobs:
             echo "::error::LOCUS_UPDATE_KEY is not set. A release without signatures cannot be installed by any client — see client/docs/SIGNING.md."
             exit 1
           fi
-          printf '%s' "$LOCUS_UPDATE_KEY" > "$RUNNER_TEMP/locus.key"
-          chmod 600 "$RUNNER_TEMP/locus.key"
+          printf '%s' "$LOCUS_UPDATE_KEY" > "$RUNNER_TEMP/chrysalis.key"
+          chmod 600 "$RUNNER_TEMP/chrysalis.key"
 
           # Run minisign through Git Bash directly, and give it WINDOWS paths
           # for its file arguments.
@@ -1880,7 +1880,7 @@ jobs:
           # No cmd.exe is involved anywhere, which removes the whole class of
           # quoting-and-backslash problems this step kept hitting.
           MS="$RUNNER_TEMP/minisign/minisign.exe"
-          KEY="$RUNNER_TEMP/locus.key"
+          KEY="$RUNNER_TEMP/chrysalis.key"
           ART="artifacts/${{ matrix.artifact }}"
           SIG="artifacts/${{ matrix.artifact }}.sig"
 
@@ -1888,13 +1888,13 @@ jobs:
             "$MS" -S -s "$(cygpath -w "$KEY")" \
               -m "$(cygpath -w "$ART")" \
               -x "$(cygpath -w "$SIG")" \
-              -t "Locus_${{ matrix.label }}"
+              -t "Chrysalis_${{ matrix.label }}"
           else
             "$RUNNER_TEMP/minisign/minisign" -S -s "$KEY" -m "$ART" -x "$SIG" \
-              -t "Locus ${{ matrix.label }}"
+              -t "Chrysalis ${{ matrix.label }}"
           fi
 
-          rm -f "$RUNNER_TEMP/locus.key"
+          rm -f "$RUNNER_TEMP/chrysalis.key"
           echo "Signed ${{ matrix.artifact }}:"
           cat "artifacts/${{ matrix.artifact }}.sig"
 
@@ -1972,17 +1972,17 @@ jobs:
       #
       # WHY THIS STEP EXISTS
       #
-      # Locus ships without an Apple Developer ID (gap #3), so a quarantined
+      # Chrysalis ships without an Apple Developer ID (gap #3), so a quarantined
       # .app is refused by Gatekeeper. macOS draws a distinction that matters
       # more than it looks: a bundle with NO signature at all is reported as
       # *corrupt* —
       #
-      #   "Locus" is damaged and can't be opened. You should move it to the Trash.
+      #   "Chrysalis" is damaged and can't be opened. You should move it to the Trash.
       #
       # — and that dialog offers no "Open Anyway". A bundle with a signature
       # that exists but is not from a Developer ID is reported as *unverified*:
       #
-      #   "Locus" cannot be opened because Apple cannot check it for malicious
+      #   "Chrysalis" cannot be opened because Apple cannot check it for malicious
       #   software.
       #
       # which macOS 15 surfaces in System Settings > Privacy & Security with an
@@ -2059,9 +2059,9 @@ jobs:
           }
           hdiutil detach "$mount"
 
-          app="$stage/Locus.app"
+          app="$stage/Chrysalis.app"
           if [ ! -d "$app" ]; then
-            echo "::error::no Locus.app in $dmg"
+            echo "::error::no Chrysalis.app in $dmg"
             ls -la "$stage" || true
             exit 1
           fi
@@ -2097,7 +2097,7 @@ jobs:
 
           # Rebuild the image from the signed staging folder.
           rm -f "$dmg"
-          hdiutil create -volname "Locus" -srcfolder "$stage" -ov -format UDZO "$dmg"
+          hdiutil create -volname "Chrysalis" -srcfolder "$stage" -ov -format UDZO "$dmg"
 
           # Re-mount and confirm the SIGNED app is inside the rebuilt image. An
           # `hdiutil create` that dropped or reverted the bundle exits 0, so the
@@ -2106,18 +2106,18 @@ jobs:
           mkdir -p "$verify"
           hdiutil attach "$dmg" -nobrowse -noverify -readonly -mountpoint "$verify"
           ok=0
-          if [ -d "$verify/Locus.app" ] && codesign --verify --deep --strict "$verify/Locus.app" 2>/dev/null; then
+          if [ -d "$verify/Chrysalis.app" ] && codesign --verify --deep --strict "$verify/Chrysalis.app" 2>/dev/null; then
             ok=1
           fi
           hdiutil detach "$verify"
 
           if [ "$ok" -ne 1 ]; then
-            echo "::error::$dmg does not contain a validly ad-hoc-signed Locus.app"
+            echo "::error::$dmg does not contain a validly ad-hoc-signed Chrysalis.app"
             ls -la "$verify" || true
             exit 1
           fi
 
-          echo "Verified: $dmg carries a signed Locus.app (ad-hoc, no Developer ID)"
+          echo "Verified: $dmg carries a signed Chrysalis.app (ad-hoc, no Developer ID)"
 
       # ── Package the macOS updater payload as a .app.tar.gz ──
       #
@@ -2150,7 +2150,7 @@ jobs:
       # the exact failure the signing step exists to move away from.
       #
       # The `tar` layout matters too: the plugin strips one leading path component
-      # (`entry.path()?.iter().skip(1)`), so the archive must hold `Locus.app/...`
+      # (`entry.path()?.iter().skip(1)`), so the archive must hold `Chrysalis.app/...`
       # rather than a bare `Contents/...`. Archiving from the parent directory
       # produces that shape.
       #
@@ -2184,9 +2184,9 @@ jobs:
           mount="$work/mnt"
           mkdir -p "$mount"
           hdiutil attach "$dmg" -nobrowse -noverify -readonly -mountpoint "$mount"
-          cp -R "$mount/Locus.app" "$work/" || {
+          cp -R "$mount/Chrysalis.app" "$work/" || {
             hdiutil detach "$mount" || true
-            echo "::error::no Locus.app inside $dmg"
+            echo "::error::no Chrysalis.app inside $dmg"
             exit 1
           }
           hdiutil detach "$mount"
@@ -2197,23 +2197,23 @@ jobs:
           # both key on `matrix.artifact`.
           tarball="artifacts/${{ matrix.artifact }}.app.tar.gz"
 
-          # `tar` from the parent so entries begin `Locus.app/`, which is what
+          # `tar` from the parent so entries begin `Chrysalis.app/`, which is what
           # the plugin's `skip(1)` expects. `--no-xattrs` keeps resource forks
           # out; `gzip -9` because a 100 MB app is a student's download.
-          ( cd "$work" && tar --no-xattrs -czf - Locus.app ) > "$tarball"
+          ( cd "$work" && tar --no-xattrs -czf - Chrysalis.app ) > "$tarball"
 
           # ── Read it back ──
           #
           # Prove the archive is the shape the plugin will accept, from the
           # artifact rather than from the step's exit status: a tar that captured
           # the wrong depth exits 0 and installs nothing.
-          if ! tar -tzf "$tarball" | head -1 | grep -q '^Locus\.app/'; then
-            echo "::error::$tarball does not start with Locus.app/ — the updater's skip(1) would miss it"
+          if ! tar -tzf "$tarball" | head -1 | grep -q '^Chrysalis\.app/'; then
+            echo "::error::$tarball does not start with Chrysalis.app/ — the updater's skip(1) would miss it"
             tar -tzf "$tarball" | head -10 || true
             exit 1
           fi
-          if ! tar -tzf "$tarball" | grep -q '^Locus\.app/Contents/MacOS/'; then
-            echo "::error::$tarball is missing Locus.app/Contents/MacOS/ — not a runnable bundle"
+          if ! tar -tzf "$tarball" | grep -q '^Chrysalis\.app/Contents/MacOS/'; then
+            echo "::error::$tarball is missing Chrysalis.app/Contents/MacOS/ — not a runnable bundle"
             exit 1
           fi
 
@@ -2246,11 +2246,11 @@ jobs:
           # signatures answer different questions.
           #
           # The key is written HERE rather than reused from the earlier signing
-          # step: that step deletes `$RUNNER_TEMP/locus.key` when it finishes, so
+          # step: that step deletes `$RUNNER_TEMP/chrysalis.key` when it finishes, so
           # by this point the file is gone. Depending on a file another step
           # cleans up is the kind of cross-step coupling that works until someone
           # reorders the steps.
-          KEY="$RUNNER_TEMP/locus-tarball.key"
+          KEY="$RUNNER_TEMP/chrysalis-tarball.key"
           printf '%s' "${LOCUS_UPDATE_KEY:-}" > "$KEY"
           chmod 600 "$KEY"
           if [ ! -s "$KEY" ]; then
@@ -2258,7 +2258,7 @@ jobs:
             exit 1
           fi
           "$RUNNER_TEMP/minisign/minisign" -S -s "$KEY" -m "$tarball" \
-            -x "$tarball.sig" -t "Locus ${{ matrix.label }} app bundle"
+            -x "$tarball.sig" -t "Chrysalis ${{ matrix.label }} app bundle"
           rm -f "$KEY"
 
           if [ ! -s "$tarball.sig" ]; then
@@ -2349,12 +2349,12 @@ jobs:
             echo "::error::LOCUS_UPDATE_KEY is not set. An unsigned installer cannot be installed by any client — see client/docs/SIGNING.md."
             exit 1
           fi
-          printf '%s' "$LOCUS_UPDATE_KEY" > "$RUNNER_TEMP/locus.key"
-          chmod 600 "$RUNNER_TEMP/locus.key"
+          printf '%s' "$LOCUS_UPDATE_KEY" > "$RUNNER_TEMP/chrysalis.key"
+          chmod 600 "$RUNNER_TEMP/chrysalis.key"
 
           # EXACTLY ONE NSIS setup, found by a glob.
           #
-          # The glob is `Locus_*_x64-setup.exe` — with NO `installer-` prefix —
+          # The glob is `Chrysalis_*_x64-setup.exe` — with NO `installer-` prefix —
           # because that is the name Tauri's bundler writes and the name "Stage
           # the platform installer" above copies into `installer/`. The prefix is
           # added LATER, by the `release` job's "Prefix and stage the installers"
@@ -2369,7 +2369,7 @@ jobs:
           # filename, so a rename applied to one but not the other would produce
           # a signature that verifies nothing.
           setup=""
-          for f in installer/Locus_*_x64-setup.exe; do
+          for f in installer/Chrysalis_*_x64-setup.exe; do
             [ -f "$f" ] || continue
             if [ -n "$setup" ]; then
               echo "::error::more than one NSIS installer staged: '$setup' and '$f'"
@@ -2378,21 +2378,21 @@ jobs:
             setup="$f"
           done
           if [ -z "$setup" ]; then
-            echo "::error::no Locus_*_x64-setup.exe to sign in installer/"
+            echo "::error::no Chrysalis_*_x64-setup.exe to sign in installer/"
             ls -la installer/ || true
             exit 1
           fi
 
           MS="$RUNNER_TEMP/minisign/minisign.exe"
-          KEY="$RUNNER_TEMP/locus.key"
+          KEY="$RUNNER_TEMP/chrysalis.key"
           # Windows paths for minisign's file arguments, a bash path to exec it —
           # the split documented in "Sign the artifact" above.
           "$MS" -S -s "$(cygpath -w "$KEY")" \
             -m "$(cygpath -w "$setup")" \
             -x "$(cygpath -w "${setup}.sig")" \
-            -t "Locus_windows-installer"
+            -t "Chrysalis_windows-installer"
 
-          rm -f "$RUNNER_TEMP/locus.key"
+          rm -f "$RUNNER_TEMP/chrysalis.key"
           echo "Signed ${setup}:"
           cat "${setup}.sig"
 
@@ -2405,7 +2405,7 @@ jobs:
       # arrives quarantined and refused, where the advice is to keep the bundle
       # and clear the flag. A `.zip` of a signed `.app` is the form macOS itself
       # treats as an app bundle in transit — extracting it with Finder or
-      # `ditto -x -k` restores a `Locus.app` that still carries the ad-hoc
+      # `ditto -x -k` restores a `Chrysalis.app` that still carries the ad-hoc
       # signature, and `ditto` preserves the bundle metadata and the symlinks
       # inside `Contents/Frameworks` that a naive `zip` would flatten.
       #
@@ -2423,7 +2423,7 @@ jobs:
       # updater payload. `fetch-release.py` resolves updater assets from an
       # allowlist and `manifest.json` names what a client installs from itself;
       # neither includes this file. The release job's collision guard rejects
-      # any installer whose name begins `locus-`, and this one deliberately does
+      # any installer whose name begins `chrysalis-`, and this one deliberately does
       # not — so it can never be mistaken for the thing the updater fetches.
       - name: Package the macOS app for download
         if: startsWith(matrix.label, 'macos')
@@ -2449,10 +2449,10 @@ jobs:
           mount="$work/mnt"
           mkdir -p "$mount"
           hdiutil attach "$dmg" -nobrowse -noverify -readonly -mountpoint "$mount"
-          app_src="$mount/Locus.app"
+          app_src="$mount/Chrysalis.app"
           if [ ! -d "$app_src" ]; then
             hdiutil detach "$mount" || true
-            echo "::error::no Locus.app inside $dmg"
+            echo "::error::no Chrysalis.app inside $dmg"
             exit 1
           fi
 
@@ -2468,9 +2468,9 @@ jobs:
           esac
 
           ver="$(node -p "require('./package.json').version")"
-          out="installer/Locus_${ver}_${arch}.zip"
+          out="installer/Chrysalis_${ver}_${arch}.zip"
 
-          # `--keepParent` so the archive contains `Locus.app/` rather than the
+          # `--keepParent` so the archive contains `Chrysalis.app/` rather than the
           # bundle's CONTENTS at the archive root. Without it, extracting gives
           # a loose `Contents/` directory and the result is not an app at all —
           # Finder shows a folder, and there is nothing to drag to Applications.
@@ -2491,12 +2491,12 @@ jobs:
           listing="$(unzip -l "$out")"
           printf '%s\n' "$listing" | head -20 | sed 's/^/    /'
           bad=0
-          printf '%s' "$listing" | grep -q 'Locus\.app/' || {
-            echo "::error::$out does not contain Locus.app/ — the bundle root is missing"
+          printf '%s' "$listing" | grep -q 'Chrysalis\.app/' || {
+            echo "::error::$out does not contain Chrysalis.app/ — the bundle root is missing"
             bad=1
           }
-          printf '%s' "$listing" | grep -q 'Locus\.app/Contents/MacOS/' || {
-            echo "::error::$out does not contain Locus.app/Contents/MacOS/ — the executable is missing"
+          printf '%s' "$listing" | grep -q 'Chrysalis\.app/Contents/MacOS/' || {
+            echo "::error::$out does not contain Chrysalis.app/Contents/MacOS/ — the executable is missing"
             bad=1
           }
           [ "$bad" -eq 0 ] || exit 1
@@ -2510,8 +2510,8 @@ jobs:
           extract="$work/extract"
           mkdir -p "$extract"
           ditto -x -k "$out" "$extract"
-          codesign --verify --deep --strict "$extract/Locus.app"
-          echo "Verified: $out extracts to a validly signed Locus.app"
+          codesign --verify --deep --strict "$extract/Chrysalis.app"
+          echo "Verified: $out extracts to a validly signed Chrysalis.app"
 
           ls -la installer/
       - uses: actions/upload-artifact@v4
@@ -2544,7 +2544,7 @@ jobs:
       # copied in under an `installer-` prefix.
       #
       # Two stages rather than downloading straight into `release/` because the
-      # installers carry their upstream filenames (e.g. `Locus_3.0.3_x64-setup.exe`)
+      # installers carry their upstream filenames (e.g. `Chrysalis_3.0.3_x64-setup.exe`)
       # and a rename step is the only place we can be certain none of them can
       # collide with an updater payload name. Collision is the one failure that
       # would matter: fetch-release.py would find an installer where it expected
@@ -2567,7 +2567,7 @@ jobs:
             # future naming change upstream cannot quietly publish an installer
             # under a name fetch-release.py resolves.
             case "$base" in
-              locus-*|manifest.json)
+              chrysalis-*|manifest.json)
                 echo "::error::installer artifact collides with an updater name: $base"
                 exit 1
                 ;;
@@ -2641,7 +2641,7 @@ jobs:
           #     It may have been moved, edited, or deleted.
           #     ERR_FILE_NOT_FOUND
           #
-          # in a Locus window — naming neither Locus nor Tauri, from a staging
+          # in a Chrysalis window — naming neither Chrysalis nor Tauri, from a staging
           # directory that is deleted moments later. Reinstalling changes nothing
           # (the install directory was never touched) and it recurs on every
           # release, because the client keeps accepting whatever is newest.
@@ -2752,13 +2752,13 @@ jobs:
               # installer" step above (minisign signs exact bytes, so the raw
               # binary's signature cannot stand in for the installer's).
               #
-              # `locus-*` covers the raw updater payloads; the `installer-` entry
-              # is the one non-`locus-` name that is genuinely an updater payload.
+              # `chrysalis-*` covers the raw updater payloads; the `installer-` entry
+              # is the one non-`chrysalis-` name that is genuinely an updater payload.
               sig_path = path + ".sig"
               entry = {"file": filename, "sha256": digest}
               if os.path.isfile(sig_path):
                   entry["signature"] = open(sig_path).read().strip()
-              elif filename.startswith("locus-") or key == "windows":
+              elif filename.startswith("chrysalis-") or key == "windows":
                   missing.append(filename + ".sig")
                   continue
               out["platforms"][key] = entry
@@ -2785,7 +2785,7 @@ jobs:
         run: |
           set -euo pipefail
           missing=0
-          for f in release/locus-*; do
+          for f in release/chrysalis-*; do
             case "$f" in
               *.sig) continue ;;
             esac
@@ -2796,7 +2796,7 @@ jobs:
           done
           # The Windows installer is an updater payload too (the hub serves it to
           # a client that executes it), so it must carry its own signature. This
-          # loop covers it explicitly: `release/locus-*` would never match a name
+          # loop covers it explicitly: `release/chrysalis-*` would never match a name
           # beginning `installer-`, so without this the one artifact that was
           # actually broken for three releases would be the one unchecked.
           for f in release/installer-Locus_*_x64-setup.exe; do
@@ -2814,12 +2814,12 @@ jobs:
         with:
           # Two kinds of asset, deliberately named apart.
           #
-          # `locus-*` are the UPDATER payloads: raw executables the in-app
+          # `chrysalis-*` are the UPDATER payloads: raw executables the in-app
           # updater downloads and replaces itself with. fetch-release.py resolves
           # exactly these names from an allowlist, so they must not be renamed.
           #
           # `installer-*` are the NSIS setup .exe, .dmg, .deb and .rpm a person
-          # downloads and runs to install Locus. They are the ones that register
+          # downloads and runs to install Chrysalis. They are the ones that register
           # the system service on Windows (see the `StartVergeService` macros in
           # packages/windows/installer.nsi), which is what makes TUN reachable
           # there.
@@ -2881,7 +2881,7 @@ jobs:
   #
   # The `release` job above is tag-gated, so a normal commit to `main` built the
   # installers and then threw them away as 90-day workflow artifacts. The only
-  # downloadable Locus was therefore a tagged release — and the person testing a
+  # downloadable Chrysalis was therefore a tagged release — and the person testing a
   # fix had nothing to install, so they ran the raw updater payload instead.
   #
   # That does not work, and the error it produces is misleading:
@@ -2889,7 +2889,7 @@ jobs:
   #   failed to run validation core "verge-mihomo" ... The system cannot find the
   #   file specified. (os error 2)
   #
-  # `locus-<platform>` is a bare executable staged from the compiler's output. It
+  # `chrysalis-<platform>` is a bare executable staged from the compiler's output. It
   # has no `verge-mihomo` sidecar beside it, because Tauri resolves sidecars
   # relative to the running executable and the raw payload ships alone. Worse, on
   # Windows it never runs the NSIS installer, so the system service is never
@@ -2899,7 +2899,7 @@ jobs:
   # deliberately a separate job from `release`, with a different asset set,
   # because the two must not be confused:
   #
-  #   * NO `manifest.json`, NO `locus-*` updater payloads, NO `.sig` files.
+  #   * NO `manifest.json`, NO `chrysalis-*` updater payloads, NO `.sig` files.
   #     Those are what `fetch-release.py` resolves, and publishing them from a
   #     branch would let an unreviewed build be pushed to the whole fleet —
   #     there is no rollout percentage and no server-driven downgrade, so a bad
@@ -2938,9 +2938,9 @@ jobs:
             base="$(basename "$f")"
             # Same guard as the release job: an installer must never end up under
             # a name that resolves as an updater payload. Nothing in this job
-            # publishes `locus-*`, so this is defence against a future edit.
+            # publishes `chrysalis-*`, so this is defence against a future edit.
             case "$base" in
-              locus-*|manifest.json)
+              chrysalis-*|manifest.json)
                 echo "::error::installer artifact collides with an updater name: $base"
                 exit 1
                 ;;

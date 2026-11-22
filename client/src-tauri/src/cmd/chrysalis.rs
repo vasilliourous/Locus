@@ -1,6 +1,6 @@
-//! Tauri commands for the Locus product surface.
+//! Tauri commands for the Chrysalis product surface.
 //!
-//! Every command is thin: it gathers inputs, calls into [`crate::locus`], and
+//! Every command is thin: it gathers inputs, calls into [`crate::chrysalis`], and
 //! returns a **typed** result. The typing is deliberate — the retired client
 //! returned strings, so the UI could not tell "code already used on another
 //! device" from "we could not reach the hub", and every distinct situation
@@ -8,15 +8,15 @@
 //! old laptop needs the former, not "activation failed".
 //!
 //! The commands are also the seam where persistence and the core meet. Nothing
-//! in `locus/` writes config or starts the core; this module owns that wiring so
+//! in `chrysalis/` writes config or starts the core; this module owns that wiring so
 //! the pure logic stays testable without an app handle.
 
 use super::CmdResult;
+use crate::chrysalis::{activation, apply, contract, store};
 use crate::config::Config;
 use crate::core::CoreManager;
 use crate::core::manager::CoreStartRefusal;
 use crate::core::manager::traffic_probe;
-use crate::locus::{activation, apply, contract, store};
 use crate::utils::dirs;
 use clash_verge_logging::{Type, logging};
 use serde::Serialize;
@@ -36,7 +36,7 @@ const CONNECT_READY_BUDGET: Duration = Duration::from_secs(30);
 /// How often the readiness loop re-checks while a connect is in flight.
 const CONNECT_READY_INTERVAL: Duration = Duration::from_millis(250);
 
-/// Set by [`locus_cancel_connect`] to abandon an in-flight connect.
+/// Set by [`chrysalis_cancel_connect`] to abandon an in-flight connect.
 ///
 /// A plain flag rather than a channel: there is exactly one connect at a time
 /// (the UI cannot double-fire it, and the loop below clears it), so the only
@@ -86,7 +86,7 @@ fn cancelled_outcome() -> ConnectionResult {
 /// student notices.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct LocusStatus {
+pub struct ChrysalisStatus {
     /// Whether this device has a code bound and accepted.
     pub activated: bool,
 
@@ -114,7 +114,7 @@ pub struct LocusStatus {
     /// `store::clear_entitlement` clears the flag on write, so this field means
     /// what it says. Do not branch on `suspended` alone: test `!activated` first.
     pub suspended: bool,
-    /// A code is stored but could not be a Locus code, so it was not used.
+    /// A code is stored but could not be a Chrysalis code, so it was not used.
     ///
     /// Reported so the Account screen can say *why* it is offering activation
     /// again. Without it, a damaged sign-in is indistinguishable from a fresh
@@ -141,7 +141,7 @@ pub struct LocusStatus {
     /// fact that a connect command once returned `Ok`.
     ///
     /// It exists because the UI could not answer that question and guessed
-    /// instead. `locus_status` carried only entitlement (`activated`), so after a
+    /// instead. `chrysalis_status` carried only entitlement (`activated`), so after a
     /// successful connect the connection screen's periodic status re-read found
     /// `activated == true` and concluded "not connected" — the traffic panel the
     /// student had just earned flashed on for one frame and vanished, and every
@@ -297,7 +297,7 @@ pub struct LocusStatus {
     /// added for exactly this reason). This field is that answer, classified, so
     /// the Account screen can say "this server is behind" instead of leaving both
     /// parties guessing. It reports; it never gates — see
-    /// [`crate::locus::contract::ENFORCEMENT_VERSION`].
+    /// [`crate::chrysalis::contract::ENFORCEMENT_VERSION`].
     pub hub_enforcement: HubEnforcement,
 }
 
@@ -333,7 +333,7 @@ pub enum HubEnforcement {
 const fn classify_hub_enforcement(recorded: Option<u32>) -> HubEnforcement {
     match recorded {
         None => HubEnforcement::Unreported,
-        Some(hub) if hub >= crate::locus::contract::ENFORCEMENT_VERSION => HubEnforcement::Current,
+        Some(hub) if hub >= crate::chrysalis::contract::ENFORCEMENT_VERSION => HubEnforcement::Current,
         Some(hub) => HubEnforcement::Stale { hub },
     }
 }
@@ -375,7 +375,7 @@ pub enum UdpStatus {
     /// paying tier looked like before UoT existed.
     None,
     /// Configured and handed to the core: `udp_relay` is on and the port is
-    /// non-zero, so the profile carries `Locus-UoT` and pins UDP to it.
+    /// non-zero, so the profile carries `Chrysalis-UoT` and pins UDP to it.
     ///
     /// **Configured is not the same as working.** It says the document is
     /// coherent, not that the listener is up or that the credentials match. The
@@ -389,7 +389,7 @@ pub enum UdpStatus {
 
 /// What the Connection screen should show about the free tier's allowance.
 ///
-/// Mirrors [`crate::locus::usage::AllowanceState`], plus the presentation fields
+/// Mirrors [`crate::chrysalis::usage::AllowanceState`], plus the presentation fields
 /// the bar needs, so the frontend does no arithmetic at all.
 #[derive(Debug, Clone, Serialize)]
 #[serde(tag = "state", rename_all = "camelCase", rename_all_fields = "camelCase")]
@@ -419,11 +419,11 @@ pub enum AllowanceStatus {
 /// client never caches the number itself, only its own usage.
 #[must_use]
 fn classify_allowance(
-    usage: &crate::locus::usage::Usage,
+    usage: &crate::chrysalis::usage::Usage,
     allowance_bytes: Option<u64>,
     now_ms: u64,
 ) -> AllowanceStatus {
-    use crate::locus::usage::AllowanceState;
+    use crate::chrysalis::usage::AllowanceState;
     match usage.classify(allowance_bytes, now_ms) {
         AllowanceState::Unlimited => AllowanceStatus::Unlimited,
         AllowanceState::Within {
@@ -510,7 +510,7 @@ pub enum SubscriptionStatus {
 /// Maps stored state to what the Account screen should say about the subscription.
 ///
 /// Split out of the command so the rules can be tested without an app handle —
-/// `locus_status` reads global config, and a test that needed that would be
+/// `chrysalis_status` reads global config, and a test that needed that would be
 /// testing the config layer instead of these decisions.
 ///
 /// The two rules that matter, and why each is a deliberate choice:
@@ -541,12 +541,12 @@ fn classify_subscription(
         return SubscriptionStatus::Unknown;
     }
 
-    match crate::locus::expiry::parse(raw_expiry) {
-        crate::locus::expiry::Expiry::Unknown => SubscriptionStatus::Unknown,
-        crate::locus::expiry::Expiry::Lapsed => SubscriptionStatus::Lapsed,
-        crate::locus::expiry::Expiry::InDays { days, .. } => SubscriptionStatus::Active {
+    match crate::chrysalis::expiry::parse(raw_expiry) {
+        crate::chrysalis::expiry::Expiry::Unknown => SubscriptionStatus::Unknown,
+        crate::chrysalis::expiry::Expiry::Lapsed => SubscriptionStatus::Lapsed,
+        crate::chrysalis::expiry::Expiry::InDays { days, .. } => SubscriptionStatus::Active {
             days_remaining: days,
-            urgent: days <= crate::locus::expiry::EXPIRY_WARNING_DAYS,
+            urgent: days <= crate::chrysalis::expiry::EXPIRY_WARNING_DAYS,
             // The hub's own string, so the tooltip can show the exact date
             // without the client re-deriving and possibly shifting it.
             expires_at: raw_expiry.unwrap_or_default().to_owned(),
@@ -559,7 +559,7 @@ fn classify_subscription(
 /// Never fails: a status query that can error forces the UI to invent a state,
 /// and the honest answer when we cannot read storage is "not activated".
 #[tauri::command]
-pub async fn locus_status() -> LocusStatus {
+pub async fn chrysalis_status() -> ChrysalisStatus {
     let verge = Config::verge().await;
     let verge_data = verge.latest_arc();
 
@@ -571,7 +571,7 @@ pub async fn locus_status() -> LocusStatus {
     // more, so there is nothing to correlate: this is now purely descriptive,
     // and the hardware fingerprint is the honest value for that. It changes when
     // the hardware changes, which is fine for a support screenshot.
-    let fingerprint = crate::locus::device::fingerprint();
+    let fingerprint = crate::chrysalis::device::fingerprint();
     let activation = store::read(&verge_data);
     // A code that is stored but is not a code. Teaches apart "this device was
     // never activated" from "this device's sign-in is damaged", which are the
@@ -580,8 +580,8 @@ pub async fn locus_status() -> LocusStatus {
 
     let subscription = classify_subscription(
         activation.is_some(),
-        verge_data.locus_expires_at.as_deref(),
-        verge_data.locus_refusal_reason.as_deref(),
+        verge_data.chrysalis_expires_at.as_deref(),
+        verge_data.chrysalis_refusal_reason.as_deref(),
     );
 
     // Observed, not assumed. The readiness latch answers "was a start
@@ -618,7 +618,7 @@ pub async fn locus_status() -> LocusStatus {
     // TUN-down is still OPPORTUNISTIC, not prompt: the idle poll is 15 s
     // (`use-connection.ts:84`), and nothing auto-reconnects, so the engine is
     // re-warmed within one poll of a drop rather than at the instant it happens.
-    crate::locus::activation_tunnel::supervise(readiness.is_ready()).await;
+    crate::chrysalis::activation_tunnel::supervise(readiness.is_ready()).await;
 
     // Read for the report, after readiness has been decided: `observe_readiness`
     // is what starts and feeds the stream, so reading it here means the field
@@ -627,16 +627,16 @@ pub async fn locus_status() -> LocusStatus {
 
     // The free tier's allowance. Read from the cached hub value and the stored
     // usage window, then classified by the one implementation of the rule
-    // (`locus::usage`). `now` comes from the system clock, which is the only
+    // (`chrysalis::usage`). `now` comes from the system clock, which is the only
     // place it enters the calculation — `usage` itself is pure and fake-clock
     // tested, so the rollover boundary is pinned without touching a real clock.
     let usage = store::usage().await;
     let allowance = classify_allowance(
         &usage,
         verge_data
-            .locus_allowance_mb
+            .chrysalis_allowance_mb
             .filter(|mb| *mb > 0)
-            .map(|mb| crate::locus::usage::sane_allowance_mb(mb) * crate::locus::usage::MIB),
+            .map(|mb| crate::chrysalis::usage::sane_allowance_mb(mb) * crate::chrysalis::usage::MIB),
         now_ms(),
     );
 
@@ -647,10 +647,10 @@ pub async fn locus_status() -> LocusStatus {
         store::tier_config(activation.as_ref().map_or("", |a| a.tier.as_str()))
             .await
             .as_ref(),
-        verge_data.locus_udp_relay.unwrap_or(false),
+        verge_data.chrysalis_udp_relay.unwrap_or(false),
     );
 
-    LocusStatus {
+    ChrysalisStatus {
         activated: activation.is_some(),
         // Read from the persisted flag, not derived from `activation`: a
         // suspension keeps the code, so `activated` is true in exactly the case
@@ -660,7 +660,7 @@ pub async fn locus_status() -> LocusStatus {
         // build that did not clear the flag on sign-out reports `false` here
         // rather than selecting a screen the student cannot leave.
         suspended: store::is_suspended(&verge_data),
-        hub_enforcement: classify_hub_enforcement(verge_data.locus_hub_enforcement),
+        hub_enforcement: classify_hub_enforcement(verge_data.chrysalis_hub_enforcement),
         stored_code_damaged,
         tier: activation.as_ref().map(|a| a.tier.clone()),
         device_id: store::redact(&fingerprint),
@@ -684,8 +684,8 @@ pub async fn locus_status() -> LocusStatus {
         //
         // `maintenance_tunnel_available()` keeps the half that matters: a build
         // without the key must never claim a route it cannot form.
-        bootstrapping: crate::locus::activation_tunnel::prefer_maintenance()
-            && crate::locus::activation_tunnel::maintenance_tunnel_available(),
+        bootstrapping: crate::chrysalis::activation_tunnel::prefer_maintenance()
+            && crate::chrysalis::activation_tunnel::maintenance_tunnel_available(),
         subscription,
         last_confirmed_at: verge_data.last_heartbeat_ok,
         traffic_flowing,
@@ -720,7 +720,7 @@ fn classify_connect_blocker(run: &crate::core::runstate::RunState) -> Option<Con
         // `VersionMismatch` is actionable and the migration dialog owns it, so it
         // is reported as unavailable rather than as a missing service.
         ServiceHealth::VersionMismatch => Some(ConnectBlocker::Unavailable {
-            reason: "the installed Locus service is a different version from this app".to_owned(),
+            reason: "the installed Chrysalis service is a different version from this app".to_owned(),
         }),
         // `Unknown` is "no read has settled". Reporting a blocker from an
         // unsettled read is the `unknown`-means-two-things defect this codebase
@@ -735,7 +735,7 @@ fn classify_connect_blocker(run: &crate::core::runstate::RunState) -> Option<Con
 ///
 /// One helper rather than a `SystemTime::now()` inline, so the elapsed-time cast
 /// (which can panic or truncate on an absurd clock) is handled in exactly one
-/// place. A clock before the epoch yields `0`, which [`crate::locus::usage`]
+/// place. A clock before the epoch yields `0`, which [`crate::chrysalis::usage`]
 /// reads as "start a window now" — the safe answer, since it grants a fresh
 /// allowance rather than expiring a student's on a broken clock.
 #[must_use]
@@ -763,7 +763,7 @@ const fn core_is_running(state: &crate::core::runstate::RunState) -> bool {
 /// would otherwise lock themselves out of the one screen that could explain the
 /// mistake.
 #[tauri::command]
-pub async fn locus_validate_code(code: String) -> ValidateCodeResult {
+pub async fn chrysalis_validate_code(code: String) -> ValidateCodeResult {
     match activation::validate_code(&code) {
         Ok(canonical) => ValidateCodeResult {
             valid: true,
@@ -795,23 +795,23 @@ pub struct ValidateCodeResult {
 /// error rather than as "your code is bad", because those are different
 /// situations and only one of them is the student's fault.
 #[tauri::command]
-pub async fn locus_check_code(code: String) -> CmdResult<activation::CodeCheck> {
+pub async fn chrysalis_check_code(code: String) -> CmdResult<activation::CodeCheck> {
     // The lookup is advisory. It carries a fingerprint only as a rate-limit and
     // logging key — the hub no longer compares it against anything, because a
     // code is not tied to a device.
-    let fingerprint = crate::locus::device::fingerprint();
+    let fingerprint = crate::chrysalis::device::fingerprint();
     activation::lookup_code(&code, &fingerprint)
         .await
-        .map_err(|error| super::coded_error("LOCUS_LOOKUP_FAILED", format!("{error:#}")))
+        .map_err(|error| super::coded_error("CHRYSALIS_LOOKUP_FAILED", format!("{error:#}")))
 }
 
-// `locus_recognise`, `resolve_identity`, `RecognitionResult` — REMOVED.
+// `chrysalis_recognise`, `resolve_identity`, `RecognitionResult` — REMOVED.
 //
 // These asked the hub whether it remembered this device so the code prompt
 // could be skipped. Device recognition is gone from both sides: the hub no
 // longer stores a device identity, and the client no longer presents one. A
 // reinstall keeps its access because the activation code itself is persisted to
-// a machine-scoped store — see `crate::locus::credential`.
+// a machine-scoped store — see `crate::chrysalis::credential`.
 /// Activates this device, persists the result, and configures the tunnel.
 ///
 /// The order matters and is the whole point of this function:
@@ -825,7 +825,7 @@ pub async fn locus_check_code(code: String) -> CmdResult<activation::CodeCheck> 
 ///
 /// A failure at any step leaves the previous state untouched.
 #[tauri::command]
-pub async fn locus_activate(code: String) -> CmdResult<ActivationResult> {
+pub async fn chrysalis_activate(code: String) -> CmdResult<ActivationResult> {
     // The hardware fingerprint is sent only as a rate-limit and support key. The
     // hub no longer binds a code to it — a code is single-use and not tied to a
     // device — so the value does not need to be stable, and a hardware hash is
@@ -834,13 +834,13 @@ pub async fn locus_activate(code: String) -> CmdResult<ActivationResult> {
     // This used to resolve the durable device identity here and send both an
     // `identity_wire` (verifier + id + store) and a binding fingerprint. All of
     // that is gone with device recognition; the code itself is the whole
-    // credential, and `crate::locus::credential` is what keeps it across
+    // credential, and `crate::chrysalis::credential` is what keeps it across
     // restarts and reinstalls.
-    let fingerprint = crate::locus::device::fingerprint();
+    let fingerprint = crate::chrysalis::device::fingerprint();
 
     let outcome = activation::activate(&code, &fingerprint)
         .await
-        .map_err(|error| super::coded_error("LOCUS_ACTIVATE_FAILED", format!("{error:#}")))?;
+        .map_err(|error| super::coded_error("CHRYSALIS_ACTIVATE_FAILED", format!("{error:#}")))?;
 
     match outcome {
         activation::ActivationOutcome::Activated {
@@ -860,7 +860,7 @@ pub async fn locus_activate(code: String) -> CmdResult<ActivationResult> {
                 fingerprint: fingerprint.clone(),
             })
             .await
-            .map_err(|error| super::coded_error("LOCUS_STORE_FAILED", format!("{error:#}")))?;
+            .map_err(|error| super::coded_error("CHRYSALIS_STORE_FAILED", format!("{error:#}")))?;
 
             // A previous refusal is now history: this device is entitled again.
             // Left in place it would keep telling a renewed student why their old
@@ -868,7 +868,11 @@ pub async fn locus_activate(code: String) -> CmdResult<ActivationResult> {
             // situation. Best-effort — a failure here must not fail an
             // activation that has already succeeded.
             if let Err(error) = store::clear_refusal().await {
-                logging!(warn, Type::Cmd, "[locus] could not clear a previous refusal: {error:#}");
+                logging!(
+                    warn,
+                    Type::Cmd,
+                    "[chrysalis] could not clear a previous refusal: {error:#}"
+                );
             }
 
             // This computer is signed in again, so the mirror may hold a code
@@ -877,7 +881,7 @@ pub async fn locus_activate(code: String) -> CmdResult<ActivationResult> {
             // here is the one event that means "signed in", and it must happen
             // BEFORE the code is stored below or the store would refuse to mirror
             // it and a reinstall would lose a freshly activated code.
-            crate::locus::credential::clear_signed_out();
+            crate::chrysalis::credential::clear_signed_out();
 
             // Record the expiry the hub just gave us, so the date is correct the
             // moment activation completes.
@@ -895,7 +899,7 @@ pub async fn locus_activate(code: String) -> CmdResult<ActivationResult> {
                 logging!(
                     warn,
                     Type::Cmd,
-                    "[locus] could not store the subscription expiry: {error:#}"
+                    "[chrysalis] could not store the subscription expiry: {error:#}"
                 );
             }
 
@@ -908,7 +912,7 @@ pub async fn locus_activate(code: String) -> CmdResult<ActivationResult> {
                 Some(tier_config) => {
                     store::store_tier_config(tier_config, udp_relay)
                         .await
-                        .map_err(|error| super::coded_error("LOCUS_STORE_FAILED", format!("{error:#}")))?;
+                        .map_err(|error| super::coded_error("CHRYSALIS_STORE_FAILED", format!("{error:#}")))?;
 
                     // Apply it now so the tunnel is ready to start. A failure
                     // here is reported in the result rather than failing the
@@ -928,16 +932,16 @@ pub async fn locus_activate(code: String) -> CmdResult<ActivationResult> {
                             logging!(
                                 info,
                                 Type::Cmd,
-                                "[locus] tier config stored; apply deferred ({reason}) — connect will apply it"
+                                "[chrysalis] tier config stored; apply deferred ({reason}) — connect will apply it"
                             );
                             true
                         }
                         Ok(apply::ApplyOutcome::Rejected { reason }) => {
-                            logging!(warn, Type::Cmd, "[locus] tier config rejected: {reason}");
+                            logging!(warn, Type::Cmd, "[chrysalis] tier config rejected: {reason}");
                             false
                         }
                         Err(error) => {
-                            logging!(warn, Type::Cmd, "[locus] could not apply tier: {error:#}");
+                            logging!(warn, Type::Cmd, "[chrysalis] could not apply tier: {error:#}");
                             false
                         }
                     }
@@ -953,7 +957,7 @@ pub async fn locus_activate(code: String) -> CmdResult<ActivationResult> {
             // freshly activated device is the one most likely to be used
             // immediately, and without this its entitlement would only start
             // refreshing on the next restart.
-            crate::locus::runtime::start(store::Activation {
+            crate::chrysalis::runtime::start(store::Activation {
                 code: code.clone(),
                 tier: tier.clone(),
                 fingerprint: fingerprint.clone(),
@@ -976,7 +980,10 @@ pub async fn locus_activate(code: String) -> CmdResult<ActivationResult> {
         // Every other outcome is a definitive answer about the code, not an
         // error in our code. Returning them as failures would make the UI show
         // "something went wrong" when the truth is "your code is expired".
-        other => Err(super::coded_error("LOCUS_ACTIVATION_REFUSED", describe_outcome(&other))),
+        other => Err(super::coded_error(
+            "CHRYSALIS_ACTIVATION_REFUSED",
+            describe_outcome(&other),
+        )),
     }
 }
 
@@ -996,7 +1003,7 @@ pub struct ActivationResult {
 
 /// Classifies this tier's UDP-over-TCP configuration from the stored payload.
 ///
-/// Split out from [`locus_status`] so every branch is testable without an app
+/// Split out from [`chrysalis_status`] so every branch is testable without an app
 /// handle, an engine or a network — which matters because the interesting cases
 /// are the ones a healthy machine never produces.
 ///
@@ -1009,7 +1016,7 @@ pub struct ActivationResult {
 ///
 /// * `udp_relay` off and no port — a TCP-only tier. UDP rides inside the proxy
 ///   (`udp: true`), which is correct and needs nothing.
-/// * `udp_relay` on and a port — the profile carries `Locus-UoT` and pins UDP to
+/// * `udp_relay` on and a port — the profile carries `Chrysalis-UoT` and pins UDP to
 ///   it. Coherent. Whether it *works* is an observation (`ready`,
 ///   `traffic_flowing`), never this.
 /// * Anything else — a half-configured tier, which is a hub-side data fault. The
@@ -1061,7 +1068,7 @@ fn describe_outcome(outcome: &activation::ActivationOutcome) -> String {
         O::Suspended => "This code has been suspended. Contact the person who sold it to you.".to_owned(),
         O::Expired => "This code has expired. You will need a new one.".to_owned(),
         O::NotFound => "That code was not recognised. Check it against the card — it is easy \
-             to mix up 0 and O, or 1 and I, which is why Locus codes leave them out."
+             to mix up 0 and O, or 1 and I, which is why Chrysalis codes leave them out."
             .to_owned(),
         // Written for a student, and it names the ACTION rather than the rule:
         // "one code per device" is a policy, but "ask whoever sold it to you and
@@ -1076,7 +1083,7 @@ fn describe_outcome(outcome: &activation::ActivationOutcome) -> String {
             .to_owned(),
         O::ServerError { message, .. } => {
             if message.is_empty() {
-                "The Locus hub could not complete the activation. Try again in a moment.".to_owned()
+                "The Chrysalis hub could not complete the activation. Try again in a moment.".to_owned()
             } else {
                 message.clone()
             }
@@ -1102,7 +1109,7 @@ fn describe_outcome(outcome: &activation::ActivationOutcome) -> String {
 ///
 /// TUN is still always-on, by product decision — the retired client was TUN-only,
 /// and a system-proxy mode would silently pass traffic the school network can
-/// see. Nothing here makes Locus connect without it.
+/// see. Nothing here makes Chrysalis connect without it.
 ///
 /// What changed is *when* we find out it is impossible. TUN needs privileges:
 /// mihomo running as an ordinary user fails with `configure tun interface:
@@ -1132,16 +1139,16 @@ fn describe_outcome(outcome: &activation::ActivationOutcome) -> String {
 /// "TUN" — the student does not know what TUN is, and naming our mechanism would
 /// describe the implementation instead of the obstacle.
 ///
-/// It used to say "Install the service from Settings", then "start Locus as an
+/// It used to say "Install the service from Settings", then "start Chrysalis as an
 /// administrator". Both named a route that only exists on some platforms: the
 /// Settings control is not rendered on macOS, and there is no "run as
 /// administrator" there at all. An absent Service is requested by startup on
 /// every platform, so the install prompt appears on its own and the student's
 /// job is to APPROVE it — that is the one route that exists everywhere, so it is
 /// the only one the sentence names.
-const TUN_UNAVAILABLE_MESSAGE: &str = "Locus needs permission to create the VPN tunnel, \
+const TUN_UNAVAILABLE_MESSAGE: &str = "Chrysalis needs permission to create the VPN tunnel, \
      and its helper service is not available on this device. Approve the permission prompt when \
-     Locus asks to install it, then try again.";
+     Chrysalis asks to install it, then try again.";
 
 /// Whether a connect attempt may proceed on the given run state.
 ///
@@ -1158,7 +1165,7 @@ const fn connect_allowed(state: &crate::core::runstate::RunState) -> bool {
 /// Names the next action (contact the seller) and does not blame the student.
 /// A date is appended by the caller when one is known — this is the part that is
 /// always true.
-const SUBSCRIPTION_LAPSED_MESSAGE: &str = "This Locus code has expired, so the VPN will not connect. Contact the person \
+const SUBSCRIPTION_LAPSED_MESSAGE: &str = "This Chrysalis code has expired, so the VPN will not connect. Contact the person \
      who sold you the code to renew it, then activate again.";
 
 /// Whether a stored expiry permits a new connection.
@@ -1172,15 +1179,15 @@ const SUBSCRIPTION_LAPSED_MESSAGE: &str = "This Locus code has expired, so the V
 ///
 /// This is the *new-connect* gate and it honours no grace period: a lapsed code
 /// cannot start a tunnel. The grace period governs a tunnel that is already up
-/// (see [`crate::locus::runtime`]), because dropping a student mid-session is a
+/// (see [`crate::chrysalis::runtime`]), because dropping a student mid-session is a
 /// different decision from letting them start one.
 #[must_use]
 fn subscription_allows_connect(raw_expiry: Option<&str>) -> bool {
-    !crate::locus::expiry::parse(raw_expiry).is_lapsed()
+    !crate::chrysalis::expiry::parse(raw_expiry).is_lapsed()
 }
 
 #[tauri::command]
-pub async fn locus_connect() -> CmdResult<ConnectionResult> {
+pub async fn chrysalis_connect() -> CmdResult<ConnectionResult> {
     let verge = Config::verge().await;
     let stored = store::read(&verge.latest_arc());
 
@@ -1190,7 +1197,7 @@ pub async fn locus_connect() -> CmdResult<ConnectionResult> {
     // This device used to take that code, fail the hub's check, and surface the
     // result as a connect that silently did nothing — with no sign-out reachable,
     // because sign-out also needs a code the local validator accepts. Reporting
-    // it as `LOCUS_NOT_ACTIVATED` would be worse in a different way: the student
+    // it as `CHRYSALIS_NOT_ACTIVATED` would be worse in a different way: the student
     // is told they never activated, which is false and sends them looking for a
     // code they do not remember buying. The sentence names what happened and the
     // one action that repairs it.
@@ -1198,18 +1205,18 @@ pub async fn locus_connect() -> CmdResult<ConnectionResult> {
         logging!(
             warn,
             Type::Cmd,
-            "[locus] refusing to connect: the stored activation code is not a valid Locus code"
+            "[chrysalis] refusing to connect: the stored activation code is not a valid Chrysalis code"
         );
         return Err(super::coded_error(
-            "LOCUS_STORED_CODE_DAMAGED",
+            "CHRYSALIS_STORED_CODE_DAMAGED",
             "The sign-in saved on this computer is damaged, so it cannot be used. Sign in again \
-             with your Locus code — your existing plan is not affected and you will not be charged \
+             with your Chrysalis code — your existing plan is not affected and you will not be charged \
              twice.",
         ));
     }
 
     let activation =
-        stored.ok_or_else(|| super::coded_error("LOCUS_NOT_ACTIVATED", "This device is not activated yet."))?;
+        stored.ok_or_else(|| super::coded_error("CHRYSALIS_NOT_ACTIVATED", "This device is not activated yet."))?;
 
     // Refuse a lapsed subscription BEFORE anything else, and before writing
     // anything.
@@ -1226,15 +1233,15 @@ pub async fn locus_connect() -> CmdResult<ConnectionResult> {
     // so it is the hub's own value and not a local guess. A code whose expiry
     // the hub never reported parses to `Unknown` and is allowed through.
     {
-        let expiry_raw = verge.latest_arc().locus_expires_at.clone();
+        let expiry_raw = verge.latest_arc().chrysalis_expires_at.clone();
         if !subscription_allows_connect(expiry_raw.as_deref()) {
             logging!(
                 warn,
                 Type::Cmd,
-                "[locus] refusing to connect: the stored subscription expiry has lapsed"
+                "[chrysalis] refusing to connect: the stored subscription expiry has lapsed"
             );
             return Err(super::coded_error(
-                "LOCUS_SUBSCRIPTION_LAPSED",
+                "CHRYSALIS_SUBSCRIPTION_LAPSED",
                 SUBSCRIPTION_LAPSED_MESSAGE,
             ));
         }
@@ -1266,10 +1273,13 @@ pub async fn locus_connect() -> CmdResult<ConnectionResult> {
         logging!(
             warn,
             Type::Cmd,
-            "[locus] refusing to connect: tun not available (elevated={admin}, service={health:?}). \
+            "[chrysalis] refusing to connect: tun not available (elevated={admin}, service={health:?}). \
              If the app was started with administrator rights, this line is evidence the probe is wrong, not the privilege."
         );
-        return Err(super::coded_error("LOCUS_TUN_NOT_AVAILABLE", TUN_UNAVAILABLE_MESSAGE));
+        return Err(super::coded_error(
+            "CHRYSALIS_TUN_NOT_AVAILABLE",
+            TUN_UNAVAILABLE_MESSAGE,
+        ));
     }
 
     // Turn TUN on BEFORE applying, so the generated config is built for TUN
@@ -1284,7 +1294,7 @@ pub async fn locus_connect() -> CmdResult<ConnectionResult> {
             .data_arc()
             .save_file()
             .await
-            .map_err(|error| super::coded_error("LOCUS_STORE_FAILED", format!("{error:#}")))?;
+            .map_err(|error| super::coded_error("CHRYSALIS_STORE_FAILED", format!("{error:#}")))?;
     }
 
     // Step 2 requires the tier config, which activation stored. Until the tier
@@ -1294,7 +1304,7 @@ pub async fn locus_connect() -> CmdResult<ConnectionResult> {
         Some(config) => config,
         None => {
             return Err(super::coded_error(
-                "LOCUS_NO_TIER_CONFIG",
+                "CHRYSALIS_NO_TIER_CONFIG",
                 format!(
                     "No connection details are stored for the {} tier yet. Re-open the app so activation can complete.",
                     activation.tier
@@ -1380,7 +1390,7 @@ pub async fn locus_connect() -> CmdResult<ConnectionResult> {
         }
 
         // A cancelled attempt must not leave a half-started engine behind: the
-        // stop is unconditional for the same reason `locus_disconnect` is.
+        // stop is unconditional for the same reason `chrysalis_disconnect` is.
         if take_cancellation() {
             let _ = CoreManager::global().stop_core().await;
             return Ok(ConnectionResult {
@@ -1451,7 +1461,7 @@ async fn apply_tier_waiting_for_the_guard(
         match apply::apply_tier(config, udp_relay).await {
             Ok(apply::ApplyOutcome::Rejected { reason }) => {
                 return Err(super::coded_error(
-                    "LOCUS_CONFIG_REJECTED",
+                    "CHRYSALIS_CONFIG_REJECTED",
                     format!("The tunnel configuration was refused: {reason}"),
                 ));
             }
@@ -1470,11 +1480,11 @@ async fn apply_tier_waiting_for_the_guard(
                     logging!(
                         warn,
                         Type::Cmd,
-                        "[locus] the config-update guard stayed held for {:?}; giving up: {reason}",
+                        "[chrysalis] the config-update guard stayed held for {:?}; giving up: {reason}",
                         started.elapsed()
                     );
                     return Err(super::coded_error(
-                        "LOCUS_CONFIG_BUSY",
+                        "CHRYSALIS_CONFIG_BUSY",
                         "Another configuration update is still running, so this connect could not \
                          apply yours. Try again in a moment.",
                     ));
@@ -1483,7 +1493,7 @@ async fn apply_tier_waiting_for_the_guard(
                     logging!(
                         info,
                         Type::Cmd,
-                        "[locus] another config update holds the guard; waiting for it ({reason})"
+                        "[chrysalis] another config update holds the guard; waiting for it ({reason})"
                     );
                     waiting_logged = true;
                 }
@@ -1499,7 +1509,7 @@ async fn apply_tier_waiting_for_the_guard(
             }
             Err(error) => {
                 return Err(super::coded_error(
-                    "LOCUS_CONFIG_FAILED",
+                    "CHRYSALIS_CONFIG_FAILED",
                     format!("Could not write the tunnel configuration: {error:#}"),
                 ));
             }
@@ -1512,7 +1522,7 @@ async fn apply_tier_waiting_for_the_guard(
     // The port-fallback variant, not the bare `start_core`: the mixed-port retry
     // used to live in the launch-time `CoreManager::init`, which this app no
     // longer calls because a launch-time start is an auto-connect. A student whose
-    // mixed port is taken would otherwise get a hard `LOCUS_CONNECT_FAILED` where
+    // mixed port is taken would otherwise get a hard `CHRYSALIS_CONNECT_FAILED` where
     // they used to get a silent fallback.
     loop {
         match CoreManager::global().start_core_with_port_fallback().await {
@@ -1537,7 +1547,7 @@ async fn apply_tier_waiting_for_the_guard(
                         logging!(
                             info,
                             Type::Cmd,
-                            "[locus] another start holds the guard; waiting for it rather than reporting a refusal"
+                            "[chrysalis] another start holds the guard; waiting for it rather than reporting a refusal"
                         );
                         waiting_logged = true;
                     }
@@ -1547,8 +1557,12 @@ async fn apply_tier_waiting_for_the_guard(
                     continue;
                 }
 
-                logging!(warn, Type::Cmd, "[locus] the engine could not be started: {message}");
-                return Err(super::coded_error("LOCUS_CONNECT_FAILED", message));
+                logging!(
+                    warn,
+                    Type::Cmd,
+                    "[chrysalis] the engine could not be started: {message}"
+                );
+                return Err(super::coded_error("CHRYSALIS_CONNECT_FAILED", message));
             }
         }
     }
@@ -1560,7 +1574,7 @@ async fn apply_tier_waiting_for_the_guard(
 /// cannot be abandoned is the retired client's forever-loading failure, where
 /// the only recovery was to kill the app.
 #[tauri::command]
-pub async fn locus_cancel_connect() -> CmdResult<()> {
+pub async fn chrysalis_cancel_connect() -> CmdResult<()> {
     CANCEL_CONNECT.store(true, Ordering::Release);
     Ok(())
 }
@@ -1577,11 +1591,11 @@ pub async fn locus_cancel_connect() -> CmdResult<()> {
 /// `stop_core` is a safe no-op when nothing is running, so there is nothing to
 /// save by checking first, and everything to lose.
 #[tauri::command]
-pub async fn locus_disconnect() -> CmdResult<ConnectionResult> {
+pub async fn chrysalis_disconnect() -> CmdResult<ConnectionResult> {
     CoreManager::global()
         .stop_core()
         .await
-        .map_err(|error| super::coded_error("LOCUS_DISCONNECT_FAILED", format!("{error:#}")))?;
+        .map_err(|error| super::coded_error("CHRYSALIS_DISCONNECT_FAILED", format!("{error:#}")))?;
 
     Ok(ConnectionResult {
         connected: false,
@@ -1637,10 +1651,10 @@ pub struct UpdateStatus {
 /// Never fails and never touches the network: this is read during window
 /// start-up, and a check that could block would delay the first paint.
 #[tauri::command]
-pub async fn locus_update_status() -> UpdateStatus {
+pub async fn chrysalis_update_status() -> UpdateStatus {
     let verge = Config::verge().await;
     let data = verge.latest_arc();
-    let no_offer_reason = data.locus_update_check_reason.clone();
+    let no_offer_reason = data.chrysalis_update_check_reason.clone();
     let current = env!("CARGO_PKG_VERSION");
 
     // ── An offer for the version we are already running is not an offer ──
@@ -1654,9 +1668,9 @@ pub async fn locus_update_status() -> UpdateStatus {
     // Compared here rather than trusted from the hub, because this is the one
     // place the running version is known: the hub cannot know whether the update
     // it advertised has already been applied.
-    let offered = match data.locus_update_offered.as_deref() {
+    let offered = match data.chrysalis_update_offered.as_deref() {
         Some(offered) if !offered.is_empty() => {
-            match crate::locus::update::rejection_reason(offered, current) {
+            match crate::chrysalis::update::rejection_reason(offered, current) {
                 // Anything not strictly newer than what is running is spent. The
                 // same gate the install path applies, so the prompt cannot offer
                 // something the installer would refuse.
@@ -1664,7 +1678,7 @@ pub async fn locus_update_status() -> UpdateStatus {
                     logging!(
                         debug,
                         Type::System,
-                        "[locus] a recorded update offer is no longer applicable: {reason}"
+                        "[chrysalis] a recorded update offer is no longer applicable: {reason}"
                     );
                     // Best-effort: the status command is read during start-up and
                     // must not fail over bookkeeping. Clearing it stops the prompt
@@ -1691,16 +1705,16 @@ pub async fn locus_update_status() -> UpdateStatus {
 
 /// Forgets an offered update the student has dismissed or already installed.
 #[tauri::command]
-pub async fn locus_dismiss_update() -> CmdResult<()> {
+pub async fn chrysalis_dismiss_update() -> CmdResult<()> {
     store::clear_update_offer()
         .await
-        .map_err(|error| super::coded_error("LOCUS_STORE_FAILED", format!("{error:#}")))
+        .map_err(|error| super::coded_error("CHRYSALIS_STORE_FAILED", format!("{error:#}")))
 }
 
 /// Downloads and installs the offered update, reporting progress as it goes.
 ///
 /// The download and the mandatory signature verification are the plugin's job —
-/// `locus::update::install` drives it, and deliberately does not re-implement the
+/// `chrysalis::update::install` drives it, and deliberately does not re-implement the
 /// swap. The retired client hand-rolled one and destroyed an installation
 /// (FIXES #22).
 ///
@@ -1709,7 +1723,7 @@ pub async fn locus_dismiss_update() -> CmdResult<()> {
 /// The plugin launches the NSIS installer and then exits the app, so a successful
 /// return may never happen. Callers must not treat a missing response as failure.
 #[tauri::command]
-pub async fn locus_install_update(app: tauri::AppHandle) -> CmdResult<()> {
+pub async fn chrysalis_install_update(app: tauri::AppHandle) -> CmdResult<()> {
     // Resolved, not the constant: the updater must reach the same hub the rest of
     // the app does. This matters most on a filtered network, where the compiled
     // default is unreachable AND the update that would fix it is served from it.
@@ -1723,10 +1737,10 @@ pub async fn locus_install_update(app: tauri::AppHandle) -> CmdResult<()> {
     logging!(
         info,
         Type::System,
-        "[locus] update install requested (running {current})"
+        "[chrysalis] update install requested (running {current})"
     );
 
-    let pending = crate::locus::update::install::PendingInstall::check(&app, &hub, current)
+    let pending = crate::chrysalis::update::install::PendingInstall::check(&app, &hub, current)
         .await
         .map_err(|error| {
             // The plugin has to be registered for `updater_builder()` to resolve.
@@ -1735,15 +1749,15 @@ pub async fn locus_install_update(app: tauri::AppHandle) -> CmdResult<()> {
             // a build that lost the registration says so, rather than presenting
             // as "updates are broken" again.
             let detail = format!("{error:#}");
-            logging!(error, Type::System, "[locus] update check failed: {detail}");
+            logging!(error, Type::System, "[chrysalis] update check failed: {detail}");
             if detail.contains("updater") && detail.contains("not") {
                 super::coded_error(
-                    "LOCUS_UPDATE_UNAVAILABLE",
-                    "The updater is not available in this build. Reinstall Locus from the \
+                    "CHRYSALIS_UPDATE_UNAVAILABLE",
+                    "The updater is not available in this build. Reinstall Chrysalis from the \
                      installer, or report this to support.",
                 )
             } else {
-                super::coded_error("LOCUS_UPDATE_CHECK_FAILED", detail)
+                super::coded_error("CHRYSALIS_UPDATE_CHECK_FAILED", detail)
             }
         })?;
 
@@ -1768,18 +1782,18 @@ pub async fn locus_install_update(app: tauri::AppHandle) -> CmdResult<()> {
         logging!(
             warn,
             Type::System,
-            "[locus] update install requested but nothing is newer than the running {current}; \
+            "[chrysalis] update install requested but nothing is newer than the running {current}; \
              clearing the stale offer"
         );
         if let Err(error) = store::clear_update_offer().await {
             logging!(
                 warn,
                 Type::System,
-                "[locus] could not clear the stale update offer: {error:#}"
+                "[chrysalis] could not clear the stale update offer: {error:#}"
             );
         }
         return Err(super::coded_error(
-            "LOCUS_UPDATE_NONE",
+            "CHRYSALIS_UPDATE_NONE",
             "This device is already up to date. The update prompt has been cleared.",
         ));
     };
@@ -1794,10 +1808,10 @@ pub async fn locus_install_update(app: tauri::AppHandle) -> CmdResult<()> {
         logging!(
             error,
             Type::System,
-            "[locus] the hub offered {installed_version} with no sha256; refusing to install"
+            "[chrysalis] the hub offered {installed_version} with no sha256; refusing to install"
         );
         return Err(super::coded_error(
-            "LOCUS_UPDATE_NO_CHECKSUM",
+            "CHRYSALIS_UPDATE_NO_CHECKSUM",
             "The update the hub offered carries no checksum, so it cannot be verified. \
              Report this to support.",
         ));
@@ -1805,16 +1819,16 @@ pub async fn locus_install_update(app: tauri::AppHandle) -> CmdResult<()> {
 
     let staging_dir = dirs::app_home_dir()
         .map(|root| root.join("update-staging"))
-        .map_err(|error| super::coded_error("LOCUS_PATHS_FAILED", format!("{error:#}")))?;
+        .map_err(|error| super::coded_error("CHRYSALIS_PATHS_FAILED", format!("{error:#}")))?;
 
     // A partial file from a previous attempt is dead weight and, on Windows,
     // something antivirus may still hold a handle on. Clear it before starting.
-    crate::locus::update::apply::prune_staging_dir(&staging_dir);
+    crate::chrysalis::update::apply::prune_staging_dir(&staging_dir);
 
     logging!(
         info,
         Type::System,
-        "[locus] downloading update {installed_version} to {}",
+        "[chrysalis] downloading update {installed_version} to {}",
         staging_dir.display()
     );
 
@@ -1840,7 +1854,7 @@ pub async fn locus_install_update(app: tauri::AppHandle) -> CmdResult<()> {
             last_percent = u64::MAX;
         }
         let _ = progress_app.emit(
-            "locus://update-progress",
+            "chrysalis://update-progress",
             UpdateProgress {
                 chunk_length: usize::try_from(received).unwrap_or(usize::MAX),
                 content_length: total,
@@ -1853,14 +1867,14 @@ pub async fn locus_install_update(app: tauri::AppHandle) -> CmdResult<()> {
         .await
         .map_err(|error| {
             let detail = format!("{error:#}");
-            logging!(error, Type::System, "[locus] update download failed: {detail}");
-            super::coded_error("LOCUS_UPDATE_DOWNLOAD_FAILED", detail)
+            logging!(error, Type::System, "[chrysalis] update download failed: {detail}");
+            super::coded_error("CHRYSALIS_UPDATE_DOWNLOAD_FAILED", detail)
         })?;
 
     logging!(
         info,
         Type::System,
-        "[locus] update {installed_version} downloaded and verified; running the installer"
+        "[chrysalis] update {installed_version} downloaded and verified; running the installer"
     );
 
     // Hand the verified bytes to the platform installer. On Windows this exits
@@ -1871,15 +1885,15 @@ pub async fn locus_install_update(app: tauri::AppHandle) -> CmdResult<()> {
         logging!(
             error,
             Type::System,
-            "[locus] the installer refused the update: {detail}"
+            "[chrysalis] the installer refused the update: {detail}"
         );
-        super::coded_error("LOCUS_UPDATE_INSTALL_FAILED", detail)
+        super::coded_error("CHRYSALIS_UPDATE_INSTALL_FAILED", detail)
     })?;
 
     logging!(
         info,
         Type::System,
-        "[locus] update to {installed_version} installed; a restart may be required"
+        "[chrysalis] update to {installed_version} installed; a restart may be required"
     );
 
     // The offer is spent. Clearing it stops the prompt reappearing for a version
@@ -1888,7 +1902,7 @@ pub async fn locus_install_update(app: tauri::AppHandle) -> CmdResult<()> {
     Ok(())
 }
 
-/// Progress of an in-flight update download, emitted as `locus://update-progress`.
+/// Progress of an in-flight update download, emitted as `chrysalis://update-progress`.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UpdateProgress {
@@ -1910,10 +1924,10 @@ pub struct UpdateProgress {
 /// Exposed so the diagnostics screen can report it without duplicating the path
 /// logic, and so a support conversation can ask for exactly one location.
 #[tauri::command]
-pub async fn locus_update_staging_dir() -> CmdResult<String> {
+pub async fn chrysalis_update_staging_dir() -> CmdResult<String> {
     let dir = dirs::app_home_dir()
         .map(|root| root.join("update-staging"))
-        .map_err(|error| super::coded_error("LOCUS_PATHS_FAILED", format!("{error:#}")))?;
+        .map_err(|error| super::coded_error("CHRYSALIS_PATHS_FAILED", format!("{error:#}")))?;
     Ok(dir.to_string_lossy().into_owned())
 }
 
@@ -1922,7 +1936,7 @@ pub async fn locus_update_staging_dir() -> CmdResult<String> {
 /// The UI shows this in diagnostics, and it is the first thing to check when
 /// activation fails on a school network.
 #[tauri::command]
-pub async fn locus_hub_url() -> String {
+pub async fn chrysalis_hub_url() -> String {
     // The URL actually in use, override included. The UI shows this for support,
     // so reporting the compiled default while dialling an override would send a
     // student to check an address the app is not using.
@@ -1957,8 +1971,8 @@ pub async fn locus_hub_url() -> String {
 /// The wait is bounded by the beat's own request timeout, so an unreachable hub
 /// delays the reply rather than hanging it.
 #[tauri::command]
-pub async fn locus_check_subscription() -> bool {
-    crate::locus::runtime::beat_now_and_wait().await
+pub async fn chrysalis_check_subscription() -> bool {
+    crate::chrysalis::runtime::beat_now_and_wait().await
 }
 
 /// What the hub did with a sign-out notification.
@@ -1967,10 +1981,10 @@ pub async fn locus_check_subscription() -> bool {
 /// because only one of them is silence. The seam is deliberate: `Released` says
 /// the key is free for the next device, `NothingToRelease` says there was nothing
 /// for the hub to release (which is still success), and `NotConfirmed` says the
-/// device is signed out but Locus was not told — so the key will still work
+/// device is signed out but Chrysalis was not told — so the key will still work
 /// elsewhere, because nothing was taken away.
 ///
-/// Defined here rather than in `locus::signout` because this is where the type
+/// Defined here rather than in `chrysalis::signout` because this is where the type
 /// crosses the IPC boundary, and `server/scripts/gen-ts-contract.py` reads the
 /// types in THIS file to generate the TypeScript mirror. A type defined elsewhere
 /// would serialise fine and be undocumented in TypeScript — the `uot_port` defect
@@ -2009,7 +2023,7 @@ pub struct SignOutResult {
 ///
 /// Forgets the key on this computer, and tells the hub so the operator can tell a
 /// device move apart from a shared key. The full sequence, and the reason for its
-/// order, is in [`crate::locus::signout`].
+/// order, is in [`crate::chrysalis::signout`].
 ///
 /// # Why a failure here is an error, but a hub failure is not
 ///
@@ -2020,24 +2034,24 @@ pub struct SignOutResult {
 /// (`hub: "notConfirmed"`) and the UI says the true thing: signed out here, and
 /// the key will still work on your next device. The frontend renders a different
 /// sentence for each of the three outcomes; they are documented on
-/// [`crate::locus::signout::HubOutcome`].
+/// [`crate::chrysalis::signout::HubOutcome`].
 #[tauri::command]
-pub async fn locus_sign_out() -> CmdResult<SignOutResult> {
-    crate::locus::signout::sign_out()
+pub async fn chrysalis_sign_out() -> CmdResult<SignOutResult> {
+    crate::chrysalis::signout::sign_out()
         .await
         .map(|result| SignOutResult {
             signed_out: result.signed_out,
             // Re-mapped rather than shared, because the IPC type is the contract
-            // and `locus::signout`'s enum is an implementation detail. A single
+            // and `chrysalis::signout`'s enum is an implementation detail. A single
             // mismatch here would show every student the wrong sentence, so the
             // mapping is exhaustive and total.
             hub: match result.hub {
-                crate::locus::signout::HubOutcome::Released => HubOutcome::Released,
-                crate::locus::signout::HubOutcome::NothingToRelease => HubOutcome::NothingToRelease,
-                crate::locus::signout::HubOutcome::NotConfirmed => HubOutcome::NotConfirmed,
+                crate::chrysalis::signout::HubOutcome::Released => HubOutcome::Released,
+                crate::chrysalis::signout::HubOutcome::NothingToRelease => HubOutcome::NothingToRelease,
+                crate::chrysalis::signout::HubOutcome::NotConfirmed => HubOutcome::NotConfirmed,
             },
         })
-        .map_err(|error| super::coded_error("LOCUS_SIGN_OUT_FAILED", format!("{error:#}")))
+        .map_err(|error| super::coded_error("CHRYSALIS_SIGN_OUT_FAILED", format!("{error:#}")))
 }
 
 #[cfg(test)]
@@ -2066,7 +2080,7 @@ mod tests {
     fn a_hub_that_never_answered_is_not_a_hub_that_is_behind() {
         assert_eq!(classify_hub_enforcement(None), HubEnforcement::Unreported);
 
-        let current = crate::locus::contract::ENFORCEMENT_VERSION;
+        let current = crate::chrysalis::contract::ENFORCEMENT_VERSION;
         assert_eq!(
             classify_hub_enforcement(Some(current)),
             HubEnforcement::Current,
@@ -2144,7 +2158,7 @@ mod tests {
     /// describes a document the core is not running.
     ///
     /// `TierConfig::uot_enabled` is the one decision `tier::build_profile` uses to
-    /// emit `Locus-UoT` and the UDP rule. `Configured` therefore has to mean
+    /// emit `Chrysalis-UoT` and the UDP rule. `Configured` therefore has to mean
     /// exactly "the builder emitted UoT", for both tier shapes.
     #[test]
     fn the_reported_udp_state_matches_the_document_that_is_built() {
@@ -2156,8 +2170,8 @@ mod tests {
                 method: "2022-blake3-aes-256-gcm".into(),
                 uot_port: port,
             };
-            let built = crate::locus::tier::build_profile(&config, relay);
-            let has_uot = built.yaml.contains(crate::locus::tier::UOT_PROXY_NAME);
+            let built = crate::chrysalis::tier::build_profile(&config, relay);
+            let has_uot = built.yaml.contains(crate::chrysalis::tier::UOT_PROXY_NAME);
             let reported = matches!(classify_udp(Some(&config), relay), UdpStatus::Configured { .. });
 
             assert_eq!(
@@ -2243,7 +2257,7 @@ mod tests {
     /// because a full one in a screenshot is a shareable one.
     #[test]
     fn status_reports_a_redacted_device_id() {
-        let full = crate::locus::device::fingerprint();
+        let full = crate::chrysalis::device::fingerprint();
         let redacted = store::redact(&full);
         assert_ne!(redacted, full, "the device id must not be the full fingerprint");
         assert_eq!(redacted.len(), 12);
@@ -2430,7 +2444,7 @@ mod tests {
     fn the_apply_cancel_exit_does_not_leak_into_the_next_connect() {
         CANCEL_CONNECT.store(true, Ordering::Release);
 
-        // The REAL branch body, not a copy of it: `locus_connect` calls exactly
+        // The REAL branch body, not a copy of it: `chrysalis_connect` calls exactly
         // this on `ApplyWait::Cancelled`. An earlier version of this test open-coded
         // the consume and therefore passed while the shipped branch leaked.
         let outcome = cancelled_outcome();
@@ -2468,7 +2482,7 @@ mod tests {
     ///
     /// It names the *permission prompt*, not an OS role. It used to say
     /// "administrator rights", which is a Windows and Linux concept: on macOS
-    /// there is no way to "run Locus as an administrator", so an instruction to
+    /// there is no way to "run Chrysalis as an administrator", so an instruction to
     /// do so is a dead end for a macOS student, and the wording varied by reader
     /// on a message that is identical everywhere.
     #[test]
@@ -2544,7 +2558,7 @@ mod tests {
     /// "no run of 3+", not "no double space".
     #[test]
     fn user_facing_messages_have_no_collapsed_whitespace() {
-        let source = include_str!("locus.rs");
+        let source = include_str!("chrysalis.rs");
         let mut offenders = Vec::new();
         for (index, line) in source.lines().enumerate() {
             // Only string literals that are messages, not code or docs.
@@ -2576,7 +2590,7 @@ mod tests {
 
     /// An unactivated device has an UNKNOWN subscription, never a lapsed one.
     ///
-    /// This is the fresh-install case. `locus_expires_at` is empty because no
+    /// This is the fresh-install case. `chrysalis_expires_at` is empty because no
     /// hub has ever spoken to this device; if that were classified as lapsed,
     /// the Account screen would tell a brand-new student their subscription had
     /// expired before they had activated anything.
@@ -2694,7 +2708,7 @@ mod tests {
                 urgent,
                 expires_at,
             } => {
-                assert!(days_remaining > crate::locus::expiry::EXPIRY_WARNING_DAYS);
+                assert!(days_remaining > crate::chrysalis::expiry::EXPIRY_WARNING_DAYS);
                 assert!(!urgent, "60 days out must not be urgent");
                 // The exact string the hub sent, so the tooltip can show it.
                 assert_eq!(expires_at, far_text);
@@ -2773,7 +2787,7 @@ mod tests {
     /// This pins the failure mode directly: serde's `rename_all` on an enum
     /// renames variants, NOT the fields inside struct variants, so without
     /// `rename_all_fields` the payload carried `days_remaining`/`expires_at`
-    /// while `src/services/locus.ts` reads `daysRemaining`/`expiresAt`. The row
+    /// while `src/services/chrysalis.ts` reads `daysRemaining`/`expiresAt`. The row
     /// then rendered "{{count}} days" with an empty count (or nothing), and the
     /// expiry was reported as simply not working — with the Rust tests all green,
     /// because none of them looked at the bytes.
@@ -2856,7 +2870,7 @@ mod tests {
     /// Collapsing them is how a paying student gets a free-tier banner.
     #[test]
     fn no_allowance_classifies_as_unlimited_not_metered() {
-        let usage = crate::locus::usage::Usage::default();
+        let usage = crate::chrysalis::usage::Usage::default();
         let value = serde_json::to_value(classify_allowance(&usage, None, 0)).expect("AllowanceStatus must serialize");
         assert_eq!(
             value.get("state").and_then(serde_json::Value::as_str),
@@ -2869,7 +2883,7 @@ mod tests {
     #[test]
     fn a_metered_allowance_carries_the_bar_fields() {
         let mb: u64 = 1024 * 1024;
-        let usage = crate::locus::usage::Usage {
+        let usage = crate::chrysalis::usage::Usage {
             used_bytes: 0,
             window_start_ms: 1,
             warned: false,
@@ -2894,7 +2908,7 @@ mod tests {
         let mb: u64 = 1024 * 1024;
         let allowance = 100 * mb;
         let at = |bytes: u64| {
-            let usage = crate::locus::usage::Usage {
+            let usage = crate::chrysalis::usage::Usage {
                 used_bytes: bytes,
                 window_start_ms: 1,
                 warned: false,
@@ -2914,7 +2928,7 @@ mod tests {
     }
 
     /// The three sign-out outcomes reach the frontend under the names
-    /// `services/locus.generated.ts` declares.
+    /// `services/chrysalis.generated.ts` declares.
     ///
     /// This is the `uot_port` class of defect, caught one layer in: the generated
     /// TypeScript used to LOWER-CASE each variant while serde camel-cased it, so

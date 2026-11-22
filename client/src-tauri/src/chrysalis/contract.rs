@@ -1,4 +1,4 @@
-//! The Locus wire contract: one definition of every name the hub and the client
+//! The Chrysalis wire contract: one definition of every name the hub and the client
 //! must agree on.
 //!
 //! # Why this module exists
@@ -25,7 +25,7 @@
 
 use serde::{Deserialize, Serialize};
 
-/// The Locus hub.
+/// The Chrysalis hub.
 ///
 /// Kept as a constant rather than a setting: the hub also owns the `server`
 /// field in every tier config, so a hub move is a server-side change plus this
@@ -94,7 +94,7 @@ pub const LEGACY_HUB_URL: &str = "https://networkingguides.duckdns.org";
 /// name, but its outbound is configured `server: <hub hostname>`
 /// ([`ss_hub`]), so the engine resolves the very name the network is blocking —
 /// and a resolver that answers nothing answers nothing for the fallback either.
-/// [`crate::locus::hub::Failure::Dns`] says so in as many words and is
+/// [`crate::chrysalis::hub::Failure::Dns`] says so in as many words and is
 /// deliberately not retryable over the tunnel. An address removes the lookup
 /// from the path.
 ///
@@ -116,13 +116,13 @@ pub const ACTIVATION_TUNNEL_ADDR: &str = "114.23.136.196";
 /// The address a release was actually built with.
 ///
 /// [`ACTIVATION_TUNNEL_ADDR`] is the checked-in default. `build.rs` forwards
-/// `LOCUS_ACTIVATION_TUNNEL_ADDR` as `LOCUS_ACTIVATION_TUNNEL_ADDR_OVERRIDE` when
+/// `CHRYSALIS_ACTIVATION_TUNNEL_ADDR` as `CHRYSALIS_ACTIVATION_TUNNEL_ADDR_OVERRIDE` when
 /// the release workflow sets it, so moving the hub is an operational input rather
-/// than a source edit — the same shape `LOCUS_ACTIVATION_TUNNEL_KEY` already uses.
+/// than a source edit — the same shape `CHRYSALIS_ACTIVATION_TUNNEL_KEY` already uses.
 /// An empty override is ignored by `build.rs`, so this can never be blank.
 #[must_use]
 pub const fn activation_tunnel_addr() -> &'static str {
-    match option_env!("LOCUS_ACTIVATION_TUNNEL_ADDR_OVERRIDE") {
+    match option_env!("CHRYSALIS_ACTIVATION_TUNNEL_ADDR_OVERRIDE") {
         Some(value) => value,
         None => ACTIVATION_TUNNEL_ADDR,
     }
@@ -196,7 +196,7 @@ pub fn resolve_hub_url(override_url: Option<&str>) -> String {
 /// override can take effect and exactly one place to change if it ever needs to.
 pub async fn hub_url() -> String {
     let verge = crate::config::Config::verge().await;
-    let stored = verge.latest_arc().locus_hub_override.clone();
+    let stored = verge.latest_arc().chrysalis_hub_override.clone();
     resolve_hub_url(stored.as_deref())
 }
 
@@ -281,7 +281,7 @@ pub struct HeartbeatRequest<'a> {
 // whether it remembers a device, because nothing on either side identifies a
 // device any more. A student's recovery path is the activation code, which the
 // client persists to a machine-scoped store precisely so a reinstall does not
-// lose it — see `crate::locus::credential`.
+// lose it — see `crate::chrysalis::credential`.
 
 /// The tier's connection parameters, as the hub emits them.
 ///
@@ -495,7 +495,7 @@ pub struct ReleaseAsset {
 /// hooks that actually run live on the box are deployed from `/root/server/`,
 /// not from this checkout. So "is the kick-out fix live?" cannot be answered by
 /// reading the tree — only by asking a hub. This constant is the question, and
-/// [`crate::cmd::locus::HubEnforcement`] is how the answer becomes visible.
+/// [`crate::cmd::chrysalis::HubEnforcement`] is how the answer becomes visible.
 ///
 /// The hub's numbering, quoted from the hook itself, so the two cannot drift
 /// silently (`tests/activation_contract.rs` pins them):
@@ -526,6 +526,13 @@ pub const PLATFORM_MACOS_ARM: &str = "macos_arm";
 /// while the *filename* says `darwin-*`. That is not an oversight: the hub's
 /// release fetcher resolves these exact names from the GitHub Release, so
 /// "tidying" one side to match the other breaks publishing for that platform.
+///
+/// **DEPRECATED ALIAS — the return values keep the `locus-` prefix on purpose.**
+/// The product is Chrysalis, but these four filenames are the names that CI
+/// publishes and the hub resolves out of the GitHub Release. Renaming them is an
+/// artifact migration: both names must be published for a release, and the hub
+/// must resolve both, before the `locus-*` set can be dropped. Nothing in this
+/// repository may rename one side alone. See docs/reference/NAME-MIGRATION.md.
 ///
 /// Returns `None` on an unsupported platform rather than guessing, so a caller
 /// cannot accidentally fetch another platform's binary.

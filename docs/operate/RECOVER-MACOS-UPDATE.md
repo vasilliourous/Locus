@@ -30,7 +30,7 @@ extracts a tar of an `.app` bundle. Full narrative in
 >
 > | # | What | Blocked on |
 > |---|---|---|
-> | 1 | A release carries `locus-darwin-<arch>.app.tar.gz` **and its `.sig`** | CI + `LOCUS_UPDATE_KEY` |
+> | 1 | A release carries `chrysalis-darwin-<arch>.app.tar.gz` **and its `.sig`** | CI + `LOCUS_UPDATE_KEY` |
 > | 2 | The **host's** `fetch-release.py` resolves the tarball | a deploy (`hooks-sync.sh --fetch-service`) |
 > | 3 | `update_config` is re-published | console → Fetch & publish |
 >
@@ -46,7 +46,7 @@ extracts a tar of an `.app` bundle. Full narrative in
 bare binary:
 
 ```console
-$ curl -s https://api.github.com/repos/vasilliourous/Locus/releases/tags/v3.2.26 \
+$ curl -s https://api.github.com/repos/vasilliourous/Chrysalis/releases/tags/v3.2.26 \
     | python3 -c "import json,sys; print([a['name'] for a in json.load(sys.stdin)['assets']])"
 … 'locus-darwin-arm64' …        # present
 …                               # NO locus-darwin-arm64.app.tar.gz
@@ -104,7 +104,7 @@ minisign signs exact bytes, so the bare binary's signature cannot stand in).
 cd client
 pnpm release-version X.Y.Z          # writes ALL FIVE version sites
 git add -A && git commit -m "chore(release): X.Y.Z"
-git tag -a vX.Y.Z -m "Locus client vX.Y.Z"
+git tag -a vX.Y.Z -m "Chrysalis client vX.Y.Z"
 git push origin main
 git push origin vX.Y.Z              # the tag triggers the build
 ```
@@ -118,15 +118,15 @@ git push origin vX.Y.Z              # the tag triggers the build
 attached:
 
 ```sh
-gh release view vX.Y.Z --repo vasilliourous/Locus --json assets \
+gh release view vX.Y.Z --repo vasilliourous/Chrysalis --json assets \
   -q '.assets[].name' | sort
 ```
 
 Required, and the tarball lines are the ones easy to be missing:
 
 ```text
-installer-Locus_X.Y.Z_x64-setup.exe
-installer-Locus_X.Y.Z_x64-setup.exe.sig
+installer-Chrysalis_X.Y.Z_x64-setup.exe
+installer-Chrysalis_X.Y.Z_x64-setup.exe.sig
 locus-darwin-amd64
 locus-darwin-amd64.sig
 locus-darwin-amd64.app.tar.gz        ← REQUIRED
@@ -145,7 +145,7 @@ manifest.json
 Also confirm CI's manifest names the tarballs:
 
 ```sh
-curl -sL https://github.com/vasilliourous/Locus/releases/download/vX.Y.Z/manifest.json \
+curl -sL https://github.com/vasilliourous/Chrysalis/releases/download/vX.Y.Z/manifest.json \
   | python3 -c "import json,sys; d=json.load(sys.stdin); print({k:v['file'] for k,v in d['platforms'].items()})"
 # -> {'macos_intel': 'locus-darwin-amd64.app.tar.gz', 'macos_arm': 'locus-darwin-arm64.app.tar.gz', …}
 ```
@@ -183,7 +183,7 @@ PB_ADMIN_EMAIL=… PB_ADMIN_PASS=… server/scripts/publish-release.sh X.Y.Z --f
 ```
 
 > The CLI defaults to the bare VPS hostname, which has **no SSH key** and hangs
-> at `install -d`. Always run it as `VPS=locus-hub server/scripts/publish-release.sh …`.
+> at `install -d`. Always run it as `VPS=chrysalis-hub server/scripts/publish-release.sh …`.
 
 The fetch now **refuses** rather than degrades: a release with no macOS tarball
 fails with a `FetchError` naming the platform and the file, and a stale deployed
@@ -199,7 +199,7 @@ curl -s "https://networkingguides.jadedns.uk/api/update?version=<prev>&platform=
 curl -s "https://networkingguides.jadedns.uk/api/update?version=<prev>&platform=macos_intel" | python3 -m json.tool
 ```
 
-Each must return `"url": "…/locus-darwin-<arch>.app.tar.gz"`.
+Each must return `"url": "…/chrysalis-darwin-<arch>.app.tar.gz"`.
 
 Then confirm the served bytes are a gzip, not a Mach-O:
 
@@ -247,7 +247,7 @@ reads exactly like a check that passed).
 ## History
 
 - **2026-10-04, v3.2.27** — the macOS packaging step landed: CI now builds and
-  signs `locus-darwin-<arch>.app.tar.gz`, and the hub's `PLATFORMS` was corrected
+  signs `chrysalis-darwin-<arch>.app.tar.gz`, and the hub's `PLATFORMS` was corrected
   to resolve it (`90dbd4f`). Before this, macOS auto-update had **never** worked:
   both sides named a bare Mach-O in the update slot.
 - **2026-10-05** — a `3.2.24` client offered `3.2.26` failed with *"not an

@@ -119,7 +119,7 @@ Because the value is materialised:
 |---|---|
 | The 410 expiry gates in `activation.pb.js` / `heartbeat.pb.js` | **No** |
 | `expiryForWire` → the client's `expires_at` | **No** — still an instant, or `null` |
-| `locus/expiry.rs` (parse, `is_lapsed`, `ExpiryState`) | **No** |
+| chrysalis/expiry.rs` (parse, `is_lapsed`, `ExpiryState`) | **No** |
 | The connect gate `subscription_allows_connect` | **No** |
 | The `rename_all_fields` wire-shape test | **No** |
 

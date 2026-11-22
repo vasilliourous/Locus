@@ -67,7 +67,7 @@ export const preloadAppData = async () => {
   const configPromise = preloadConfig()
   const initialLanguage = await preloadLanguage(undefined, () => configPromise)
   // The config is still preloaded: language lives in it. There is no theme mode
-  // to resolve -- Locus has one permanent appearance, so a stored `theme_mode` or
+  // to resolve -- Chrysalis has one permanent appearance, so a stored `theme_mode` or
   // `theme_id` is ignored rather than read.
   await Promise.all([configPromise, initializeLanguage(initialLanguage)])
 }

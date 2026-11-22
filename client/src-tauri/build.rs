@@ -29,7 +29,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // platform list. `TARGET` is set for every build target, including a
     // cross-compile, which is the case where a hard-coded name would be wrong.
     println!(
-        "cargo:rustc-env=LOCUS_BUILD_TARGET={}",
+        "cargo:rustc-env=CHRYSALIS_BUILD_TARGET={}",
         std::env::var("TARGET").unwrap_or_default()
     );
 
@@ -53,16 +53,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // binary that cannot reach the one transport built for a blocked network, with
     // nothing in the artifact saying so. `activation_tunnel.rs` therefore also
     // stamps the compiled-in state into the binary so support can read it back.
-    match std::env::var("LOCUS_ACTIVATION_TUNNEL_KEY") {
+    match std::env::var("CHRYSALIS_ACTIVATION_TUNNEL_KEY") {
         Ok(key) if !key.is_empty() => {
-            println!("cargo:rustc-env=LOCUS_ACTIVATION_TUNNEL_KEY={key}");
-            println!("cargo:rustc-env=LOCUS_ACTIVATION_TUNNEL_KEY_PRESENT=1");
+            println!("cargo:rustc-env=CHRYSALIS_ACTIVATION_TUNNEL_KEY={key}");
+            println!("cargo:rustc-env=CHRYSALIS_ACTIVATION_TUNNEL_KEY_PRESENT=1");
         }
         _ => {
-            println!("cargo:rustc-env=LOCUS_ACTIVATION_TUNNEL_KEY_PRESENT=0");
+            println!("cargo:rustc-env=CHRYSALIS_ACTIVATION_TUNNEL_KEY_PRESENT=0");
         }
     }
-    println!("cargo:rerun-if-env-changed=LOCUS_ACTIVATION_TUNNEL_KEY");
+    println!("cargo:rerun-if-env-changed=CHRYSALIS_ACTIVATION_TUNNEL_KEY");
 
     // ── The free tier's key, for the maintenance tunnel ──
     //
@@ -78,7 +78,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Same shape as the key above, for the same reason it is `option_env!` in the
     // source rather than `env!`: a build without it must still produce a working
     // client that simply has no maintenance tunnel, never a broken build.
-    match std::env::var("LOCUS_FREE_TIER_KEY") {
+    match std::env::var("CHRYSALIS_FREE_TIER_KEY") {
         Ok(key) if !key.is_empty() => {
             // The `_PRESENT` companion, added 2026-11-19. This key used to lack
             // one, on the reasoning that a missing key was "visible where it
@@ -95,14 +95,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             // Same shape as above, for the same reason: `build_stamp()` renders it
             // and the startup line becomes the one fact that separates "this build
             // cannot" from "this network will not".
-            println!("cargo:rustc-env=LOCUS_FREE_TIER_KEY={key}");
-            println!("cargo:rustc-env=LOCUS_FREE_TIER_KEY_PRESENT=1");
+            println!("cargo:rustc-env=CHRYSALIS_FREE_TIER_KEY={key}");
+            println!("cargo:rustc-env=CHRYSALIS_FREE_TIER_KEY_PRESENT=1");
         }
         _ => {
-            println!("cargo:rustc-env=LOCUS_FREE_TIER_KEY_PRESENT=0");
+            println!("cargo:rustc-env=CHRYSALIS_FREE_TIER_KEY_PRESENT=0");
         }
     }
-    println!("cargo:rerun-if-env-changed=LOCUS_FREE_TIER_KEY");
+    println!("cargo:rerun-if-env-changed=CHRYSALIS_FREE_TIER_KEY");
 
     // ── The bootstrap ADDRESS ──
     //
@@ -117,12 +117,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // is ignored rather than allowed to blank the compiled default: an empty
     // address would silently reduce the fallback to name-only, which is the
     // failure this candidate exists to fix.
-    if let Ok(addr) = std::env::var("LOCUS_ACTIVATION_TUNNEL_ADDR")
+    if let Ok(addr) = std::env::var("CHRYSALIS_ACTIVATION_TUNNEL_ADDR")
         && !addr.trim().is_empty()
     {
-        println!("cargo:rustc-env=LOCUS_ACTIVATION_TUNNEL_ADDR_OVERRIDE={}", addr.trim());
+        println!(
+            "cargo:rustc-env=CHRYSALIS_ACTIVATION_TUNNEL_ADDR_OVERRIDE={}",
+            addr.trim()
+        );
     }
-    println!("cargo:rerun-if-env-changed=LOCUS_ACTIVATION_TUNNEL_ADDR");
+    println!("cargo:rerun-if-env-changed=CHRYSALIS_ACTIVATION_TUNNEL_ADDR");
 
     if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows")
         && std::env::var("CARGO_CFG_TARGET_ENV").as_deref() == Ok("msvc")
@@ -172,11 +175,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 ///
 /// On Windows this is the whole reason the file is more than one line: the app
 /// binary declares `requireAdministrator`, so Windows shows the UAC prompt
-/// **when the app is launched**, before any Locus code runs.
+/// **when the app is launched**, before any Chrysalis code runs.
 ///
 /// # Why the app asks for elevation up front
 ///
-/// Locus creates a TUN device, which requires administrator rights on Windows
+/// Chrysalis creates a TUN device, which requires administrator rights on Windows
 /// (`configure tun interface: operation not permitted` without them). The
 /// inherited Clash Verge design avoided running the GUI elevated by installing a
 /// privileged *service* and talking to it over IPC — but that means the honest

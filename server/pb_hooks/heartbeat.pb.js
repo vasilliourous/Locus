@@ -1,4 +1,4 @@
-// Locus Heartbeat Hook — PocketBase 0.22 compatible
+// Chrysalis Heartbeat Hook — PocketBase 0.22 compatible
 // Changed from GET to POST to avoid leaking activation codes in server access logs.
 // Code and fingerprint are sent in the JSON body, not URL query parameters.
 routerAdd("POST", "/api/heartbeat", function(e) {
@@ -253,7 +253,7 @@ routerAdd("POST", "/api/heartbeat", function(e) {
             //
             // The client validates it (absolute https, no path) and falls back to
             // its compiled default on anything else — see
-            // `locus::contract::resolve_hub_url`. The hub is offering a suggestion,
+            // `chrysalis::contract::resolve_hub_url`. The hub is offering a suggestion,
             // not commanding a change it could not check.
             if (cfgRec && cfgRec.get("config")) {
                 try {

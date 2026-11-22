@@ -27,7 +27,7 @@ describe('gateScreen', () => {
 
   test('a signed-out device gets the activation gate, even with the suspension flag set', () => {
     // THE REPORTED TRAP. Signing out of a suspended device removed its code and
-    // left `locus_suspended` set, and the kick-out screen — which offers no
+    // left `chrysalis_suspended` set, and the kick-out screen — which offers no
     // controls, by design, because its remedy is a conversation — was rendered for
     // a device that held nothing. The only way out was wiping the app's data.
     //

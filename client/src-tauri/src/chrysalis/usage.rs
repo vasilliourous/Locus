@@ -47,7 +47,7 @@ pub const WINDOW_MS: u64 = 30 * 24 * 60 * 60 * 1000;
 pub const WARN_FRACTION: f64 = 0.8;
 
 /// The persisted shape of a free user's usage, stored alongside the rest of the
-/// product state in `verge.yaml` (see [`crate::locus::store`]).
+/// product state in `verge.yaml` (see [`crate::chrysalis::store`]).
 ///
 /// Every field is `default`ed so a config written before the free tier existed
 /// deserialises cleanly into a fresh, unused window.

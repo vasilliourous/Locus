@@ -262,13 +262,13 @@ requires every one of them:
 
 | Asset | Notes |
 |---|---|
-| `locus-linux-amd64` | raw executables, for the auto-updater |
+| `locus-linux-amd64` — a DEPRECATED ALIAS, see [`../reference/NAME-MIGRATION.md`](../reference/NAME-MIGRATION.md) | raw executables, for the auto-updater |
 | `locus-windows-amd64.exe` | the raw PE, for the **retired portable client** only — no longer what a Windows client updates from |
 | `locus-darwin-amd64` | the *filename* says darwin while the *platform key* says `macos_intel` — a frozen asymmetry, not an oversight |
 | `locus-darwin-arm64` | |
 | **`.sig` for each of the four** | minisign signatures; without them no client can install the update |
-| `installer-Locus_<v>_x64-setup.exe` | the Windows NSIS installer — **this is what a Windows client installs from itself** |
-| `installer-Locus_<v>_x64-setup.exe.sig` | its own minisign signature; minisign signs exact bytes, so the raw binary's cannot substitute |
+| `installer-Chrysalis_<v>_x64-setup.exe` | the Windows NSIS installer — **this is what a Windows client installs from itself** |
+| `installer-Chrysalis_<v>_x64-setup.exe.sig` | its own minisign signature; minisign signs exact bytes, so the raw binary's cannot substitute |
 | `manifest.json` | version + per-platform filename, SHA-256 and signature |
 
 > **Windows updates from the installer, not the raw binary.** A Windows client does
@@ -298,11 +298,11 @@ its first push; the exact command is in `client/docs/SIGNING.md` §4a.
 **The raw binaries are staged by hand.** `createUpdaterArtifacts` is `false`, so
 `tauri build` emits the *installed* forms (NSIS, `.app`) but not the bare
 executables the updater consumes. The workflow copies the compiled binary
-(`target/<triple>/release/locus[.exe]`) under the name the hub expects.
+(`target/<triple>/release/chrysalis[.exe]`) under the name the hub expects.
 
 **Why a partial release is impossible:** `manifest.json` generation fails if any
 binary or signature is missing, and a second check verifies every
-`locus-*` artifact has a `.sig` before the release is created.
+`chrysalis-*` artifact has a `.sig` before the release is created.
 
 ### The same profile, or two full compiles — and a cache key that was never reusable
 
@@ -335,7 +335,7 @@ match this build. A cache that is restored but never reused is worse than no
 cache: it spends the download and buys nothing.
 
 The workflow now sets `add-job-id-key: false` with an explicit
-`shared-key: locus-${{ matrix.triple }}`. It stays per-triple because
+`shared-key: chrysalis-${{ matrix.triple }}`. It stays per-triple because
 `macos-intel` and `macos-arm` are independent compiles and would evict each other.
 
 **Measured effect.** The first run after the change is cold — a new key has
@@ -369,14 +369,14 @@ both made a green run mean less than it appeared to:
   that prove *a working config is accepted* and the one that proves *a working
   tunnel reads as connected* could all be "verified" by not running.
 - **The knob that would have failed instead was never turned.** The suites honour
-  `LOCUS_REQUIRE_LIVE_ENGINE`, and no workflow set it.
+  `CHRYSALIS_REQUIRE_LIVE_ENGINE`, and no workflow set it.
 
 Both are now closed in the Linux `build` job, which sets:
 
 | Variable | Effect | Why here |
 |---|---|---|
-| `LOCUS_REQUIRE_LIVE_ENGINE=1` | every skip becomes a failure | `sing-box` is installed by the step above and `prebuild` has fetched the sidecar, so nothing in the engine suites is allowed to be absent |
-| `LOCUS_REQUIRE_EGRESS=1` | "this runner has no network" becomes a failure for the one public-round-trip case | the same job demonstrably has egress — it fetched the registry and the build inputs one step earlier |
+| `CHRYSALIS_REQUIRE_LIVE_ENGINE=1` | every skip becomes a failure | `sing-box` is installed by the step above and `prebuild` has fetched the sidecar, so nothing in the engine suites is allowed to be absent |
+| `CHRYSALIS_REQUIRE_EGRESS=1` | "this runner has no network" becomes a failure for the one public-round-trip case | the same job demonstrably has egress — it fetched the registry and the build inputs one step earlier |
 
 **The two requirements are not the same, and conflating them wasted the suite.**
 Engine availability is a fact about the *run* (`prebuild` either ran or the job is
@@ -456,7 +456,7 @@ deployed peer:** `install_singbox` returns early when a binary already exists at
 is a fact about a deploy, not about this workflow.
 
 > **The positive-egress case retries a second host before failing.** Setting
-> `LOCUS_REQUIRE_EGRESS` immediately produced `504 Timeout` against
+> `CHRYSALIS_REQUIRE_EGRESS` immediately produced `504 Timeout` against
 > `cp.cloudflare.com` from the gate — because that is a *convenience* endpoint, not
 > something a release should depend on. The case now tries `gstatic.com` too and
 > names both on failure. One third party's availability was never the assertion.
@@ -486,16 +486,16 @@ needs to point at its own checkout — **ships inside the artifact**:
 ```jsonc
 // the Shape that shipped v3.2.12 broken
 {"build":{"beforeBuildCommand":"","frontendDist":"${{ github.workspace }}/client/dist"}}
-// On the Windows runner github.workspace is D:\a\Locus\Locus, so the binary
+// On the Windows runner github.workspace is D:\a\Chrysalis\Chrysalis, so the binary
 // carries D:/a/Locus/Locus/client/dist as the directory it expects its web
 // assets in.
 ```
 
 On a student's machine that directory does not exist. Tauri resolves the start
 page against a missing root, WebView2 renders Chromium's own page — **Edge logo,
-`File not found`, `ERR_FILE_NOT_FOUND`** — inside a window still titled Locus. The
+`File not found`, `ERR_FILE_NOT_FOUND`** — inside a window still titled Chrysalis. The
 window is `.visible(false)` until page-load *Finished*, which never arrives, so the
-app never appears at all, and nothing in the message names Locus, Tauri, or CI.
+app never appears at all, and nothing in the message names Chrysalis, Tauri, or CI.
 Because the bad value is in the **executable**, a restart changes nothing and a
 reinstall changes nothing (it installs the same binary). Reported 2026-09-30 on a
 **fresh install pulled from the release page** with a clean `verge.yaml`
@@ -545,12 +545,12 @@ hub expects exactly this shape:
 
 | Asset | Consumer | Notes |
 |---|---|---|
-| `installer-*` (`Locus_<v>_x64-setup.exe`, `.dmg`, `.deb`, `.rpm`) | **humans** | The supported way to install Locus. Windows NSIS also registers the system service (`StartVergeService`), and the app binary itself declares `requireAdministrator` (see `src-tauri/build.rs`), so it prompts for UAC at launch and does not depend on the service to reach TUN. |
-| `installer-Locus_<v>_<arch>.zip` | **humans (macOS)** | The compressed, **ad-hoc-signed** `Locus.app` for each architecture. Exists for the one case the `.dmg` cannot serve: a download that arrives quarantined and refused. A zip does **not** avoid quarantine — a browser fetching it stamps the archive and the extracted `.app` inherits the flag — but it delivers a bundle that survives transport intact, so macOS reports the bypassable "unidentified developer" dialog (System Settings → Privacy & Security → **Open Anyway**) instead of *"damaged and can't be opened"*, which has no such button. **Not an updater payload**: the hub fetches it as a human download, and CI's manifest and the hub's `PLATFORMS` both refuse a `.zip` in an update slot (`check-consistency.sh` §1c). |
-| raw `locus-<os>-<arch>[.exe]` | **auto-updater + hub** | Must be raw; the updater cannot unpack a zip. **NOT a human download** — it ships alone, so `sidecar("verge-mihomo")` cannot resolve and validation fails with `os error 2`. |
+| `installer-*` (`Chrysalis_<v>_x64-setup.exe`, `.dmg`, `.deb`, `.rpm`) | **humans** | The supported way to install Chrysalis. Windows NSIS also registers the system service (`StartVergeService`), and the app binary itself declares `requireAdministrator` (see `src-tauri/build.rs`), so it prompts for UAC at launch and does not depend on the service to reach TUN. |
+| `installer-Chrysalis_<v>_<arch>.zip` | **humans (macOS)** | The compressed, **ad-hoc-signed** `Chrysalis.app` for each architecture. Exists for the one case the `.dmg` cannot serve: a download that arrives quarantined and refused. A zip does **not** avoid quarantine — a browser fetching it stamps the archive and the extracted `.app` inherits the flag — but it delivers a bundle that survives transport intact, so macOS reports the bypassable "unidentified developer" dialog (System Settings → Privacy & Security → **Open Anyway**) instead of *"damaged and can't be opened"*, which has no such button. **Not an updater payload**: the hub fetches it as a human download, and CI's manifest and the hub's `PLATFORMS` both refuse a `.zip` in an update slot (`check-consistency.sh` §1c). |
+| raw `chrysalis-<os>-<arch>[.exe]` | **auto-updater + hub** | Must be raw; the updater cannot unpack a zip. **NOT a human download** — it ships alone, so `sidecar("verge-mihomo")` cannot resolve and validation fails with `os error 2`. |
 | `manifest.json` | updater + hub | Version + per-platform filename + SHA256 |
 
-**Never hand a person the raw `locus-*` file.** It is an updater payload that
+**Never hand a person the raw `chrysalis-*` file.** It is an updater payload that
 happens to live on the same release. Running it produces
 `failed to run validation core "verge-mihomo" ... (os error 2)` because Tauri
 resolves sidecars relative to the executable's own directory and the payload ships

@@ -1,9 +1,9 @@
-// Locus Device Release Hook — PocketBase 0.22 compatible
+// Chrysalis Device Release Hook — PocketBase 0.22 compatible
 //
 // POST /api/release-entitlement
 //
 // A student signs out on a device. The client forgets the code locally (see
-// client/src-tauri/src/locus/signout.rs) and tells the hub here, so the
+// client/src-tauri/src/chrysalis/signout.rs) and tells the hub here, so the
 // operator can tell "this student moved to a new computer" apart from "this key
 // is being shared". From the console those two look identical otherwise.
 //

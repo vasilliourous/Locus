@@ -51,7 +51,7 @@ Concretely, this means:
 
 **The client's fingerprint can still change across a reinstall**, because it
 still falls back to a value persisted only in the client's own config
-(`locus/device.rs`).
+(chrysalis/device.rs`).
 
 **Consequence, now that the binding rule is enforced:** a reinstalling student
 is refused with a 409 and **needs an operator**. Before this work they would

@@ -4,15 +4,15 @@
 audience:    human-operator
 status:      live
 authoritative-for: the anti-drift guard — what is absent, and must not be described as working
-verified-against: server/pb_hooks/, client/src-tauri/src/locus/
+verified-against: server/pb_hooks/, client/src-tauri/src/chrysalis/
 ```
 
 Claims that appeared in the legacy business documents or have been floated in
 planning, and which **do not exist in the current code**.
 
 Verified by grep: `referred_by`, `referral`, `warp`, `trial`, `free_week`
-across `server/`, `scripts/`, and `client/src-tauri/src/locus/` return
-nothing; `"protocol"`, `v2ray`, `trojan` in the hooks and Locus modules
+across `server/`, `scripts/`, and `client/src-tauri/src/chrysalis/` return
+nothing; `"protocol"`, `v2ray`, `trojan` in the hooks and Chrysalis modules
 return nothing.
 
 > **This file is updated *with* a change, never after it.** The term model,
@@ -55,7 +55,7 @@ The honest summary: the *enforcement* works end to end; the *purchase* does not.
 | The 8443 cap at 1 Mbps | **BUILT** — `04-tc.sh`, both the applied class and the reboot unit, held in agreement by `check-consistency.sh` §23. |
 | The `free` tier row | **BUILT** — seeded as the free plan's only row. |
 | The allowance, sent by the hub | **BUILT** — `free_allowance_mb` / `free_throttle_mbps` on the heartbeat, gated to the free/eco tiers. |
-| Client-side counting of the 10 GB allowance | **BUILT** — `client/src-tauri/src/locus/usage.rs`, pure and fake-clock tested. The window, the rollover and the 80% line are one implementation. The *number* is the hub's (`free_allowance_mb`), so the 5→10 GB change needed no client release. |
+| Client-side counting of the 10 GB allowance | **BUILT** — `client/src-tauri/src/chrysalis/usage.rs`, pure and fake-clock tested. The window, the rollover and the 80% line are one implementation. The *number* is the hub's (`free_allowance_mb`), so the 5→10 GB change needed no client release. |
 | The usage bar | **BUILT** — `components/connection/usage-bar.tsx`, wired into the connection screen. Renders nothing for a paying tier. |
 | The 80% warning and the throttle banner | **BUILT** — as the bar's colour and its summary line. |
 | **The upgrade route beside the throttle state** | **BUILT (3.2.26)** — the throttle line is followed by a sentence naming the action (contact the middleman about Full). There is no self-serve checkout to link to; a code is a physical card ([`08-distribution.md`](08-distribution.md)). |

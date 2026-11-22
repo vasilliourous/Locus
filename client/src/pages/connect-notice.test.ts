@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest'
 
-import type { SubscriptionStatus } from '@/services/locus'
+import type { SubscriptionStatus } from '@/services/chrysalis'
 
 import {
   activationRefusal,

@@ -1,4 +1,4 @@
-# Locus Server — Secrets and transient files
+# Chrysalis Server — Secrets and transient files
 
 # Plain-text secrets file (NEVER commit — encrypt before committing).
 # The ENCRYPTED form, secrets.env.age, IS committed on purpose: it is encrypted
@@ -15,7 +15,7 @@
 # `./name` pattern matched nothing and `git add -A` staged a live credential
 # (caught 2026-10-02, vpspassword.txt).
 #
-# Covers the documented env-var convention (LOCUS_SECRETS_PASSPHRASE put in a
+# Covers the documented env-var convention (CHRYSALIS_SECRETS_PASSPHRASE put in a
 # file for an agent or a script to read) and the obvious ad-hoc names.
 encryption-password*
 secrets-passphrase*

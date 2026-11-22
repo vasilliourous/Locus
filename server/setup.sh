@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# Locus Modular VPS Setup — Orchestrator
+# Chrysalis Modular VPS Setup — Orchestrator
 # Usage:
 #   1. scp -r server root@your-vps:/root/server/          (no key file — see below)
-#   2. ssh root@your-vps "LOCUS_SECRETS_PASSPHRASE_FILE=/root/pw /root/server/setup.sh"
+#   2. ssh root@your-vps "CHRYSALIS_SECRETS_PASSPHRASE_FILE=/root/pw /root/server/setup.sh"
 #
 # Secrets are auto-decrypted from secrets.env.age using a PASSPHRASE.
 # See docs/operate/SECRETS-MANAGEMENT.md for setup instructions.
@@ -32,8 +32,8 @@ fail() { echo -e "${RED}[FAIL]${NC} $*" | tee -a "$LOGFILE"; exit 1; }
 # ciphertext is committed. Nothing in this script reads a key file any more.
 #
 # Passphrase sources (in order of precedence):
-#   1. LOCUS_SECRETS_PASSPHRASE       — the passphrase itself
-#   2. LOCUS_SECRETS_PASSPHRASE_FILE  — a file containing it
+#   1. CHRYSALIS_SECRETS_PASSPHRASE       — the passphrase itself
+#   2. CHRYSALIS_SECRETS_PASSPHRASE_FILE  — a file containing it
 # If neither is set, the deploy FAILS. There is no prompt: this script runs
 # non-interactively over ssh and in CI, where a prompt would hang forever.
 #
@@ -61,14 +61,26 @@ if [ -f "$SECRETS_FILE" ]; then
     SECRETS_TMP="/tmp/.secrets-$$.env"
 
     # Resolve the passphrase SOURCE without ever echoing the value.
-    if [ -n "${LOCUS_SECRETS_PASSPHRASE:-}" ]; then
+    if [ -n "${CHRYSALIS_SECRETS_PASSPHRASE:-}" ]; then
+        PASSPHRASE_FEED="${CHRYSALIS_SECRETS_PASSPHRASE}"
+        PASSPHRASE_SRC="CHRYSALIS_SECRETS_PASSPHRASE"
+    elif [ -n "${CHRYSALIS_SECRETS_PASSPHRASE_FILE:-}" ]; then
+        [ -f "${CHRYSALIS_SECRETS_PASSPHRASE_FILE}" ] || \
+            fail "CHRYSALIS_SECRETS_PASSPHRASE_FILE is not a file: ${CHRYSALIS_SECRETS_PASSPHRASE_FILE}"
+        PASSPHRASE_FEED="$(cat "${CHRYSALIS_SECRETS_PASSPHRASE_FILE}")"
+        PASSPHRASE_SRC="CHRYSALIS_SECRETS_PASSPHRASE_FILE"
+
+    # DEPRECATED ALIAS: the pre-rename names are still accepted, because a host
+    # that has not been re-provisioned passes them and a mid-upgrade deploy must
+    # not fail on a variable name. See docs/reference/NAME-MIGRATION.md.
+    elif [ -n "${LOCUS_SECRETS_PASSPHRASE:-}" ]; then
         PASSPHRASE_FEED="${LOCUS_SECRETS_PASSPHRASE}"
-        PASSPHRASE_SRC="LOCUS_SECRETS_PASSPHRASE"
+        PASSPHRASE_SRC="LOCUS_SECRETS_PASSPHRASE (deprecated alias)"
     elif [ -n "${LOCUS_SECRETS_PASSPHRASE_FILE:-}" ]; then
         [ -f "${LOCUS_SECRETS_PASSPHRASE_FILE}" ] || \
             fail "LOCUS_SECRETS_PASSPHRASE_FILE is not a file: ${LOCUS_SECRETS_PASSPHRASE_FILE}"
         PASSPHRASE_FEED="$(cat "${LOCUS_SECRETS_PASSPHRASE_FILE}")"
-        PASSPHRASE_SRC="LOCUS_SECRETS_PASSPHRASE_FILE"
+        PASSPHRASE_SRC="LOCUS_SECRETS_PASSPHRASE_FILE (deprecated alias)"
     else
         cat >&2 << 'KEYERR'
 
@@ -76,8 +88,8 @@ if [ -f "$SECRETS_FILE" ]; then
 ║  FATAL: secrets.env.age found but no passphrase available.  ║
 ║                                                            ║
 ║  Provide it in one of these ways:                          ║
-║    1. Set LOCUS_SECRETS_PASSPHRASE=<passphrase>            ║
-║    2. Set LOCUS_SECRETS_PASSPHRASE_FILE=<path>             ║
+║    1. Set CHRYSALIS_SECRETS_PASSPHRASE=<passphrase>            ║
+║    2. Set CHRYSALIS_SECRETS_PASSPHRASE_FILE=<path>             ║
 ║                                                            ║
 ║  There is deliberately NO prompt: this script runs          ║
 ║  non-interactively, where a prompt would hang.              ║
@@ -273,7 +285,7 @@ run_module() {
 # ── Show header ──
 cat << EOF
 ╔═══════════════════════════════════════════╗
-║     Locus VPS — Modular Setup             ║
+║     Chrysalis VPS — Modular Setup             ║
 ║     Domain: ${DOMAIN}                      ║
 ╚═══════════════════════════════════════════╝
 EOF
@@ -338,7 +350,7 @@ fi
 
 # ── Resolve ADMIN_API_TOKEN BEFORE the modules run ──
 #
-# This MUST happen before the module loop, not after it. `locus-fetch.service`
+# This MUST happen before the module loop, not after it. `chrysalis-fetch.service`
 # (installed and started by module 05) reads ADMIN_API_TOKEN from
 # /etc/environment via EnvironmentFile= and REFUSES TO START without it. The
 # token used to be written after the loop, so on a FIRST deploy the file did
@@ -599,7 +611,7 @@ generate_first_batch
 # ── Write the single admin credentials file ──
 # Runs LAST, after every secret exists (tier passwords from module 02,
 # PB admin creds from module 06, /etc/environment from the block above,
-# the fetch link secret from locus-fetch's first run). Doing it here rather
+# the fetch link secret from chrysalis-fetch's first run). Doing it here rather
 # than inside a module guarantees nothing is missing yet.
 #
 # Written unconditionally -- including on a re-run -- so the file can never
@@ -635,7 +647,7 @@ log "   Admin console:  https://${DOMAIN}/admin/"
 log "     Sign in with the admin token: $(cat ${ADMIN_API_TOKEN_FILE} 2>/dev/null || echo '(see the file)')"
 log "     Or bookmark:  https://${DOMAIN}/admin/?token=<token>"
 log ""
-log "   ALL credentials: /root/locus-credentials.txt  (chmod 600)"
+log "   ALL credentials: /root/chrysalis-credentials.txt  (chmod 600)"
 log "     Tier passwords, PB admin, admin token, B2, fetch secret — all in one"
 log "     file, with where each value came from. Paste the tier passwords"
 log "     straight into a Clash Verge Rev config."

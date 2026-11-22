@@ -1,4 +1,4 @@
-# Locus — Terms, Renewal and Device Binding: Implementation Reference
+# Chrysalis — Terms, Renewal and Device Binding: Implementation Reference
 
 ```
 audience:    builder

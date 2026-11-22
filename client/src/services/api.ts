@@ -13,7 +13,7 @@ const getUserAgentPromise = once(async () => {
     return `${name}/${version}`
   } catch (error) {
     console.debug('Failed to build User-Agent, fallback to default', error)
-    return 'locus-client'
+    return 'chrysalis-client'
   }
 })
 // Get current IP and geolocation information （refactored IP detection with service-specific mappings）

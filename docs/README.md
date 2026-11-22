@@ -1,4 +1,4 @@
-# Locus documentation index
+# Chrysalis documentation index
 
 ```
 audience:    all
@@ -44,7 +44,7 @@ bulk-delete `codes` or `code_events`; revoke with Suspend, move with Unbind.*
 
 | Document | `status` | What it is |
 |---|---|---|
-| [`../README.md`](../README.md) | live | **The front door.** What Locus is, the layout, and where to go next. |
+| [`../README.md`](../README.md) | live | **The front door.** What Chrysalis is, the layout, and where to go next. |
 | [`../AGENTS.md`](../AGENTS.md) | live | **Agents read this first.** Repo map, the fact rules, and the release procedure (bump → commit → tag). |
 | [`STATE.md`](STATE.md) | live | **Where a fact goes.** The two claim classes and the ownership map — one canonical home per topic. Not a fact table. |
 | [`state.toml`](state.toml) | data | The derived facts (version, domain, console path, platform list) as **data**, each with a `source` and `provenance`. Guard-enforced by §9. |
@@ -77,13 +77,14 @@ bulk-delete `codes` or `code_events`; revoke with Suspend, move with Unbind.*
 | Document | `status` | What it is |
 |---|---|---|
 | [`reference/API.md`](reference/API.md) | live | HTTP API reference for the hub (activation, heartbeat, code lookup, releases). |
+| [`reference/NAME-MIGRATION.md`](reference/NAME-MIGRATION.md) | live | **Which names are Chrysalis and which are still `locus`, with what retires each one.** Read before "fixing" a `locus` you found by grepping — many are load-bearing aliases. §53 guards the list. |
 | [`reference/CONTRACT.md`](reference/CONTRACT.md) | live | **The frozen wire contract** — every field, endpoint, platform key and proxy name an installed client depends on, held as data in `contract.lock.json`. Read before renaming anything on the wire. |
 | [`reference/contract.lock.json`](reference/contract.lock.json) | live | The machine-readable half of the above. Generated; enforced by `check-consistency.sh` §37. |
 | [`../server/data/sidecar.lock.json`](../server/data/sidecar.lock.json) | live | **The pinned build inputs** — sha256 of the mihomo engine, the service bundle and the four geo databases, plus the engine versions. Enforced by §39 and by `prebuild.mjs` at download time. Read before bumping an engine. |
 | [`reference/DEVICE-IDENTITY.md`](reference/DEVICE-IDENTITY.md) | live | **How a student keeps their entitlement** across an update, an uninstall or a reset, and why device identity was removed. Read before touching the activation gate. |
 | [`reference/ACTIVATION-TUNNEL.md`](reference/ACTIVATION-TUNNEL.md) | live | **When a censored network blocks enrolment** — the measured traces, why no existing override can rescue a new device, and the pre-activation Shadowsocks listener that carries the three enrolment endpoints. Read before changing the activation transport, the allowlist or the activation rate limit. |
 | [`reference/MAINTENANCE-TUNNEL.md`](reference/MAINTENANCE-TUNNEL.md) | live | **The free-tier route used when the hub cannot be reached by name** — what it carries, the "no HTTP status" switch rule, the lifecycle, and why the plan dials an address instead of chaining. Read before changing the switch, the lifecycle or `tier.rs::dial_server`. |
-| [`reference/TUNNEL-SUPERVISOR.md`](reference/TUNNEL-SUPERVISOR.md) | live | **When the maintenance tunnel may be stopped** — the four states, why an instantaneous `Ready` sample caused the engine to flap across TUN-up, and the hold that replaced it. Read before touching the lifecycle in `cmd/locus.rs` or the hold constants. |
+| [`reference/TUNNEL-SUPERVISOR.md`](reference/TUNNEL-SUPERVISOR.md) | live | **When the maintenance tunnel may be stopped** — the four states, why an instantaneous `Ready` sample caused the engine to flap across TUN-up, and the hold that replaced it. Read before touching the lifecycle in `cmd/chrysalis.rs` or the hold constants. |
 | [`reference/SUSPENSION.md`](reference/SUSPENSION.md) | live | **The four entitlement states and the invariant between them** — why a suspension can only be true of a device that still holds its code, why a suspended device keeps beating, and the deployment fact that decides whether the hub enforces any of it. Read before touching `handle_refusal`, `clear_entitlement`, `sign_out` or the gate. |
 | [`reference/DEBUGGING-METHOD.md`](reference/DEBUGGING-METHOD.md) | live | **How to diagnose a defect here** — the reproduce→locate→prove→fix→guard order, two-sided contracts, and checks that cannot fail. Read before fixing anything that "should work". |
 | [`reference/EGRESS-READINESS.md`](reference/EGRESS-READINESS.md) | live | **Why the button says "connecting"** — the readiness chain from probe to rendered phase, and how to localise a stall. Read before touching `probe.rs`. |
@@ -161,9 +162,9 @@ that the client keeps in a machine store —
 | [`client/docs/SIGNING.md`](../client/docs/SIGNING.md) | live | Key custody, rotation, and the release signing pipeline. |
 | [`client/docs/IDENTITY-MIGRATION.md`](../client/docs/IDENTITY-MIGRATION.md) | live | The app-id migration and what must NOT be renamed. |
 | [`client/docs/CONTRIBUTING_i18n.md`](../client/docs/CONTRIBUTING_i18n.md) | live | Adding or changing a translated string. |
-| [`client/docs/LOGIC-INVENTORY.md`](../client/docs/LOGIC-INVENTORY.md) | design-record | The module map — what each `locus/` module owns. Partly a to-do: where it and the code disagree, the code wins. |
+| [`client/docs/LOGIC-INVENTORY.md`](../client/docs/LOGIC-INVENTORY.md) | design-record | The module map — what each `chrysalis/` module owns. Partly a to-do: where it and the code disagree, the code wins. |
 | [`client/docs/UPDATE-ARCHITECTURE.md`](../client/docs/UPDATE-ARCHITECTURE.md) | design-record | Why the updater is hub-mediated, and how it differs from Tauri's. Implemented, with two documented corrections. |
-| [`client/docs/ARCHITECTURE.md`](../client/docs/ARCHITECTURE.md) | design-record | The pre-port rework plan: what to cut from upstream, where Locus logic goes, and the old client's bugs not to re-earn. |
+| [`client/docs/ARCHITECTURE.md`](../client/docs/ARCHITECTURE.md) | design-record | The pre-port rework plan: what to cut from upstream, where Chrysalis logic goes, and the old client's bugs not to re-earn. |
 | [`client/docs/RESTRUCTURE.md`](../client/docs/RESTRUCTURE.md) | design-record | The repo layout after the 2026-09 separation, and the paths that do not exist. |
 
 ## Archived and historical

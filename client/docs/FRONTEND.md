@@ -8,7 +8,7 @@ verified-against: client/src/pages/, client/src/components/
 ```
 
 > The front-end was replaced in the 3.1.0 rework: the inherited Clash Verge
-> screens were deleted and Locus's own two-tab application was built in their
+> screens were deleted and Chrysalis's own two-tab application was built in their
 > place. This file describes what those surfaces **are**, so the next change does
 > not have to rediscover the rules from the code.
 >
@@ -67,7 +67,7 @@ three times over — on write (`store::clear_entitlement`), on read
 Four rules live here and each was a real bug:
 
 - **Everything that can change the answer asks again, immediately.** The hook
-  re-reads on the backend's `locus://entitlement-changed` event, on the local
+  re-reads on the backend's `chrysalis://entitlement-changed` event, on the local
   `entitlement-refresh` signal, and on window focus, `pageshow`, `online` and
   `visibilitychange`. The interval (`SUBSCRIPTION_POLL_MS`) survives as a **floor**,
   not as the mechanism: it is what keeps "event-driven" from meaning
@@ -85,19 +85,19 @@ Four rules live here and each was a real bug:
   left it covering the activation screen permanently — a blank window over a
   working app.
 - **The kick-out screen takes the status it renders.** `SuspendedScreen` used to
-  issue its own `locusStatus()`, making it a third independent reader of a fact the
+  issue its own `chrysalisStatus()`, making it a third independent reader of a fact the
   gate and the sidebar also read — and the one that disagreed was the one on
   screen. It is now a pure render of the gate's read.
 
 ### The gate reads the status, and nothing mutates it out of band
 
 `useEntitlement()` owns the read. There are two signals that say "the account
-changed" — `locus://entitlement-changed` from the backend and
+changed" — `chrysalis://entitlement-changed` from the backend and
 `services/entitlement-refresh.ts` from the renderer — and the guidance for a new
 surface is to read the status from the hook, never to fetch it again:
 
 - **A backend change** (a suspension on a background beat, a reinstatement, a
-  sign-out) emits `locus://entitlement-changed`. The payload is a label for logs;
+  sign-out) emits `chrysalis://entitlement-changed`. The payload is a label for logs;
   the authoritative state is always the re-read, so a missed event delays the
   screen rather than making it lie.
 - **A student action** (sign-out) calls `requestEntitlementRefresh()` from the
@@ -105,7 +105,7 @@ surface is to read the status from the hook, never to fetch it again:
   gate leaves the app immediately instead of after a poll.
 
 There used to be a second writer: a **device-recognition** check
-(`locus_recognise()`) that asked the hub whether it already knew the device, and
+(`chrysalis_recognise()`) that asked the hub whether it already knew the device, and
 STORED the entitlement as a side effect. Because `activated` is not what that
 command returns, the successful case had to bump an `entitlementRestored` counter
 to make the status effect re-read — otherwise a returning student sat on the code
@@ -160,7 +160,7 @@ while connecting) and `toggle()`. Two rules there matter:
 - **`connecting` is reachable two ways** — a connect the student started, and a
   half-dialled core found on app open. A press means "cancel" in the first case
   and "take the half-formed tunnel down" in the second; `connectInFlightRef`
-  distinguishes them, because `locusCancelConnect` only raises a flag for a
+  distinguishes them, because `chrysalisCancelConnect` only raises a flag for a
   running command to notice.
 
 ---
@@ -249,22 +249,22 @@ it is a module rather than a prop is in that file. The five-minute cadence is
 right for a fact the *hub* changes; it is wrong for one this device just changed.
 
 The Rust half, and why its step order is load-bearing twice over, is
-[`../../client/src-tauri/src/locus/signout.rs`](../src-tauri/src/locus/signout.rs);
+[`../../client/src-tauri/src/chrysalis/signout.rs`](../src-tauri/src/chrysalis/signout.rs);
 the hub half is [`../../docs/reference/API.md`](../../docs/reference/API.md) §5c.
 
 ---
 
 ## 4. The status the UI reads
 
-`locus_status` (`cmd/locus.rs`) is the single poll the UI is built on. It is
+`chrysalis_status` (`cmd/chrysalis.rs`) is the single poll the UI is built on. It is
 deliberately small and never fails — a status query that can error forces the UI
 to invent a state, and the honest answer when storage cannot be read is "not
 activated".
 
-> **The TypeScript types for this are generated, not written.** `services/locus.ts`
-> re-exports `LocusStatus` and the eight sibling IPC types from
-> `services/locus.generated.ts`, which `server/scripts/gen-ts-contract.py` derives
-> from the Rust types in `cmd/locus.rs`. Change the Rust, run
+> **The TypeScript types for this are generated, not written.** `services/chrysalis.ts`
+> re-exports `ChrysalisStatus` and the eight sibling IPC types from
+> `services/chrysalis.generated.ts`, which `server/scripts/gen-ts-contract.py` derives
+> from the Rust types in `cmd/chrysalis.rs`. Change the Rust, run
 > `pnpm gen:contract`, and commit the diff. A hand-written interface here would
 > shadow the generated one; `check-consistency.sh` §33 and §38 both fail if one
 > reappears. The frozen names across the *hub* boundary are
@@ -314,12 +314,12 @@ satisfy.
 
 What this section owns is the *structure* the palette flows through:
 
-- `src/pages/_theme.tsx` holds `LOCUS_COLORS` — the one palette — plus the
+- `src/pages/_theme.tsx` holds `CHRYSALIS_COLORS` — the one palette — plus the
   MUI-shaped `defaultTheme` projection and `TIER_COLORS`. The fields are
   **defaults, not overrides**: `services/theme.ts` reads each as `setting.X ||
   dt.X`, so a student who customised a colour keeps it. A custom colour is a
   preference on top of the one appearance, not a second appearance.
-- `src/services/theme.ts` builds `locusTheme` **once at module load** and exposes
+- `src/services/theme.ts` builds `chrysalisTheme` **once at module load** and exposes
   `applyThemeWhenReady()`, which writes the window-chrome CSS variables and the
   global stylesheet. There is no theme hook: nothing can change the theme at
   runtime, so nothing re-renders when it does not.
@@ -338,7 +338,7 @@ What this section owns is the *structure* the palette flows through:
 ### There are no themes
 
 The registry, the resolver, the decoration presets, the Account dropdown and the
-theme hook were **deleted on 2026-11-19**. Locus has one permanent appearance
+theme hook were **deleted on 2026-11-19**. Chrysalis has one permanent appearance
 (Dawn); `/COLOURS.md` §0 records the decision and §3 records what was removed.
 An archived copy of the old layer's mechanics is in
 [`../../docs/archive/THEMES.md`](../../docs/archive/THEMES.md) — read it for *why*
@@ -347,7 +347,7 @@ that layer existed, never as an instruction, because every file it names is gone
 Two properties are worth keeping in mind if a second appearance is ever proposed:
 
 - **Shape and decoration travelled by CSS variables** (`--card-radius`,
-  `--control-radius`) and one `<style id="locus-theme-decoration">` element. The
+  `--control-radius`) and one `<style id="chrysalis-theme-decoration">` element. The
   variables survive — there is one set of values and `cardSx` still reads
   `var(--card-radius, 12px)` — but nothing injects a decoration any more.
 - **`setting.X || dt.X` is unchanged.** It is the only runtime input to the
@@ -365,6 +365,6 @@ instead — a card that relied on `elevation` would be invisible.
 |---|---|
 | Profiles UI (`pages/profiles.tsx`, `components/profile/`) | A student activates a code; they do not manage subscriptions. The profiles **engine** remains load-bearing — only the UI was removed. |
 | Connections table, Rules browser, Unlock checker | Tools for choosing between nodes, or unrelated to a VPN. |
-| Node picker, core selector, TUN/system-proxy switches, ports, DNS | One server per tier, one core, decided by Locus and the hub. Exposing them is the interface the product exists to remove. |
+| Node picker, core selector, TUN/system-proxy switches, ports, DNS | One server per tier, one core, decided by Chrysalis and the hub. Exposing them is the interface the product exists to remove. |
 | Deep links entirely | They existed solely to import subscription URLs. |
-| A Locus logo asset | `src-tauri/icons/*` is still the Clash Verge Rev mark. A separate 48×48 shield is a brand decision nobody has taken, so the activation screen shows the wordmark alone. Marks: [`/COLOURS.md`](../../COLOURS.md) §8. |
+| A Chrysalis logo asset | `src-tauri/icons/*` is still the Clash Verge Rev mark. A separate 48×48 shield is a brand decision nobody has taken, so the activation screen shows the wordmark alone. Marks: [`/COLOURS.md`](../../COLOURS.md) §8. |

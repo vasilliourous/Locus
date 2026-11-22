@@ -1,4 +1,4 @@
-# Locus Operations Manual
+# Chrysalis Operations Manual
 
 ```
 audience:    human-operator
@@ -7,7 +7,7 @@ authoritative-for: day-to-day operation of the hub (health, backups, restore)
 verified-against: server/scripts/, server/setup.sh
 ```
 
-> Day-to-day management of the Locus server.
+> Day-to-day management of the Chrysalis server.
 
 ---
 
@@ -326,7 +326,7 @@ ssh root@new-vps "DOMAIN=networkingguides.jadedns.uk bash /root/server/scripts/s
   ever bootstrap by hand, use the CLI — `/api/collections/_superusers/records`
   returns 404 on 0.22.x.
 - **Secrets**: `setup.sh` needs `age` installed *and* the passphrase in
-  `LOCUS_SECRETS_PASSPHRASE` (or `LOCUS_SECRETS_PASSPHRASE_FILE`). Missing it
+  `CHRYSALIS_SECRETS_PASSPHRASE` (or `CHRYSALIS_SECRETS_PASSPHRASE_FILE`). Missing it
   aborts immediately (by design). There is no prompt — see
   [`SECRETS-MANAGEMENT.md`](SECRETS-MANAGEMENT.md).
 - **SSH**: UFW allows 22/tcp plainly; brute-force protection is fail2ban
@@ -342,7 +342,7 @@ ssh root@new-vps "DOMAIN=networkingguides.jadedns.uk bash /root/server/scripts/s
 ```bash
 ssh $VPS "fail2ban-client status sshd"
 # Expect: log lines and a non-empty 'Journal matches'.
-# Ban policy lives in /etc/fail2ban/jail.d/locus-sshd.local
+# Ban policy lives in /etc/fail2ban/jail.d/chrysalis-sshd.local
 # (6 failures / 10m -> 1h ban, banaction=ufw).
 
 # Unban an IP you locked out of by testing:
@@ -401,19 +401,19 @@ What each step covers, and why:
 | console | `/var/www/admin/` | built, tarred, uploaded, extracted, and **served-verified** (`/admin/` must 200). |
 | site | `/var/www/site/` | the public landing page. Rendered from the release manifest's `platforms` map (so its four download URLs name the version the hub actually serves), tarred, uploaded, and **served-verified** — including that `/updates/` is NOT reachable on the landing host. |
 | staging | `/root/server/` | `setup.sh` deploys FROM here, not from the repo. Leaving it stale is how a re-run reverts hooks. |
-| locus-fetch | restart | it runs FROM the staging copy, so a changed script has no effect until the process is recycled. |
+| chrysalis-fetch | restart | it runs FROM the staging copy, so a changed script has no effect until the process is recycled. |
 | verify | — | health, `/api/update`, `/api/release`, heartbeat, hook-drift, and the landing page's four download links. |
 
 **SSH access.** Key auth is installed; nothing prompts. `~/.ssh/config` defines a
-`Host locus-hub` alias (HostName = the hub domain, User root, IdentityFile the
-deploy key in `.deploy/locus_deploy` — passphrase-free, gitignored, in
+`Host chrysalis-hub` alias (HostName = the hub domain, User root, IdentityFile the
+deploy key in `.deploy/chrysalis_deploy` — passphrase-free, gitignored, in
 `/root/.ssh/authorized_keys`):
 
 ```bash
-ssh locus-hub 'uptime'
+ssh chrysalis-hub 'uptime'
 ```
 
-`deploy.sh` probes for the `locus-hub` alias and falls back to
+`deploy.sh` probes for the `chrysalis-hub` alias and falls back to
 `root@<domain>` if it is absent. A password fallback exists
 (`scripts/vps-test/sshp.py`, reading `VPS_HOST`/`VPS_USER`/`VPS_PW` from
 the environment, never the command line) for when the key is unavailable.
@@ -540,7 +540,7 @@ Tiers → edit → Save. Clients pick it up on their next heartbeat (≤5 min).
    never asks you to pick a file.
 2. Releases → enter the version (e.g. `2.2.1`) → **Fetch & publish**.
    The hub downloads `locus-linux-amd64`, the Windows installer
-   `installer-Locus_<version>_x64-setup.exe`, `locus-darwin-amd64`,
+   `installer-Chrysalis_<version>_x64-setup.exe`, `locus-darwin-amd64`,
    `locus-darwin-arm64` and `manifest.json` **from the
    GitHub Release tagged `v2.2.1` itself**, verifies each file's format against
    the platform slot it belongs in (a Windows `.exe` in the Linux slot is
@@ -590,7 +590,7 @@ ssh $VPS "ls /var/www/admin/index.html && curl -s -o /dev/null -w '%{http_code}\
 server/scripts/deploy-console.sh
 
 # Is the fetch service up? (only needed for releases)
-ssh $VPS "systemctl status locus-fetch --no-pager && curl -s http://127.0.0.1:8091/health"
+ssh $VPS "systemctl status chrysalis-fetch --no-pager && curl -s http://127.0.0.1:8091/health"
 
 # Admin API errors
 ssh $VPS "journalctl -u pocketbase -n 50 --no-pager | grep -i admin_console"
@@ -619,7 +619,7 @@ Releasing an update is: **tag → wait for CI → Releases → Fetch & publish.*
    - **raw** `locus-linux-amd64`, `locus-darwin-amd64`, `locus-darwin-arm64`
      (and `locus-windows-amd64.exe` for the retired portable client).
    - a **`.sig` minisign signature for each** of those four.
-   - the **Windows** NSIS installer, `installer-Locus_<version>_x64-setup.exe`,
+   - the **Windows** NSIS installer, `installer-Chrysalis_<version>_x64-setup.exe`,
      **with its own `.sig`**.
    - `manifest.json` — version, per-platform filename + SHA256 (+ signature).
 
@@ -759,7 +759,7 @@ the served bytes, and exits non-zero if anything disagrees.
 
   | Build | What macOS says | Can the student get past it? |
   |---|---|---|
-  | Unsigned (before 2026-10) | *"Locus" is damaged and can't be opened. You should move it to the Trash.* | **No** — no "Open Anyway"; Terminal only |
+  | Unsigned (before 2026-10) | *"Chrysalis" is damaged and can't be opened. You should move it to the Trash.* | **No** — no "Open Anyway"; Terminal only |
   | Ad-hoc signed (now) | *"…cannot be opened because Apple cannot check it for malicious software."* | **Yes** — System Settings → Privacy & Security → **Open Anyway** |
 
   Gatekeeper treats a signature that exists but is not from a Developer ID as an
@@ -815,7 +815,7 @@ the served bytes, and exits non-zero if anything disagrees.
 
 ## #7 Gaming UDP (Strike) — enable & verify
 
-> The product is Locus; deployed server artifacts keep the legacy `myvpn` names
+> The product is Chrysalis; deployed server artifacts keep the legacy `myvpn` names
 > until redeploy. This runbook covers the **sing-box UDP-over-TCP (UoT)**
 > endpoint so Strike's raw-UDP-blocked school networks can carry game/voice UDP
 > inside an allowed TCP flow.
@@ -832,7 +832,7 @@ reversible and stepwise, so validate each gate before the next.
 ### 0. Baseline first (do this BEFORE enabling)
 
 ```bash
-# From a device on the same school/restricted network, WITHOUT locus connected,
+# From a device on the same school/restricted network, WITHOUT Chrysalis connected,
 # see if raw UDP to the VPS is actually blocked (this is the whole point):
 timeout 3 bash -c 'echo -n > /dev/udp/<DOMAIN>/8445' ; echo "exit=$?"
 # Expected: blocked/fails on restricted nets (exit nonzero or hang).
@@ -877,7 +877,7 @@ cd server && python3 scripts/seed-live.py
 
 ### 3. Compare (client probe builds AFTER the endpoint is up)
 
-Point a Locus client at Strike on the restricted net, connect, then:
+Point a Chrysalis client at Strike on the restricted net, connect, then:
 
 - **TCP**: `curl -sf https://<DOMAIN>/api/health` still works (unchanged TCP path).
 - **UDP through tunnel**: run a UDP query that must traverse the UoT outbound,

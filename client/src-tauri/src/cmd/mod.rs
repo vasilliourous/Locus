@@ -94,10 +94,10 @@ pub fn proxy_aware_error(error: &anyhow::Error) -> CommandFailure {
 // Command modules
 pub mod app;
 pub mod backup;
+pub mod chrysalis;
 pub mod clash;
 pub mod lightweight;
 pub mod listener;
-pub mod locus;
 pub mod network;
 pub mod profile;
 pub mod proxy;
@@ -112,10 +112,10 @@ pub mod webdav;
 // Re-export all command functions for backwards compatibility
 pub use app::*;
 pub use backup::*;
+pub use chrysalis::*;
 pub use clash::*;
 pub use lightweight::*;
 pub use listener::*;
-pub use locus::*;
 pub use network::*;
 pub use profile::*;
 pub use proxy::*;

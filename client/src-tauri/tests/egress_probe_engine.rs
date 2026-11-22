@@ -1,7 +1,7 @@
 //! The through-tunnel egress probe must mean what the app thinks it means.
 //!
 //! `core::manager::probe::probe_egress` decides whether a tunnel is carrying
-//! traffic by asking mihomo to run a delay test on the Locus proxy group and
+//! traffic by asking mihomo to run a delay test on the Chrysalis proxy group and
 //! reading the result. The *rule* that turns that result into readiness is
 //! unit-tested without a socket (`probe.rs`), which is deliberate — but it means
 //! the rule is only as good as the assumption that a real mihomo answers the way
@@ -52,12 +52,12 @@ use std::time::{Duration, Instant};
 /// which means the one signal that distinguished "verified" from "not run" was
 /// prose on stderr.
 ///
-/// `LOCUS_REQUIRE_LIVE_ENGINE=1` turns every skip into a failure, so a green run
+/// `CHRYSALIS_REQUIRE_LIVE_ENGINE=1` turns every skip into a failure, so a green run
 /// on a machine that *should* have exercised the engine proves it did. Set it
 /// wherever a real engine and egress exist — that is the run worth trusting.
 fn skip(reason: &str) {
-    if std::env::var_os("LOCUS_REQUIRE_LIVE_ENGINE").is_some() {
-        panic!("SKIP was requested to be a failure (LOCUS_REQUIRE_LIVE_ENGINE is set): {reason}");
+    if std::env::var_os("CHRYSALIS_REQUIRE_LIVE_ENGINE").is_some() {
+        panic!("SKIP was requested to be a failure (CHRYSALIS_REQUIRE_LIVE_ENGINE is set): {reason}");
     }
     eprintln!("SKIP: {reason}");
 }
@@ -67,7 +67,7 @@ fn skip(reason: &str) {
 ///
 /// # Why this exists
 ///
-/// `LOCUS_REQUIRE_LIVE_ENGINE` was a knob nobody turned, so `cargo test` stayed
+/// `CHRYSALIS_REQUIRE_LIVE_ENGINE` was a knob nobody turned, so `cargo test` stayed
 /// skip-silent — and worse, it was applied to the wrong thing. Every test in this
 /// file skipped on a missing sidecar, *including the four that need no network at
 /// all*. Those four are the ones that assert a broken tunnel reads as broken, and
@@ -82,7 +82,7 @@ fn skip(reason: &str) {
 ///   * **egress** — a public host must be reachable for the two positive cases.
 ///     That is a property of the runner, and no amount of building fixes it.
 ///
-/// [`egress_required`] is for the second: `LOCUS_REQUIRE_EGRESS=1` turns "this
+/// [`egress_required`] is for the second: `CHRYSALIS_REQUIRE_EGRESS=1` turns "this
 /// runner has no network" from a skip into a failure, so the positive case — the
 /// one that was never run, and the direction three shipped defects failed in — is
 /// exercised on the job that claims to exercise it.
@@ -90,7 +90,7 @@ fn require_engine_when_possible() -> Option<PathBuf> {
     match sidecar() {
         Some(engine) => Some(engine),
         None => {
-            // No `LOCUS_REQUIRE_LIVE_ENGINE` check here on purpose: requiring the
+            // No `CHRYSALIS_REQUIRE_LIVE_ENGINE` check here on purpose: requiring the
             // engine is the DEFAULT now, so there is nothing to opt into. The
             // variable is still honoured for the egress cases below, which is the
             // only situation where a skip is a fact about the machine rather than
@@ -105,7 +105,7 @@ fn require_engine_when_possible() -> Option<PathBuf> {
 ///
 /// See [`require_engine_when_possible`].
 fn egress_required() -> bool {
-    std::env::var_os("LOCUS_REQUIRE_EGRESS").is_some()
+    std::env::var_os("CHRYSALIS_REQUIRE_EGRESS").is_some()
 }
 
 /// The URL the egress probe fetches through the tunnel.
@@ -382,7 +382,7 @@ fn unused_port() -> u16 {
 /// member is a `direct` outbound, so the delay test exercises real egress.
 ///
 /// `direct` rather than a real proxy because the test must not depend on a live
-/// Locus hub: what is being checked is how mihomo answers the *group delay*
+/// Chrysalis hub: what is being checked is how mihomo answers the *group delay*
 /// route, and a `direct` member reaches the test's own 204 server through the
 /// same URLTest path a real proxy would use.
 fn write_config(dir: &Path, controller_port: u16, mixed_port: u16) -> PathBuf {
@@ -400,20 +400,20 @@ fn write_config(dir: &Path, controller_port: u16, mixed_port: u16) -> PathBuf {
          \x20 nameserver:\n\
          \x20   - system\n\
          proxies:\n\
-         \x20 - name: \"Locus\"\n\
+         \x20 - name: \"Chrysalis\"\n\
          \x20   type: direct\n\
          \x20   udp: false\n\
-         \x20 - name: \"Locus-UoT\"\n\
+         \x20 - name: \"Chrysalis-UoT\"\n\
          \x20   type: direct\n\
          \x20   udp: false\n\
          proxy-groups:\n\
-         \x20 - name: \"Locus Auto\"\n\
+         \x20 - name: \"Chrysalis Auto\"\n\
          \x20   type: select\n\
          \x20   proxies:\n\
-         \x20     - \"Locus-UoT\"\n\
-         \x20     - \"Locus\"\n\
+         \x20     - \"Chrysalis-UoT\"\n\
+         \x20     - \"Chrysalis\"\n\
          rules:\n\
-         \x20 - \"MATCH,Locus Auto\"\n"
+         \x20 - \"MATCH,Chrysalis Auto\"\n"
     );
     std::fs::write(&config, yaml).expect("write config");
     config
@@ -462,7 +462,7 @@ fn write_config(dir: &Path, controller_port: u16, mixed_port: u16) -> PathBuf {
 /// `400 {"message":"Body invalid"}`.
 fn group_delay_path(test_url: &str, timeout_millis: u32) -> String {
     format!(
-        "/group/Locus%20Auto/delay?url={}&timeout={timeout_millis}",
+        "/group/Chrysalis%20Auto/delay?url={}&timeout={timeout_millis}",
         encode(test_url)
     )
 }
@@ -530,7 +530,7 @@ fn a_reachable_member_yields_a_usable_delay() {
         return;
     };
 
-    let dir = std::env::temp_dir().join("locus-egress-probe-ok");
+    let dir = std::env::temp_dir().join("chrysalis-egress-probe-ok");
     let mut controller_res = PortReservation::bind();
     let mut mixed_res = PortReservation::bind();
     let controller_port = controller_res.port();
@@ -545,7 +545,7 @@ fn a_reachable_member_yields_a_usable_delay() {
     let _guard = start_engine(&engine, &dir, &config, &controller);
 
     // The target is the URL the probe actually uses, reached through a `direct`
-    // member so the test needs no live Locus hub. It is a *public* host on
+    // member so the test needs no live Chrysalis hub. It is a *public* host on
     // purpose: mihomo's `direct` outbound reports a delay of `0` for a loopback
     // target (loopback bypasses the proxy path), so a local server cannot stand
     // in for a real round trip here — verified against the sidecar before this
@@ -553,7 +553,7 @@ fn a_reachable_member_yields_a_usable_delay() {
     //
     // This test therefore needs one outbound request to succeed. Where that is
     // impossible (an offline runner) it SKIPs rather than failing — unless the
-    // run declared `LOCUS_REQUIRE_EGRESS`, in which case a skip would be the
+    // run declared `CHRYSALIS_REQUIRE_EGRESS`, in which case a skip would be the
     // whole point being missed. The fact it proves is about how mihomo answers a
     // *completed* round trip, and no network means no round trip, not a broken
     // probe.
@@ -562,7 +562,7 @@ fn a_reachable_member_yields_a_usable_delay() {
     // group. Keeping this test on the group route would leave it pinning a call
     // the app no longer makes — the exact staleness that let the previous
     // classifier drift go unnoticed for a release.
-    let path = member_delay_path("Locus", test_url, DELAY_BUDGET_MILLIS);
+    let path = member_delay_path("Chrysalis", test_url, DELAY_BUDGET_MILLIS);
 
     // ── THE CONTROL, INSIDE THE TEST ──
     //
@@ -655,7 +655,7 @@ fn a_reachable_member_yields_a_usable_delay() {
             // hosts failing is a fact about the tunnel or the runner, not about
             // Cloudflare.
             let retry_url = "https://www.gstatic.com/generate_204";
-            let retry_path = member_delay_path("Locus", retry_url, DELAY_BUDGET_MILLIS);
+            let retry_path = member_delay_path("Chrysalis", retry_url, DELAY_BUDGET_MILLIS);
             let mut retry_last = (0u16, String::new());
             let retry_deadline = Instant::now() + Duration::from_secs(15);
             while Instant::now() < retry_deadline {
@@ -772,7 +772,7 @@ fn the_delay_timeout_field_is_milliseconds() {
         return;
     };
 
-    let dir = std::env::temp_dir().join("locus-egress-probe-units");
+    let dir = std::env::temp_dir().join("chrysalis-egress-probe-units");
     let mut controller_res = PortReservation::bind();
     let mut mixed_res = PortReservation::bind();
     let controller_port = controller_res.port();
@@ -850,7 +850,7 @@ fn the_delay_timeout_field_is_milliseconds() {
     // refuses an out-of-range value before it dials anything, so it is immune to
     // the target, to the `direct` outbound and to network conditions.
     let max_ok = i16::MAX as u32;
-    let (at_max, at_max_body) = http_get(&controller, &member_delay_path("Locus", &_target, max_ok));
+    let (at_max, at_max_body) = http_get(&controller, &member_delay_path("Chrysalis", &_target, max_ok));
     // 404 means the route did not answer, which says nothing about the field.
     // Asserting `!= 400` alone let a 404 pass silently; the status must be a real
     // answer before the range claim means anything.
@@ -867,7 +867,7 @@ fn the_delay_timeout_field_is_milliseconds() {
          the budget clamp in probe.rs is wrong"
     );
 
-    let (past_max, past_max_body) = http_get(&controller, &member_delay_path("Locus", &_target, max_ok + 1));
+    let (past_max, past_max_body) = http_get(&controller, &member_delay_path("Chrysalis", &_target, max_ok + 1));
     assert_eq!(
         past_max,
         400,
@@ -909,7 +909,7 @@ fn an_unreachable_member_is_not_reported_as_success() {
     let mixed_port = mixed_res.port();
     let controller = format!("127.0.0.1:{controller_port}");
 
-    let dir = std::env::temp_dir().join("locus-egress-probe-fail");
+    let dir = std::env::temp_dir().join("chrysalis-egress-probe-fail");
     let config = write_config(&dir, controller_port, mixed_port);
 
     controller_res.release();
@@ -940,7 +940,7 @@ fn an_unreachable_member_is_not_reported_as_success() {
 /// This is the asymmetry the whole per-member fix rests on, and it is why the
 /// group route could strand a working tunnel while the member route cannot:
 ///
-///   * `/group/Locus%20Auto/delay` turns ANY non-2xx into a hard `Err` in the
+///   * `/group/Chrysalis%20Auto/delay` turns ANY non-2xx into a hard `Err` in the
 ///     plugin (`ret_failed_resp!`), so "every member failed" arrives at the probe
 ///     as an indistinguishable transport error — there is no delay map to read.
 ///   * `/proxies/<name>/delay` turns a non-2xx into `Ok(ProxyDelay { delay: 0 })`
@@ -966,7 +966,7 @@ fn a_dead_member_answers_with_a_non_measurement_not_an_error() {
         return;
     };
 
-    let dir = std::env::temp_dir().join("locus-egress-probe-deadmember");
+    let dir = std::env::temp_dir().join("chrysalis-egress-probe-deadmember");
     let mut controller_res = PortReservation::bind();
     let mut mixed_res = PortReservation::bind();
     let controller_port = controller_res.port();
@@ -980,7 +980,7 @@ fn a_dead_member_answers_with_a_non_measurement_not_an_error() {
 
     // A target nothing is listening on, so the member cannot complete a round trip.
     let dead_url = format!("http://127.0.0.1:{}/generate_204", unused_port());
-    let (status, body) = http_get(&controller, &member_delay_path("Locus-UoT", &dead_url, 2_000));
+    let (status, body) = http_get(&controller, &member_delay_path("Chrysalis-UoT", &dead_url, 2_000));
 
     // The plugin maps a non-2xx here to `Ok(ProxyDelay { delay: 0 })`, so the
     // probe receives a value it can classify rather than an `Err` it cannot
@@ -1048,9 +1048,9 @@ fn the_engine_sentinels_are_not_measurements() {
 /// holding two unreachable members:
 ///
 /// ```text
-/// GET /group/Locus%20Auto/delay?url=…&timeout=5
+/// GET /group/Chrysalis%20Auto/delay?url=…&timeout=5
 ///   -> 504 {"message":"get delay: all proxies timeout"}
-/// GET /proxies/Locus-Dead/delay?url=…&timeout=5
+/// GET /proxies/Chrysalis-Dead/delay?url=…&timeout=5
 ///   -> 503 {"message":"An error occurred in the delay test"}
 /// ```
 ///
@@ -1071,7 +1071,7 @@ fn a_group_whose_members_all_fail_returns_no_delay_map() {
         return;
     };
 
-    let dir = std::env::temp_dir().join("locus-egress-probe-alldead");
+    let dir = std::env::temp_dir().join("chrysalis-egress-probe-alldead");
     let mut controller_res = PortReservation::bind();
     let mut mixed_res = PortReservation::bind();
     let controller_port = controller_res.port();

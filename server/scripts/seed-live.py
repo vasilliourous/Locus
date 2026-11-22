@@ -16,7 +16,7 @@ existing runbook or shell history lands on an explanation instead of a
 
 --- original docstring follows ---
 
-Locus live-seed for a PocketBase on a (re-)provisioned VPS.
+Chrysalis live-seed for a PocketBase on a (re-)provisioned VPS.
 
 Creates the collections, update_config, tier_configs (reading passwords from
 /etc/shadowsocks/*.json — the single source of truth on the box) and seeds
@@ -51,7 +51,7 @@ API = "http://127.0.0.1:8090"
 # name, which took activation, heartbeat and the update path down together. The
 # old name still resolves and the hub still answers on it (05-caddy.sh puts both
 # names on one site block), because deployed pre-3.3.2 builds have it compiled in
-# and cannot be told otherwise. See client/src-tauri/src/locus/contract.rs.
+# and cannot be told otherwise. See client/src-tauri/src/chrysalis/contract.rs.
 DOMAIN = os.environ.get("DOMAIN", "networkingguides.jadedns.uk")
 ADMIN_EMAIL = f"admin@{DOMAIN}"
 CREDS = "/root/.pb_admin_creds"

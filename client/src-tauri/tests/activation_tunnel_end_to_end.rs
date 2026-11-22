@@ -70,8 +70,8 @@ const TUNNEL_PORT: u16 = 8453;
 const FILTER_PORT: u16 = 18090;
 
 fn skip(reason: &str) {
-    if std::env::var_os("LOCUS_REQUIRE_LIVE_ENGINE").is_some() {
-        panic!("SKIP was requested to be a failure (LOCUS_REQUIRE_LIVE_ENGINE is set): {reason}");
+    if std::env::var_os("CHRYSALIS_REQUIRE_LIVE_ENGINE").is_some() {
+        panic!("SKIP was requested to be a failure (CHRYSALIS_REQUIRE_LIVE_ENGINE is set): {reason}");
     }
     eprintln!("SKIP: {reason}");
 }
@@ -377,7 +377,7 @@ fn an_enrolment_request_completes_through_the_activation_tunnel() {
     };
 
     // The SS listener must occupy the port the generated config dials, because
-    // `locus_generated_config` hard-codes `TUNNEL_PORT` — that is the deployment's
+    // `chrysalis_generated_config` hard-codes `TUNNEL_PORT` — that is the deployment's
     // port and it must not be configurable from a test, or the test would stop
     // checking what ships. So the harness adapts to the product, not the reverse.
     if accepts(TUNNEL_PORT) {
@@ -422,7 +422,7 @@ fn an_enrolment_request_completes_through_the_activation_tunnel() {
         drop(listener);
         port
     };
-    let yaml = locus_generated_config(proxy_port, TUNNEL_PORT);
+    let yaml = chrysalis_generated_config(proxy_port, TUNNEL_PORT);
     std::fs::write(workdir.path.join("client.yaml"), yaml).expect("write client config");
 
     let engine_log = std::fs::File::create(workdir.path.join("engine.log")).expect("create engine log");
@@ -468,7 +468,7 @@ fn an_enrolment_request_completes_through_the_activation_tunnel() {
     // (measured 2026-11-01; `ssserver` logs `tcp tunnel … -> <the requested dest>`).
     // The admin path is refused by the filter on the far side, which is where the
     // security boundary actually sits.
-    let body = r#"{"code":"LOCUS-AAAA-BBBB-CCCC","fingerprint":"0123456789abcdef"}"#;
+    let body = r#"{"code":"CHRYSALIS-AAAA-BBBB-CCCC","fingerprint":"0123456789abcdef"}"#;
     let (status, answer) = post_via_socks(proxy_port, &format!("127.0.0.1:{FILTER_PORT}/api/activate"), body);
 
     assert_eq!(status, 200, "an allowlisted path must survive the tunnel: {answer}");
@@ -511,7 +511,7 @@ fn an_enrolment_request_completes_through_the_activation_tunnel() {
 /// exercising what ships — which is why the shape below is deliberately identical,
 /// comment for comment, and why the unit tests assert the invariants rather than
 /// the text.
-fn locus_generated_config(forward_port: u16, tunnel_port: u16) -> String {
+fn chrysalis_generated_config(forward_port: u16, tunnel_port: u16) -> String {
     format!(
         "mixed-port: {forward_port}\n\
          allow-lan: false\n\
@@ -529,12 +529,12 @@ fn locus_generated_config(forward_port: u16, tunnel_port: u16) -> String {
          \x20   password: \"{TEST_KEY}\"\n\
          \x20   udp: false\n\
          proxy-groups:\n\
-         \x20 - name: Locus Activation\n\
+         \x20 - name: Chrysalis Activation\n\
          \x20   type: select\n\
          \x20   proxies:\n\
          \x20     - Activation-Tunnel\n\
          rules:\n\
-         \x20 - MATCH,Locus Activation\n"
+         \x20 - MATCH,Chrysalis Activation\n"
     )
 }
 
@@ -545,7 +545,7 @@ struct TempDir {
 
 impl TempDir {
     fn new() -> Self {
-        let base = std::env::temp_dir().join(format!("locus-activation-tunnel-test-{}", std::process::id()));
+        let base = std::env::temp_dir().join(format!("chrysalis-activation-tunnel-test-{}", std::process::id()));
         std::fs::create_dir_all(&base).expect("create the test directory");
         Self { path: base }
     }
@@ -553,10 +553,10 @@ impl TempDir {
 
 impl Drop for TempDir {
     fn drop(&mut self) {
-        // Kept when LOCUS_KEEP_TEST_DIR is set, so a failing run can be inspected
+        // Kept when CHRYSALIS_KEEP_TEST_DIR is set, so a failing run can be inspected
         // instead of guessed at. The engine's own log is the only account of why a
         // request vanished, and it is worthless once the directory is gone.
-        if std::env::var_os("LOCUS_KEEP_TEST_DIR").is_some() {
+        if std::env::var_os("CHRYSALIS_KEEP_TEST_DIR").is_some() {
             eprintln!("[keep] test directory retained at {}", self.path.display());
             return;
         }

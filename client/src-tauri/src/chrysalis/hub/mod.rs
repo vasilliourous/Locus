@@ -1,4 +1,4 @@
-//! The one HTTP client every Locus hub call uses.
+//! The one HTTP client every Chrysalis hub call uses.
 //!
 //! # Why this module exists
 //!
@@ -19,7 +19,7 @@
 //! The result is a student staring at:
 //!
 //! ```text
-//! could not reach the Locus hub at https://…/api/activate:
+//! could not reach the Chrysalis hub at https://…/api/activate:
 //!   client error (Connect): invalid peer certificate: Expired
 //! ```
 //!

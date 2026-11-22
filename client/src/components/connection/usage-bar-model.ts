@@ -1,4 +1,4 @@
-import type { AllowanceStatus } from '@/services/locus'
+import type { AllowanceStatus } from '@/services/chrysalis'
 
 /**
  * Formatting for the free tier's usage bar, as pure functions.

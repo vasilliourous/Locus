@@ -17,7 +17,7 @@ import {
 import { useI18n } from '@/hooks/use-i18n'
 import { useVerge } from '@/hooks/use-verge'
 import { useWindowDecorations } from '@/hooks/use-window'
-import { locusTheme } from '@/services/theme'
+import { chrysalisTheme } from '@/services/theme'
 import getSystem from '@/utils/get-system'
 
 import { useLayoutEvents, usePendingFailures } from './_layout/hooks'
@@ -72,7 +72,7 @@ const Layout = () => {
   }, [language, switchLanguage])
 
   return (
-    <ThemeProvider theme={locusTheme}>
+    <ThemeProvider theme={chrysalisTheme}>
       {/* 左侧底部窗口控制按钮 */}
       <NoticeManager position={verge?.notice_position} />
       <ServiceMigrationDialog />

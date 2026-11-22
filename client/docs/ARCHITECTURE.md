@@ -4,11 +4,11 @@
 audience:    builder
 status:      design-record
 authoritative-for: the pre-port plan and its rationale
-verified-against: client/src-tauri/src/locus/, client/docs/
+verified-against: client/src-tauri/src/chrysalis/, client/docs/
 ```
 
 > **Design record — not a to-do.** This was written before the port; the plan it
-> describes has been carried out (`src-tauri/src/locus/` exists with the modules
+> describes has been carried out (`src-tauri/src/chrysalis/` exists with the modules
 > listed in `LOGIC-INVENTORY.md`, the debloat in §6 is done, and the client shipped
 > on its own 3.x line). **Read `UPSTREAM-CHANGES.md` alongside this** — it is the
 > authoritative statement of what actually changed, including several load-bearing
@@ -31,12 +31,12 @@ Verge's core-management machinery. Three things make the difference large enough
 need written architecture:
 
 1. **The updater is completely different.** Verge uses the Tauri updater plugin against
-   a signed static manifest. Locus uses a hub-mediated `update_config` record with
+   a signed static manifest. Chrysalis uses a hub-mediated `update_config` record with
    per-platform SHA-256s, a rollout percentage, and a one-shot code-bearing download
    link. Section 5 is the full reconciliation; it is the single most consequential
    design decision in the fork.
 2. **Verge has no concept of a user.** There is no account, no code, no device, no
-   entitlement. Everything Locus needs — activation, tiers, heartbeat, grace — is
+   entitlement. Everything Chrysalis needs — activation, tiers, heartbeat, grace — is
    additive, and must not fight Verge's "profiles are the source of truth" model.
 3. **The wire names are a contract.** Three layers — publish scripts, the hub hook,
    the client — carry names that *rename* between layers, and that rename is
@@ -87,10 +87,12 @@ Counts and paths verified against the tree in `client/`.
 | `_routers.tsx` | 18 | rewrite |
 
 **Upstream identity removed already** (`client/` state as of this document): package
-name `locus-client`, Cargo package `locus`, license `GPL-3.0-only` (the forked
+name `chrysalis-client`, Cargo package `chrysalis`, license `GPL-3.0-only` (the forked
 upstream terms, as the root `LICENSE` carve-out states), bundle id
-`com.locus.client`, product name `Locus`, deep-link scheme `locus`, UA fallback
-`locus-client`, upstream CI and git hooks deleted. The Tauri updater plugin block was
+`com.locus.client` (a DEPRECATED ALIAS — see
+[`../../docs/reference/NAME-MIGRATION.md`](../../docs/reference/NAME-MIGRATION.md)), product name
+`Chrysalis`, deep-link scheme `locus`, UA fallback
+`chrysalis-client`, upstream CI and git hooks deleted. The Tauri updater plugin block was
 **removed from `tauri.conf.json`** — see §5.
 
 ---
@@ -162,9 +164,9 @@ The most important section. **See `UPDATE-ARCHITECTURE.md`** — it is long enou
 deserve its own file, and it is the design the rest of the rework depends on.
 
 Summary of the decision: **the Tauri updater's DECISION LAYER is removed, and the
-plugin is kept as the installer.** Locus's hub-mediated update path is ported to
+plugin is kept as the installer.** Chrysalis's hub-mediated update path is ported to
 Rust, because it is already the contract every deployed client speaks — and
-`locus/update/install.rs` still calls `Update::install()`, which is what provides
+`chrysalis/update/install.rs` still calls `Update::install()`, which is what provides
 NSIS/macOS/Linux installation and the mandatory minisign verification. What is gone
 is `core/updater.rs`, the plugin's Tauri registration, its WebView-facing
 capabilities, and the `@tauri-apps/plugin-updater` frontend surface.
@@ -206,7 +208,7 @@ hooks, hooks before their commands, and each step is verified with `pnpm run web
    > "The Clash Verge service version does not match the version required by this app…"
    > "TUN mode needs the Clash Verge system service to take over network traffic."
 
-   Decide the user-facing name for that component (suggestion: **"the Locus network
+   Decide the user-facing name for that component (suggestion: **"the Chrysalis network
    service"**) and apply it per-string. Getting this wrong produces error messages
    students cannot act on, which is the "permission failures reported as opaque engine
    errors" bug (FIXES #18) in a new costume.
@@ -241,20 +243,20 @@ missing feature), and it is a **shipping requirement, not cleanup** — an unres
 
 ---
 
-## 7. Adding the Locus logic
+## 7. Adding the Chrysalis logic
 
 ### 7.1 Where it goes
 
 | Concern | New location | Do not put it in |
 |---|---|---|
-| Code validation + activation | `src-tauri/src/locus/activation.rs` | `cmd/` (keep commands thin) |
-| Heartbeat loop | `src-tauri/src/locus/heartbeat.rs` | `core/` (Verge's; keeps upstream parity) |
-| Product state persistence | `src-tauri/src/locus/store.rs` | `config/verge.rs` |
-| Tier → mihomo config | `src-tauri/src/locus/tier.rs` | `enhance/` |
-| Update client | `src-tauri/src/locus/update/` | `core/updater.rs` (delete that) |
-| Commands | `src-tauri/src/cmd/locus.rs` | — |
+| Code validation + activation | `src-tauri/src/chrysalis/activation.rs` | `cmd/` (keep commands thin) |
+| Heartbeat loop | `src-tauri/src/chrysalis/heartbeat.rs` | `core/` (Verge's; keeps upstream parity) |
+| Product state persistence | `src-tauri/src/chrysalis/store.rs` | `config/verge.rs` |
+| Tier → mihomo config | `src-tauri/src/chrysalis/tier.rs` | `enhance/` |
+| Update client | `src-tauri/src/chrysalis/update/` | `core/updater.rs` (delete that) |
+| Commands | `src-tauri/src/cmd/chrysalis.rs` | — |
 
-The `locus/` module is the product; everything Verge-provided stays where it is so the
+The `chrysalis/` module is the product; everything Verge-provided stays where it is so the
 seam is obvious in review. `IVerge` (`config/verge.rs`) gets the product fields added
 **additively** — it is already all `Option<T>` with serde defaults, so
 `activation_code`, `tier`, `device_fingerprint` slot in without new machinery.
@@ -360,7 +362,7 @@ can plausibly re-earn:
    proxies page can go too, which cuts a further ~199 lines plus its components.
 3. **Telegram channel link** in `src/pages/settings.tsx` still points at
    `t.me/clash_verge_re`.
-4. **`locus.app` placeholder URLs** (docs/repo/release links) — confirm the real domain
+4. **`chrysalis.app` placeholder URLs** (docs/repo/release links) — confirm the real domain
    or remove the buttons.
 5. **TUN on/off in settings vs. always-on.** Verge defaults to system-proxy mode;
    the old client was TUN-only. This changes the failure modes students see.

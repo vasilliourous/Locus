@@ -4,11 +4,11 @@ import { useTranslation } from 'react-i18next'
 
 import { BaseDialog } from '@/components/base/base-dialog'
 import {
-  locusDismissUpdate,
-  locusInstallUpdate,
-  locusUpdateStatus,
+  chrysalisDismissUpdate,
+  chrysalisInstallUpdate,
+  chrysalisUpdateStatus,
   type UpdateProgress,
-} from '@/services/locus'
+} from '@/services/chrysalis'
 import { errorDetail } from '@/services/notice-service'
 
 /**
@@ -20,7 +20,7 @@ import { errorDetail } from '@/services/notice-service'
  * the heartbeat received the hub's offer and logged it, and nothing else ever
  * happened. So a student was never told a new build existed, and — because there
  * was no control anywhere — had no way to ask. This is the prompt the original
- * Clash Verge client showed, restored on top of Locus's own hub-mediated updater.
+ * Clash Verge client showed, restored on top of Chrysalis's own hub-mediated updater.
  *
  * # Why a popup and nothing else
  *
@@ -58,12 +58,12 @@ export const UpdatePrompt = () => {
   //
   // # Why the subscription, not just the mount read
   //
-  // This used to read exactly once. Locus is a background VPN: the window is
+  // This used to read exactly once. Chrysalis is a background VPN: the window is
   // started with the app and then left alone for days, so a read on mount meant
   // an offer that arrived ten seconds later was never shown until the student
   // happened to relaunch — which people do not do. The backend now emits
-  // `locus://update-offered` when a check records a NEW offer
-  // (`locus::update::poll`), and this is the half that turns it into a dialog.
+  // `chrysalis://update-offered` when a check records a NEW offer
+  // (`chrysalis::update::poll`), and this is the half that turns it into a dialog.
   //
   // The listener re-reads status rather than trusting the payload: the event
   // carries a version, but the prompt's contract is the stored offer, and one
@@ -72,7 +72,7 @@ export const UpdatePrompt = () => {
     let cancelled = false
 
     const read = () =>
-      locusUpdateStatus()
+      chrysalisUpdateStatus()
         .then((status) => {
           if (cancelled) return
           // The backend already refuses to report an offer that is not newer
@@ -104,7 +104,7 @@ export const UpdatePrompt = () => {
     let unlisten: (() => void) | undefined
     void (async () => {
       const { listen } = await import('@tauri-apps/api/event')
-      const stop = await listen('locus://update-offered', () => {
+      const stop = await listen('chrysalis://update-offered', () => {
         void read()
       })
       // A fast unmount can resolve this after cleanup, in which case nothing
@@ -129,7 +129,7 @@ export const UpdatePrompt = () => {
     void (async () => {
       const { listen } = await import('@tauri-apps/api/event')
       const stop = await listen<UpdateProgress>(
-        'locus://update-progress',
+        'chrysalis://update-progress',
         (event) => {
           setProgress(event.payload)
         },
@@ -151,7 +151,7 @@ export const UpdatePrompt = () => {
     setError(null)
     setInstalling(true)
     try {
-      await locusInstallUpdate()
+      await chrysalisInstallUpdate()
       // Reached only when the install did NOT restart the app — Windows exits
       // into the NSIS installer instead, so this is the Linux/macOS path, and
       // even there the new binary is not running until a restart.
@@ -172,7 +172,7 @@ export const UpdatePrompt = () => {
     // asked once more, which is a better outcome than a dialog that will not
     // close.
     setOpen(false)
-    void locusDismissUpdate().catch(() => {})
+    void chrysalisDismissUpdate().catch(() => {})
   }, [])
 
   if (!offered) return null

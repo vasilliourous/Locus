@@ -26,7 +26,7 @@
 //! the plugin's installer is already atomic. Porting that machinery would
 //! re-earn FIXES #22 and #54.
 
-use crate::locus::update::signal::UpdateOffer;
+use crate::chrysalis::update::signal::UpdateOffer;
 use anyhow::{Context as _, Result, bail};
 use sha2::{Digest as _, Sha256};
 use std::path::{Path, PathBuf};
@@ -154,14 +154,14 @@ pub async fn download(
         .rsplit('/')
         .next()
         .filter(|name| !name.is_empty() && !name.contains(['\\', ':']))
-        .unwrap_or("locus-update.bin");
+        .unwrap_or("chrysalis-update.bin");
     let destination = staging_dir.join(format!("{}.download", sanitize(file_name)));
 
     // The shared hub client, not a hand-built one. The update download is the
     // path that matters MOST when a machine's OS certificate store is the
     // problem: the update is how such a machine gets fixed, so a client that
-    // cannot verify the hub here traps it. See `locus::hub`.
-    let hub = crate::locus::contract::hub_url().await;
+    // cannot verify the hub here traps it. See `chrysalis::hub`.
+    let hub = crate::chrysalis::contract::hub_url().await;
 
     // ── Which host this artifact may come from ──
     //
@@ -177,10 +177,10 @@ pub async fn download(
     // origin comparison refused it — so a device on a blocking network could not
     // fetch the build that would fix it, which is the dead end the update path is
     // supposed to be the way out of.
-    let hosts = crate::locus::update::signal::OfferHosts::for_hub(&hub);
+    let hosts = crate::chrysalis::update::signal::OfferHosts::for_hub(&hub);
     if !hosts.permits(&offer.url) {
         bail!(
-            "refusing to download an update from a host that is not the Locus hub ({}): the \
+            "refusing to download an update from a host that is not the Chrysalis hub ({}): the \
              hub offered {}. This is either a stale hub record or a tampered response; \
              neither may be fetched.",
             hosts.describe(),
@@ -200,9 +200,10 @@ pub async fn download(
     // the redirect target is usually the blocked one. Following it would move the
     // request to a host the allowlist above never checked, and turn an explainable
     // refusal into an unexplained timeout.
-    let hub_client = crate::locus::hub::client_refusing_redirects(&hub, crate::locus::hub::Timeout::Download).await;
+    let hub_client =
+        crate::chrysalis::hub::client_refusing_redirects(&hub, crate::chrysalis::hub::Timeout::Download).await;
     if hub_client.diagnosis().is_some() {
-        tracing::warn!(target: "locus::hub", "{}", hub_client.describe());
+        tracing::warn!(target: "chrysalis::hub", "{}", hub_client.describe());
     }
     let download_client = hub_client.client();
 
@@ -381,11 +382,11 @@ async fn retry_download_over_maintenance(
     hub: &str,
     url: &str,
 ) -> Result<Option<reqwest::Response>> {
-    if !crate::locus::activation_tunnel::note_failure_and_decide_retry(error) {
+    if !crate::chrysalis::activation_tunnel::note_failure_and_decide_retry(error) {
         return Ok(None);
     }
     tracing::warn!(
-        target: "locus::activation_tunnel",
+        target: "chrysalis::activation_tunnel",
         "the direct update download produced no response; retrying through the maintenance tunnel"
     );
     // `_retry`, not `hub_client_for`: this call site may START a maintenance engine.
@@ -396,9 +397,10 @@ async fn retry_download_over_maintenance(
     // would have succeeded — for no reason a student could observe. The download is
     // also the call that REPAIRS a blocked device, so of the three it is the one
     // that most needs to be able to start the route it is retrying over.
-    let retry = crate::locus::activation_tunnel::hub_client_for_retry(hub, crate::locus::hub::Timeout::Download).await;
+    let retry =
+        crate::chrysalis::activation_tunnel::hub_client_for_retry(hub, crate::chrysalis::hub::Timeout::Download).await;
     let sent = retry.client().get(url).send().await;
-    if !crate::locus::activation_tunnel::log_retry_outcome(&sent) {
+    if !crate::chrysalis::activation_tunnel::log_retry_outcome(&sent) {
         return Err(anyhow::anyhow!(
             "could not reach {url} directly ({error:#}), and the maintenance tunnel also failed"
         ));
@@ -456,13 +458,13 @@ mod tests {
     /// implementation, or verification is worthless.
     #[test]
     fn file_hashing_matches_a_known_digest() {
-        let dir = std::env::temp_dir().join(format!("locus-hash-test-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("chrysalis-hash-test-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).expect("create temp dir");
         let file = dir.join("payload.bin");
-        std::fs::write(&file, b"locus").expect("write");
+        std::fs::write(&file, b"chrysalis").expect("write");
 
-        // SHA-256 of the ASCII bytes "locus".
+        // SHA-256 of the ASCII bytes "chrysalis".
         let expected = "9c1f6b1db1b2c8c1c7c9d5c5e2a7c7b9e0b1e2c3d4e5f6a7b8c9d0e1f2a3b4c5";
         let actual = sha256_file(&file).expect("hash");
         assert_eq!(actual.len(), 64, "a SHA-256 hex digest is 64 characters");
@@ -486,7 +488,7 @@ mod tests {
     /// might have in that directory.
     #[test]
     fn pruning_only_removes_partial_downloads() {
-        let dir = std::env::temp_dir().join(format!("locus-prune-test-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("chrysalis-prune-test-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).expect("create temp dir");
 
@@ -507,7 +509,7 @@ mod tests {
     /// startup, before any download has ever happened.
     #[test]
     fn pruning_a_missing_directory_is_harmless() {
-        let missing = std::env::temp_dir().join("locus-does-not-exist-xyz");
+        let missing = std::env::temp_dir().join("chrysalis-does-not-exist-xyz");
         let _ = std::fs::remove_dir_all(&missing);
         prune_staging_dir(&missing);
     }

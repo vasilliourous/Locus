@@ -52,7 +52,7 @@ the free VPNs on their own terms — and it is not:
 - **No switching cost.** A student can leave and use a free VPN the moment
   the free VPN works again.
 
-The last point is why the free tier is strategically useful: it makes Locus
+The last point is why the free tier is strategically useful: it makes Chrysalis
 the *default installed app* in a market with no switching cost.
 
 ## 13.5 The competitive question that matters

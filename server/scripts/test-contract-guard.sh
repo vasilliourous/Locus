@@ -41,10 +41,10 @@ trap 'rm -rf "$TMP"' EXIT
 # copy.
 mkdir -p "$TMP/pristine"
 TOUCHED="server/pb_hooks/code_lookup.pb.js
-client/src-tauri/src/locus/contract.rs
-client/src-tauri/src/locus/tier.rs
-client/src/services/locus.ts
-client/src/services/locus.generated.ts
+client/src-tauri/src/chrysalis/contract.rs
+client/src-tauri/src/chrysalis/tier.rs
+client/src/services/chrysalis.ts
+client/src/services/chrysalis.generated.ts
 client/src-tauri/sidecar/verge-mihomo-x86_64-unknown-linux-gnu
 vendor/build-inputs/verge-mihomo/verge-mihomo-x86_64-unknown-linux-gnu
 client/src-tauri/src/core/manager/lifecycle.rs"
@@ -99,7 +99,7 @@ echo "════════════════════════�
 # 1. A wire field removed — the `uot_port` / `server_port_uot` class.
 expect_caught \
     "a wire struct field removed (TierConfig.uot_port)" \
-    "client/src-tauri/src/locus/contract.rs" \
+    "client/src-tauri/src/chrysalis/contract.rs" \
     'lambda s: s.replace("""    #[serde(rename = "uot_port", alias = "server_port_uot", default)]\n    pub uot_port: u16,\n""", "")' \
     "no longer has field uot_port"
 
@@ -107,7 +107,7 @@ expect_caught \
 #    compile and the value simply never arrives.
 expect_caught \
     "a wire field respelled (ActivateResponse.device_fingerprint)" \
-    "client/src-tauri/src/locus/contract.rs" \
+    "client/src-tauri/src/chrysalis/contract.rs" \
     'lambda s: s.replace("    pub device_fingerprint: Option<String>,", """    #[serde(rename = "deviceFingerprint")]\n    pub device_fingerprint: Option<String>,""")' \
     "changed wire name"
 
@@ -121,7 +121,7 @@ expect_caught \
 # 4. An enum wire value dropped — the `bound_this_device` / `already_used` class.
 expect_caught \
     "an enum wire value removed (LookupStatus::Unbound)" \
-    "client/src-tauri/src/locus/contract.rs" \
+    "client/src-tauri/src/chrysalis/contract.rs" \
     'lambda s: s.replace("    /// The code exists and has not been redeemed yet.\n    Unbound,\n", "")' \
     "no longer accepts wire value"
 
@@ -129,8 +129,8 @@ expect_caught \
 #    name. YAML stays valid; only the engine refuses it.
 expect_caught \
     "the proxy group name made equal to the proxy name" \
-    "client/src-tauri/src/locus/tier.rs" \
-    'lambda s: s.replace("""pub const GROUP_NAME: &str = "Locus Auto";""", """pub const GROUP_NAME: &str = "Locus";""")' \
+    "client/src-tauri/src/chrysalis/tier.rs" \
+    'lambda s: s.replace("""pub const GROUP_NAME: &str = "Chrysalis Auto";""", """pub const GROUP_NAME: &str = "Chrysalis";""")' \
     "reference loop"
 
 echo "════════════════════════════════════════════════════════════"
@@ -181,18 +181,18 @@ PY
 #    developer who edits the Rust type and forgets to regenerate produces.
 check_full \
     "the generated TS file left stale after a Rust type change (§38)" \
-    "client/src/services/locus.generated.ts" \
+    "client/src/services/chrysalis.generated.ts" \
     'lambda s: s.replace("  ready: boolean", "  ready: boolean\n  staleDriftField: boolean", 1)' \
     "no longer match the Rust types"
 
-# 7. §33: someone hand-writes the interface back into services/locus.ts,
+# 7. §33: someone hand-writes the interface back into services/chrysalis.ts,
 #    shadowing the generated type. §38 would stay green — the generated file is
 #    untouched — so §33 is the only thing that catches this.
 check_full \
     "a hand-written interface redeclared over the generated type (§33)" \
-    "client/src/services/locus.ts" \
-    'lambda s: s + "\nexport interface LocusStatus {\n  activated: boolean\n}\n"' \
-    "redeclares LocusStatus"
+    "client/src/services/chrysalis.ts" \
+    'lambda s: s + "\nexport interface ChrysalisStatus {\n  activated: boolean\n}\n"' \
+    "redeclares ChrysalisStatus"
 
 echo "════════════════════════════════════════════════════════════"
 

@@ -14,7 +14,7 @@ everything retired in `legacy/`. `git mv` throughout, so history follows — use
 ## The layout, and what is not there
 
 ```
-client/            the fork (Clash Verge Rev base); product logic in src-tauri/src/locus/
+client/            the fork (Clash Verge Rev base); product logic in src-tauri/src/chrysalis/
 server/            the hub: modules/, pb_hooks/, scripts/, console/, site/
 docs/              this set — index at ../docs/README.md
 legacy/            v4/ and wails-client/ — reference only, never built

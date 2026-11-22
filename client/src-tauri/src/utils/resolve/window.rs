@@ -5,18 +5,18 @@ use tauri::{Theme, WebviewWindow};
 use crate::{config::Config, core::handle, utils::resolve::window_script::build_window_initial_script};
 use clash_verge_logging::{Type, logging, logging_error};
 
-// Locus's window colours, applied natively.
+// Chrysalis's window colours, applied natively.
 //
 // The window is shown before the WebView has parsed anything, so this is the
 // first pixel a student sees. A value that disagrees with the page shows as a
 // flash of the wrong colour on every launch.
 //
-// Must stay in step with `src/pages/_theme.tsx` (`LOCUS_COLORS.background`) and
+// Must stay in step with `src/pages/_theme.tsx` (`CHRYSALIS_COLORS.background`) and
 // the `--bg-color` value in `src/index.html`. The three layers exist because each
 // one paints at a different moment: native window, pre-bundle document, then
 // themed app. Values: /COLOURS.md §1-§2.
 //
-// **One ground, not a pair.** Locus has one permanent appearance (`/COLOURS.md`
+// **One ground, not a pair.** Chrysalis has one permanent appearance (`/COLOURS.md`
 // §0), so this file no longer asks the OS whether it prefers light and no longer
 // carries a second hex. The window is painted Dawn's background on every system,
 // which is also why a light-mode machine no longer gets a light flash before a
@@ -121,7 +121,7 @@ pub async fn build_new_window() -> Result<WebviewWindow, String> {
         "main", /* the unique window label */
         tauri::WebviewUrl::App(start_page.into()),
     )
-    .title("Locus")
+    .title("Chrysalis")
     .center()
     .decorations(DEFAULT_DECORATIONS)
     .fullscreen(false)

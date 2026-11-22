@@ -1,11 +1,11 @@
-# Locus — Secure School VPN
+# Chrysalis — Secure School VPN
 
 A VPN service for students at N4L-managed NZ schools. It bypasses N4L's Palo Alto
 filter using Shadowsocks TCP over a sing-box/mihomo TUN device — no TLS
 fingerprinting surface, no client-visible SOCKS layer, and TCP is the only
 transport that has to survive the filter.
 
-> **This page is a front door, not a reference.** It says what Locus is and where
+> **This page is a front door, not a reference.** It says what Chrysalis is and where
 > to go next. Every fact it could restate lives in a document that owns it, and
 > linking is the whole point — a second copy of a fact is a second thing that can
 > disagree. The map of every document is
@@ -27,7 +27,7 @@ transport that has to survive the filter.
 
 ---
 
-## What Locus is
+## What Chrysalis is
 
 **Two plans.** Free is the funnel; Full is the product. Each has **its own**
 UDP-over-TCP listener, because a sing-box inbound is bound to a single password.
@@ -46,8 +46,8 @@ Activation codes are `RQ-XXXX-XXXX-XXXX-C` — 15 characters, Luhn-mod-N checksu
 charset `ABCDEFGHJKLMNPQRSTUVWXYZ23456789`. The older `MYVPN-` form was retired in
 the 2026-08-17 migration.
 
-**Architecture.** The client is a Tauri 2 fork of Clash Verge Rev carrying Locus
-product logic in `client/src-tauri/src/locus/` (contract, activation, device
+**Architecture.** The client is a Tauri 2 fork of Clash Verge Rev carrying Chrysalis
+product logic in `client/src-tauri/src/chrysalis/` (contract, activation, device
 fingerprinting, heartbeat, tier→config, store, apply, runtime supervisor,
 hub-mediated updater). The hub is PocketBase + `pb_hooks/` behind Caddy, with the
 Shadowsocks/tc/BBR stack installed by numbered modules under `server/modules/`.
@@ -62,8 +62,8 @@ build.
 ## Repository layout
 
 ```
-Locus/
-├── client/        the desktop app — Tauri 2 + React, Locus logic in src-tauri/src/locus/
+Chrysalis/
+├── client/        the desktop app — Tauri 2 + React, Chrysalis logic in src-tauri/src/chrysalis/
 ├── server/        the hub — deploy modules, pb_hooks, console/, site/
 ├── docs/          live documentation; docs/README.md is the index
 └── legacy/        retired clients. REFERENCE ONLY — read it, never build it.
@@ -140,7 +140,7 @@ IP address here. The hub's reachability is a **dated claim** in
 > address (the heartbeat) needs a working hub to reach. **Removing it
 > strands the deployed fleet at the activation gate** with no path to the
 > update that would fix it. `05-caddy.sh` emits both; `check-consistency.sh`
-> §32 fails the build if that stops being true. `locusvpn.jadedns.uk` is the
+> §32 fails the build if that stops being true. `chrysalisvpn.jadedns.uk` is the
 > landing page only and must never serve the API.
 
 ---

@@ -1,4 +1,4 @@
-# Agent guidelines — Locus
+# Agent guidelines — Chrysalis
 
 Read this, then the one guide for the area you are touching. Nothing here is a
 procedure; each rule links to the file that owns it.
@@ -7,7 +7,7 @@ procedure; each rule links to the file that owns it.
 
 | Path | What it is | Its guide |
 |---|---|---|
-| `client/` | The desktop app (Tauri 2 + React). Product logic in `src-tauri/src/locus/`. | [`client/AGENTS.md`](client/AGENTS.md) |
+| `client/` | The desktop app (Tauri 2 + React). Product logic in `src-tauri/src/chrysalis/`. | [`client/AGENTS.md`](client/AGENTS.md) |
 | `server/` | The hub: PocketBase, Caddy, the Shadowsocks/BBR/tc stack, `pb_hooks/`. Also `server/site/` (landing page) and `server/console/` (operator console). | — |
 | `docs/` | The documentation. [`docs/README.md`](docs/README.md) is the index. | — |
 | `legacy/` | Retired client code. **Reference only — never build it.** | `legacy/wails-client/ARCHIVED.md` |
@@ -45,8 +45,8 @@ procedure; each rule links to the file that owns it.
 
 One clause each; the file that owns it has the story.
 
-- **The proxy group name must differ from the proxy name** (`Locus Auto` vs
-  `Locus`) — mihomo treats a match as a reference loop and refuses the whole
+- **The proxy group name must differ from the proxy name** (`Chrysalis Auto` vs
+  `Chrysalis`) — mihomo treats a match as a reference loop and refuses the whole
   config, which is valid YAML. Only running the engine catches it.
 - **mihomo's delay `timeout` is milliseconds, in a signed 16-bit field** — and
   `Timeout` is the same string a dead tunnel returns, so a 5 ms budget reads as a
@@ -72,4 +72,4 @@ One clause each; the file that owns it has the story.
 - **Run `check-consistency.sh` with `bash`.** Under `sh`/`dash` it aborts with
   "Bad substitution" and prints false `BAD` lines.
 - **Secrets do not travel with a repo copy.** A fresh clone has zero Actions
-  secrets and every signed build fails until `LOCUS_UPDATE_KEY` is set.
+  secrets and every signed build fails until `LOCUS_UPDATE_KEY` (a DEPRECATED ALIAS name) is set.

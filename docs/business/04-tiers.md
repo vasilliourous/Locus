@@ -296,7 +296,7 @@ The hub has **no per-user traffic accounting**. Each tier is one shadowsocks
 instance with a **single shared password**, so every free user is
 indistinguishable on the wire. There is nowhere to count bytes per user.
 
-So the quota is counted **by the client** (`client/src-tauri/src/locus/usage.rs`),
+So the quota is counted **by the client** (`client/src-tauri/src/chrysalis/usage.rs`),
 which already heartbeats and knows its tier. The honest consequences:
 
 - **It is soft.** A modified client could ignore the cap. The client is
@@ -379,7 +379,7 @@ screen the app did not honour. It now says the allowance is spent, which is true
 
 **The window is 30 days, not a calendar month.** The 30-day window, the 80%
 warning line and the classification all live in one pure module
-(`client/src-tauri/src/locus/usage.rs`), so the warning and the allowance state
+(`client/src-tauri/src/chrysalis/usage.rs`), so the warning and the allowance state
 cannot disagree about where the line is. The client has no trustworthy
 timezone and the hub stores no billing date per student, so a fixed 30-day window
 is the one rule that cannot disagree with itself across a daylight-saving

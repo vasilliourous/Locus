@@ -2,7 +2,7 @@
 //!
 //! # Why this module exists
 //!
-//! An activation code lives in `verge.yaml` (see [`crate::locus::store`]), which
+//! An activation code lives in `verge.yaml` (see [`crate::chrysalis::store`]), which
 //! is the *app's* config. That file is deleted by an uninstall, replaced by some
 //! update paths, and reset by the app's own backup/restore machinery. When it
 //! goes, the code goes with it, and the student is dropped back onto the
@@ -19,7 +19,7 @@
 //! It holds one thing: the activation code. It is a **bearer credential** for the
 //! student's tier, and the file is written owner-only (`0o600`) for that reason.
 //! It is never logged, never exported, and never rendered — the same rules
-//! [`crate::locus::store`] applies to the copy in `verge.yaml`. There is nothing
+//! [`crate::chrysalis::store`] applies to the copy in `verge.yaml`. There is nothing
 //! secret *identifying* here (no device id, no fingerprint): guarding a code
 //! against deletion does not require knowing whose device it is.
 //!
@@ -48,19 +48,19 @@ pub fn credential_store_dir() -> Option<PathBuf> {
     #[cfg(target_os = "linux")]
     {
         // The FHS location for variable state that survives package operations.
-        Some(PathBuf::from("/var/lib/locus"))
+        Some(PathBuf::from("/var/lib/chrysalis"))
     }
     #[cfg(target_os = "macos")]
     {
         // `/Library` is machine-scoped; a `~/Library` path dies with the account.
-        Some(PathBuf::from("/Library/Application Support/Locus"))
+        Some(PathBuf::from("/Library/Application Support/Chrysalis"))
     }
     #[cfg(target_os = "windows")]
     {
         // ProgramData is the Windows convention for shared app state on this
         // computer, and is where an installer is expected to leave state it wants
         // back later.
-        std::env::var_os("PROGRAMDATA").map(|base| PathBuf::from(base).join("Locus"))
+        std::env::var_os("PROGRAMDATA").map(|base| PathBuf::from(base).join("Chrysalis"))
     }
     #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
     {
@@ -186,13 +186,13 @@ pub fn remove_code() {
     let _ = std::fs::remove_file(credential_path_in(&dir));
 }
 
-/// The file that tells a *running* copy of Locus that this device was signed out.
+/// The file that tells a *running* copy of Chrysalis that this device was signed out.
 ///
 /// # Why a deletion alone is not enough
 ///
 /// [`remove_code`] deletes the mirror, and that is enough to stop the NEXT launch
 /// from adopting it. It is not enough to stop a **live** write from putting it
-/// back: [`crate::locus::store::read_code_rehydrating`] runs on the heartbeat
+/// back: [`crate::chrysalis::store::read_code_rehydrating`] runs on the heartbeat
 /// path, and a beat already in flight when the student signs out can reach it a
 /// moment later, re-read a code from a mirror that has not been deleted yet, and
 /// faithfully mirror it again — so the sign-out is undone by the very loop it just
@@ -310,7 +310,7 @@ mod tests {
     /// Follows the pattern already used in `identity.rs`, `update/apply.rs` and
     /// `utils/server.rs` rather than pulling in a `tempfile` dependency.
     fn scratch(name: &str) -> PathBuf {
-        std::env::temp_dir().join(format!("locus-credential-{}-{}", name, std::process::id()))
+        std::env::temp_dir().join(format!("chrysalis-credential-{}-{}", name, std::process::id()))
     }
 
     /// The `write_code_file`/`write_code` split only matters because of the
@@ -318,7 +318,7 @@ mod tests {
     /// predicate `write_code` uses.
     ///
     /// `write_code` itself cannot be exercised here: it resolves the real
-    /// machine-scoped directory (`/var/lib/locus` on Linux), and a unit test must
+    /// machine-scoped directory (`/var/lib/chrysalis` on Linux), and a unit test must
     /// not write there — on CI that path is either unprivileged or shared, and a
     /// test that needs root silently stops testing anything.
     fn marker_blocks(dir: &Path) -> bool {
@@ -420,7 +420,7 @@ mod tests {
     fn writing_creates_the_directory() {
         let dir = scratch("mkdir");
         let _ = std::fs::remove_dir_all(&dir);
-        let nested = dir.join("locus");
+        let nested = dir.join("chrysalis");
         assert!(write_code_file(&nested, "RQ-ZVY6-7NSD-X9X2-T"));
         assert!(nested.is_dir());
         let _ = std::fs::remove_dir_all(&dir);

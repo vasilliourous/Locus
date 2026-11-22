@@ -89,9 +89,15 @@ fn base64_to_string(s: &str) -> Result<String, String> {
     String::from_utf8(decoded).map_err(|e| format!("decoded bytes are not UTF-8 text: {e}"))
 }
 
-/// The `.pub` file in `.locus-keys/`, when this checkout has one.
+/// The `.pub` file in `.chrysalis-keys/`, when this checkout has one.
 fn local_pub_file() -> Option<String> {
-    std::fs::read_to_string(client_dir().join("..").join(".locus-keys").join("locus_update.pub")).ok()
+    std::fs::read_to_string(
+        client_dir()
+            .join("..")
+            .join(".chrysalis-keys")
+            .join("chrysalis_update.pub"),
+    )
+    .ok()
 }
 
 /// The configured pubkey must be base64 of the whole `.pub` file's text.
@@ -132,7 +138,7 @@ fn the_configured_pubkey_is_base64_of_the_public_key_file() {
         assert_eq!(
             key_line.trim(),
             expected_line.trim(),
-            "the configured pubkey does not match .locus-keys/locus_update.pub — \
+            "the configured pubkey does not match .chrysalis-keys/chrysalis_update.pub — \
              the running app would reject every update signed by the CI key \
              ('created with a different key')"
         );
@@ -149,7 +155,7 @@ fn the_configured_pubkey_is_base64_of_the_public_key_file() {
 ///
 /// The literal is the bare key line of the CURRENT keypair (rotated
 /// 2026-10-16, key ID `4DA9B48F39251CEF`). It is retargeted rather than derived
-/// from `.locus-keys/locus_update.pub` on purpose: the point of this test is to
+/// from `.chrysalis-keys/chrysalis_update.pub` on purpose: the point of this test is to
 /// pin the *shape* that fails, and a test that reads the value it is meant to
 /// reject would pass on any key, including a malformed one. When the key is
 /// rotated again, update this literal and the one in `SIGNING.md` §3 together.
@@ -187,7 +193,7 @@ fn a_signature_field_is_base64_of_the_whole_sig_file() {
 
     let sig_text = "untrusted comment: signature from minisign secret key\n\
                     RUT9eeTiJVDWZMBlzoYnS0T3fWk2qM1kAAAA=\n\
-                    trusted comment: Locus linux\n\
+                    trusted comment: Chrysalis linux\n\
                     AHhE2ZGRWCrFe02+ZLxfaDZmV6/ABBBBBBBBBBBBBBBBBBBBBBB=\n";
 
     // What publish-release.sh stores: the whole file, base64'd once.

@@ -3,13 +3,13 @@ import getSystem from '@/utils/get-system'
 const OS = getSystem()
 
 /**
- * The Locus palette. **Every value here is documented in `/COLOURS.md` §2**,
+ * The Chrysalis palette. **Every value here is documented in `/COLOURS.md` §2**,
  * which is the only file allowed to describe or justify one. Do not restate a
  * value or a rationale here; change it there first.
  *
  * # There is exactly one appearance
  *
- * Locus is permanently Dawn. There is no theme registry, no theme id, no
+ * Chrysalis is permanently Dawn. There is no theme registry, no theme id, no
  * light/dark switch and no theme hook — the appearance a student gets is the one
  * constant below, and the decision that made it permanent is recorded in
  * `COLOURS.md` §0. Do not reintroduce a second palette "just for contrast" or
@@ -29,7 +29,7 @@ const OS = getSystem()
  * object is the source the MUI theme is *projected* from, and the projection is
  * the one place the two vocabularies meet.
  */
-export const LOCUS_COLORS = {
+export const CHRYSALIS_COLORS = {
   background: '#1A1B26',
   surface: '#24283B',
   surfaceHover: '#2F3349',
@@ -63,12 +63,12 @@ export const LOCUS_COLORS = {
  * fetch to render its own chrome. The Twemoji face on Windows is an emoji
  * fallback shipped in `font.scss`, not the UI face.
  */
-export const locusFontFamily = `-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif, "Apple Color Emoji"${
+export const chrysalisFontFamily = `-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif, "Apple Color Emoji"${
   OS === 'windows' ? ', twemoji mozilla' : ''
 }`
 
 /**
- * The MUI-shaped projection of {@link LOCUS_COLORS}.
+ * The MUI-shaped projection of {@link CHRYSALIS_COLORS}.
  *
  * These are the fields `theme.ts` reads: everything else in the MUI palette is
  * derived from them. `theme_setting` overrides each as `setting.X || dt.X` in
@@ -76,16 +76,16 @@ export const locusFontFamily = `-apple-system, BlinkMacSystemFont, "Segoe UI", R
  * colour wins, and this object is the default it falls back to.
  */
 export const defaultTheme = {
-  primary_color: LOCUS_COLORS.accent,
-  secondary_color: LOCUS_COLORS.secondary,
-  primary_text: LOCUS_COLORS.textPrimary,
-  secondary_text: LOCUS_COLORS.textSecondary,
-  info_color: LOCUS_COLORS.info,
-  error_color: LOCUS_COLORS.error,
-  warning_color: LOCUS_COLORS.warning,
-  success_color: LOCUS_COLORS.success,
-  background_color: LOCUS_COLORS.background,
-  font_family: locusFontFamily,
+  primary_color: CHRYSALIS_COLORS.accent,
+  secondary_color: CHRYSALIS_COLORS.secondary,
+  primary_text: CHRYSALIS_COLORS.textPrimary,
+  secondary_text: CHRYSALIS_COLORS.textSecondary,
+  info_color: CHRYSALIS_COLORS.info,
+  error_color: CHRYSALIS_COLORS.error,
+  warning_color: CHRYSALIS_COLORS.warning,
+  success_color: CHRYSALIS_COLORS.success,
+  background_color: CHRYSALIS_COLORS.background,
+  font_family: chrysalisFontFamily,
 }
 
 /**

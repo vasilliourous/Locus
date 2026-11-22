@@ -84,7 +84,7 @@ impl RootStore {
     pub const fn label(self) -> &'static str {
         match self {
             Self::Platform => "the operating system's certificate store",
-            Self::Bundled => "the certificate roots bundled with Locus",
+            Self::Bundled => "the certificate roots bundled with Chrysalis",
         }
     }
 }

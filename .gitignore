@@ -1,4 +1,4 @@
-# Locus Root .gitignore
+# Chrysalis Root .gitignore
 #
 # NOTE: gitignore has no inline comments. A `#` only starts a comment at the
 # BEGINNING of a line — anywhere else it is part of the pattern. Two secret
@@ -135,21 +135,28 @@ whale.txt
 # would grant root shell on the hub if it leaked.
 .deploy/
 
-# Locus update signing keys. The private key signs every shipped client update;
+# Chrysalis update signing keys. The private key signs every shipped client update;
 # a leak lets anyone publish a build every installed client will accept, and a
 # loss means no installed client can ever be updated again. Never commit either
 # file — the public key belongs in tauri.conf.json, the private key in CI
 # secrets and offline custody.
+.chrysalis-keys/
+# The PRE-RENAME directory, kept ignored because a working tree that predates the
+# 2026-11-23 rename still has the signing key in it. Without this line the key in
+# an old checkout is covered by NO pattern at all — `git check-ignore` returns
+# "not ignored", so one `git add -A` stages the private key that signs every
+# shipped update. `.chrysalis-keys/` is where the key belongs now; this line only
+# keeps an old tree from publishing it.
 .locus-keys/
 # WHY THE README IS CARVED BACK OUT. The whole directory is ignored because the
 # update-signing private key lives in it, and a clone therefore gets an EMPTY
-# .locus-keys/ with nothing to explain it. The one thing that directory must carry
-# is the reason not to delete its contents — see .locus-keys/README.md. A negative
+# .chrysalis-keys/ with nothing to explain it. The one thing that directory must carry
+# is the reason not to delete its contents — see .chrysalis-keys/README.md. A negative
 # rule alone would have made the committed copy powerless: the first ignore got
 # there first, and `git status` reported the README as ignored rather than as a
 # new file. §5 of check-consistency.sh asserts nothing in this directory but the
 # README can ever be tracked.
-!.locus-keys/README.md
+!.chrysalis-keys/README.md
 .icon-backup/
 
 # The design brief for the copy and identity rework (`.brief/`). Scratch: the
@@ -288,3 +295,8 @@ URGENT-*.md
 # Same reasoning as URGENT-*.md above: the durable record of what was fixed is in
 # docs/reference/FIXES.md and STILL-OPEN.md; this file is the working state.
 .renovation-handover.md
+
+# Migration plan scratch: written before the rename is executed, and deliberately
+# NOT committed. Its content is the record of intent, not a safety copy — the git
+# history is the recovery net. Same reasoning as .renovation-handover.md above.
+.migration/

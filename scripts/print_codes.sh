@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Locus Code Card Printer
+# Chrysalis Code Card Printer
 # Formats activation codes into printable card sheets (PDF via enscript/ps2pdf).
 #
 # Usage:
@@ -67,7 +67,7 @@ if [ ${#CODES[@]} -eq 0 ]; then
 fi
 
 echo "═══════════════════════════════════════════"
-echo " Locus Code Card Printer"
+echo " Chrysalis Code Card Printer"
 echo "═══════════════════════════════════════════"
 echo " Codes:      ${#CODES[@]}"
 echo " Output:     ${OUTPUT_FILE}"
@@ -96,7 +96,7 @@ generate_enscript() {
         if [[ "$INPUT_FILE" == *"free"* ]]; then tier="Free"
         elif [[ "$INPUT_FILE" == *"eco"* ]]; then tier="Free"
         elif [[ "$INPUT_FILE" == *"strike"* ]]; then tier="Full"
-        else tier="Locus"
+        else tier="Chrysalis"
         fi
 
         cat >> "$tmp_txt" << CARD
@@ -176,7 +176,7 @@ generate_a2ps() {
 generate_text() {
     local txt_output="${OUTPUT_FILE%.pdf}.txt"
 
-    echo "Locus Activation Codes" > "$txt_output"
+    echo "Chrysalis Activation Codes" > "$txt_output"
     echo "Generated: $(date)" >> "$txt_output"
     echo "═══════════════════════════════════════════" >> "$txt_output"
     echo "" >> "$txt_output"

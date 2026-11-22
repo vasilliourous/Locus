@@ -4,7 +4,7 @@
 audience:    builder
 status:      live
 authoritative-for: the readiness chain from probe to rendered phase, and how to localise a stall
-verified-against: client/src-tauri/src/core/manager/probe.rs, client/src/components/connection/phase.ts, client/src-tauri/src/cmd/locus.rs
+verified-against: client/src-tauri/src/core/manager/probe.rs, client/src/components/connection/phase.ts, client/src-tauri/src/cmd/chrysalis.rs
 ```
 
 **What this is.** A field manual for one symptom: *the tunnel is carrying traffic
@@ -35,10 +35,10 @@ each hop is named beside it.
     if ready                 -> 'connected'
     else                     -> 'disconnected'
             ▲
-  client/src/services/locus.ts   locus_status()
+  client/src/services/chrysalis.ts   chrysalis_status()
     { activated, connected, ready, coreUp, trafficFlowing, subscription, … }
             ▲
-  client/src-tauri/src/cmd/locus.rs  locus_status()
+  client/src-tauri/src/cmd/chrysalis.rs  chrysalis_status()
     ready:   readiness.is_ready()      // Readiness::Ready
     core_up: readiness.is_core_up()    // Ready | Connecting
             ▲
@@ -95,28 +95,28 @@ broken hop.
 
 ### Hop 0 — did the connect even get as far as applying a config?
 
-**Added 2026-10.** Before the readiness chain runs at all, `locus_connect` has to
+**Added 2026-10.** Before the readiness chain runs at all, `chrysalis_connect` has to
 get the tier's configuration applied. That path has its own failure modes and they
 are *not* readiness failures, so they are diagnosed here rather than mistaken for
 the stall below.
 
-`locus_connect` (`cmd/locus.rs`) does, in order:
+`chrysalis_connect` (`cmd/chrysalis.rs`) does, in order:
 
 ```text
-1. store::read            -> no usable record        -> LOCUS_NOT_ACTIVATED
-2. stored expiry          -> known past date         -> LOCUS_SUBSCRIPTION_LAPSED
-3. RUN_STATE.tun_capable  -> false                   -> LOCUS_TUN_NOT_AVAILABLE
+1. store::read            -> no usable record        -> CHRYSALIS_NOT_ACTIVATED
+2. stored expiry          -> known past date         -> CHRYSALIS_SUBSCRIPTION_LAPSED
+3. RUN_STATE.tun_capable  -> false                   -> CHRYSALIS_TUN_NOT_AVAILABLE
 4. enable_tun_mode = true, saved                     (only after 3 passed)
-5. store::tier_config     -> none stored             -> LOCUS_NO_TIER_CONFIG
+5. store::tier_config     -> none stored             -> CHRYSALIS_NO_TIER_CONFIG
 6. apply_tier_waiting_for_the_guard
      |  Applies ONCE (re-applying per poll was the defect — see below)
      |  Waits out a config-update guard somebody else holds; bounded by
-     |  CONNECT_READY_BUDGET -> LOCUS_CONFIG_BUSY
-     |  A real refusal                          -> LOCUS_CONFIG_REJECTED
-     |  A write failure                         -> LOCUS_CONFIG_FAILED
+     |  CONNECT_READY_BUDGET -> CHRYSALIS_CONFIG_BUSY
+     |  A real refusal                          -> CHRYSALIS_CONFIG_REJECTED
+     |  A write failure                         -> CHRYSALIS_CONFIG_FAILED
      |  Cancel while waiting                    -> ConnectionResult{connected:false,"Cancelled"}
 7. start_core_with_port_fallback  (ONCE, not per poll)
-       -> a start failing for a real reason    -> LOCUS_CONNECT_FAILED
+       -> a start failing for a real reason    -> CHRYSALIS_CONNECT_FAILED
 8. readiness poll (250 ms, CONNECT_READY_BUDGET) -> the chain below
 ```
 
@@ -128,7 +128,7 @@ is already running"*. A connect that was proceeding normally was reported as a
 refused configuration, and the command resolved, abandoning the wait it was in the
 middle of. The macOS Intel report is that sentence.
 
-**Reading the codes:** `LOCUS_CONFIG_REJECTED` is the only one that is a verdict on
+**Reading the codes:** `CHRYSALIS_CONFIG_REJECTED` is the only one that is a verdict on
 the configuration. `BUSY` / `FAILED` / `CONNECT_FAILED` are statements about the
 machine's state or about timing, and a log line saying "rejected" for any of them
 is a bug — `ValidationOutcome::is_refusal()` is the predicate that decides, and it
@@ -149,7 +149,7 @@ of the app or a stuck process holding the preferences lock.
 
 ```sh
 # In the running app's devtools console, or against the command surface:
-locusStatus()
+chrysalisStatus()
 ```
 
 Read **`connected`**, **`ready`** and **`trafficFlowing`** separately. They are
@@ -179,11 +179,11 @@ curl -s http://127.0.0.1:<external-controller>/version
 # -> refused / timeout      ProbeOutcome::Unresponsive -> NotReady -> 'connecting'
 
 # The through-tunnel check, exactly as the probe makes it (probe_egress):
-curl -s -G "http://127.0.0.1:<external-controller>/group/Locus%20Auto/delay" \
+curl -s -G "http://127.0.0.1:<external-controller>/group/Chrysalis%20Auto/delay" \
      --data-urlencode "url=http://cp.cloudflare.com/generate_204" \
      --data-urlencode "timeout=5000"
-# -> 200 {"Locus":1234}     a member reported a round trip
-# -> 200 {"Locus-UoT":5000} a member HIT ITS BUDGET (see §4 — this was the bug)
+# -> 200 {"Chrysalis":1234}     a member reported a round trip
+# -> 200 {"Chrysalis-UoT":5000} a member HIT ITS BUDGET (see §4 — this was the bug)
 # -> 504 "get proxy: all timeout"   every member timed out
 # -> 200 {}                 no member reported at all
 ```
@@ -209,20 +209,20 @@ curl -s -G "http://127.0.0.1:<external-controller>/group/Locus%20Auto/delay" \
 >   invocation is in the right unit.
 
 `<external-controller>` is the address the app configured (see `clash-verge.yaml`
-/ the run state). The group name must be **`Locus Auto`** — the *group*, not the
-`Locus` proxy. See §5.
+/ the run state). The group name must be **`Chrysalis Auto`** — the *group*, not the
+`Chrysalis` proxy. See §5.
 
 ### Hop 3 — is the group the traffic is using the group being probed?
 
 ```sh
-curl -s http://127.0.0.1:<external-controller>/proxies/Locus%20Auto
-# -> {"now":"Locus-UoT", "all":["Locus-UoT","Locus"], …}
+curl -s http://127.0.0.1:<external-controller>/proxies/Chrysalis%20Auto
+# -> {"now":"Chrysalis-UoT", "all":["Chrysalis-UoT","Chrysalis"], …}
 ```
 
 `now` is the member the group's `select` has chosen — and therefore the member the
 delay test dials. Compare it against the proxy the student's traffic actually exits
 through. **If they differ, the probe is testing a path the traffic is not using.**
-For Strike, `tier.rs` deliberately lists `Locus-UoT` first precisely because a
+For Strike, `tier.rs` deliberately lists `Chrysalis-UoT` first precisely because a
 `select` group defaults to its first member.
 
 ### Hop 4 — does the classifier accept what the engine said?
@@ -249,7 +249,7 @@ but the button disagrees. It is a single field:
 
 ```sh
 # In the devtools console:
-(await locusStatus()).trafficFlowing
+(await chrysalisStatus()).trafficFlowing
 # -> true   bytes are moving right now; `ready` must be true
 # -> false  no bytes, or no recent sample — the delay test is the only proof left
 ```
@@ -294,13 +294,13 @@ probe's own question by hand:
 
 ```sh
 # which member the group is currently using (may not be the one carrying traffic)
-curl -s "http://127.0.0.1:<controller>/proxies/Locus%20Auto" | jq .now
+curl -s "http://127.0.0.1:<controller>/proxies/Chrysalis%20Auto" | jq .now
 
 # the probe's question, per outbound — note 200-with-delay:0 means "member failed"
 # `timeout` is MILLISECONDS: 5000 = 5 s. A hand-typed 5 is a 5 ms budget and
 # answers `504 Timeout` in ~7 ms on a perfectly good tunnel.
-curl -s "http://127.0.0.1:<controller>/proxies/Locus/delay?url=<enc(EGRESS_TEST_URL)>&timeout=5000"
-curl -s "http://127.0.0.1:<controller>/proxies/Locus-UoT/delay?url=<enc(EGRESS_TEST_URL)>&timeout=5000"
+curl -s "http://127.0.0.1:<controller>/proxies/Chrysalis/delay?url=<enc(EGRESS_TEST_URL)>&timeout=5000"
+curl -s "http://127.0.0.1:<controller>/proxies/Chrysalis-UoT/delay?url=<enc(EGRESS_TEST_URL)>&timeout=5000"
 ```
 
 A `200` carrying a usable `delay` on **either** outbound means the probe should be
@@ -408,16 +408,16 @@ yourself making the two identical, stop — that is the bug being reintroduced.
   `/proxies/<name>/delay` for every name in `tier::OUTBOUND_NAMES`, and never the
   group. The group route tests only the group's *currently selected* member, and
   the tier's group is a `select` whose default is its **first** member — on a UDP
-  tier that is `Locus-UoT`, a different outbound from the `Locus` proxy ordinary
+  tier that is `Chrysalis-UoT`, a different outbound from the `Chrysalis` proxy ordinary
   TCP traffic uses. Asking the group therefore lets the app decide the tunnel is
   dead by consulting an outbound the student's traffic never touches.
-- **The name is `Locus Auto` (the group); `Locus` and `Locus-UoT` are the proxies
+- **The name is `Chrysalis Auto` (the group); `Chrysalis` and `Chrysalis-UoT` are the proxies
   inside it.** mihomo refuses a group whose name matches a member (see
   `client/AGENTS.md`), so the group and its members can never share a name. If you
   add a third outbound, add it to `OUTBOUND_NAMES` **and** to the group —
   `every_outbound_the_probe_asks_about_is_one_the_profile_defines` pins the pair.
 - **The probe tests general egress, not the hub.** `EGRESS_TEST_URL` is a
-  Cloudflare 204 on purpose: a tunnel that reaches only the Locus hub has not
+  Cloudflare 204 on purpose: a tunnel that reaches only the Chrysalis hub has not
   proven it can carry the student's traffic.
 - **The group route and the member route fail *differently*, and the difference is
   the fix.** `delay_group` raises any non-2xx as an `Err` (`ret_failed_resp!` in
@@ -524,7 +524,7 @@ for the current list. The load-bearing gaps, as of the last edit:
   SKIPs**, so "it passes" there means only that it did not run the assertion.
 - **The per-member fix is verified structurally, not end to end.** The
   group/member error asymmetry above is read from the plugin source and measured
-  against a local sidecar; it has never been exercised through a real Locus tunnel
+  against a local sidecar; it has never been exercised through a real Chrysalis tunnel
   on a school link. See `STILL-OPEN.md`.
 - **No run on a real school network.** The budget is a judgement, not a measurement.
 - **The unit guard's wait is load-dependent, and that is the honest word for it.**
@@ -548,8 +548,8 @@ for the current list. The load-bearing gaps, as of the last edit:
 
 | Thing | Value | Where |
 |---|---|---|
-| Outbounds probed, in order | `Locus`, `Locus-UoT` | `locus/tier.rs::OUTBOUND_NAMES` |
-| Group (never probed directly) | `Locus Auto` | `locus/tier.rs::GROUP_NAME` |
+| Outbounds probed, in order | `Chrysalis`, `Chrysalis-UoT` | chrysalis/tier.rs::OUTBOUND_NAMES` |
+| Group (never probed directly) | `Chrysalis Auto` | chrysalis/tier.rs::GROUP_NAME` |
 | Egress URL | `http://cp.cloudflare.com/generate_204` | `core/manager/probe.rs::EGRESS_TEST_URL` |
 | Per-attempt budget | 5 s | `EGRESS_ATTEMPT_TIMEOUT` |
 | Whole-check deadline | 12 s | `EGRESS_DEADLINE` |

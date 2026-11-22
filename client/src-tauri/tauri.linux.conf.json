@@ -7,9 +7,9 @@
       "deb": {
         "depends": ["openssl", "libayatana-appindicator3-1"],
         "desktopTemplate": "./packages/linux/clash-verge.desktop",
-        "provides": ["locus"],
-        "conflicts": ["locus"],
-        "replaces": ["locus"],
+        "provides": ["chrysalis"],
+        "conflicts": ["chrysalis"],
+        "replaces": ["chrysalis"],
         "postInstallScript": "./packages/linux/post-install.sh",
         "preRemoveScript": "./packages/linux/pre-remove.sh"
       },
@@ -17,9 +17,9 @@
         "depends": ["openssl", "libayatana-appindicator-gtk3"],
         "recommends": ["policycoreutils", "policycoreutils-python-utils"],
         "desktopTemplate": "./packages/linux/clash-verge.desktop",
-        "provides": ["locus"],
-        "conflicts": ["locus"],
-        "obsoletes": ["locus"],
+        "provides": ["chrysalis"],
+        "conflicts": ["chrysalis"],
+        "obsoletes": ["chrysalis"],
         "postInstallScript": "./packages/linux/post-install-rpm.sh",
         "preRemoveScript": "./packages/linux/pre-remove.sh"
       }

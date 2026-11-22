@@ -3,7 +3,7 @@
 ```
 audience:    builder
 status:      live
-authoritative-for: how the Locus client differs from upstream Clash Verge Rev
+authoritative-for: how the Chrysalis client differs from upstream Clash Verge Rev
 verified-against: client/ (vs Clash Verge Rev v2.5.5)
 ```
 
@@ -21,14 +21,14 @@ verified-against: client/ (vs Clash Verge Rev v2.5.5)
 
 | | Size | Notes |
 |---|---|---|
-| **Locus logic we wrote** | the `locus/` module tree + `cmd/locus.rs` | a few thousand lines; read the tree — a count here is stale the next commit |
-| **Locus frontend we wrote** | ~500 TS/TSX | activation gate, connect control, service shims |
-| **Locus tests** | run the suites for the count | inline in the modules they cover, plus the integration crates |
+| **Chrysalis logic we wrote** | the `chrysalis/` module tree + `cmd/chrysalis.rs` | a few thousand lines; read the tree — a count here is stale the next commit |
+| **Chrysalis frontend we wrote** | ~500 TS/TSX | activation gate, connect control, service shims |
+| **Chrysalis tests** | run the suites for the count | inline in the modules they cover, plus the integration crates |
 | Upstream code retained | the rest | `core/`, `config/`, `enhance/`, `feat/`, `cmd/` |
 
 Upstream's machinery was **not** rewritten. Everything Verge already did well —
 core lifecycle, config generation and validation, privilege elevation, the service
-vs sidecar decision, reload-vs-restart policy — is kept and used as-is. The Locus
+vs sidecar decision, reload-vs-restart policy — is kept and used as-is. The Chrysalis
 modules sit *beside* it and call into it.
 
 That is a deliberate architectural rule, and the reason is in `../../docs/reference/FIXES.md`: the
@@ -38,7 +38,7 @@ retired client hand-rolled each of those and re-earned a bug for every one.
 
 ## 2. What was added (ours)
 
-### `src-tauri/src/locus/` — the product logic
+### `src-tauri/src/chrysalis/` — the product logic
 
 | Module | Responsibility | Why it is not upstream's |
 |---|---|---|
@@ -47,16 +47,16 @@ retired client hand-rolled each of those and re-earned a bug for every one.
 | `device.rs` | Per-OS hardware fingerprint, cached for the process lifetime | The original code-binding key; now a rate-limit/support key only |
 | `credential.rs` | The activation code mirrored to a machine-scoped store | A reinstall or an update must not lose a student's code |
 | `heartbeat.rs` | The loop, backoff, jitter, 7-day grace, config refresh | Verge has no server relationship at all |
-| `tier.rs` | Tier payload → mihomo YAML, including the UoT outbound | Verge generates config from *profiles*; Locus generates it from an entitlement |
+| `tier.rs` | Tier payload → mihomo YAML, including the UoT outbound | Verge generates config from *profiles*; Chrysalis generates it from an entitlement |
 | `store.rs` | Product state as additive `IVerge` fields | Deliberately reuses Verge's store rather than adding a second JSON file |
 | `apply.rs` | Writes the tier into a profile slot, then calls Verge's existing pipeline | The bridge; see §4 |
 | `runtime.rs` | Owns the heartbeat loop's lifecycle | One owner, because the loop must never run twice nor outlive the app |
 | `update/` | Version compare, signal decode, public-manifest fallback, installer hand-off | Verge's updater is replaced, not configured — see §3 |
 
-### `cmd/locus.rs` — the command surface
+### `cmd/chrysalis.rs` — the command surface
 
-`locus_status`, `locus_validate_code`, `locus_check_code`, `locus_activate`,
-`locus_connect`, `locus_disconnect`, `locus_hub_url`, `locus_update_staging_dir`.
+`chrysalis_status`, `chrysalis_validate_code`, `chrysalis_check_code`, `chrysalis_activate`,
+`chrysalis_connect`, `chrysalis_disconnect`, `chrysalis_hub_url`, `chrysalis_update_staging_dir`.
 
 Every one returns a **typed** result. The retired client returned strings, so the UI
 could not distinguish "this code is bound to your old laptop" from "we could not
@@ -71,8 +71,8 @@ reach the hub" — and every distinct situation collapsed into one unhelpful mes
 | `pages/account.tsx` | Device, tier, subscription detail, diagnostics |
 | `components/connection/` | The connection state machine (`use-connection.ts`, `phase.ts`) and cards |
 | `pages/connect-notice.ts` | Which message the connection screen shows, and in what priority |
-| `pages/_theme.tsx` | The Locus palette (`LOCUS_COLORS` / `LOCUS_LIGHT`) |
-| `services/locus.ts` | Typed shims over the commands |
+| `pages/_theme.tsx` | The Chrysalis palette (`CHRYSALIS_COLORS` / `CHRYSALIS_LIGHT`) |
+| `services/chrysalis.ts` | Typed shims over the commands |
 | `services/hub.ts` | The hub URL, in exactly one place |
 
 > The 3.1.0 rework replaced this whole surface; see `client/docs/FRONTEND.md`.
@@ -101,13 +101,13 @@ reach the hub" — and every distinct situation collapsed into one unhelpful mes
 
 **What remains of the plugin, deliberately:**
 
-- the `tauri-plugin-updater` **Rust dependency** — `locus/update/install.rs` calls
+- the `tauri-plugin-updater` **Rust dependency** — `chrysalis/update/install.rs` calls
   `Update::install()`, which is the installer we keep (see below)
 - the `plugins.updater.pubkey` in `tauri.conf.json` — required for the plugin's
   mandatory minisign verification
 
 **Why:** Verge's updater points at a static signed manifest on GitHub Releases and
-has no concept of entitlement, rollout, or a per-device release. Locus updates are
+has no concept of entitlement, rollout, or a per-device release. Chrysalis updates are
 hub-mediated: the heartbeat carries the signal, `/api/update` serves the manifest,
 and the hub decides what this device is offered.
 
@@ -122,7 +122,7 @@ Only the decision layer is ours.
 
 ### The debloat
 
-Removed because Locus has no such product surface:
+Removed because Chrysalis has no such product surface:
 
 | Removed | Why |
 |---|---|
@@ -158,12 +158,12 @@ connection-summary hook — the page went and the machinery stayed.
 This is the piece worth understanding, because it is where the two codebases meet:
 
 ```
-locus::apply::apply_tier(config, udp_relay)
+chrysalis::apply::apply_tier(config, udp_relay)
    │
    ├─ tier::build_profile()          → a mihomo document (ours)
    │
-   ├─ write app_profiles_dir()/locus.yaml
-   │     └─ a LOCAL profile, named "Locus"
+   ├─ write app_profiles_dir()/chrysalis.yaml
+   │     └─ a LOCAL profile, named "Chrysalis"
    │        Re-applying REPLACES it. A refresh happens every heartbeat, and a new
    │        file each time would grow the config directory indefinitely.
    │
@@ -188,15 +188,15 @@ An agent tidying these up will break something in the field.
 ### The proxy group name must differ from the proxy name
 
 ```rust
-pub const PROXY_NAME:     &str = "Locus";
-pub const GROUP_NAME:     &str = "Locus Auto";   // NOT "Locus"
+pub const PROXY_NAME:     &str = "Chrysalis";
+pub const GROUP_NAME:     &str = "Chrysalis Auto";   // NOT "Chrysalis"
 ```
 
 mihomo reads a group whose name matches a member as a **reference loop** and refuses
 the **entire configuration**:
 
 ```
-loop is detected in ProxyGroup, please check following ProxyGroups: [Locus]
+loop is detected in ProxyGroup, please check following ProxyGroups: [Chrysalis]
 ```
 
 The document is valid YAML and every unit test passed; only running the real engine
@@ -229,7 +229,7 @@ belonged to another device.
 **Both are gone.** A code is single-use and not tied to anything —
 `codes.activated_at` is the whole record of redemption, and re-activating a code
 restores access on a new machine or after a reinstall. The code is kept durably
-by `locus/credential.rs`, in a machine-scoped store, so a reinstall does not lose
+by `chrysalis/credential.rs`, in a machine-scoped store, so a reinstall does not lose
 it.
 
 **Do not put authorisation back on the fingerprint.** It is still computed and
@@ -240,11 +240,11 @@ still sent, but only as a rate-limit and support key. Full design:
 
 ## 6. Identity changes
 
-| | Upstream | Locus |
+| | Upstream | Chrysalis |
 |---|---|---|
 | App id | `io.github.clash-verge-rev.clash-verge-rev` | `com.locus.client` |
 | Data dir | upstream's | migrated on first launch (see below) |
-| Product name | Clash Verge | Locus |
+| Product name | Clash Verge | Chrysalis |
 | Version | 2.5.5 (inherited) | its own 3.x line, not Verge's — current value in `../../docs/state.toml` `[client.version]` |
 
 **The data-dir migration is real user state**, not a rename: `APP_ID` is the app data
@@ -282,8 +282,8 @@ are also not worth the churn:
 
 ```sh
 # Everything we own lives here:
-ls client/src-tauri/src/locus/
-ls client/src/services/locus.ts client/src/services/hub.ts
+ls client/src-tauri/src/chrysalis/
+ls client/src/services/chrysalis.ts client/src/services/hub.ts
 ls client/src/pages/{activation,connection,account}.tsx
 ls client/src/components/connection/
 ls client/src/pages/connect-notice.ts client/src/pages/_theme.tsx
@@ -335,7 +335,7 @@ Shadowsocks-2022 listener and the real mihomo sidecar, on loopback, no network.
 Requirements, because it is not always runnable:
 
 - **`sing-box` on PATH.** It is the hub's listener, not something this project
-  ships; a missing one is a SKIP unless `LOCUS_REQUIRE_LIVE_ENGINE` is set, which
+  ships; a missing one is a SKIP unless `CHRYSALIS_REQUIRE_LIVE_ENGINE` is set, which
   CI does after installing it (`../../docs/operate/CI-CD.md`).
 - **A local target, never a public one.** `probe::EGRESS_TEST_URL` points at
   `cp.cloudflare.com`, and a sandboxed runner cannot reach it — the engine reports
@@ -347,13 +347,13 @@ Requirements, because it is not always runnable:
   passing for the wrong reason.
 
 Both assertions were **observed failing** against the defects they describe: the
-UoT test against a `Locus-UoT` outbound with `udp-over-tcp` removed (the 3.3.x
+UoT test against a `Chrysalis-UoT` outbound with `udp-over-tcp` removed (the 3.3.x
 shape), and the probe test against a pre-SS2022 cipher on the TCP member.
 
 ### The readiness probe has its own manual
 
 `core/manager/probe.rs` and the `core/manager/mod.rs` around it are **upstream
-files Locus modified**, and the modification is load-bearing: the app's
+files Chrysalis modified**, and the modification is load-bearing: the app's
 connected/connecting distinction is decided there, and a defect there reads on
 screen as "stuck on connecting" with no other symptom. Two shipped defects came
 from this one chain.

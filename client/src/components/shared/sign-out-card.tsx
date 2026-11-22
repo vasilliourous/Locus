@@ -20,7 +20,7 @@ import {
   graceState,
   SIGN_OUT_RESULT_MS,
 } from '@/pages/sign-out-timer'
-import { locusSignOut, type SignOutResult } from '@/services/locus'
+import { chrysalisSignOut, type SignOutResult } from '@/services/chrysalis'
 import { errorDetail } from '@/services/notice-service'
 
 /**
@@ -47,7 +47,7 @@ import { errorDetail } from '@/services/notice-service'
  * # Why the outcome is three sentences, not one
  *
  * The backend reports `released | nothingToRelease | notConfirmed` (see
- * `locus_sign_out`). Only the first two mean the hub knows; `notConfirmed` means
+ * `chrysalis_sign_out`). Only the first two mean the hub knows; `notConfirmed` means
  * the network did not, and the honest sentence names that and reassures them that
  * the key still works on the next device. Collapsing all three into "Signed out"
  * would tell a student on a dead network that their key had been released — the
@@ -108,7 +108,7 @@ export const SignOutCard = ({ onSignedOut }: { onSignedOut: () => void }) => {
     // the effect touches state only from inside the promise where it belongs.
     void (async () => {
       try {
-        const outcome = await locusSignOut()
+        const outcome = await chrysalisSignOut()
         setResult(outcome)
       } catch (error) {
         // `errorDetail` because a Rust failure arrives as

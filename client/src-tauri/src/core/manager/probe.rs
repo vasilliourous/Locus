@@ -127,7 +127,7 @@ pub const EGRESS_RETRY_GAP: Duration = Duration::from_millis(500);
 /// A 204-only endpoint on a highly-available CDN: tiny, cacheable, and it
 /// returns a body-less success so a captive portal answering in the tunnel's
 /// place is caught (a portal returns a redirect/HTML, not a 204 from this host).
-/// mihomo's own default "connectivity check" family; chosen over the Locus hub
+/// mihomo's own default "connectivity check" family; chosen over the Chrysalis hub
 /// so the check tests *general* internet egress, not one host — a tunnel that
 /// reaches only the hub has not proven it can carry the student's traffic.
 pub const EGRESS_TEST_URL: &str = "http://cp.cloudflare.com/generate_204";
@@ -511,7 +511,7 @@ const _: () = assert!(DELAY_BUDGET_MILLIS >= 1_000);
 /// choice is the third "stuck on connecting" report. mihomo's group delay tests
 /// the group's **currently selected** member and nothing else, and the tier's
 /// group is `type: select` whose default is its FIRST member. On a UDP tier that
-/// first member is `Locus-UoT` — a different outbound from the `Locus` proxy the
+/// first member is `Chrysalis-UoT` — a different outbound from the `Chrysalis` proxy the
 /// student's ordinary TCP traffic falls through to.
 ///
 /// So the probe could ask a question the tunnel did not have to answer: the
@@ -541,7 +541,7 @@ async fn egress_attempt_once() -> bool {
     // guard test below asserts on the value this function actually sends.
     let timeout_millis = DELAY_BUDGET_MILLIS;
 
-    for member in crate::locus::tier::OUTBOUND_NAMES {
+    for member in crate::chrysalis::tier::OUTBOUND_NAMES {
         let probe = crate::core::handle::Handle::mihomo().delay_proxy_by_name(member, EGRESS_TEST_URL, timeout_millis);
 
         // The plugin's delay call has its own timeout (passed above), but wrap it

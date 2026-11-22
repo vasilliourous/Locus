@@ -4,7 +4,7 @@
 audience:    human-operator
 status:      live
 authoritative-for: what is decided but unbuilt, what is proposed, and what the operator must supply
-verified-against: server/pb_hooks/, client/src-tauri/src/locus/
+verified-against: server/pb_hooks/, client/src-tauri/src/chrysalis/
 ```
 
 Proposals awaiting a decision, or work already decided but not yet built.
@@ -30,7 +30,7 @@ is done, and what is left:
   `free_throttle_mbps`), so it can change without a client release
   ([`15-continuity.md`](15-continuity.md#152-the-free-tiers-continuity-question-new)).
 - Client-side counting of the 10 GB window, the 80% line and the classification —
-  one pure module, `client/src-tauri/src/locus/usage.rs`, fake-clock tested.
+  one pure module, `client/src-tauri/src/chrysalis/usage.rs`, fake-clock tested.
 - The usage bar, the warning and the throttle state on the connection screen.
 - `check-consistency.sh` §23 holds all of it in agreement, and was observed
   failing against each half-deployed state.

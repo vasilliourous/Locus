@@ -33,12 +33,12 @@
 # Usage:
 #   ./secrets-encrypt.sh                       # encrypt ../.secrets.env
 #   ./secrets-encrypt.sh path/to/plaintext.env
-#   LOCUS_SECRETS_PASSPHRASE_FILE=/tmp/pw ./secrets-encrypt.sh
-#   LOCUS_SECRETS_PASSPHRASE='...'        ./secrets-encrypt.sh
+#   CHRYSALIS_SECRETS_PASSPHRASE_FILE=/tmp/pw ./secrets-encrypt.sh
+#   CHRYSALIS_SECRETS_PASSPHRASE='...'        ./secrets-encrypt.sh
 #
 # Passphrase sources, in order of precedence (same contract as setup.sh):
-#   1. LOCUS_SECRETS_PASSPHRASE       — the passphrase itself
-#   2. LOCUS_SECRETS_PASSPHRASE_FILE  — a file containing it
+#   1. CHRYSALIS_SECRETS_PASSPHRASE       — the passphrase itself
+#   2. CHRYSALIS_SECRETS_PASSPHRASE_FILE  — a file containing it
 #   3. an interactive prompt (age's own), if neither is set and a tty is present
 #
 # The passphrase is never echoed, never logged, and never passed as an argument.
@@ -91,7 +91,7 @@ STRIKE_PASS
 BUDGET_PASS
 PB_ADMIN_EMAIL
 PB_ADMIN_PASS
-LOCUS_UPDATE_KEY_B64
+CHRYSALIS_UPDATE_KEY_B64
 VPS_PW
 "
 # BUDGET_PASS joined the required list on 2026-11-12: Budget is a SOLD plan
@@ -202,11 +202,18 @@ fi
 
 # ── Resolve the passphrase source, but do NOT read the value yet ──
 # Only the *source* is chosen here; the value is streamed into the pty below.
-if [ -n "${LOCUS_SECRETS_PASSPHRASE:-}" ]; then
-    PASS_MODE=env;  PASS_SRC="LOCUS_SECRETS_PASSPHRASE (environment)"
+if [ -n "${CHRYSALIS_SECRETS_PASSPHRASE:-}" ]; then
+    PASS_MODE=env;  PASS_SRC="CHRYSALIS_SECRETS_PASSPHRASE (environment)"
+elif [ -n "${CHRYSALIS_SECRETS_PASSPHRASE_FILE:-}" ]; then
+    [ -f "$CHRYSALIS_SECRETS_PASSPHRASE_FILE" ] || fail "CHRYSALIS_SECRETS_PASSPHRASE_FILE is not a file: $CHRYSALIS_SECRETS_PASSPHRASE_FILE"
+    PASS_MODE=file; PASS_SRC="CHRYSALIS_SECRETS_PASSPHRASE_FILE ($CHRYSALIS_SECRETS_PASSPHRASE_FILE)"
+# DEPRECATED ALIAS: the pre-rename names, accepted for one release. See NAME-MIGRATION.md.
+elif [ -n "${LOCUS_SECRETS_PASSPHRASE:-}" ]; then
+    PASS_MODE=env;  PASS_SRC="LOCUS_SECRETS_PASSPHRASE (deprecated alias)"; CHRYSALIS_SECRETS_PASSPHRASE="$LOCUS_SECRETS_PASSPHRASE"
 elif [ -n "${LOCUS_SECRETS_PASSPHRASE_FILE:-}" ]; then
     [ -f "$LOCUS_SECRETS_PASSPHRASE_FILE" ] || fail "LOCUS_SECRETS_PASSPHRASE_FILE is not a file: $LOCUS_SECRETS_PASSPHRASE_FILE"
-    PASS_MODE=file; PASS_SRC="LOCUS_SECRETS_PASSPHRASE_FILE ($LOCUS_SECRETS_PASSPHRASE_FILE)"
+    PASS_MODE=file; PASS_SRC="LOCUS_SECRETS_PASSPHRASE_FILE (deprecated alias) ($LOCUS_SECRETS_PASSPHRASE_FILE)"
+    CHRYSALIS_SECRETS_PASSPHRASE_FILE="$LOCUS_SECRETS_PASSPHRASE_FILE"
 else
     PASS_MODE=prompt; PASS_SRC="interactive prompt"
 fi
@@ -235,9 +242,9 @@ if [ "$PASS_MODE" = prompt ]; then
 else
     # A temporary copy is NOT used; the value is piped straight in.
     if [ "$PASS_MODE" = env ]; then
-        _feed() { printf '%s\n%s\n' "$LOCUS_SECRETS_PASSPHRASE" "$LOCUS_SECRETS_PASSPHRASE"; }
+        _feed() { printf '%s\n%s\n' "$CHRYSALIS_SECRETS_PASSPHRASE" "$CHRYSALIS_SECRETS_PASSPHRASE"; }
     else
-        _pw="$(cat "$LOCUS_SECRETS_PASSPHRASE_FILE")"
+        _pw="$(cat "$CHRYSALIS_SECRETS_PASSPHRASE_FILE")"
         _feed() { printf '%s\n%s\n' "$_pw" "$_pw"; }
     fi
 
@@ -262,7 +269,7 @@ else
     _RT="$(mktemp)"
     trap 'rm -f "$_RT"' EXIT
     if [ "$PASS_MODE" = env ]; then
-        _feed1() { printf '%s\n' "$LOCUS_SECRETS_PASSPHRASE"; }
+        _feed1() { printf '%s\n' "$CHRYSALIS_SECRETS_PASSPHRASE"; }
     else
         _feed1() { printf '%s\n' "$_pw"; }
     fi

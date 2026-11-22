@@ -219,7 +219,7 @@ async function generate() {
 async function kickOut(row: CodeRow) {
   const reason = window.prompt(
     `Kick ${row.code} out?\n\n` +
-      `The student's tunnel is stopped and their app shows a "signed out of Locus" ` +
+      `The student's tunnel is stopped and their app shows a "signed out of Chrysalis" ` +
       `screen carrying YOUR reason below — so write it for them, not for us.\n\n` +
       `The code is KEPT on their computer: unsuspending restores their access ` +
       `without them re-entering anything or restarting the app.\n\n` +
@@ -563,7 +563,7 @@ function downloadCsv() {
   const blob = new Blob([csv], { type: 'text/csv' })
   const a = document.createElement('a')
   a.href = URL.createObjectURL(blob)
-  a.download = `locus-codes-${new Date().toISOString().slice(0, 10)}.csv`
+  a.download = `chrysalis-codes-${new Date().toISOString().slice(0, 10)}.csv`
   a.click()
   URL.revokeObjectURL(a.href)
 }

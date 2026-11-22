@@ -1,4 +1,4 @@
-import type { ConnectBlocker, SubscriptionStatus } from '@/services/locus'
+import type { ConnectBlocker, SubscriptionStatus } from '@/services/chrysalis'
 
 /**
  * What the connection screen should say when the student cannot connect.
@@ -28,7 +28,7 @@ import type { ConnectBlocker, SubscriptionStatus } from '@/services/locus'
  * read the status yet". The connection hook starts in the second state and moves
  * to a settled one when its read lands, so on EVERY mount the screen rendered the
  * card prompt for one render — "milliseconds, sometimes over a second", which is
- * exactly how long `locus_status` takes while it proves the tunnel with a real
+ * exactly how long `chrysalis_status` takes while it proves the tunnel with a real
  * request through it. Navigating Home -> Settings remounts the page, so it
  * happened on every navigation.
  *

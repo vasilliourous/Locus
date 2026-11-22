@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Locus SS2022 Migration Verification
+# Chrysalis SS2022 Migration Verification
 #
 # Run ON THE HOST after `setup.sh` completes, to prove the Shadowsocks 2022
 # migration actually took effect. This is deliberately separate from
@@ -39,7 +39,7 @@ warn() { echo -e "${YELLOW}  ⚠️  WARN:${NC} $*" | tee -a "$LOGFILE"; WARN=$(
 
 cat << EOF | tee -a "$LOGFILE"
 ═══════════════════════════════════════════
- Locus SS2022 Verification
+ Chrysalis SS2022 Verification
  Expected cipher: ${SS_METHOD}
  Date:            $(date)
  Host:            $(hostname) $(hostname -I 2>/dev/null | awk '{print $1}')

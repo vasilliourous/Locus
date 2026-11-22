@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Locus wire contract — extract, verify, or refresh the frozen snapshot.
+"""Chrysalis wire contract — extract, verify, or refresh the frozen snapshot.
 
 WHY THIS EXISTS
 
@@ -53,10 +53,10 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[2]
 LOCK = REPO / "docs" / "reference" / "contract.lock.json"
 
-CONTRACT_RS = REPO / "client" / "src-tauri" / "src" / "locus" / "contract.rs"
-TIER_RS = REPO / "client" / "src-tauri" / "src" / "locus" / "tier.rs"
-CMD_RS = REPO / "client" / "src-tauri" / "src" / "cmd" / "locus.rs"
-LOCUS_RS = REPO / "client" / "src-tauri" / "src" / "locus"
+CONTRACT_RS = REPO / "client" / "src-tauri" / "src" / "chrysalis" / "contract.rs"
+TIER_RS = REPO / "client" / "src-tauri" / "src" / "chrysalis" / "tier.rs"
+CMD_RS = REPO / "client" / "src-tauri" / "src" / "cmd" / "chrysalis.rs"
+CHRYSALIS_RS = REPO / "client" / "src-tauri" / "src" / "chrysalis"
 LIB_RS = REPO / "client" / "src-tauri" / "src" / "lib.rs"
 TS_SRC = REPO / "client" / "src"
 HOOKS = REPO / "server" / "pb_hooks"
@@ -196,11 +196,11 @@ def collect():
                 hub_routes.add("%s %s" % (method, route))
 
     client_calls = set()
-    locus_rs_src = ""
-    if LOCUS_RS.is_dir():
-        for path in sorted(LOCUS_RS.rglob("*.rs")):
+    chrysalis_rs_src = ""
+    if CHRYSALIS_RS.is_dir():
+        for path in sorted(CHRYSALIS_RS.rglob("*.rs")):
             text = read(path) or ""
-            locus_rs_src += text
+            chrysalis_rs_src += text
             for route in re.findall(r'"(/api/[a-z0-9/_-]+)"', text):
                 client_calls.add(route)
             # A call site built with format! carries the verb in the method
@@ -243,28 +243,28 @@ def collect():
         for name in re.findall(
             r"#\[tauri::command\]\s*\npub (?:async )?fn (\w+)", text
         ):
-            if name.startswith("locus_"):
+            if name.startswith("chrysalis_"):
                 defined.append(name)
-        for name in re.findall(r'invoke\(\s*[\'"](locus_\w+)[\'"]', text):
+        for name in re.findall(r'invoke\(\s*[\'"](chrysalis_\w+)[\'"]', text):
             called.append(name)
     for name in re.findall(r"\bcmd::(\w+)", lib):
-        if name.startswith("locus_"):
+        if name.startswith("chrysalis_"):
             registered.append(name)
     if TS_SRC.is_dir():
         for path in sorted(TS_SRC.rglob("*.ts*")):
             text = read(path) or ""
             for name in re.findall(
-                r"invoke(?:<[^>]*>)?\(\s*['\"](locus_\w+)['\"]", text
+                r"invoke(?:<[^>]*>)?\(\s*['\"](chrysalis_\w+)['\"]", text
             ):
                 called.append(name)
 
     return {
         "version": 1,
-        "what": "The Locus wire contract. See server/scripts/contract-snapshot.py.",
+        "what": "The Chrysalis wire contract. See server/scripts/contract-snapshot.py.",
         "boundary": {
-            "client_rust": "client/src-tauri/src/locus/contract.rs",
+            "client_rust": "client/src-tauri/src/chrysalis/contract.rs",
             "hub_routes": "server/pb_hooks/*.js — routerAdd() calls",
-            "ipc": "client/src-tauri/src/cmd/locus.rs + lib.rs + client/src/**/*.ts*",
+            "ipc": "client/src-tauri/src/cmd/chrysalis.rs + lib.rs + client/src/**/*.ts*",
         },
         "structs": wire_structs,
         "enums": {"LookupStatus": {"wire_values": lookup_wire}},

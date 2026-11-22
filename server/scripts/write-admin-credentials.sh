@@ -16,14 +16,14 @@
 # safe to re-run by hand at any time:
 #   /root/server/scripts/write-admin-credentials.sh
 #
-# Output: /root/locus-credentials.txt  (chmod 600)
+# Output: /root/chrysalis-credentials.txt  (chmod 600)
 #
 # It ALWAYS reports on the fleet-divergence question, because the file is the
 # operator's last chance to notice that this host invented its own passwords
 # before they walk away.
 set -uo pipefail
 
-OUT="/root/locus-credentials.txt"
+OUT="/root/chrysalis-credentials.txt"
 PASS_FILE="/root/.tier_passwords"
 PB_CREDS="/root/.pb_admin_creds"
 ADMIN_TOKEN_FILE="/root/.admin_api_token"
@@ -120,7 +120,7 @@ umask 077
 {
 cat <<EOF
 ╔══════════════════════════════════════════════════════════════════════╗
-║  LOCUS — DEPLOYED CREDENTIALS                                          ║
+║  CHRYSALIS — DEPLOYED CREDENTIALS                                          ║
 ║  Generated $(now)
 ╚══════════════════════════════════════════════════════════════════════╝
 

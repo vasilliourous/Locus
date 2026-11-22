@@ -14,7 +14,7 @@ hood there are three parts, and only one of them is the customer's.
 
 | Part | What it is | Where |
 |---|---|---|
-| **Client** | Tauri 2 + React desktop app, forked from Clash Verge Rev v2.5.5, tunnelling via mihomo. The Locus logic is its own `locus/` module tree in Rust. Ships as a 3.x release (current version: `[client.version]` in [`../state.toml`](../state.toml)). | `client/` |
+| **Client** | Tauri 2 + React desktop app, forked from Clash Verge Rev v2.5.5, tunnelling via mihomo. The Chrysalis logic is its own `chrysalis/` module tree in Rust. Ships as a 3.x release (current version: `[client.version]` in [`../state.toml`](../state.toml)). | `client/` |
 | **Hub** | One DigitalOcean droplet running PocketBase + Caddy + the Shadowsocks/BBR/tc stack. Holds codes, tiers, releases, and the admin console. | `server/` |
 | **Retired clients** | Go + Wails and Go + Fyne predecessors. Reference only — they paid for the behavioural contract the fork reproduces. | `legacy/` |
 
@@ -52,8 +52,8 @@ cash, and activated **once**. Everything about distribution
 > The student then keeps access without the card in hand, because **the client
 > keeps the code itself** in a machine-scoped store — it is re-read on every
 > launch and survives an uninstall and a reinstall. `verge.yaml` holds the
-> primary copy; `/var/lib/locus` (Linux), `/Library/Application Support/Locus`
-> (macOS) and `%PROGRAMDATA%\Locus` (Windows) hold the mirror.
+> primary copy; `/var/lib/chrysalis` (Linux), `/Library/Application Support/Chrysalis`
+> (macOS) and `%PROGRAMDATA%\Chrysalis` (Windows) hold the mirror.
 >
 > This is what makes a thrown-away card survivable: the code was the purchase,
 > and the app remembers it. **It is not addressed by a device fingerprint** —

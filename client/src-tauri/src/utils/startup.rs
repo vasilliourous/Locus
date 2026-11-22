@@ -11,7 +11,7 @@ const STARTUP_LOG_FILE: &str = "startup.log";
 
 pub(crate) fn report_error(error: &anyhow::Error) {
     let detail = format!("{error:#}");
-    eprintln!("[locus] startup failed: {detail}");
+    eprintln!("[chrysalis] startup failed: {detail}");
 
     let log_result = startup_log_path().and_then(|path| {
         append_error(&path, &detail).with_context(|| format!("startup log {}", path.display()))?;
@@ -19,18 +19,18 @@ pub(crate) fn report_error(error: &anyhow::Error) {
     });
     let message = match log_result {
         Ok(path) => format!(
-            "Locus could not start.\n\n{detail}\n\nDiagnostic log:\n{}",
+            "Chrysalis could not start.\n\n{detail}\n\nDiagnostic log:\n{}",
             path.display()
         ),
         Err(log_error) => {
-            eprintln!("[locus] failed to write startup log: {log_error:#}");
-            format!("Locus could not start.\n\n{detail}\n\nThe diagnostic log could not be written:\n{log_error:#}")
+            eprintln!("[chrysalis] failed to write startup log: {log_error:#}");
+            format!("Chrysalis could not start.\n\n{detail}\n\nThe diagnostic log could not be written:\n{log_error:#}")
         }
     };
 
     let _ = rfd::MessageDialog::new()
         .set_level(rfd::MessageLevel::Error)
-        .set_title("Locus startup failed")
+        .set_title("Chrysalis startup failed")
         .set_description(message)
         .set_buttons(rfd::MessageButtons::Ok)
         .show();

@@ -40,7 +40,7 @@ use std::process::Command;
 /// before `cargo test`, so the only way to reach this branch in CI is that
 /// something upstream broke, and that is worth a red build.
 ///
-/// `LOCUS_REQUIRE_LIVE_ENGINE=1` makes that explicit for a release-time run;
+/// `CHRYSALIS_REQUIRE_LIVE_ENGINE=1` makes that explicit for a release-time run;
 /// `proof()` in `test-contract-guard.sh` covers the same claim from the outside.
 fn require_engine() -> Option<PathBuf> {
     match sidecar() {
@@ -56,11 +56,11 @@ fn require_engine() -> Option<PathBuf> {
 /// completeness.
 ///
 /// A bare `eprintln!("SKIP: …")` reads exactly like a passing test in `cargo test`
-/// output. `LOCUS_REQUIRE_LIVE_ENGINE=1` turns every skip into a failure, so a
+/// output. `CHRYSALIS_REQUIRE_LIVE_ENGINE=1` turns every skip into a failure, so a
 /// green run on a machine that *should* have run the engine proves it did.
 fn skip(reason: &str) {
-    if std::env::var_os("LOCUS_REQUIRE_LIVE_ENGINE").is_some() {
-        panic!("SKIP was requested to be a failure (LOCUS_REQUIRE_LIVE_ENGINE is set): {reason}");
+    if std::env::var_os("CHRYSALIS_REQUIRE_LIVE_ENGINE").is_some() {
+        panic!("SKIP was requested to be a failure (CHRYSALIS_REQUIRE_LIVE_ENGINE is set): {reason}");
     }
     eprintln!("SKIP: {reason}");
 }
@@ -145,8 +145,8 @@ fn strike_profile_yaml() -> String {
     // and finished by naming one that no longer existed. A test must not encode a
     // world claim — see docs/operate/CLAIMS.md §6. The domain is the only stable
     // identifier and even that does not belong in a unit test.
-    app_lib::locus::tier::build_profile(
-        &app_lib::locus::contract::TierConfig {
+    app_lib::chrysalis::tier::build_profile(
+        &app_lib::chrysalis::contract::TierConfig {
             server: "hub.example.invalid".into(),
             server_port: 8445,
             password: "MXBLrr0jTazDXjMo+33Ic8+IQKCWr6ueOogcykZGVYA=".into(),
@@ -160,8 +160,8 @@ fn strike_profile_yaml() -> String {
 
 /// An Eco tier: plain TCP, no UoT endpoint.
 fn eco_profile_yaml() -> String {
-    app_lib::locus::tier::build_profile(
-        &app_lib::locus::contract::TierConfig {
+    app_lib::chrysalis::tier::build_profile(
+        &app_lib::chrysalis::contract::TierConfig {
             server: "hub.example.invalid".into(),
             server_port: 8443,
             password: "MXBLrr0jTazDXjMo+33Ic8+IQKCWr6ueOogcykZGVYA=".into(),
@@ -179,7 +179,7 @@ fn the_engine_accepts_a_strike_profile() {
         return;
     };
 
-    let dir = std::env::temp_dir().join("locus-tier-engine-test-strike");
+    let dir = std::env::temp_dir().join("chrysalis-tier-engine-test-strike");
     std::fs::create_dir_all(&dir).expect("temp dir");
     let config = dir.join("strike.yaml");
     std::fs::write(&config, strike_profile_yaml()).expect("write profile");
@@ -199,7 +199,7 @@ fn the_engine_accepts_an_eco_profile() {
         return;
     };
 
-    let dir = std::env::temp_dir().join("locus-tier-engine-test-eco");
+    let dir = std::env::temp_dir().join("chrysalis-tier-engine-test-eco");
     std::fs::create_dir_all(&dir).expect("temp dir");
     let config = dir.join("eco.yaml");
     std::fs::write(&config, eco_profile_yaml()).expect("write profile");
@@ -226,7 +226,7 @@ fn the_engine_accepts_the_pinned_uot_protocol_version() {
         "the profile must pin the UoT protocol revision"
     );
 
-    let dir = std::env::temp_dir().join("locus-tier-engine-test-uot");
+    let dir = std::env::temp_dir().join("chrysalis-tier-engine-test-uot");
     std::fs::create_dir_all(&dir).expect("temp dir");
     let config = dir.join("uot.yaml");
     std::fs::write(&config, yaml).expect("write profile");

@@ -1,5 +1,5 @@
 /*
- * Locus landing page.
+ * Chrysalis landing page.
  *
  * The palette is copied by value from the client. It is duplicated rather than
  * imported because this page is served as a static file by Caddy and has no

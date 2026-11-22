@@ -89,10 +89,10 @@
   "update": {
     "installNow": "Install now",
     "later": "Later",
-    "body": "Locus {{version}} is ready to install. The update takes a moment and your connection will drop while it installs.",
+    "body": "Chrysalis {{version}} is ready to install. The update takes a moment and your connection will drop while it installs.",
     "downloading": "Downloading…",
     "downloadingPercent": "Downloading… {{percent}}%",
-    "restartNotice": "Locus may close and reopen by itself to finish. Do not force-quit it.",
-    "connectionNotice": "You can keep using Locus until you install."
+    "restartNotice": "Chrysalis may close and reopen by itself to finish. Do not force-quit it.",
+    "connectionNotice": "You can keep using Chrysalis until you install."
   }
 }

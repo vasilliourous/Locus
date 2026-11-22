@@ -48,7 +48,7 @@ case "$VERSION" in
     *) echo "error: '${VERSION}' does not look like a version" >&2; exit 1 ;;
 esac
 
-# Prefer the `locus-hub` ssh alias, which carries the deploy key and needs no
+# Prefer the `chrysalis-hub` ssh alias, which carries the deploy key and needs no
 # password; fall back to the bare host for a machine set up differently.
 #
 # WHY THIS PROBE EXISTS, because the failure it prevents is a HANG, not an error:
@@ -63,8 +63,8 @@ esac
 # fallback keeps working on a host where the bare name does have key auth.
 _site_pick_ssh_target() {
     if [ -n "${VPS:-}" ]; then printf '%s' "$VPS"; return; fi
-    if ssh -o BatchMode=yes -o ConnectTimeout=5 locus-hub true 2>/dev/null; then
-        printf 'locus-hub'
+    if ssh -o BatchMode=yes -o ConnectTimeout=5 chrysalis-hub true 2>/dev/null; then
+        printf 'chrysalis-hub'
     else
         printf 'root@networkingguides.jadedns.uk'
     fi
@@ -86,7 +86,7 @@ note() { printf '\033[1;33m    %s\033[0m\n' "$*"; }
 
 remote() { $SSH -o StrictHostKeyChecking=accept-new "$VPS" "$@"; }
 
-printf '\033[1mVerifying Locus %s\033[0m\n\n' "$VERSION"
+printf '\033[1mVerifying Chrysalis %s\033[0m\n\n' "$VERSION"
 
 # ── 1. The version directory exists on the host ────────────────────────────
 echo "1. Artifacts on the host"
@@ -260,7 +260,7 @@ fi
 # one is public — so that is reported as a note, not a failure.
 echo
 echo "7. The landing page offers ${VERSION}"
-LANDING="${LANDING_DOMAIN:-locusvpn.jadedns.uk}"
+LANDING="${LANDING_DOMAIN:-chrysalisvpn.jadedns.uk}"
 page="$(curl -s -m 20 "https://${LANDING}/" 2>/dev/null || true)"
 if [ -z "$page" ]; then
     note "could not fetch https://${LANDING}/ — page state UNKNOWN (not a pass)"

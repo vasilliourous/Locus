@@ -24,7 +24,7 @@ pub struct IVerge {
     pub language: Option<String>,
 
     // `theme_mode` and `theme_id` were removed on 2026-11-19, together with the
-    // theme registry, the light appearance and the theme hook. Locus has one
+    // theme registry, the light appearance and the theme hook. Chrysalis has one
     // permanent appearance (/COLOURS.md section 0), so there is no mode and no
     // theme to store.
     //
@@ -219,7 +219,7 @@ pub struct IVerge {
 
     pub enable_external_controller: Option<bool>,
 
-    // ── Locus product state ──────────────────────────────────────────────────
+    // ── Chrysalis product state ──────────────────────────────────────────────────
     //
     // Additive on purpose: every field here is `Option<T>` with a serde default,
     // which is exactly the shape this struct already uses, so adding them needs
@@ -231,14 +231,14 @@ pub struct IVerge {
     /// plaintext in a user-writable config. That is deliberate (the retired
     /// client did the same, and the code must survive restarts), but it has
     /// consequences: never log it, never include it in a diagnostics export, and
-    /// never send the full value to the frontend — see `cmd::locus`.
+    /// never send the full value to the frontend — see `cmd::chrysalis`.
     pub activation_code: Option<String>,
 
     /// The tier the hub granted (`free`/`eco` for the free plan, `strike` for
     /// the paid one). A **frozen wire name**: the hub resolves it against
     /// `tier_configs`, so it is never renamed to match what the UI displays.
     /// The student-visible label lives in one place (`tier-badge.tsx`).
-    pub locus_tier: Option<String>,
+    pub chrysalis_tier: Option<String>,
 
     /// The device fingerprint this code is bound to.
     pub device_fingerprint: Option<String>,
@@ -267,17 +267,17 @@ pub struct IVerge {
     /// arrives as one payload, is replaced as one payload, and is meaningless
     /// in pieces. A schema change on the hub side then cannot leave a partially
     /// populated config behind.
-    pub locus_tier_server: Option<String>,
+    pub chrysalis_tier_server: Option<String>,
 
     /// Whether this tier should carry UDP over TCP.
-    pub locus_udp_relay: Option<bool>,
+    pub chrysalis_udp_relay: Option<bool>,
 
     /// An override for the hub's base URL, when the built-in one cannot be
     /// reached from this network.
     ///
     /// # Why this exists
     ///
-    /// The hub address is compiled in (`locus::contract::HUB_URL`), which is
+    /// The hub address is compiled in (`chrysalis::contract::HUB_URL`), which is
     /// correct — a client that cannot find its hub cannot activate, heartbeat or
     /// update, so the address must not be a per-machine guess. But it is also the
     /// one value that can become *entirely* unreachable for reasons that have
@@ -308,14 +308,14 @@ pub struct IVerge {
     /// operator (config file, or a future console-driven push on an authenticated
     /// path), which is also why the value alone can never degrade the compiled
     /// default into something insecure.
-    pub locus_hub_override: Option<String>,
+    pub chrysalis_hub_override: Option<String>,
 
     /// When this code lapses, exactly as the hub last told us.
     ///
     /// Stored raw rather than as a timestamp so the value the UI displays is the
     /// value the hub sent: re-serialising here would mean the client and the
     /// admin console could disagree about the same code by a timezone. Parsing
-    /// happens at display time in [`crate::locus::expiry`], which is also where
+    /// happens at display time in [`crate::chrysalis::expiry`], which is also where
     /// the "do not invent a date" rule lives.
     ///
     /// Refreshed by every heartbeat, so it stays accurate for as long as the app
@@ -324,7 +324,7 @@ pub struct IVerge {
     ///
     /// `None` means the hub told us nothing (older hub, or no expiry recorded).
     /// It does NOT mean expired, and the UI must render nothing.
-    pub locus_expires_at: Option<String>,
+    pub chrysalis_expires_at: Option<String>,
 
     /// Why the hub last refused this device, when it refused.
     ///
@@ -343,15 +343,15 @@ pub struct IVerge {
     ///
     /// Cleared on a successful activation, so a renewed student does not keep
     /// seeing the reason their old code was refused.
-    pub locus_refusal_reason: Option<String>,
+    pub chrysalis_refusal_reason: Option<String>,
 
     /// Whether an operator has suspended this code, with the credential kept.
     ///
-    /// Distinct from `locus_refusal_reason` being set, which covers every
+    /// Distinct from `chrysalis_refusal_reason` being set, which covers every
     /// refusal. This is the one refusal that is REVERSIBLE: the code, tier and
     /// expiry are all still stored, so clearing this flag restores the session
     /// without the student re-entering anything. See
-    /// `locus::store::record_suspension` for the trade that makes it safe.
+    /// `chrysalis::store::record_suspension` for the trade that makes it safe.
     ///
     /// `None` (not `false`) when absent, so an older config file is "not
     /// suspended" rather than needing a migration.
@@ -360,10 +360,10 @@ pub struct IVerge {
     /// activation behind it used to render the kick-out screen for a device that
     /// was not signed in — a screen with no controls, by design — and the only
     /// way out was wiping the app's data. The writers keep the pair consistent
-    /// (`locus::store::clear_entitlement` clears this) and
-    /// `locus::store::is_suspended` refuses the impossible pair on read, so the
+    /// (`chrysalis::store::clear_entitlement` clears this) and
+    /// `chrysalis::store::is_suspended` refuses the impossible pair on read, so the
     /// UI never has to defend against it.
-    pub locus_suspended: Option<bool>,
+    pub chrysalis_suspended: Option<bool>,
 
     /// Which version of the hub's enforcement logic last answered this device.
     ///
@@ -375,7 +375,7 @@ pub struct IVerge {
     /// exactly like a suspension that was never set.
     ///
     /// Recorded on every successful beat. `None` means no beat has delivered a
-    /// value yet; a value BELOW [`crate::locus::contract::ENFORCEMENT_VERSION`]
+    /// value yet; a value BELOW [`crate::chrysalis::contract::ENFORCEMENT_VERSION`]
     /// means the hub predates this client, so the client's enforcement features
     /// (suspension) cannot work no matter what the console shows. That is a
     /// deployment fact, not a student's problem, and saying so plainly is the
@@ -384,7 +384,7 @@ pub struct IVerge {
     /// The number never gates anything client-side: refusing service to a student
     /// because the operator's box is behind would be a worse defect than the one
     /// it reports.
-    pub locus_hub_enforcement: Option<u32>,
+    pub chrysalis_hub_enforcement: Option<u32>,
 
     /// The version the hub has offered this device, if any.
     ///
@@ -400,12 +400,12 @@ pub struct IVerge {
     ///
     /// `None` means nothing has been offered. It does NOT mean "up to date" — the
     /// hub may simply not have been reached yet.
-    pub locus_update_offered: Option<String>,
+    pub chrysalis_update_offered: Option<String>,
 
     /// Why the last heartbeat did not produce an update offer, if it did not.
     ///
     /// A human-readable sentence derived from
-    /// [`crate::locus::update::NoOfferReason`], shown on the Account page so a
+    /// [`crate::chrysalis::update::NoOfferReason`], shown on the Account page so a
     /// student (or support) can answer "why is this device not updating?"
     /// without reading a log.
     ///
@@ -416,16 +416,16 @@ pub struct IVerge {
     /// Written on EVERY beat, including the healthy case (to `None`), so a
     /// problem that is fixed stops being reported. A stale reason that outlived
     /// its cause would send a student to change a setting that is already right.
-    pub locus_update_check_reason: Option<String>,
+    pub chrysalis_update_check_reason: Option<String>,
 
     // ── The free tier's usage window ─────────────────────────────────────────
     //
     // The allowance is counted CLIENT-SIDE, because the hub has no per-user
     // accounting (one shared shadowsocks password per tier). These three fields
     // are that counter's persisted state; the arithmetic lives in
-    // [`crate::locus::usage`], which is pure and fake-clock tested.
+    // [`crate::chrysalis::usage`], which is pure and fake-clock tested.
     //
-    // Stored as a serialised [`crate::locus::usage::Usage`] rather than three
+    // Stored as a serialised [`crate::chrysalis::usage::Usage`] rather than three
     // loose fields on purpose: the counter is one value with internal
     // consistency (a count is meaningless without the window it belongs to), and
     // splitting it across keys is how a half-written window happens — a new
@@ -433,22 +433,22 @@ pub struct IVerge {
     /// The free-tier usage window, serialised JSON.
     ///
     /// `None` for a paying tier, or a client that has never recorded a byte.
-    /// Absence means "no window yet", which [`crate::locus::usage::Usage`] starts
+    /// Absence means "no window yet", which [`crate::chrysalis::usage::Usage`] starts
     /// lazily on the first reading — not "zero used", which would report a
     /// full allowance to a student mid-window.
-    pub locus_usage: Option<String>,
+    pub chrysalis_usage: Option<String>,
 
     /// The allowance the hub last advertised, in **mebibytes**.
     ///
     /// Cached from the heartbeat so a status read can classify usage without a
-    /// live beat — the Connection screen polls `locus_status` far more often than
+    /// live beat — the Connection screen polls `chrysalis_status` far more often than
     /// the client beats. This is the *server's* value, refreshed on every beat;
     /// changing it on the hub takes effect on the student's next beat without a
     /// release, which is the whole reason it is a wire field.
     ///
     /// `None` means the hub has never sent one — a paying tier, or an older hub.
     /// It reads as "no allowance", never as zero, so it cannot throttle anyone.
-    pub locus_allowance_mb: Option<u64>,
+    pub chrysalis_allowance_mb: Option<u64>,
 
     /// The speed a throttled free student drops to, in Mbps, as the hub last
     /// advertised it (`free_throttle_mbps`).
@@ -457,13 +457,13 @@ pub struct IVerge {
     /// says how much data, this says how slow once it is gone.
     ///
     /// **Persisted but not yet applied.** Nothing lowers a live Core's speed
-    /// from this value yet; see the note on [`crate::locus::store::throttle_mbps`]
+    /// from this value yet; see the note on [`crate::chrysalis::store::throttle_mbps`]
     /// and `STILL-OPEN.md`. It is stored now so the value survives a restart and
     /// the applying step has something to read when it lands.
     ///
     /// `None` means the hub did not send one, and the caller must apply **no**
     /// throttle — absence is not "zero speed".
-    pub locus_throttle_mbps: Option<u32>,
+    pub chrysalis_throttle_mbps: Option<u32>,
 
     // ── Retired: device identity and the recognition token ───────────────────
     //
@@ -478,20 +478,20 @@ pub struct IVerge {
     // them either error or silently discard the rest of the config. They are
     // inert, and a later cleanup can drop them once no shipped build writes them.
     /// Retired. The device's non-secret identifier.
-    pub locus_device_id: Option<String>,
+    pub chrysalis_device_id: Option<String>,
 
     /// Retired. The device's secret. Never read; if a build ever did, the
     /// never-log/never-export rules would still apply.
-    pub locus_device_secret: Option<String>,
+    pub chrysalis_device_secret: Option<String>,
 
     /// Retired. Where the identity was found: `"machine"` or `"app"`.
-    pub locus_identity_store: Option<String>,
+    pub chrysalis_identity_store: Option<String>,
 
     /// Retired. The session token the hub minted at recognition.
-    pub locus_device_token: Option<String>,
+    pub chrysalis_device_token: Option<String>,
 
     /// Retired. When that token expired.
-    pub locus_token_expires_at: Option<String>,
+    pub chrysalis_token_expires_at: Option<String>,
 }
 
 #[derive(Default, Debug, Clone, Deserialize, Serialize)]
@@ -554,7 +554,7 @@ impl IVerge {
 
         if needs_fix {
             logging!(debug, Type::Config, "正在保存修正后的配置文件...");
-            help::save_yaml(&config_path, &config, Some("# Locus Config")).await?;
+            help::save_yaml(&config_path, &config, Some("# Chrysalis Config")).await?;
             logging!(info, Type::Config, "配置文件修正完成，需要重新加载配置");
 
             Self::reload_config_after_fix(config).await;
@@ -680,7 +680,7 @@ impl IVerge {
     }
 
     pub async fn save_file(&self) -> Result<()> {
-        help::save_yaml(&dirs::verge_path()?, &self, Some("# Locus Config")).await
+        help::save_yaml(&dirs::verge_path()?, &self, Some("# Chrysalis Config")).await
     }
 
     #[allow(clippy::cognitive_complexity)]

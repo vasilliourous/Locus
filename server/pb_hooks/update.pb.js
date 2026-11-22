@@ -1,4 +1,4 @@
-// Locus update manifest — the endpoint the desktop client's updater polls.
+// Chrysalis update manifest — the endpoint the desktop client's updater polls.
 //
 // WHY THIS IS NOT /api/release
 //
@@ -59,7 +59,7 @@ routerAdd("GET", "/api/update", function(e) {
     // "1.10.0" > "1.9.0" (string comparison gets that backwards) and
     // "2.0.0" > "2.0.0-rc1".
     //
-    // This mirrors locus::update::version on the client. Both exist because the
+    // This mirrors chrysalis::update::version on the client. Both exist because the
     // hub must not advertise a downgrade even if update_config is stale, and the
     // client must not accept one even if the hub is wrong. Two independent
     // checks on the same rule is the point, not duplication.
@@ -169,7 +169,7 @@ routerAdd("GET", "/api/update", function(e) {
             // without signing, or before signing existed — and the symptom
             // otherwise is "updates silently never arrive", which is the
             // hardest class of fault to diagnose.
-            console.log("[locus] /api/update: refusing to advertise " + version +
+            console.log("[chrysalis] /api/update: refusing to advertise " + version +
                         " for " + platform + " — missing " +
                         (url ? "" : "url ") + (sha256 ? "" : "sha256 ") +
                         (signature ? "" : "signature ") + "(publish it with a signature)");

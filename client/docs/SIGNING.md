@@ -1,16 +1,16 @@
-# Client release signing — Locus
+# Client release signing — Chrysalis
 
 ```
 audience:    human-operator
 status:      live
-authoritative-for: release signing, key custody under .locus-keys/
+authoritative-for: release signing, key custody under .chrysalis-keys/
 verified-against: client/scripts/, .github/workflows/client.yml
 ```
 
 > **The private key is a single point of failure in both directions.** Losing it
 > means no installed client can ever accept another update. Leaking it means
 > anyone can publish a build every client will install. Read this before
-> touching anything under `.locus-keys/` or the CI signing step.
+> touching anything under `.chrysalis-keys/` or the CI signing step.
 
 ---
 
@@ -46,7 +46,7 @@ Verified by reading `minisign-verify-0.2.5` **and** `tauri-plugin-updater-2.11.0
 - The plugin's `verify_signature()` calls `base64_to_string()` on **both** the
   pubkey and the signature, and that helper requires the result to be UTF-8
   **text**. So both fields are base64 of the corresponding file's *entire text*:
-  `base64(locus_update.pub)` and `base64(<artifact>.sig)`. See §3 for why the
+  `base64(chrysalis_update.pub)` and `base64(<artifact>.sig)`. See §3 for why the
   pubkey is the trap.
 - The key ID in the signature must match the key ID in the public key, or
   verification fails with *"created with a different key"*.
@@ -92,7 +92,7 @@ negative cases are recorded here.
 | **Public key (as configured)** | `dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXkgNERBOUI0OEYzOTI1MUNFRgpSV1R2SENVNWo3U3BUY1p3VnpKbjg1MkpVZEw0dnVMUEJWRC91RXBjTU1ibmx6dWxZeENKZjZoRgo=` |
 | **Underlying minisign key** | `RWTvHCU5j7SpTcZwVzJn852JUdL4vuLPBVD/uEpcMMbnlzulYxCJf6hF` |
 | **Where it lives** | `client/src-tauri/tauri.conf.json` → `plugins.updater.pubkey` |
-| **Secret key** | `LOCUS_UPDATE_KEY_B64` in `server/secrets.env.age` — the durable copy. `.locus-keys/locus_update.key` is a per-session cache extracted from it. |
+| **Secret key** | `LOCUS_UPDATE_KEY_B64` in `server/secrets.env.age` — the durable copy. `.chrysalis-keys/chrysalis_update.key` is a per-session cache extracted from it. |
 | **Where it must go** | GitHub Actions secret `LOCUS_UPDATE_KEY`, **and** an offline copy you control, **and** a passphrase-encrypted backup inside `server/secrets.env.age` |
 | Key ID | `4DA9B48F39251CEF` (shown in the `.pub` comment line) |
 
@@ -130,12 +130,12 @@ deterministically:
 
 ```sh
 # Regenerate the configured form from the .pub file
-base64 -w0 .locus-keys/locus_update.pub
+base64 -w0 .chrysalis-keys/chrysalis_update.pub
 ```
 
 `client/src-tauri/tests/update_signature_contract.rs` pins this: it reads
 `tauri.conf.json`, applies the plugin's own decode, and asserts the result is
-minisign text matching `.locus-keys/locus_update.pub`. It also asserts the bare
+minisign text matching `.chrysalis-keys/chrysalis_update.pub`. It also asserts the bare
 key is rejected, so the trap cannot be reintroduced silently.
 
 
@@ -143,29 +143,29 @@ The key has **no passphrase**, deliberately: CI must sign non-interactively. Tha
 makes the secret-store copy the only thing protecting it — treat it like the
 production database credentials.
 
-`.locus-keys/` is in the root `.gitignore`. Verify it stays that way:
+`.chrysalis-keys/` is in the root `.gitignore`. Verify it stays that way:
 
 ```sh
-git check-ignore -v .locus-keys/locus_update.key
+git check-ignore -v .chrysalis-keys/chrysalis_update.key
 ```
 
 ### The working copy is a cache, extracted per session
 
-`.locus-keys/locus_update.key` is **not kept between sessions** and an empty
-`.locus-keys/` is the normal state after a clone. The durable copy is
+`.chrysalis-keys/chrysalis_update.key` is **not kept between sessions** and an empty
+`.chrysalis-keys/` is the normal state after a clone. The durable copy is
 `LOCUS_UPDATE_KEY_B64` in `server/secrets.env.age`. To sign anything locally:
 
 ```sh
 export LOCUS_SECRETS_PASSPHRASE_FILE=decryptionkeyforsecretsdeleteafteruse.txt
-./server/scripts/locus-key-extract.sh           # writes 0700 / 0600, verifies the key ID
+./server/scripts/chrysalis-key-extract.sh           # writes 0700 / 0600, verifies the key ID
 #  ... sign ...
-./server/scripts/locus-key-extract.sh --remove  # drop the cache again
+./server/scripts/chrysalis-key-extract.sh --remove  # drop the cache again
 ```
 
 Why it works this way: the directory is gitignored, so on 2026-10-16 it vanished
 with the working tree and took the key with it. Making the cache empty by default
 means the *recovery* route is the route used every day, so it is exercised rather
-than discovered broken. [`../../.locus-keys/README.md`](../../.locus-keys/README.md)
+than discovered broken. [`../../.chrysalis-keys/README.md`](../../.chrysalis-keys/README.md)
 owns the detail.
 
 ---
@@ -190,19 +190,19 @@ tar xzf minisign.tar.gz
 # -G generate, -W no passphrase (required for non-interactive CI signing)
 # THE PATHS ARE THE TRAP — see the note below. Run this from the REPO ROOT.
 ./minisign-linux/x86_64/minisign -G -W \
-  -p .locus-keys/locus_update.pub -s .locus-keys/locus_update.key \
-  -c "Locus client update signing key"
+  -p .chrysalis-keys/chrysalis_update.pub -s .chrysalis-keys/chrysalis_update.key \
+  -c "Chrysalis client update signing key"
 
 # BEFORE anything else: confirm the private key cannot be committed.
 # Generating into a non-ignored path is how a live signing key becomes a
 # one-`git add -A` incident.
-git check-ignore -v .locus-keys/locus_update.key
+git check-ignore -v .chrysalis-keys/chrysalis_update.key
 ```
 
 > **Generate at the repo root, never in `client/`.** The contract test resolves
-> `.locus-keys/` as `CARGO_MANIFEST_DIR/..` — that is, the repo root — and its
+> `.chrysalis-keys/` as `CARGO_MANIFEST_DIR/..` — that is, the repo root — and its
 > mismatch assertion only runs **when the file it looks for exists**. A key
-> generated at `client/.locus-keys/` is therefore not found, the assertion is
+> generated at `client/.chrysalis-keys/` is therefore not found, the assertion is
 > skipped, and the test **passes regardless of whether the configured pubkey
 > matches the key**. It reads as a green guard over the one relationship it exists
 > to check. This was hit during the 2026-10-16 rotation and caught only by a
@@ -214,8 +214,8 @@ Then, **before shipping anything**:
 1. Put the public key into `tauri.conf.json` → `plugins.updater.pubkey` as
    **base64 of the whole `.pub` file** — *not* its second line. See §3: the bare
    key line fails at the plugin's `base64_to_string` step. Derive it:
-   `base64 -w0 .locus-keys/locus_update.pub`.
-2. Put the whole `locus_update.key` file into the `LOCUS_UPDATE_KEY` GitHub
+   `base64 -w0 .chrysalis-keys/chrysalis_update.pub`.
+2. Put the whole `chrysalis_update.key` file into the `LOCUS_UPDATE_KEY` GitHub
    secret — see §4a for the exact command.
 3. Put an offline copy somewhere you control: a password manager, and ideally a
    second location. **This is the copy whose absence caused the 2026-10-16
@@ -250,12 +250,12 @@ the message does not say *how* to fix it, which is a real cost when it fires.
 
 ```sh
 # From a checkout, with gh authenticated against the right account.
-# If .locus-keys/ is empty, recover the key from the bundle first — the recovery
+# If .chrysalis-keys/ is empty, recover the key from the bundle first — the recovery
 # procedure is docs/operate/RELEASE-RECOVERY.md §2:
-gh secret set LOCUS_UPDATE_KEY --repo vasilliourous/Locus < .locus-keys/locus_update.key
+gh secret set LOCUS_UPDATE_KEY --repo vasilliourous/Chrysalis < .chrysalis-keys/chrysalis_update.key
 
 # Verify it exists (prints only names and dates, never values):
-gh secret list --repo vasilliourous/Locus
+gh secret list --repo vasilliourous/Chrysalis
 ```
 
 ### ⚠️ Secrets do NOT survive a repository move
@@ -272,10 +272,10 @@ are stored against the **repository**, and **none** of the following carry them:
 
 So after a copy or a fresh repo, `LOCUS_UPDATE_KEY` must be re-set by hand
 **before the first `v*` tag**, or the tag fails at signing. The key file is not in
-git — and `.locus-keys/` is deliberately emptied every session, so a copy of the
+git — and `.chrysalis-keys/` is deliberately emptied every session, so a copy of the
 tree carries neither the key nor a stale copy of it. The durable sources are the
-offline copy at `~/.locus-secrets/locus_update.key`, the Actions secret, and the
-passphrase bundle; `server/scripts/locus-key-extract.sh` rebuilds the cache from
+offline copy at `~/.chrysalis-secrets/chrysalis_update.key`, the Actions secret, and the
+passphrase bundle; `server/scripts/chrysalis-key-extract.sh` rebuilds the cache from
 the bundle in one command.
 
 The **same key must be used**, not a freshly generated one: the matching public
@@ -298,7 +298,7 @@ write-only by design — no API, `gh` command, or UI action returns the value, w
 or without a token — so there was never a copy on any machine to encrypt. When
 that key needed to be used, it could not be retrieved, and the fleet it signed
 for could not be updated; the record of those attempts is in the operator's
-recovery manifest at `~/.locus-secrets/RECOVERY-MANIFEST.md`.
+recovery manifest at `~/.chrysalis-secrets/RECOVERY-MANIFEST.md`.
 
 **The key in use now is backed up there deliberately**, per §4 step 4. The
 rotation changed the order of operations: generate locally *first*, encrypt a
@@ -369,10 +369,10 @@ lost, and the sequence actually executed was:
 
 ```sh
 # A raw updater payload (Linux/macOS, and the retired portable Windows client):
-minisign -V -p locus_update.pub -m locus-linux-amd64 -x locus-linux-amd64.sig
+minisign -V -p chrysalis_update.pub -m locus-linux-amd64 -x locus-linux-amd64.sig
 # The Windows installer — signed separately, because minisign signs exact bytes
 # and a Windows client updates from THIS file, not from the raw binary:
-minisign -V -p locus_update.pub \
+minisign -V -p chrysalis_update.pub \
   -m installer-Locus_3.2.14_x64-setup.exe \
   -x installer-Locus_3.2.14_x64-setup.exe.sig
 ```

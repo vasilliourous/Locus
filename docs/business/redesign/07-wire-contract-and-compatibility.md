@@ -67,7 +67,7 @@ the `expiryForWire` note in `activation.pb.js` documents the contract explicitly
 > distinguishes 'no date recorded' from 'the date is blank' to avoid showing a
 > paying student 'expired' on a code that simply has no expiry set."*
 
-**From the client's enforcement.** `Expiry::is_lapsed` in `locus/expiry.rs`:
+**From the client's enforcement.** `Expiry::is_lapsed` in chrysalis/expiry.rs`:
 
 > *"**Only a known past date lapses.** `Unknown` deliberately does not: a hub
 > that has not told us a date, or a code with none recorded, must never be read
@@ -83,7 +83,7 @@ lie the UI would render as a real date.
 
 `activation.pb.js` returns **403** for both *suspended* and *bound to another
 device*, and the client disambiguates **by substring**
-(the 403 classifier in `locus/activation.rs`):
+(the 403 classifier in chrysalis/activation.rs`):
 
 ```rust
 403 => {

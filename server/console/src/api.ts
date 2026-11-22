@@ -1,10 +1,10 @@
-// API client for the Locus admin console.
+// API client for the Chrysalis admin console.
 //
 // The admin token is kept in sessionStorage, NOT localStorage: it should not
 // outlive the browser session on a shared machine, and it is never baked into
 // the built bundle (which is served publicly as a static file).
 
-const TOKEN_KEY = 'locus_admin_token'
+const TOKEN_KEY = 'chrysalis_admin_token'
 
 export function getToken(): string {
   return sessionStorage.getItem(TOKEN_KEY) || ''

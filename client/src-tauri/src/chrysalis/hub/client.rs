@@ -1,7 +1,7 @@
 //! The hub clients: the two root stores, the probe that picks between them, and
 //! the diagnosis that explains the choice.
 //!
-//! Read [`super`](crate::locus::hub) first — it holds the reason this module
+//! Read [`super`](crate::chrysalis::hub) first — it holds the reason this module
 //! exists. The short version: a bare `reqwest` client trusts only the OS store,
 //! which on an unpatched machine has no path to the hub's `ISRG Root X2` anchor
 //! and reports that as `InvalidCertificate(Expired)`.
@@ -65,7 +65,7 @@ impl Timeout {
 ///     the hub by name, the redirect target is usually the blocked name: following
 ///     it turns a refusal that can be explained into a timeout that cannot. The
 ///     download also checks the host it was offered against
-///     [`crate::locus::update::signal::OfferHosts`] first, and following a redirect
+///     [`crate::chrysalis::update::signal::OfferHosts`] first, and following a redirect
 ///     would quietly move the request to a host that check never saw.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Redirects {
@@ -130,7 +130,7 @@ fn platform_client(timeout: Timeout, redirects: Redirects) -> Result<&'static re
         reqwest::Client::builder()
             .timeout(std::time::Duration::from_secs(seconds))
             .pool_idle_timeout(HUB_POOL_IDLE)
-            .user_agent(concat!("Locus-Client/", env!("CARGO_PKG_VERSION")))
+            .user_agent(concat!("Chrysalis-Client/", env!("CARGO_PKG_VERSION")))
             .redirect(redirects.policy())
             .no_proxy()
             .build()
@@ -164,7 +164,7 @@ fn bundled_roots_client(timeout: Timeout, redirects: Redirects) -> Result<&'stat
         reqwest::Client::builder()
             .timeout(std::time::Duration::from_secs(seconds))
             .pool_idle_timeout(HUB_POOL_IDLE)
-            .user_agent(concat!("Locus-Client/", env!("CARGO_PKG_VERSION")))
+            .user_agent(concat!("Chrysalis-Client/", env!("CARGO_PKG_VERSION")))
             .tls_backend_preconfigured(config)
             .redirect(redirects.policy())
             .no_proxy()
@@ -406,7 +406,7 @@ impl Failure {
             ),
             Self::ResetDuringHandshake => Some(
                 "The network cut the connection to the hub. This usually means a school \
-                 or work filter is blocking it. Locus will try the activation tunnel \
+                 or work filter is blocking it. Chrysalis will try the activation tunnel \
                  instead when one is available.",
             ),
             // The sentence a school-network student needed and did not get. It says
@@ -423,14 +423,14 @@ impl Failure {
             Self::Dns => Some(
                 "This computer could not look up the hub's address, so the connection was \
                  never attempted. That is usually this network filtering DNS — common on \
-                 school and work networks. Locus will try the activation tunnel instead \
+                 school and work networks. Chrysalis will try the activation tunnel instead \
                  when one is available; if that does not work either, a phone hotspot \
                  will tell you whether this computer is the cause.",
             ),
             Self::Refused => Some(
                 "The hub's address was found, but nothing there accepted the connection. \
                  That is either a temporary outage at the hub or this network quietly \
-                 redirecting the address — common on school and work networks. Locus \
+                 redirecting the address — common on school and work networks. Chrysalis \
                  will try the activation tunnel instead when one is available; if that \
                  fails too, try a phone hotspot to tell the two apart.",
             ),
@@ -660,7 +660,7 @@ pub async fn client_with_proxy(hub: &str, timeout: Timeout, proxy: Option<reqwes
             diagnosis: selected.diagnosis().cloned(),
         },
         Err(error) => {
-            tracing::error!("locus hub client (proxied): {error:#}");
+            tracing::error!("chrysalis hub client (proxied): {error:#}");
             selected
         }
     }
@@ -699,7 +699,7 @@ fn proxied_client(timeout: Timeout, proxy: &reqwest::Proxy) -> Result<&'static r
         reqwest::Client::builder()
             .timeout(timeout.seconds_public())
             .pool_idle_timeout(HUB_POOL_IDLE)
-            .user_agent(concat!("Locus-Client/", env!("CARGO_PKG_VERSION")))
+            .user_agent(concat!("Chrysalis-Client/", env!("CARGO_PKG_VERSION")))
             .redirect(Redirects::Follow.policy())
             .proxy(proxy.clone())
             .build()
@@ -717,7 +717,7 @@ async fn client_with(hub: &str, timeout: Timeout, redirects: Redirects) -> HubCl
         Ok(client) => client,
         Err(error) => {
             // A client that will not build is not a certificate problem.
-            tracing::error!("locus hub client ({primary:?}): {error:#}");
+            tracing::error!("chrysalis hub client ({primary:?}): {error:#}");
             return HubClient {
                 client: emergency_client(),
                 diagnosis: None,
@@ -780,7 +780,7 @@ async fn probe_and_choose(
             // route. Reported here rather than left for the caller to discover as
             // an unexplained 4xx.
             tracing::warn!(
-                target: "locus::hub",
+                target: "chrysalis::hub",
                 status = %response.status(),
                 "the hub probe for {hub} was answered by something other than the hub's health \
                  route — a filter or a misrouted request is the usual cause"
@@ -837,7 +837,7 @@ fn remember(hub: &str, verdict: Option<Diagnosis>) {
 /// takes the activation screen down with it.
 fn bundled_or_empty(store: RootStore, timeout: Timeout, redirects: Redirects) -> &'static reqwest::Client {
     client_for(store, timeout, redirects).unwrap_or_else(|error| {
-        tracing::error!("locus hub client ({store:?}): {error:#}; falling back to a bare client");
+        tracing::error!("chrysalis hub client ({store:?}): {error:#}; falling back to a bare client");
         emergency_client()
     })
 }
@@ -931,7 +931,7 @@ mod tests {
     ///
     /// This is the defect the school-network report named. `Dns` used to be
     /// folded into `Transport`, whose remedy is `None` — so the student saw
-    /// "could not reach the Locus hub at …: error sending request for url (…)"
+    /// "could not reach the Chrysalis hub at …: error sending request for url (…)"
     /// and nothing else, with no way to learn that the name had not resolved.
     ///
     /// **Updated 2026-11-09.** This test used to assert the opposite of its last
@@ -1155,7 +1155,7 @@ mod tests {
     #[test]
     fn the_store_labels_say_whose_store_it_is() {
         assert!(RootStore::Platform.label().contains("operating system"));
-        assert!(RootStore::Bundled.label().contains("bundled with Locus"));
+        assert!(RootStore::Bundled.label().contains("bundled with Chrysalis"));
     }
 
     #[test]
@@ -1227,7 +1227,7 @@ mod live_tests {
     /// The fallback must actually verify the real hub, not merely exist.
     ///
     /// `#[ignore]` because it needs the network. Run deliberately with:
-    /// `cargo test --lib locus::hub::live_tests -- --ignored`
+    /// `cargo test --lib chrysalis::hub::live_tests -- --ignored`
     #[tokio::test]
     #[ignore = "needs network access to the live hub"]
     async fn the_bundled_roots_verify_the_live_hub() {

@@ -1,6 +1,6 @@
 // AUTO-GENERATED — do not edit by hand.
 //
-// Source: client/src-tauri/src/cmd/locus.rs
+// Source: client/src-tauri/src/cmd/chrysalis.rs
 // Tool:   server/scripts/gen-ts-contract.py
 //
 // Every type in this file is a mechanical mirror of a Rust type that crosses the
@@ -11,7 +11,7 @@
 // To change a wire shape, change the Rust type and run:
 //   python3 server/scripts/gen-ts-contract.py --write
 //
-// Prose documentation for these types lives in services/locus.ts beside the
+// Prose documentation for these types lives in services/chrysalis.ts beside the
 // functions that return them. This file carries the Rust doc comments as
 // context, but the decision to document a field belongs with the hand-written
 // file, which is not generated.
@@ -24,7 +24,7 @@
  * gate renders on every launch, and a slow first paint is the first thing a
  * student notices.
  */
-export interface LocusStatus {
+export interface ChrysalisStatus {
   /**
    * Whether this device has a code bound and accepted.
    */
@@ -56,7 +56,7 @@ export interface LocusStatus {
    */
   suspended: boolean
   /**
-   * A code is stored but could not be a Locus code, so it was not used.
+   * A code is stored but could not be a Chrysalis code, so it was not used.
    *
    * Reported so the Account screen can say *why* it is offering activation
    * again. Without it, a damaged sign-in is indistinguishable from a fresh
@@ -93,7 +93,7 @@ export interface LocusStatus {
    * fact that a connect command once returned `Ok`.
    *
    * It exists because the UI could not answer that question and guessed
-   * instead. `locus_status` carried only entitlement (`activated`), so after a
+   * instead. `chrysalis_status` carried only entitlement (`activated`), so after a
    * successful connect the connection screen's periodic status re-read found
    * `activated == true` and concluded "not connected" — the traffic panel the
    * student had just earned flashed on for one frame and vanished, and every
@@ -259,7 +259,7 @@ export interface LocusStatus {
    * added for exactly this reason). This field is that answer, classified, so
    * the Account screen can say "this server is behind" instead of leaving both
    * parties guessing. It reports; it never gates — see
-   * [`crate::locus::contract::ENFORCEMENT_VERSION`].
+   * [`crate::chrysalis::contract::ENFORCEMENT_VERSION`].
    */
   hubEnforcement: HubEnforcement
 }
@@ -342,7 +342,7 @@ export interface UpdateStatus {
 }
 
 /**
- * Progress of an in-flight update download, emitted as `locus://update-progress`.
+ * Progress of an in-flight update download, emitted as `chrysalis://update-progress`.
  */
 export interface UpdateProgress {
   /**
@@ -463,7 +463,7 @@ export type UdpStatus =
   | { kind: 'none' }
   /**
    * Configured and handed to the core: `udp_relay` is on and the port is
-   * non-zero, so the profile carries `Locus-UoT` and pins UDP to it.
+   * non-zero, so the profile carries `Chrysalis-UoT` and pins UDP to it.
    *
    * **Configured is not the same as working.** It says the document is
    * coherent, not that the listener is up or that the credentials match. The
@@ -486,7 +486,7 @@ export type UdpStatus =
 /**
  * What the Connection screen should show about the free tier's allowance.
  *
- * Mirrors [`crate::locus::usage::AllowanceState`], plus the presentation fields
+ * Mirrors [`crate::chrysalis::usage::AllowanceState`], plus the presentation fields
  * the bar needs, so the frontend does no arithmetic at all.
  */
 export type AllowanceStatus =
@@ -569,10 +569,10 @@ export type SubscriptionStatus =
  * because only one of them is silence. The seam is deliberate: `Released` says
  * the key is free for the next device, `NothingToRelease` says there was nothing
  * for the hub to release (which is still success), and `NotConfirmed` says the
- * device is signed out but Locus was not told — so the key will still work
+ * device is signed out but Chrysalis was not told — so the key will still work
  * elsewhere, because nothing was taken away.
  *
- * Defined here rather than in `locus::signout` because this is where the type
+ * Defined here rather than in `chrysalis::signout` because this is where the type
  * crosses the IPC boundary, and `server/scripts/gen-ts-contract.py` reads the
  * types in THIS file to generate the TypeScript mirror. A type defined elsewhere
  * would serialise fine and be undocumented in TypeScript — the `uot_port` defect

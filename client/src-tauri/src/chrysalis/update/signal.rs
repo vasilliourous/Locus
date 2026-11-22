@@ -21,7 +21,9 @@
 //! This module is the client half of that contract, so the names live in
 //! exactly one place and cannot drift from the hub.
 
-use crate::locus::contract::{PLATFORM_LINUX, PLATFORM_MACOS_ARM, PLATFORM_MACOS_INTEL, PLATFORM_WINDOWS, TierConfig};
+use crate::chrysalis::contract::{
+    PLATFORM_LINUX, PLATFORM_MACOS_ARM, PLATFORM_MACOS_INTEL, PLATFORM_WINDOWS, TierConfig,
+};
 
 /// A complete, actionable update offer.
 ///
@@ -367,7 +369,7 @@ impl OfferHosts {
     /// Build from the hub this run dials.
     ///
     /// `hub` is `contract::hub_url()`, so a stored override is already resolved
-    /// into it. [`crate::locus::contract::HUB_URL`] is added as well — a hub that
+    /// into it. [`crate::chrysalis::contract::HUB_URL`] is added as well — a hub that
     /// advertises its canonical name is not an attack. [`LEGACY_HUB_URL`] is also
     /// added, and that is not tidiness: the update record's `download_*` columns
     /// were published pointing at the legacy name (measured 2026-11-06:
@@ -377,14 +379,14 @@ impl OfferHosts {
     /// canonical name refuses the very artifact the hub is offering it — the
     /// update path failing on an uncensored network too.
     ///
-    /// [`LEGACY_HUB_URL`]: crate::locus::contract::LEGACY_HUB_URL
+    /// [`LEGACY_HUB_URL`]: crate::chrysalis::contract::LEGACY_HUB_URL
     #[must_use]
     pub fn for_hub(hub: &str) -> Self {
         let mut allowed = Vec::with_capacity(3);
         for candidate in [
             hub,
-            crate::locus::contract::HUB_URL,
-            crate::locus::contract::LEGACY_HUB_URL,
+            crate::chrysalis::contract::HUB_URL,
+            crate::chrysalis::contract::LEGACY_HUB_URL,
         ] {
             if let Some(host) = host_of(candidate) {
                 let lowered = host.to_ascii_lowercase();
@@ -756,7 +758,7 @@ mod tests {
         assert!(
             hosts.permits(&format!(
                 "{}/updates/3.3.5/locus-linux-amd64",
-                crate::locus::contract::HUB_URL
+                crate::chrysalis::contract::HUB_URL
             )),
             "the compiled-in hub must always be acceptable"
         );

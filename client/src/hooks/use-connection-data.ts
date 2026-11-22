@@ -4,7 +4,7 @@ import { MihomoWebSocket, type Message } from 'tauri-plugin-mihomo-api'
 /**
  * Live connection-count telemetry from the mihomo core.
  *
- * Locus exposes one number from this — how many connections are active right
+ * Chrysalis exposes one number from this — how many connections are active right
  * now, shown on the home page's traffic card. The full connection table, the
  * per-connection metadata normalisation and the closed-connection ring buffer
  * that used to live here served the Connections page, which is not part of this

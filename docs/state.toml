@@ -99,7 +99,7 @@ provenance = "derived"
 # in STATE.md for months, went stale three times, and finished by naming an
 # address that no longer existed — while being labelled "authoritative".
 value      = "networkingguides.jadedns.uk"
-source     = "client/src-tauri/src/locus/contract.rs (HUB_URL); server/setup.sh (DOMAIN, required env)"
+source     = "client/src-tauri/src/chrysalis/contract.rs (HUB_URL); server/setup.sh (DOMAIN, required env)"
 provenance = "derived"
 
 [hub.domain_legacy]
@@ -112,7 +112,7 @@ provenance = "derived"
 # block while an earlier build is in the field strands that device at the
 # activation gate with no path to the update that would fix it.
 value      = "networkingguides.duckdns.org"
-source     = "client/src-tauri/src/locus/contract.rs (LEGACY_HUB_URL); server/modules/05-caddy.sh (both names on one site block)"
+source     = "client/src-tauri/src/chrysalis/contract.rs (LEGACY_HUB_URL); server/modules/05-caddy.sh (both names on one site block)"
 provenance = "derived"
 
 [activation_tunnel.bootstrap_port]
@@ -121,7 +121,7 @@ provenance = "derived"
 # /api/activate, /api/code-lookup and /api/heartbeat through an allowlist and a
 # rate limit, because its credential ships in every client.
 value      = 8453
-source     = "server/modules/09-activation-tunnel.sh (ACTIVATION_TUNNEL_PORT); client/src-tauri/src/locus/activation_tunnel.rs (TUNNEL_PORT)"
+source     = "server/modules/09-activation-tunnel.sh (ACTIVATION_TUNNEL_PORT); client/src-tauri/src/chrysalis/activation_tunnel.rs (TUNNEL_PORT)"
 provenance = "derived"
 
 [activation_tunnel.filter_port]
@@ -129,7 +129,7 @@ provenance = "derived"
 # names this as the destination, because `ssserver` has no inbound forwarding —
 # it dials whatever the client asked for. Two values that must agree.
 value      = 18090
-source     = "server/modules/09-activation-tunnel.sh (ACTIVATION_FORWARD_PORT); client/src-tauri/src/locus/activation_tunnel.rs (FILTER_PORT)"
+source     = "server/modules/09-activation-tunnel.sh (ACTIVATION_FORWARD_PORT); client/src-tauri/src/chrysalis/activation_tunnel.rs (FILTER_PORT)"
 provenance = "derived"
 
 [hub.api_base]
@@ -160,8 +160,22 @@ provenance = "derived"
 # The hub keeps its own name because that name is baked into every deployed
 # client (the activation response hands out `server`, the updater resolves
 # `update_url`) — renaming it would strand the fleet.
-value      = "locusvpn.jadedns.uk"
+value      = "chrysalisvpn.jadedns.uk"
 source     = "server/modules/05-caddy.sh (LANDING_DOMAIN default)"
+provenance = "derived"
+
+[site.domain_legacy]
+# The landing page's PREVIOUS name. Same shape and same reason as
+# `hub.domain_legacy`: it resolves today and the new name does not, so it must
+# keep serving or the page 404s between this rename and the DNS change.
+#
+# `05-caddy.sh` puts BOTH names on the one landing block; that is why this is a
+# derived fact and not a note. Set `LANDING_DOMAIN_LEGACY=""` to drop it, and only
+# once `chrysalisvpn.jadedns.uk` answers on the box.
+#
+# DEPRECATED ALIAS. See docs/reference/NAME-MIGRATION.md.
+value      = "locusvpn.jadedns.uk"
+source     = "server/modules/05-caddy.sh (LANDING_DOMAIN_LEGACY default); server/templates/Caddyfile (both names on one block)"
 provenance = "derived"
 
 [site.document_root]
@@ -204,10 +218,10 @@ provenance = "unverified"
 
 [platforms.keys]
 # The four update platforms. The keys say macos_*, the artifact filenames say
-# darwin-* — that asymmetry is frozen; see client/src-tauri/src/locus/contract.rs.
+# darwin-* — that asymmetry is frozen; see client/src-tauri/src/chrysalis/contract.rs.
 # Enforced by check-consistency.sh §1.
 value      = ["linux", "windows", "macos_intel", "macos_arm"]
-source     = "client/src-tauri/src/locus/contract.rs; server/pb_hooks/*.pb.js"
+source     = "client/src-tauri/src/chrysalis/contract.rs; server/pb_hooks/*.pb.js"
 provenance = "derived"
 
 [tiers.free]

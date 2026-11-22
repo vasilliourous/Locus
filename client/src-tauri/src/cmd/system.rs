@@ -22,7 +22,7 @@ use clash_verge_logging::{Type, logging};
 /// This is a log sink, not a control channel: it takes a level and a message and
 /// writes them. It never evaluates what it is given.
 #[tauri::command]
-pub async fn locus_js_log(level: String, message: String) -> Result<(), String> {
+pub async fn chrysalis_js_log(level: String, message: String) -> Result<(), String> {
     match level.as_str() {
         "error" => logging!(error, Type::Frontend, "[webview] {message}"),
         "warn" => logging!(warn, Type::Frontend, "[webview] {message}"),

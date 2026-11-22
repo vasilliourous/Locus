@@ -1,4 +1,4 @@
-// Locus Activation Hook — PocketBase 0.22 compatible
+// Chrysalis Activation Hook — PocketBase 0.22 compatible
 // Uses findFirstRecordByData for lookups (simplest API, works across versions)
 // Uses newQuery().execute() for SQL operations
 // All code inside routerAdd callback (functions not hoisted in goja scope)
@@ -130,7 +130,7 @@ routerAdd("POST", "/api/activate", function(e) {
         // class activate and the rest are told "too many attempts", which the
         // client reports as a failure to reach the hub.
         //
-        // The path filter sets `X-Locus-Bootstrap` to a per-client digest it
+        // The path filter sets `X-Chrysalis-Bootstrap` to a per-client digest it
         // computes itself (peer address keyed with the bootstrap key). It
         // OVERWRITES any copy the client sent, so this value is the filter's
         // statement about the client, not the client's about itself. Caddy's
@@ -141,7 +141,7 @@ routerAdd("POST", "/api/activate", function(e) {
         var bootstrapId = "";
         try {
             var allHeaders = $apis.requestInfo(e).headers || {};
-            var rawId = allHeaders["x-locus-bootstrap"] || allHeaders["X-Locus-Bootstrap"] || "";
+            var rawId = allHeaders["x-chrysalis-bootstrap"] || allHeaders["X-Chrysalis-Bootstrap"] || "";
             rawId = String(rawId).trim();
             if (rawId.length >= 16 && rawId.length <= 64) bootstrapId = rawId;
         } catch(ex) { bootstrapId = ""; }

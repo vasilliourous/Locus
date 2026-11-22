@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# publish-release.sh — publish a Locus release to the live update hub.
+# publish-release.sh — publish a Chrysalis release to the live update hub.
 #
 # This is the missing link between CI and the client auto-updater. CI produces
 # raw per-platform executables + a manifest.json on a GitHub Release; this
@@ -71,7 +71,7 @@ case "$VERSION" in
     *) echo "error: '${VERSION}' does not look like a version (expected x.y.z)" >&2; exit 1 ;;
 esac
 
-# Prefer the `locus-hub` ssh alias, which carries the deploy key and needs no
+# Prefer the `chrysalis-hub` ssh alias, which carries the deploy key and needs no
 # password; fall back to the bare host for a machine set up differently.
 #
 # WHY THIS PROBE EXISTS, because the failure it prevents is a HANG, not an error:
@@ -86,8 +86,8 @@ esac
 # fallback keeps working on a host where the bare name does have key auth.
 _site_pick_ssh_target() {
     if [ -n "${VPS:-}" ]; then printf '%s' "$VPS"; return; fi
-    if ssh -o BatchMode=yes -o ConnectTimeout=5 locus-hub true 2>/dev/null; then
-        printf 'locus-hub'
+    if ssh -o BatchMode=yes -o ConnectTimeout=5 chrysalis-hub true 2>/dev/null; then
+        printf 'chrysalis-hub'
     else
         printf 'root@networkingguides.jadedns.uk'
     fi
@@ -256,7 +256,7 @@ if [ "$FROM_GITHUB" = "1" ]; then
 fi
 
 # ── Validate local artifacts ──
-log "Publishing Locus ${VERSION} from ${RELEASE_DIR}"
+log "Publishing Chrysalis ${VERSION} from ${RELEASE_DIR}"
 [ -d "$RELEASE_DIR" ] || fail "release dir not found: ${RELEASE_DIR} (did you download the release artifacts?)" 4
 
 declare -a HAVE_FILES=() HAVE_KEYS=() HAVE_SHA=()
@@ -530,7 +530,7 @@ for key in keys:
     if not os.path.exists(sig_path):
         raise SystemExit(
             f"refusing to publish: no signature for {fname} (expected {fname}.sig).\n"
-            f"Sign every artifact with the Locus update key before publishing — see\n"
+            f"Sign every artifact with the Chrysalis update key before publishing — see\n"
             f"client/docs/SIGNING.md. A release without signatures cannot be installed\n"
             f"by any client, because the updater verifies one mandatorily."
         )

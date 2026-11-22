@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # enable-uot.sh — Idempotently install & start the sing-box UDP-over-TCP
-# endpoint on an ALREADY-DEPLOYED Locus VPS, then advertise uot_port +
+# endpoint on an ALREADY-DEPLOYED Chrysalis VPS, then advertise uot_port +
 # udp_relay=true for the Strike tier so compatible clients (sing-box) route
 # game/voice UDP over TCP.
 #
@@ -77,7 +77,7 @@ log "✓ wrote $CONFIG_FILE (port ${UOT_PORT}, method ${STRIKE_METHOD})"
 # ── 3. systemd unit ──
 cat > "$SERVICE_FILE" <<UNIT
 [Unit]
-Description=sing-box server (Strike UDP-over-TCP) — Locus #7
+Description=sing-box server (Strike UDP-over-TCP) — Chrysalis #7
 After=network.target
 
 [Service]

@@ -8,21 +8,21 @@ import { useSubscription } from '@/hooks/use-subscription'
 import { monoFontFamily } from '@/pages/_surfaces'
 import { activationRefusal } from '@/pages/connect-notice'
 import {
-  locusActivate,
-  locusCheckCode,
-  locusStatus,
-  locusValidateCode,
+  chrysalisActivate,
+  chrysalisCheckCode,
+  chrysalisStatus,
+  chrysalisValidateCode,
   type ActivationResult,
-  type LocusStatus,
+  type ChrysalisStatus,
   type ValidateCodeResult,
-} from '@/services/locus'
+} from '@/services/chrysalis'
 import { errorDetail } from '@/services/notice-service'
 
 /**
  * First-run activation gate.
  *
  * The app renders this and NOTHING else until a code is accepted. That is the
- * whole product decision: a Locus student does not configure Clash, choose a
+ * whole product decision: a Chrysalis student does not configure Clash, choose a
  * profile or pick a node — they enter the code on the card they were sold.
  *
  * Behaviour deliberately preserved from the retired client, because it was
@@ -93,10 +93,10 @@ const ActivationScreen = ({ onActivated }: Props) => {
   // One field, read once on mount, only to say whether the backup route is
   // carrying this screen's requests. Deliberately not polled and not a second
   // state system: the screen's job is the code, and this is a caption.
-  const [status, setStatus] = useState<LocusStatus | null>(null)
+  const [status, setStatus] = useState<ChrysalisStatus | null>(null)
   useEffect(() => {
     let cancelled = false
-    void locusStatus().then((value) => {
+    void chrysalisStatus().then((value) => {
       if (!cancelled) setStatus(value)
     })
     return () => {
@@ -120,7 +120,7 @@ const ActivationScreen = ({ onActivated }: Props) => {
     if (raw.length !== CODE_LENGTH) return
 
     let cancelled = false
-    locusValidateCode(raw)
+    chrysalisValidateCode(raw)
       .then((result) => {
         if (!cancelled) setCheck(result)
       })
@@ -162,7 +162,7 @@ const ActivationScreen = ({ onActivated }: Props) => {
     // that counts against the rate limit.
     setPhase('checking')
     try {
-      const check = await locusCheckCode(raw)
+      const check = await chrysalisCheckCode(raw)
       if (!check.ready) {
         setError(check.message)
         setPhase('idle')
@@ -187,7 +187,7 @@ const ActivationScreen = ({ onActivated }: Props) => {
 
     setPhase('activating')
     try {
-      const result = await locusActivate(raw)
+      const result = await chrysalisActivate(raw)
       setPhase('done')
       onActivated(result)
     } catch (err) {
@@ -234,7 +234,7 @@ const ActivationScreen = ({ onActivated }: Props) => {
       <Box
         sx={{ width: 420, maxWidth: 'calc(100vw - 48px)', textAlign: 'center' }}
       >
-        {/* Brand mark. There is no Locus pictorial mark in the repo, so the mark
+        {/* Brand mark. There is no Chrysalis pictorial mark in the repo, so the mark
             is the wordmark alone — deliberately, rather than substituting
             another product's logo. See `/COLOURS.md` §8. */}
         <Typography
@@ -242,7 +242,7 @@ const ActivationScreen = ({ onActivated }: Props) => {
           sx={{ fontWeight: 700, letterSpacing: '-0.01em', mb: 0.5 }}
           color="primary.main"
         >
-          Locus
+          Chrysalis
         </Typography>
         <Typography
           variant="body2"
@@ -260,7 +260,7 @@ const ActivationScreen = ({ onActivated }: Props) => {
             free-tier relay. Without a line saying so, the only visible effect is
             that enrolment works — or, when it does not, that it fails with no
             indication of which route was tried.
-            One line, from the backend's own verdict (`LocusStatus.bootstrapping`),
+            One line, from the backend's own verdict (`ChrysalisStatus.bootstrapping`),
             never inferred here. */}
         {status?.bootstrapping && (
           <Typography variant="caption" color="text.secondary" sx={{ mb: 2 }}>

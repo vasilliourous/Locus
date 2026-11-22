@@ -104,7 +104,7 @@ pub const FILTER_PORT: u16 = 18090;
 /// **Absent by default, and absent in every build made from a clean checkout.**
 /// The value lives in `server/secrets.env.age` on the operator's machine (see
 /// `docs/operate/SECRETS-MANAGEMENT.md`); CI injects it as the
-/// `LOCUS_ACTIVATION_TUNNEL_KEY` build-time environment variable.
+/// `CHRYSALIS_ACTIVATION_TUNNEL_KEY` build-time environment variable.
 ///
 /// It is read through `option_env!` rather than `env!` on purpose: a missing key
 /// must make the **tunnel** unavailable, not break the **build**. A client
@@ -125,7 +125,7 @@ pub const FILTER_PORT: u16 = 18090;
 /// binary that has it, so it must be assumed public. What makes that acceptable
 /// is the hub's allowlist and rate limit, not the key — see the module docs in
 /// `09-activation-tunnel.sh`.
-const BOOTSTRAP_KEY: Option<&str> = option_env!("LOCUS_ACTIVATION_TUNNEL_KEY");
+const BOOTSTRAP_KEY: Option<&str> = option_env!("CHRYSALIS_ACTIVATION_TUNNEL_KEY");
 
 /// Whether the build that produced THIS binary carried a bootstrap key.
 ///
@@ -137,7 +137,7 @@ const BOOTSTRAP_KEY: Option<&str> = option_env!("LOCUS_ACTIVATION_TUNNEL_KEY");
 /// which is exactly how three releases went out keyless.
 ///
 /// Rendered by [`build_stamp`] and logged at startup.
-const BOOTSTRAP_KEY_PRESENT: &str = env!("LOCUS_ACTIVATION_TUNNEL_KEY_PRESENT");
+const BOOTSTRAP_KEY_PRESENT: &str = env!("CHRYSALIS_ACTIVATION_TUNNEL_KEY_PRESENT");
 
 /// The hub's free-tier listener — the `free` plan's own shadowsocks port.
 ///
@@ -181,7 +181,7 @@ pub fn activation_tunnel_available() -> bool {
 /// network refusing everything. See `build_stamp`.
 #[must_use]
 pub fn maintenance_tunnel_available() -> bool {
-    option_env!("LOCUS_FREE_TIER_KEY").is_some_and(|key| !key.is_empty())
+    option_env!("CHRYSALIS_FREE_TIER_KEY").is_some_and(|key| !key.is_empty())
 }
 
 /// What the build script said about the free-tier key.
@@ -189,7 +189,7 @@ pub fn maintenance_tunnel_available() -> bool {
 /// Same two-way agreement as [`BOOTSTRAP_KEY_PRESENT`], and for the same reason:
 /// a cached rebuild whose environment changed without this crate being rebuilt is
 /// the one condition where the source and the build script disagree.
-const FREE_TIER_KEY_PRESENT: &str = env!("LOCUS_FREE_TIER_KEY_PRESENT");
+const FREE_TIER_KEY_PRESENT: &str = env!("CHRYSALIS_FREE_TIER_KEY_PRESENT");
 
 /// One line describing this build's bootstrap capability, for the support log.
 ///
@@ -278,7 +278,7 @@ impl Drop for Tunnel {
 #[derive(Debug, Clone)]
 pub struct Bootstrap {
     /// The host the engine dials. The compiled address, not the hub's name — see
-    /// [`crate::locus::contract::ACTIVATION_TUNNEL_ADDR`] for why a name cannot
+    /// [`crate::chrysalis::contract::ACTIVATION_TUNNEL_ADDR`] for why a name cannot
     /// be relied on here.
     pub server: String,
     /// The listener's port on that host.
@@ -299,7 +299,7 @@ impl Bootstrap {
     pub fn activation() -> Option<Self> {
         let key = BOOTSTRAP_KEY.filter(|key| !key.is_empty())?;
         Some(Self {
-            server: crate::locus::contract::activation_tunnel_addr().to_owned(),
+            server: crate::chrysalis::contract::activation_tunnel_addr().to_owned(),
             port: TUNNEL_PORT,
             key: key.to_owned(),
         })
@@ -321,9 +321,9 @@ impl Bootstrap {
     /// as [`Self::activation`].
     #[must_use]
     pub fn maintenance() -> Option<Self> {
-        let key = option_env!("LOCUS_FREE_TIER_KEY").filter(|key| !key.is_empty())?;
+        let key = option_env!("CHRYSALIS_FREE_TIER_KEY").filter(|key| !key.is_empty())?;
         Some(Self {
-            server: crate::locus::contract::activation_tunnel_addr().to_owned(),
+            server: crate::chrysalis::contract::activation_tunnel_addr().to_owned(),
             port: FREE_TIER_PORT,
             key: key.to_owned(),
         })
@@ -341,7 +341,7 @@ impl Tunnel {
         match Bootstrap::activation() {
             Some(bootstrap) => Self::start_with(&bootstrap).await,
             None => {
-                tracing::debug!(target: "locus::activation_tunnel", "no bootstrap key compiled in; tunnel unavailable");
+                tracing::debug!(target: "chrysalis::activation_tunnel", "no bootstrap key compiled in; tunnel unavailable");
                 Ok(None)
             }
         }
@@ -370,7 +370,7 @@ impl Tunnel {
         // outbound and one group — see `Target` on why that is not a widened
         // surface.
         let targets = if destination_port == TUNNEL_PORT {
-            let ss_hub = crate::locus::contract::ss_hub().await;
+            let ss_hub = crate::chrysalis::contract::ss_hub().await;
             bootstrap_targets(&ss_hub, bootstrap.server.as_str())
         } else {
             vec![Target {
@@ -381,7 +381,7 @@ impl Tunnel {
         std::fs::write(&config, render_config(port, &targets, key, destination_port)?)
             .with_context(|| format!("could not write the activation tunnel config to {}", config.display()))?;
         tracing::debug!(
-            target: "locus::activation_tunnel",
+            target: "chrysalis::activation_tunnel",
             targets = targets.len(),
             // Names and addresses only — never the key. This is the line that
             // makes "the fallback ran and both candidates failed" distinguishable
@@ -421,7 +421,7 @@ impl Tunnel {
         while Instant::now() < deadline {
             if std::net::TcpStream::connect(("127.0.0.1", port)).is_ok() {
                 tracing::info!(
-                    target: "locus::activation_tunnel",
+                    target: "chrysalis::activation_tunnel",
                     port,
                     "activation tunnel engine is listening"
                 );
@@ -547,7 +547,7 @@ fn development_sidecar_name(core: &str, suffix: &str) -> String {
     // The triple this crate was compiled for, emitted by `build.rs`. Derived rather
     // than hard-coded so a cross-compile names the artifact the build actually
     // produces.
-    format!("{core}-{}{suffix}", env!("LOCUS_BUILD_TARGET"))
+    format!("{core}-{}{suffix}", env!("CHRYSALIS_BUILD_TARGET"))
 }
 
 /// One place the bootstrap listener may be dialled.
@@ -564,7 +564,7 @@ fn development_sidecar_name(core: &str, suffix: &str) -> String {
 /// So the outbound is built from an **ordered** set of targets — the resolved
 /// name first (it is the one an operator moving the hub can change without a
 /// release), then the compiled address
-/// ([`crate::locus::contract::ACTIVATION_TUNNEL_ADDR`]) as the case that needs no
+/// ([`crate::chrysalis::contract::ACTIVATION_TUNNEL_ADDR`]) as the case that needs no
 /// resolver at all.
 ///
 /// # Why more than one is not "a second proxy"
@@ -625,7 +625,7 @@ const TARGET_BY_ADDRESS: &str = "Activation-Tunnel-Direct";
 /// already paid for (`tier.rs::GROUP_NAME`): mihomo treats a group whose name
 /// equals a proxy inside it as a reference loop and refuses the whole config —
 /// which is valid YAML, so only running the engine catches it.
-const GROUP_NAME: &str = "Locus Activation";
+const GROUP_NAME: &str = "Chrysalis Activation";
 
 /// What the group's health check probes.
 ///
@@ -957,7 +957,7 @@ async fn drop_warm_engine() {
 // It is deliberately NOT a supervisor: there is one handle, one latch and no
 // health checks. Whether it should be running is decided by the two calls below,
 // made from the places that already know (app setup, and the readiness
-// transition observed in `locus_status`).
+// transition observed in `chrysalis_status`).
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// The held maintenance engine.
@@ -999,7 +999,7 @@ pub fn remember_prefer_maintenance() {
 /// **Lives here, beside the flag, and is used by every module that touches it.**
 /// It started as two guards — one in this module, one in `tier.rs` — each
 /// serialising its own tests and neither excluding the other's. That is a split
-/// lock, and it failed exactly as a split lock does: `cargo test -p locus --lib`
+/// lock, and it failed exactly as a split lock does: `cargo test -p chrysalis --lib`
 /// ran this module's negative case concurrently with `tier.rs`'s positive one and
 /// the assertion saw the other test's write. One flag needs one lock, in the
 /// module that owns the flag.
@@ -1091,7 +1091,7 @@ pub async fn maintenance_proxy_or_start() -> Option<String> {
     // startup timeout discovering it.
     if Bootstrap::maintenance().is_none() {
         tracing::warn!(
-            target: "locus::activation_tunnel",
+            target: "chrysalis::activation_tunnel",
             "the maintenance tunnel cannot be started: this build carries no free-tier key \
              (see build_stamp at startup), so the retry was not attempted"
         );
@@ -1109,12 +1109,12 @@ pub async fn maintenance_proxy_or_start() -> Option<String> {
     clear_failed_starts();
 
     tracing::info!(
-        target: "locus::activation_tunnel",
+        target: "chrysalis::activation_tunnel",
         "no maintenance engine was warm at the moment it was needed; starting one now"
     );
     if !warm_maintenance().await {
         tracing::warn!(
-            target: "locus::activation_tunnel",
+            target: "chrysalis::activation_tunnel",
             "the maintenance engine could not be started, so the retry did not happen"
         );
         return None;
@@ -1174,7 +1174,7 @@ pub async fn warm_maintenance() -> bool {
     // reads as "the start did not happen" and logs as such. The distinction is one
     // line and was wrong in the first version of this refactor.
     if let Some(reason) = refusal_to_start() {
-        tracing::debug!(target: "locus::activation_tunnel", "{reason}");
+        tracing::debug!(target: "chrysalis::activation_tunnel", "{reason}");
         return maintenance_proxy().is_some();
     }
 
@@ -1253,7 +1253,7 @@ async fn start_quietly(bootstrap: &Bootstrap) -> Option<Tunnel> {
         Err(error) => {
             record_failed_start();
             tracing::warn!(
-                target: "locus::activation_tunnel",
+                target: "chrysalis::activation_tunnel",
                 "could not start the maintenance tunnel: {error:#}"
             );
             None
@@ -1494,7 +1494,7 @@ fn dispatch_start() {
         starting_flag().store(false, std::sync::atomic::Ordering::SeqCst);
         if !started {
             tracing::debug!(
-                target: "locus::activation_tunnel",
+                target: "chrysalis::activation_tunnel",
                 "the detached maintenance start did not produce an engine"
             );
         }
@@ -1524,7 +1524,7 @@ fn dispatch_drained_stop() {
 
 /// Feeds one observation to the supervisor and performs the action it asks for.
 ///
-/// **This is the whole lifecycle**, replacing the two-branch `if` in `cmd/locus.rs`.
+/// **This is the whole lifecycle**, replacing the two-branch `if` in `cmd/chrysalis.rs`.
 /// Returning the state keeps the caller's report and the decision it just made
 /// reading from the same observation, rather than from two independently timed
 /// reads.
@@ -1546,7 +1546,7 @@ pub async fn supervise(ready_now: bool) -> Supervised {
 
     // **Nothing here may block the caller for longer than a status poll.**
     //
-    // `supervise` runs inside `locus_status`, which the UI polls every 750 ms while
+    // `supervise` runs inside `chrysalis_status`, which the UI polls every 750 ms while
     // a connect settles. A `Start` costs the engine load (up to `STARTUP_TIMEOUT`)
     // and a drained `Stop` costs up to `DRAIN_TIMEOUT` (45 s) — so awaiting either
     // here would stall the status command, and with it the button, for as long as
@@ -1566,14 +1566,14 @@ pub async fn supervise(ready_now: bool) -> Supervised {
             // sample showing traffic again returns to `Carrying` with the engine
             // never having been touched.
             tracing::info!(
-                target: "locus::activation_tunnel",
+                target: "chrysalis::activation_tunnel",
                 "the plan tunnel has carried traffic for {}s; beginning the maintenance handover",
                 TUNNEL_HOLD.as_secs()
             );
         }
         Action::Stop => {
             tracing::info!(
-                target: "locus::activation_tunnel",
+                target: "chrysalis::activation_tunnel",
                 "handover complete: the plan tunnel is carrying traffic, draining and stopping the \
                  maintenance engine"
             );
@@ -1660,7 +1660,7 @@ pub async fn stop_maintenance_drained() {
     let outstanding = in_flight_count();
     if outstanding > 0 {
         tracing::warn!(
-            target: "locus::activation_tunnel",
+            target: "chrysalis::activation_tunnel",
             outstanding,
             "stopping the maintenance engine with {outstanding} request(s) still in flight after \
              {}s; they will fail as they would have without the drain",
@@ -1764,13 +1764,13 @@ impl Drop for InFlight {
 /// plan tunnel is up, [`stop_maintenance`] has stopped the engine, so every call
 /// goes direct at full speed even though the session still prefers maintenance —
 /// the flag records what the network did, not what the route is.
-pub async fn hub_client_for(hub: &str, timeout: crate::locus::hub::Timeout) -> crate::locus::hub::HubClient {
+pub async fn hub_client_for(hub: &str, timeout: crate::chrysalis::hub::Timeout) -> crate::chrysalis::hub::HubClient {
     let proxy = match proxy_if_warm() {
         Some(url) => match reqwest::Proxy::all(&url) {
             Ok(proxy) => Some(proxy),
             Err(error) => {
                 tracing::warn!(
-                    target: "locus::activation_tunnel",
+                    target: "chrysalis::activation_tunnel",
                     "the maintenance proxy URL could not be used ({error:#}); using direct"
                 );
                 None
@@ -1779,7 +1779,7 @@ pub async fn hub_client_for(hub: &str, timeout: crate::locus::hub::Timeout) -> c
         None => None,
     };
 
-    crate::locus::hub::client_with_proxy(hub, timeout, proxy).await
+    crate::chrysalis::hub::client_with_proxy(hub, timeout, proxy).await
 }
 
 /// The same client, but **starts a maintenance engine if none is warm.**
@@ -1789,13 +1789,16 @@ pub async fn hub_client_for(hub: &str, timeout: crate::locus::hub::Timeout) -> c
 /// load on a network that does not need it, and the retry has already established
 /// that it does. Keeping them apart makes that asymmetry visible at the call site
 /// instead of hidden in a boolean.
-pub async fn hub_client_for_retry(hub: &str, timeout: crate::locus::hub::Timeout) -> crate::locus::hub::HubClient {
+pub async fn hub_client_for_retry(
+    hub: &str,
+    timeout: crate::chrysalis::hub::Timeout,
+) -> crate::chrysalis::hub::HubClient {
     let proxy = match maintenance_proxy_or_start().await {
         Some(url) => match reqwest::Proxy::all(&url) {
             Ok(proxy) => Some(proxy),
             Err(error) => {
                 tracing::warn!(
-                    target: "locus::activation_tunnel",
+                    target: "chrysalis::activation_tunnel",
                     "the maintenance proxy URL could not be used ({error:#}); using direct"
                 );
                 None
@@ -1804,7 +1807,7 @@ pub async fn hub_client_for_retry(hub: &str, timeout: crate::locus::hub::Timeout
         None => None,
     };
 
-    crate::locus::hub::client_with_proxy(hub, timeout, proxy).await
+    crate::chrysalis::hub::client_with_proxy(hub, timeout, proxy).await
 }
 
 /// The warm maintenance proxy, whenever the route should be used for a hub call.
@@ -1894,7 +1897,7 @@ fn admit(prefer: bool, warm: Option<String>, draining: bool) -> Option<String> {
 ///
 /// Deliberately not a classifier variant: a TLS-inspecting appliance truncates the
 /// stream, which arrives as a decode error rather than a reset, so
-/// [`crate::locus::hub::Failure::classify`] would report `Transport` and the older
+/// [`crate::chrysalis::hub::Failure::classify`] would report `Transport` and the older
 /// tunnel retry never fires on the network this exists for.
 pub fn should_retry_over_maintenance(error: &reqwest::Error) -> bool {
     // Deliberately NOT `maintenance_proxy().is_some()` any more (2026-11-19).
@@ -1948,7 +1951,7 @@ pub fn log_retry_outcome<T>(result: &Result<T, reqwest::Error>) -> bool {
 /// failure, whatever it was classified as. That is the signal the maintenance
 /// tunnel exists for, and it is deliberately NOT a classifier variant: a school
 /// appliance that inspects TLS truncates the stream, which arrives as a decode
-/// error rather than a reset ([`crate::locus::hub::Failure::classify`]), so keying
+/// error rather than a reset ([`crate::chrysalis::hub::Failure::classify`]), so keying
 /// on the classifier would miss the case this was built for.
 ///
 /// Called from every call site, and cheap: two atomics.
@@ -1959,7 +1962,7 @@ pub fn note_transport_failure(no_status: bool) {
     if no_status && !prefer_maintenance() {
         remember_prefer_maintenance();
         tracing::warn!(
-            target: "locus::hub",
+            target: "chrysalis::hub",
             "direct failed (no status), switching to maintenance"
         );
     }
@@ -1982,7 +1985,7 @@ pub fn note_transport_failure(no_status: bool) {
 ///     work", so the second call — the one that actually matters — is refused
 ///     BEFORE it is attempted. A transient failure on the advisory lookup
 ///     therefore blocked activation outright.
-pub async fn post<T, B>(path: &str, body: &B, timeout: crate::locus::hub::Timeout) -> Result<T>
+pub async fn post<T, B>(path: &str, body: &B, timeout: crate::chrysalis::hub::Timeout) -> Result<T>
 where
     T: DeserializeOwned,
     B: Serialize + Sync,
@@ -2005,7 +2008,7 @@ where
         // the security boundary is the allowlist on the far side, which refuses
         // anything outside it with an empty 403.
         .timeout(timeout_seconds(timeout))
-        .user_agent(concat!("Locus-Client/", env!("CARGO_PKG_VERSION")))
+        .user_agent(concat!("Chrysalis-Client/", env!("CARGO_PKG_VERSION")))
         .proxy(proxy)
         // `no_proxy` must NOT be set here — it is what makes the direct client
         // bypass the system proxy, and here we are deliberately installing one.
@@ -2048,7 +2051,7 @@ where
     forget_tunnel_failure();
 
     serde_json::from_str(&text).with_context(|| {
-        format!("the activation tunnel returned something that is not a Locus response ({status}): {text}")
+        format!("the activation tunnel returned something that is not a Chrysalis response ({status}): {text}")
     })
 }
 
@@ -2057,11 +2060,11 @@ where
 /// It inherits the direct path's timeout rather than inventing one: a tunnel
 /// request that is slower than the direct one it replaced has failed at the only
 /// thing it was for.
-const fn timeout_seconds(timeout: crate::locus::hub::Timeout) -> Duration {
+const fn timeout_seconds(timeout: crate::chrysalis::hub::Timeout) -> Duration {
     Duration::from_secs(match timeout {
-        crate::locus::hub::Timeout::Activation => 30,
-        crate::locus::hub::Timeout::Heartbeat => 15,
-        crate::locus::hub::Timeout::Download => 600,
+        crate::chrysalis::hub::Timeout::Activation => 30,
+        crate::chrysalis::hub::Timeout::Heartbeat => 15,
+        crate::chrysalis::hub::Timeout::Download => 600,
     })
 }
 
@@ -2079,7 +2082,7 @@ mod tests {
     /// next test's setup and its assertion.
     ///
     /// That was not theoretical. Measured on this machine before the guard: 1
-    /// failure in 5 runs of `cargo test --lib --package locus`, in `debug`, with
+    /// failure in 5 runs of `cargo test --lib --package chrysalis`, in `debug`, with
     /// the message "a warm engine must be handed back" — plus a second sighting
     /// in `--profile fast-release`. The same suite passed on the other runs, which
     /// is exactly how a flake reaches CI and gets called a broken build.
@@ -2217,7 +2220,7 @@ mod tests {
         assert_eq!(rules.len(), 1, "one rule, so there is no path we did not choose");
         assert_eq!(
             rules[0].as_str(),
-            Some("MATCH,Locus Activation"),
+            Some("MATCH,Chrysalis Activation"),
             "the single rule must be a catch-all to our group — a DIRECT rule here \
              would turn the bootstrap tunnel into a general proxy"
         );
@@ -2448,7 +2451,7 @@ mod tests {
         // The decision a call site makes for an ANSWERED request: the flag must
         // stay false. Written through the same entry point the call sites use, so
         // the test follows the rule rather than restating it.
-        crate::locus::activation_tunnel::note_transport_failure(false);
+        crate::chrysalis::activation_tunnel::note_transport_failure(false);
         assert!(
             !prefer_maintenance(),
             "a request the server ANSWERED must not switch the session to the maintenance route"
@@ -2487,7 +2490,7 @@ mod tests {
             error.status().is_none(),
             "a refused connection is the signal: no HTTP status"
         );
-        crate::locus::activation_tunnel::note_transport_failure(error.status().is_none());
+        crate::chrysalis::activation_tunnel::note_transport_failure(error.status().is_none());
         assert!(
             prefer_maintenance(),
             "a request that produced no HTTP status at all must switch the session to the maintenance route"
@@ -2500,10 +2503,10 @@ mod tests {
     /// traffic and comes back when it does not.
     ///
     /// This drives `stop_maintenance`/`warm_maintenance` — the two calls
-    /// `locus_status` makes on each readiness transition — rather than a
+    /// `chrysalis_status` makes on each readiness transition — rather than a
     /// readiness value, because a test that injected readiness would assert the
     /// poll's wiring, not the lifecycle it triggers. The wiring itself is one `if`
-    /// at `cmd/locus.rs`; the behaviour that can regress is here.
+    /// at `cmd/chrysalis.rs`; the behaviour that can regress is here.
     ///
     /// LIMITATION, stated rather than hidden: the 750 ms vs 15 s poll interval
     /// lives in React (`use-connection.ts:84,95`) and cannot be exercised from
@@ -2557,7 +2560,7 @@ mod tests {
     #[test]
     fn the_maintenance_config_dials_the_free_tier_port() {
         let bootstrap = Bootstrap {
-            server: crate::locus::contract::activation_tunnel_addr().to_owned(),
+            server: crate::chrysalis::contract::activation_tunnel_addr().to_owned(),
             port: FREE_TIER_PORT,
             key: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=".to_owned(),
         };
@@ -3178,7 +3181,7 @@ mod tests {
         // value depends on how the test binary was built. A build without the key
         // must report unavailable, which is what stops the fallback from being
         // attempted and then failing confusingly.
-        let compiled = option_env!("LOCUS_ACTIVATION_TUNNEL_KEY").is_some();
+        let compiled = option_env!("CHRYSALIS_ACTIVATION_TUNNEL_KEY").is_some();
         assert_eq!(
             activation_tunnel_available(),
             compiled,

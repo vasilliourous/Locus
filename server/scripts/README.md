@@ -19,7 +19,7 @@ Two conventions hold across this directory:
 | `deploy.sh` | One command to put the repo's server state onto the hub (was: know which of six scripts to run, in what order, with which flags) | Yes — idempotent |
 | `deploy-console.sh` | Build the admin-console SPA locally (needs `npm` on **your** machine, not the VPS) and upload it to `/root/server/console-dist.tar.gz` for `05-caddy.sh` to install. Requires `VPS` and `DOMAIN` explicitly | Yes |
 | `hooks-sync.sh` | Copy the repo's `pb_hooks/*.pb.js` to the live hub and verify they landed (sha256 drift check, atomic move, restart, then a real request to `/api/release`). **`--fetch-service`** does the same for `fetch-release.py` at `/root/server/scripts/` (compiles the host's copy, probes `/health`) | Yes |
-| `write-admin-credentials.sh` | Assemble every effective credential on the VPS into `/root/locus-credentials.txt` (mode 600): tier passwords, PB admin creds, admin API token, fetch-link HMAC secret, B2 creds. Ends with a fleet-divergence warning — read it | Yes |
+| `write-admin-credentials.sh` | Assemble every effective credential on the VPS into `/root/chrysalis-credentials.txt` (mode 600): tier passwords, PB admin creds, admin API token, fetch-link HMAC secret, B2 creds. Ends with a fleet-divergence warning — read it | Yes |
 
 ## Seeding and one-off repairs
 
@@ -36,7 +36,7 @@ Two conventions hold across this directory:
 
 | Script | What it does |
 |---|---|
-| `fetch-release.py` | **The normal path.** Runs as `locus-fetch.service`; downloads a version's artifacts straight from its GitHub Release, verifies each one's format, SHA-256 **and** signature, then writes `update_config`. Also answers `POST /api/admin/fetch-release` (admin token) and `GET /api/admin/fetch-release?…&sig=` (one-shot signed link) |
+| `fetch-release.py` | **The normal path.** Runs as `chrysalis-fetch.service`; downloads a version's artifacts straight from its GitHub Release, verifies each one's format, SHA-256 **and** signature, then writes `update_config`. Also answers `POST /api/admin/fetch-release` (admin token) and `GET /api/admin/fetch-release?…&sig=` (one-shot signed link) |
 | `publish-release.sh` | The CLI path for a hand-built or hotfixed binary not on a GitHub Release. Verifies served bytes by re-downloading. Refuses unsigned artifacts |
 
 ## Verification (no network / no live changes)

@@ -54,10 +54,10 @@
         "repairFailed": "Gagal memperbaiki layanan"
       },
       "sysproxy": {
-        "privilegeRequired": "Tidak dapat mengatur proxy sistem: macOS menolak perubahan ini karena hak akses tidak mencukupi. Pasang layanan Locus; jika Anda administrator, Anda juga dapat mematikan keharusan kata sandi administrator untuk pengaturan seluruh sistem di opsi lanjutan Pengaturan Sistem → Privasi & Keamanan.",
+        "privilegeRequired": "Tidak dapat mengatur proxy sistem: macOS menolak perubahan ini karena hak akses tidak mencukupi. Pasang layanan Chrysalis; jika Anda administrator, Anda juga dapat mematikan keharusan kata sandi administrator untuk pengaturan seluruh sistem di opsi lanjutan Pengaturan Sistem → Privasi & Keamanan.",
         "directFallback": "Gagal mengatur proxy sistem; lalu lintas dikembalikan ke koneksi langsung.",
         "guardStopped": "Penjaga proxy sistem berhenti setelah gagal beberapa kali berturut-turut. Proxy sistem tidak lagi dipertahankan secara otomatis.",
-        "coreNotReady": "Proxy sistem tidak dapat diaktifkan karena inti tidak berjalan. Jalankan inti (atau pasang/perbaiki layanan Locus) lalu coba lagi.",
+        "coreNotReady": "Proxy sistem tidak dapat diaktifkan karena inti tidak berjalan. Jalankan inti (atau pasang/perbaiki layanan Chrysalis) lalu coba lagi.",
         "systemCallFailed": "Proxy sistem gagal ditulis karena panggilan sistem Windows gagal. Ini biasanya sementara, coba lagi."
       }
     },

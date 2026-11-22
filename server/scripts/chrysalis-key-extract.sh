@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
-# locus-key-extract.sh — rehydrate .locus-keys/ from the encrypted bundle
+# chrysalis-key-extract.sh — rehydrate .chrysalis-keys/ from the encrypted bundle
 #
 # WHY THIS IS A SCRIPT AND NOT AN INSTRUCTION
 #
-# `.locus-keys/locus_update.key` is the minisign PRIVATE key that signs every
+# `.chrysalis-keys/chrysalis_update.key` is the minisign PRIVATE key that signs every
 # client update. Every installed client trusts exactly one public key — the one
 # compiled into it — and the Tauri updater has no bypass. Lose the private key
 # and no already-installed client can ever be updated again.
 #
-# It USED to live only in `.locus-keys/`, a gitignored directory. On 2026-10-16
+# It USED to live only in `.chrysalis-keys/`, a gitignored directory. On 2026-10-16
 # the working tree was lost and the key went with it; it survived only because an
 # unencrypted copy happened to still be on the deployed host, and the fleet still
 # paid a manual reinstall. A secret recoverable only from a box you might delete
@@ -19,19 +19,25 @@
 # script is the only supported way to fill the cache, which means:
 #
 #   * a fresh clone needs a checkout plus the passphrase, and nothing else;
-#   * deleting `.locus-keys/*` is always safe — that is the normal state;
+#   * deleting `.chrysalis-keys/*` is always safe — that is the normal state;
 #   * there is exactly one route to the key, so it cannot silently fork.
 #
 # USAGE
-#   ./locus-key-extract.sh              # write .locus-keys/, verifying by default
-#   ./locus-key-extract.sh --check      # verify the bundle's key, write nothing
-#   ./locus-key-extract.sh --remove     # delete the cache after a signing session
+#   ./chrysalis-key-extract.sh              # write .chrysalis-keys/, verifying by default
+#   ./chrysalis-key-extract.sh --check      # verify the bundle's key, write nothing
+#   ./chrysalis-key-extract.sh --remove     # delete the cache after a signing session
 #
 # Passphrase sources are inherited from secrets-decrypt.sh and are the same three,
 # in the same precedence — do not invent a fourth:
-#   1. LOCUS_SECRETS_PASSPHRASE       — the passphrase itself
-#   2. LOCUS_SECRETS_PASSPHRASE_FILE  — a file containing it
+#   1. CHRYSALIS_SECRETS_PASSPHRASE       — the passphrase itself
+#   2. CHRYSALIS_SECRETS_PASSPHRASE_FILE  — a file containing it
 #   3. an interactive prompt
+#
+# DEPRECATED ALIAS: the pre-rename `LOCUS_SECRETS_PASSPHRASE` and
+# `LOCUS_SECRETS_PASSPHRASE_FILE` are still accepted by the scripts this inherits
+# from, and `LOCUS_UPDATE_KEY_B64` in the bundle is still spelled with the old
+# product word. Both are deliberate; see
+# docs/reference/NAME-MIGRATION.md.
 #
 # WHAT IS VERIFIED, AND WHY EACH HALF MATTERS
 #
@@ -52,9 +58,9 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SERVER_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 REPO_DIR="$(cd "${SERVER_DIR}/.." && pwd)"
 
-KEY_DIR="${REPO_DIR}/.locus-keys"
-KEY_PRIV="${KEY_DIR}/locus_update.key"
-KEY_PUB="${KEY_DIR}/locus_update.pub"
+KEY_DIR="${REPO_DIR}/.chrysalis-keys"
+KEY_PRIV="${KEY_DIR}/chrysalis_update.key"
+KEY_PUB="${KEY_DIR}/chrysalis_update.pub"
 TAURI_CONF="${REPO_DIR}/client/src-tauri/tauri.conf.json"
 DECRYPT="${SCRIPT_DIR}/secrets-decrypt.sh"
 
@@ -92,7 +98,7 @@ if [ "$MODE" = remove ]; then
     if [ "$removed" -eq 0 ]; then
         log "nothing to remove — the key cache is already empty (the normal state)"
     else
-        log "removed ${removed} file(s) from .locus-keys/ — re-run this script to sign again"
+        log "removed ${removed} file(s) from .chrysalis-keys/ — re-run this script to sign again"
     fi
     exit 0
 fi
@@ -114,9 +120,9 @@ chmod 600 "$TMP_ENV"
   Check the passphrase. Nothing was written."
 
 # ── Pull the key out, without ever echoing it ──
-key_b64=$(grep -m1 '^LOCUS_UPDATE_KEY_B64=' "$TMP_ENV" | cut -d= -f2- || true)
+key_b64=$(grep -m1 '^CHRYSALIS_UPDATE_KEY_B64=' "$TMP_ENV" | cut -d= -f2- || true)
 if [ -z "$key_b64" ]; then
-    fail "server/secrets.env.age has no LOCUS_UPDATE_KEY_B64.
+    fail "server/secrets.env.age has no CHRYSALIS_UPDATE_KEY_B64.
   The bundle is the key's only durable copy — restore it before signing.
   See docs/operate/RELEASE-RECOVERY.md §2."
 fi
@@ -126,7 +132,7 @@ chmod 600 "$TMP_KEY"
 # shellcheck disable=SC2064
 trap 'rm -f "$TMP_ENV" "$TMP_KEY"' EXIT
 printf '%s' "$key_b64" | base64 -d > "$TMP_KEY" 2>/dev/null \
-    || fail "LOCUS_UPDATE_KEY_B64 is not valid base64 — the bundle entry is corrupt"
+    || fail "CHRYSALIS_UPDATE_KEY_B64 is not valid base64 — the bundle entry is corrupt"
 
 # ── Verification 1: is this a minisign secret key at all? ──
 #
@@ -136,7 +142,7 @@ printf '%s' "$key_b64" | base64 -d > "$TMP_KEY" 2>/dev/null \
 # newline folded into it — which would otherwise surface only at signing time.
 head -c 18 "$TMP_KEY" | grep -q 'untrusted comment:' \
     || fail "the extracted bytes are not a minisign secret key (missing 'untrusted comment:').
-  LOCUS_UPDATE_KEY_B64 in the bundle may be truncated or wrapped."
+  CHRYSALIS_UPDATE_KEY_B64 in the bundle may be truncated or wrapped."
 
 # ── Verification 2: does the PUBLIC half match what the client trusts? ──
 #
@@ -212,13 +218,13 @@ else
 
   Signing with this would produce updates every installed client refuses, and
   nothing would fail until a student tried to update. Do not sign with it.
-  Either the bundle entry is stale (put the right key into LOCUS_UPDATE_KEY_B64
+  Either the bundle entry is stale (put the right key into CHRYSALIS_UPDATE_KEY_B64
   and re-encrypt) or the pubkey was rotated without re-encrypting.
   See docs/operate/RELEASE-RECOVERY.md §2."
 fi
 
 if [ "$MODE" = check ]; then
-    log "verified (nothing written; .locus-keys/ unchanged)"
+    log "verified (nothing written; .chrysalis-keys/ unchanged)"
     exit 0
 fi
 
@@ -250,14 +256,14 @@ fi
 priv_mode=$(stat -c '%a' "$KEY_PRIV" 2>/dev/null || stat -f '%Lp' "$KEY_PRIV" 2>/dev/null)
 dir_mode=$(stat -c '%a' "$KEY_DIR" 2>/dev/null || stat -f '%Lp' "$KEY_DIR" 2>/dev/null)
 if [ "$priv_mode" != "600" ] || [ "$dir_mode" != "700" ]; then
-    fail "permissions are wrong: .locus-keys/ is ${dir_mode:-?}, locus_update.key is ${priv_mode:-?}
+    fail "permissions are wrong: .chrysalis-keys/ is ${dir_mode:-?}, chrysalis_update.key is ${priv_mode:-?}
   Expected 700 / 600. Refusing to leave a signing key group- or world-readable."
 fi
 
-log "extracted the signing key into .locus-keys/ (key ID ${derived_id:-${pub_id:-?}}, 0600)"
+log "extracted the signing key into .chrysalis-keys/ (key ID ${derived_id:-${pub_id:-?}}, 0600)"
 echo
 echo "  Signing works now. When the session is over:"
 echo "    $0 --remove"
 echo
-warn "This directory is a CACHE. The durable copy is LOCUS_UPDATE_KEY_B64 in"
+warn "This directory is a CACHE. The durable copy is CHRYSALIS_UPDATE_KEY_B64 in"
 warn "server/secrets.env.age. Never treat the file here as the backup."

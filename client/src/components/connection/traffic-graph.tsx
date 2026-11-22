@@ -24,7 +24,7 @@ export const TrafficGraph = () => {
   const trafficRef = useRef<EnhancedCanvasTrafficGraphRef>(null)
   const { verge } = useVerge()
 
-  // Respect the user's stored preference. Locus keeps this setting, but it now
+  // Respect the user's stored preference. Chrysalis keeps this setting, but it now
   // defaults on: the graph is the clearest evidence the tunnel is carrying
   // traffic, which is the question a student actually has.
   const showGraph = verge?.traffic_graph ?? true

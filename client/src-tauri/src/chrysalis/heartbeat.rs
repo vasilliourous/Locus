@@ -15,7 +15,7 @@
 //! 3. **The update signal.** Updates are advertised through the heartbeat, not
 //!    a separate poll, gated server-side by a per-device rollout percentage.
 
-use crate::locus::contract::{HeartbeatRequest, TierConfig};
+use crate::chrysalis::contract::{HeartbeatRequest, TierConfig};
 use serde::Deserialize;
 use std::sync::Arc;
 use std::time::Duration;
@@ -59,7 +59,7 @@ pub const SUSPENDED_INTERVAL: Duration = Duration::from_secs(2 * 60);
 /// on every heartbeat.
 pub const GRACE_PERIOD: Duration = Duration::from_secs(7 * 24 * 60 * 60);
 
-// The per-attempt timeout lives in `locus::hub::Timeout::Heartbeat` now, beside
+// The per-attempt timeout lives in `chrysalis::hub::Timeout::Heartbeat` now, beside
 // the other two hub timeouts, because a client built here would trust only the
 // operating system's certificate store — see that module.
 
@@ -129,12 +129,12 @@ pub struct HeartbeatResponse {
     /// path at once — the failure prevents escaping the failure. The remedy is a
     /// second hostname plus a client that will use it, and the heartbeat is the
     /// only channel that reaches an already-installed device without a release.
-    /// This is the same reasoning as [`crate::locus::contract::ReleaseManifest`]:
+    /// This is the same reasoning as [`crate::chrysalis::contract::ReleaseManifest`]:
     /// the update path must not require the thing that is broken.
     ///
     /// # Why it is a suggestion and not an instruction
     ///
-    /// It is validated by [`crate::locus::contract::resolve_hub_url`] before it is
+    /// It is validated by [`crate::chrysalis::contract::resolve_hub_url`] before it is
     /// stored, and anything that is not an absolute `https` URL with no path falls
     /// back to the compiled default. A hub that sent a malformed or plaintext value
     /// therefore cannot strand the device it was trying to rescue — the worst case
@@ -154,7 +154,7 @@ pub struct HeartbeatResponse {
     /// missing one, because it is a false claim about the student's account that
     /// support then has to argue with.
     ///
-    /// Not reformatted here either: it is parsed with [`crate::locus::expiry::parse`]
+    /// Not reformatted here either: it is parsed with [`crate::chrysalis::expiry::parse`]
     /// at the point of display, so there is one parser and one dialect.
     #[serde(default)]
     pub expires_at: Option<String>,
@@ -164,7 +164,7 @@ pub struct HeartbeatResponse {
     /// **Advisory, and absent for a paying tier.** The hub has no per-user
     /// accounting (one shared password per tier means free users are
     /// indistinguishable on the wire), so the client counts its own bytes —
-    /// see [`crate::locus::usage`]. It is a wire field rather than a constant
+    /// see [`crate::chrysalis::usage`]. It is a wire field rather than a constant
     /// precisely so the operator can change the allowance without shipping a
     /// release.
     ///
@@ -264,10 +264,10 @@ impl HeartbeatResponse {
     #[must_use]
     pub fn download_url(&self, platform: &str) -> Option<&str> {
         let per_platform = match platform {
-            crate::locus::contract::PLATFORM_LINUX => self.update_linux.as_deref(),
-            crate::locus::contract::PLATFORM_WINDOWS => self.update_windows.as_deref(),
-            crate::locus::contract::PLATFORM_MACOS_INTEL => self.update_macos_intel.as_deref(),
-            crate::locus::contract::PLATFORM_MACOS_ARM => self.update_macos_arm.as_deref(),
+            crate::chrysalis::contract::PLATFORM_LINUX => self.update_linux.as_deref(),
+            crate::chrysalis::contract::PLATFORM_WINDOWS => self.update_windows.as_deref(),
+            crate::chrysalis::contract::PLATFORM_MACOS_INTEL => self.update_macos_intel.as_deref(),
+            crate::chrysalis::contract::PLATFORM_MACOS_ARM => self.update_macos_arm.as_deref(),
             _ => None,
         };
         per_platform.or(self.update_url.as_deref())
@@ -277,10 +277,10 @@ impl HeartbeatResponse {
     #[must_use]
     pub fn download_sha256(&self, platform: &str) -> Option<&str> {
         let per_platform = match platform {
-            crate::locus::contract::PLATFORM_LINUX => self.update_sha256_linux.as_deref(),
-            crate::locus::contract::PLATFORM_WINDOWS => self.update_sha256_windows.as_deref(),
-            crate::locus::contract::PLATFORM_MACOS_INTEL => self.update_sha256_macos_intel.as_deref(),
-            crate::locus::contract::PLATFORM_MACOS_ARM => self.update_sha256_macos_arm.as_deref(),
+            crate::chrysalis::contract::PLATFORM_LINUX => self.update_sha256_linux.as_deref(),
+            crate::chrysalis::contract::PLATFORM_WINDOWS => self.update_sha256_windows.as_deref(),
+            crate::chrysalis::contract::PLATFORM_MACOS_INTEL => self.update_sha256_macos_intel.as_deref(),
+            crate::chrysalis::contract::PLATFORM_MACOS_ARM => self.update_sha256_macos_arm.as_deref(),
             _ => None,
         };
         per_platform.or(self.update_sha256.as_deref())
@@ -304,7 +304,7 @@ impl HeartbeatResponse {
     /// `free_allowance_mb = 0` is treated the same way — the operator's way of
     /// turning the quota off without a release.
     ///
-    /// The figure is **clamped** before conversion ([`crate::locus::usage::sane_allowance_mb`]).
+    /// The figure is **clamped** before conversion ([`crate::chrysalis::usage::sane_allowance_mb`]).
     /// An absurd value straight off the wire saturates the multiply below, and
     /// the saturated byte count then overflows `used * 10` in the classifier —
     /// which misreads every window as spent and throttles the student instantly
@@ -313,7 +313,7 @@ impl HeartbeatResponse {
     pub fn allowance_bytes(&self) -> Option<u64> {
         self.free_allowance_mb
             .filter(|mb| *mb > 0)
-            .map(|mb| crate::locus::usage::sane_allowance_mb(mb) * crate::locus::usage::MIB)
+            .map(|mb| crate::chrysalis::usage::sane_allowance_mb(mb) * crate::chrysalis::usage::MIB)
     }
 }
 
@@ -342,7 +342,7 @@ pub enum BeatOutcome {
 ///
 /// This was a two-variant enum (a code, or a session token minted at device
 /// recognition). Recognition is gone, and with it the token: a device always
-/// holds a code now, and `crate::locus::credential` is what keeps it from being
+/// holds a code now, and `crate::chrysalis::credential` is what keeps it from being
 /// lost. The type is kept as a newtype rather than being replaced by a bare
 /// `String` so the redaction and formatting rules below stay attached to the
 /// value everywhere it is used.
@@ -470,16 +470,17 @@ pub async fn beat(credential: &Credential, fingerprint: &str) -> BeatOutcome {
     // network that refuses the default hostname honours a stored override. See
     // `contract::resolve_hub_url` — and note this is the ONE place a heartbeat
     // finds its hub, so the override cannot be honoured inconsistently.
-    let hub = crate::locus::contract::hub_url().await;
+    let hub = crate::chrysalis::contract::hub_url().await;
 
     // The shared client, so a machine whose OS certificate store cannot verify
-    // the hub still heartbeats. See `locus::hub` for why a hand-built client
+    // the hub still heartbeats. See `chrysalis::hub` for why a hand-built client
     // fails on Windows.
     // The routing decision, including the maintenance tunnel — see
     // `activation_tunnel::hub_client_for`.
-    let hub_client = crate::locus::activation_tunnel::hub_client_for(&hub, crate::locus::hub::Timeout::Heartbeat).await;
+    let hub_client =
+        crate::chrysalis::activation_tunnel::hub_client_for(&hub, crate::chrysalis::hub::Timeout::Heartbeat).await;
     if hub_client.diagnosis().is_some() {
-        tracing::warn!(target: "locus::hub", "{}", hub_client.describe());
+        tracing::warn!(target: "chrysalis::hub", "{}", hub_client.describe());
     }
 
     let response = match hub_client
@@ -510,17 +511,17 @@ pub async fn beat(credential: &Credential, fingerprint: &str) -> BeatOutcome {
             // refuses, and `Backoff` already spaces attempts out. The spawn only
             // happens on the reset/refused path, which cannot happen on a network
             // that permits the hub at all.
-            let failure = crate::locus::hub::Failure::classify(&error);
-            if failure.retryable_over_tunnel() && crate::locus::activation_tunnel::activation_tunnel_available() {
+            let failure = crate::chrysalis::hub::Failure::classify(&error);
+            if failure.retryable_over_tunnel() && crate::chrysalis::activation_tunnel::activation_tunnel_available() {
                 tracing::warn!(
-                    target: "locus::activation_tunnel",
+                    target: "chrysalis::activation_tunnel",
                     "the direct heartbeat failed as {failure:?} (the signature of a name-based \
                      block); retrying through the activation tunnel"
                 );
-                match crate::locus::activation_tunnel::post(
+                match crate::chrysalis::activation_tunnel::post(
                     "/api/heartbeat",
                     &body,
-                    crate::locus::hub::Timeout::Heartbeat,
+                    crate::chrysalis::hub::Timeout::Heartbeat,
                 )
                 .await
                 {
@@ -567,24 +568,25 @@ async fn retry_beat_over_maintenance<B: serde::Serialize + Sync>(
     hub: &str,
     body: &B,
 ) -> Option<reqwest::Response> {
-    if !crate::locus::activation_tunnel::note_failure_and_decide_retry(error) {
+    if !crate::chrysalis::activation_tunnel::note_failure_and_decide_retry(error) {
         return None;
     }
     tracing::warn!(
-        target: "locus::activation_tunnel",
+        target: "chrysalis::activation_tunnel",
         "the direct heartbeat produced no response; retrying through the maintenance tunnel"
     );
     // `_retry`, not `hub_client_for`: this call site may START a maintenance engine.
     // A heartbeat on a device that dropped its plan tunnel is exactly when an engine
     // may have been stopped at TUN-up and never restarted.
-    let retry = crate::locus::activation_tunnel::hub_client_for_retry(hub, crate::locus::hub::Timeout::Heartbeat).await;
+    let retry =
+        crate::chrysalis::activation_tunnel::hub_client_for_retry(hub, crate::chrysalis::hub::Timeout::Heartbeat).await;
     let sent = retry
         .client()
         .post(format!("{hub}/api/heartbeat"))
         .json(body)
         .send()
         .await;
-    if crate::locus::activation_tunnel::log_retry_outcome(&sent) {
+    if crate::chrysalis::activation_tunnel::log_retry_outcome(&sent) {
         sent.ok()
     } else {
         None
@@ -739,7 +741,7 @@ pub struct HeartbeatLoop {
     /// that instant, so a beat completing with nobody listening is simply not
     /// observed. That is the intended semantic — the completion is an event for
     /// whoever asked, not a durable record. The durable record is the stored
-    /// expiry, which `locus_status` reads.
+    /// expiry, which `chrysalis_status` reads.
     beat_done: Arc<Notify>,
     task: tokio::task::JoinHandle<()>,
 }
@@ -1137,7 +1139,7 @@ mod tests {
         };
 
         assert_eq!(
-            response.download_url(crate::locus::contract::PLATFORM_WINDOWS),
+            response.download_url(crate::chrysalis::contract::PLATFORM_WINDOWS),
             Some("https://hub/updates/2.0.0/locus-linux-amd64"),
             "the fallback returns the linux URL even for windows — which is why the \
              publish path must always write per-platform fields"
@@ -1269,7 +1271,7 @@ mod tests {
         let bytes = response.allowance_bytes().expect("a quota is still applied");
         assert_eq!(
             bytes,
-            crate::locus::usage::MAX_SANE_ALLOWANCE_MB * crate::locus::usage::MIB,
+            crate::chrysalis::usage::MAX_SANE_ALLOWANCE_MB * crate::chrysalis::usage::MIB,
             "the absurd value must be clamped, not saturated into nonsense"
         );
     }

@@ -26,7 +26,7 @@ import { FALLBACK_LANGUAGE, initializeLanguage } from './services/i18n'
 import { preloadAppData } from './services/preload'
 import { swrConfig } from './services/query-client'
 import { LoadingCacheProvider } from './services/states'
-import { applyThemeWhenReady, locusTheme } from './services/theme'
+import { applyThemeWhenReady, chrysalisTheme } from './services/theme'
 import { disableWebViewShortcuts } from './utils/disable-webview-shortcuts'
 
 if (!window.ResizeObserver) {
@@ -172,7 +172,7 @@ const initializeApp = () => {
   // every screen.
   root.render(
     <React.StrictMode>
-      <ThemeProvider theme={locusTheme}>
+      <ThemeProvider theme={chrysalisTheme}>
         <CssBaseline />
         <BaseErrorBoundary>
           <Shell />

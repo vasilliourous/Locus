@@ -9,7 +9,7 @@ verified-against: docs/state.toml
 
 | | |
 |---|---|
-| **Product** | Locus — a small commercial VPN service sold to students at N4L-managed NZ schools (the live deployment is Macleans College). |
+| **Product** | Chrysalis — a small commercial VPN service sold to students at N4L-managed NZ schools (the live deployment is Macleans College). |
 | **The job it does** | Lets a student on school WiFi reach games, video, and sites the school firewall blocks. |
 | **How** | Shadowsocks 2022 over **TCP** — no TLS fingerprint for the firewall to match, no UDP dependency for the base tiers. |
 | **Form** | Signed desktop app (Windows-primary; macOS/Linux builds exist), activation-code gated, no self-signup. |

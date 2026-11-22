@@ -33,9 +33,9 @@ import { useI18n } from '@/hooks/use-i18n'
 import { useSubscription } from '@/hooks/use-subscription'
 import { useVerge } from '@/hooks/use-verge'
 import { cardSx } from '@/pages/_surfaces'
+import { chrysalisUpdateStatus, type UpdateStatus } from '@/services/chrysalis'
 import { requestEntitlementRefresh } from '@/services/entitlement-refresh'
 import { supportedLanguages } from '@/services/i18n'
-import { locusUpdateStatus, type UpdateStatus } from '@/services/locus'
 import { showNotice } from '@/services/notice-service'
 
 /**
@@ -45,8 +45,8 @@ import { showNotice } from '@/services/notice-service'
  * four a student should touch, and a whole destination for four rows is worse
  * than folding them in. The distinction that matters: language, start-at-login
  * and update-checking are *preferences*; core choice, TUN, system proxy, ports
- * and DNS are *internals* Locus decides, and have no UI at all. Appearance is
- * not a preference either: Locus has one permanent look (`/COLOURS.md` §0).
+ * and DNS are *internals* Chrysalis decides, and have no UI at all. Appearance is
+ * not a preference either: Chrysalis has one permanent look (`/COLOURS.md` §0).
  */
 const AccountPage = () => {
   const { t } = useTranslation()
@@ -76,7 +76,7 @@ const AccountPage = () => {
   const [updateStatus, setUpdateStatus] = useState<UpdateStatus | null>(null)
   useEffect(() => {
     let cancelled = false
-    locusUpdateStatus()
+    chrysalisUpdateStatus()
       .then((s) => {
         if (!cancelled) setUpdateStatus(s)
       })
@@ -448,7 +448,7 @@ const AccountPage = () => {
         {/* "Check for updates automatically".
             Wired to `auto_check_update` — NOT `enable_auto_launch`. The row was
             previously bound to the start-at-login field, so this control showed
-            the auto-launch state and toggling it changed whether Locus started
+            the auto-launch state and toggling it changed whether Chrysalis started
             at login, while the label said updates. That is why the setting
             looked wrong out of the box: it was reporting a different setting.
             Default is ON (`unwrap_or(true)`), so a fresh install picks up
@@ -513,7 +513,7 @@ const AccountPage = () => {
                         // Re-read so the notice clears the moment it is fixed,
                         // rather than lingering until the next mount and making
                         // the toggle look like it did nothing.
-                        locusUpdateStatus().then(setUpdateStatus),
+                        chrysalisUpdateStatus().then(setUpdateStatus),
                       )
                       .catch(onError)
                   }}

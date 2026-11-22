@@ -1,9 +1,9 @@
-# Contributing — Locus client
+# Contributing — Chrysalis client
 
 ```
 audience:    builder
 status:      live
-authoritative-for: how to set up and submit a change to the Locus client
+authoritative-for: how to set up and submit a change to the Chrysalis client
 verified-against: client/package.json, client/scripts/, client/docs/
 ```
 
@@ -13,8 +13,8 @@ verified-against: client/package.json, client/scripts/, client/docs/
 > [`docs/README.md`](../docs/README.md) and covered by the link and reachability
 > guards.
 
-This directory is a **fork of Clash Verge Rev v2.5.5**, adapted into the Locus
-desktop client. It is the shipping Locus client. The predecessor Wails client is
+This directory is a **fork of Clash Verge Rev v2.5.5**, adapted into the Chrysalis
+desktop client. It is the shipping Chrysalis client. The predecessor Wails client is
 archived at `legacy/wails-client/` and is not the product.
 
 Agent-facing rules live in [`AGENTS.md`](AGENTS.md); read that first if you are

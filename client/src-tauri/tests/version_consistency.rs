@@ -125,7 +125,7 @@ fn every_version_site_agrees() {
 fn the_version_is_parseable_by_the_updater() {
     let version = cargo_version();
     assert!(
-        !app_lib::locus::update::version::rejection_reason(&version, "0.0.1").is_some(),
+        !app_lib::chrysalis::update::version::rejection_reason(&version, "0.0.1").is_some(),
         "the client's own version {version} would be rejected by its update gate"
     );
 }

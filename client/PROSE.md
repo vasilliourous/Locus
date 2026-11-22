@@ -29,7 +29,7 @@ says, edit the rows under that screen's heading.
 | Key | Text | Code |
 |---|---|---|
 | `home.components.connection.activation.alphabet` | The code is 15 characters and never contains 0, O, 1 or I. | src/pages/activation.tsx:408 |
-| `home.components.connection.activation.backupRoute` | Using the Locus backup route to reach the server. | src/pages/activation.tsx:267 |
+| `home.components.connection.activation.backupRoute` | Using the Chrysalis backup route to reach the server. | src/pages/activation.tsx:267 |
 | `home.components.connection.activation.codeLabel` | Activation code | src/pages/activation.tsx:327 |
 | `home.components.connection.activation.codePlaceholder` | RQ-XXXX-XXXX-XXXX-X | src/pages/activation.tsx:325 |
 | `home.components.connection.activation.lede` | Your code is on the card you were sold. | src/pages/activation.tsx:306 |
@@ -56,9 +56,9 @@ says, edit the rows under that screen's heading.
 | Key | Text | Code |
 |---|---|---|
 | `home.components.connection.activeConnections` | Active connections | src/pages/connection.tsx:549 |
-| `home.components.connection.blockerServiceInstallRequired` | Locus cannot turn the VPN on yet: its helper service is not installed, and the permission prompt to install it was dismissed, denied, or never appeared. Quit and reopen Locus, then approve the prompt when it appears. If no prompt appears at all, reinstall Locus, then approve the prompt. | src/pages/connect-notice.ts:149 |
-| `home.components.connection.blockerServiceOperationInFlight` | Locus is setting up its helper service. This takes a moment — wait for the prompt or for this message to clear, then try again. | src/pages/connect-notice.ts:151 |
-| `home.components.connection.blockerServiceUnavailable` | Locus cannot turn the VPN on yet: its helper service is installed but not working ({{reason}}). Quit and reopen Locus to repair it. If that does not work, reinstall Locus. | src/pages/connect-notice.ts:150 |
+| `home.components.connection.blockerServiceInstallRequired` | Chrysalis cannot turn the VPN on yet: its helper service is not installed, and the permission prompt to install it was dismissed, denied, or never appeared. Quit and reopen Chrysalis, then approve the prompt when it appears. If no prompt appears at all, reinstall Chrysalis, then approve the prompt. | src/pages/connect-notice.ts:149 |
+| `home.components.connection.blockerServiceOperationInFlight` | Chrysalis is setting up its helper service. This takes a moment — wait for the prompt or for this message to clear, then try again. | src/pages/connect-notice.ts:151 |
+| `home.components.connection.blockerServiceUnavailable` | Chrysalis cannot turn the VPN on yet: its helper service is installed but not working ({{reason}}). Quit and reopen Chrysalis to repair it. If that does not work, reinstall Chrysalis. | src/pages/connect-notice.ts:150 |
 | `home.components.connection.cancel` | Stop | src/pages/connection.tsx:149 |
 | `home.components.connection.checking` | Checking… | src/pages/connection.tsx:147 |
 | `home.components.connection.connect` | Connect | src/pages/connection.tsx:154 |
@@ -75,12 +75,12 @@ says, edit the rows under that screen's heading.
 | `home.components.connection.metricsWhenConnected` | Traffic figures appear once the VPN is on. | src/pages/connection.tsx:485 |
 | `home.components.connection.needsActivation` | This device needs an activation code before it can connect. | src/pages/connection.tsx:340 |
 | `home.components.connection.notConnected` | Not connected | src/pages/connection.tsx:175 |
-| `home.components.connection.requiresSetup` | Locus cannot turn the VPN on yet: it needs permission, and its helper service is not installed. Locus will ask for that permission when it starts — approve the prompt, then try again. | src/pages/connection.tsx:431 |
+| `home.components.connection.requiresSetup` | Chrysalis cannot turn the VPN on yet: it needs permission, and its helper service is not installed. Chrysalis will ask for that permission when it starts — approve the prompt, then try again. | src/pages/connection.tsx:431 |
 | `home.components.connection.sessionDownload` | Downloaded this session | src/components/connection/traffic-summary.tsx:82<br>src/pages/connection.tsx:535 |
 | `home.components.connection.sessionUpload` | Uploaded this session | src/components/connection/traffic-summary.tsx:75<br>src/pages/connection.tsx:528 |
-| `home.components.connection.subscriptionExpiresIn` | Your Locus subscription expires in {{count}} days. Contact the person who sold you the code to renew it. | src/pages/connection.tsx:404 |
-| `home.components.connection.subscriptionExpiresToday` | Your Locus subscription expires today. Contact the person who sold you the code to renew it. | src/pages/connection.tsx:403 |
-| `home.components.connection.subscriptionLapsed` | Your Locus subscription has expired, so the VPN will not connect. Contact the person who sold you the code to renew it. | src/pages/connection.tsx:389 |
+| `home.components.connection.subscriptionExpiresIn` | Your Chrysalis subscription expires in {{count}} days. Contact the person who sold you the code to renew it. | src/pages/connection.tsx:404 |
+| `home.components.connection.subscriptionExpiresToday` | Your Chrysalis subscription expires today. Contact the person who sold you the code to renew it. | src/pages/connection.tsx:403 |
+| `home.components.connection.subscriptionLapsed` | Your Chrysalis subscription has expired, so the VPN will not connect. Contact the person who sold you the code to renew it. | src/pages/connection.tsx:389 |
 | `home.components.connection.supportEmail` | maillcontainer@proton.me | src/components/shared/support-block.tsx:100 |
 | `home.components.connection.takingLonger` | Still connecting. This can take a few seconds on a school network — you can stop and try again. | src/pages/connection.tsx:286 |
 | `home.components.connection.toggleHint` | Press Enter to turn the VPN on or off | src/pages/connection.tsx:266 |
@@ -97,7 +97,7 @@ says, edit the rows under that screen's heading.
 | `home.components.connection.supportBlock.middleman` | Start with the person who sold you your code: they know your account and can usually fix it on the spot. | src/components/shared/support-block.tsx:90 |
 | `home.components.connection.supportBlock.replyPromise` | Every email is answered within 12 hours, not counting nighttime. | src/components/shared/support-block.tsx:136 |
 | `home.components.connection.supportBlock.title` | Any problem at all — email us. | src/components/shared/support-block.tsx:82 |
-| `home.components.connection.supportBlock.why` | Locus is run by one person, so an email that names the error is something that can actually be fixed. | src/components/shared/support-block.tsx:143 |
+| `home.components.connection.supportBlock.why` | Chrysalis is run by one person, so an email that names the error is something that can actually be fixed. | src/components/shared/support-block.tsx:143 |
 
 ## Sign-out card
 
@@ -107,7 +107,7 @@ says, edit the rows under that screen's heading.
 |---|---|---|
 | `home.components.connection.signOut.action` | Sign out on this device | src/components/shared/sign-out-card.tsx:218 |
 | `home.components.connection.signOut.body` | Signing out makes this computer forget your access key. Your subscription is not cancelled, and the time you have paid for keeps running. | src/components/shared/sign-out-card.tsx:187 |
-| `home.components.connection.signOut.confirmBody` | Locus will forget your access key on this computer. This computer will stop working with Locus until you enter the key from your card again. | src/components/shared/sign-out-card.tsx:253 |
+| `home.components.connection.signOut.confirmBody` | Chrysalis will forget your access key on this computer. This computer will stop working with Chrysalis until you enter the key from your card again. | src/components/shared/sign-out-card.tsx:253 |
 | `home.components.connection.signOut.confirmKeeps` | Your subscription is not cancelled, and it will not be shortened. | src/components/shared/sign-out-card.tsx:256 |
 | `home.components.connection.signOut.confirmMoving` | If you are moving to a new computer, this is what you want. | src/components/shared/sign-out-card.tsx:263 |
 | `home.components.connection.signOut.confirmTitle` | Sign out on this device? | src/components/shared/sign-out-card.tsx:249 |
@@ -116,8 +116,8 @@ says, edit the rows under that screen's heading.
 | `home.components.connection.signOut.deviceIdCopy` | Copy | src/pages/account.tsx:350 |
 | `home.components.connection.signOut.deviceIdCopyFailed` | Could not copy automatically — select the Device ID and copy it by hand. | src/pages/account.tsx:345 |
 | `home.components.connection.signOut.signedOut` | Signed out. This computer no longer holds your key. | src/components/shared/sign-out-card.tsx:162 |
-| `home.components.connection.signOut.signedOutFailed` | Locus could not sign out. Nothing has changed on this device. Try again, and email us if it keeps happening. | src/components/shared/sign-out-card.tsx:120 |
-| `home.components.connection.signOut.signedOutOffline` | Signed out on this computer. We could not reach Locus to record it — your key is still yours, and entering it on your next device will work. | src/components/shared/sign-out-card.tsx:164 |
+| `home.components.connection.signOut.signedOutFailed` | Chrysalis could not sign out. Nothing has changed on this device. Try again, and email us if it keeps happening. | src/components/shared/sign-out-card.tsx:120 |
+| `home.components.connection.signOut.signedOutOffline` | Signed out on this computer. We could not reach Chrysalis to record it — your key is still yours, and entering it on your next device will work. | src/components/shared/sign-out-card.tsx:164 |
 | `home.components.connection.signOut.signedOutReleased` | Signed out. Your key has been released here and is ready for your next device. | src/components/shared/sign-out-card.tsx:160 |
 | `home.components.connection.signOut.title` | Signed in on this device | src/components/shared/sign-out-card.tsx:175 |
 | `home.components.connection.signOut.undo` | Cancel | src/components/shared/sign-out-card.tsx:271 |
@@ -143,10 +143,10 @@ says, edit the rows under that screen's heading.
 | `home.components.connection.account.expired` | Expired | src/pages/account.tsx:168 |
 | `home.components.connection.account.expires` | Expires | src/pages/account.tsx:149 |
 | `home.components.connection.account.expiresSoon` | Your subscription expires soon. Contact the person who sold you the code to renew. | src/pages/account.tsx:220 |
-| `home.components.connection.account.hubBehind` | Your Locus server is running an older version of its account checks. If someone suspends your access, this device will not find out until the server is updated. Quote this number to them: {{hub}}. | src/pages/account.tsx:387 |
+| `home.components.connection.account.hubBehind` | Your Chrysalis server is running an older version of its account checks. If someone suspends your access, this device will not find out until the server is updated. Quote this number to them: {{hub}}. | src/pages/account.tsx:387 |
 | `home.components.connection.account.language` | Language | src/pages/account.tsx:432 |
 | `home.components.connection.account.lastChecked` | Last confirmed {{time}} | src/pages/account.tsx:287 |
-| `home.components.connection.account.noExpiryYet` | Your subscription end date is not available yet. It will appear after this device next contacts Locus. | src/pages/account.tsx:205 |
+| `home.components.connection.account.noExpiryYet` | Your subscription end date is not available yet. It will appear after this device next contacts Chrysalis. | src/pages/account.tsx:205 |
 | `home.components.connection.account.notActivated` | This device is not activated. Enter the code from your card to connect. | src/pages/account.tsx:664 |
 | `home.components.connection.account.notActivatedToCheck` | Activate a code first — there is nothing to confirm yet. | src/pages/account.tsx:272 |
 | `home.components.connection.account.off` | Off | src/pages/account.tsx:472 |
@@ -159,12 +159,12 @@ says, edit the rows under that screen's heading.
 | `home.components.connection.account.refreshBusy` | A status read was already running | src/pages/account.tsx:626 |
 | `home.components.connection.account.refreshed` | Up to date — status re-read | src/pages/account.tsx:624 |
 | `home.components.connection.account.refreshFailed` | Could not re-read the status | src/pages/account.tsx:627 |
-| `home.components.connection.account.storedCodeDamaged` | The sign-in saved on this computer is damaged and could not be used, so Locus is asking you to enter your code again. Your plan and its remaining time are not affected. | src/pages/account.tsx:663 |
+| `home.components.connection.account.storedCodeDamaged` | The sign-in saved on this computer is damaged and could not be used, so Chrysalis is asking you to enter your code again. Your plan and its remaining time are not affected. | src/pages/account.tsx:663 |
 | `home.components.connection.account.subscription` | Subscription | src/pages/account.tsx:128 |
 | `home.components.connection.account.thisDevice` | This device | src/pages/account.tsx:305 |
 | `home.components.connection.account.today` | Today | src/pages/account.tsx:152 |
-| `home.components.connection.account.updateBlocked` | Locus cannot update itself right now: {{reason}} | src/pages/account.tsx:539 |
-| `home.components.connection.account.updateCheckOff` | Automatic update checking is off, so Locus is not being told about new versions. Turn it on above to receive fixes. | src/pages/account.tsx:504 |
+| `home.components.connection.account.updateBlocked` | Chrysalis cannot update itself right now: {{reason}} | src/pages/account.tsx:539 |
+| `home.components.connection.account.updateCheckOff` | Automatic update checking is off, so Chrysalis is not being told about new versions. Turn it on above to receive fixes. | src/pages/account.tsx:504 |
 | `home.components.connection.account.updateCheckOffAction` | Turn on automatic updates | src/pages/account.tsx:521 |
 
 ## Traffic graph and figures
@@ -211,36 +211,36 @@ says, edit the rows under that screen's heading.
 | `layout.components.serviceMigration.errors.restartFailed` | Failed to restart the core | src/components/layout/service-migration-dialog.tsx:116 |
 | `layout.components.serviceMigration.errors.stateRefreshFailed` | Failed to refresh the service state | src/components/layout/service-migration-dialog.tsx:101 |
 | `layout.components.serviceMigration.locationRefusedMessage` | The service cannot start the VPN because its installation path or directory permissions failed a security check. Reinstall the service to restore its files and permissions, then try again. | src/components/layout/sysproxy-privilege-dialog.tsx:36 |
-| `layout.components.serviceMigration.message` | The Locus service version does not match the version required by this app. Choose Reinstall Service to uninstall the existing service and install the required version. | src/components/layout/service-migration-dialog.tsx:158 |
+| `layout.components.serviceMigration.message` | The Chrysalis service version does not match the version required by this app. Choose Reinstall Service to uninstall the existing service and install the required version. | src/components/layout/service-migration-dialog.tsx:158 |
 | `layout.components.serviceMigration.reinstall` | Reinstall service | src/components/layout/service-migration-dialog.tsx:147<br>src/components/layout/sysproxy-privilege-dialog.tsx:143 |
 | `layout.components.serviceMigration.repair` | Repair service | src/components/layout/service-migration-dialog.tsx:146<br>src/components/layout/sysproxy-privilege-dialog.tsx:42 |
-| `layout.components.serviceMigration.success` | The Locus service was updated successfully | src/components/layout/service-migration-dialog.tsx:133<br>src/components/layout/sysproxy-privilege-dialog.tsx:119 |
+| `layout.components.serviceMigration.success` | The Chrysalis service was updated successfully | src/components/layout/service-migration-dialog.tsx:133<br>src/components/layout/sysproxy-privilege-dialog.tsx:119 |
 | `layout.components.serviceMigration.title` | Service update required | src/components/layout/service-migration-dialog.tsx:141 |
-| `layout.components.serviceMigration.unavailableMessage` | The Locus service is required and is not available. Install or repair it, then try again. Locus cannot turn the VPN on without it. | src/components/layout/service-migration-dialog.tsx:159 |
+| `layout.components.serviceMigration.unavailableMessage` | The Chrysalis service is required and is not available. Install or repair it, then try again. Chrysalis cannot turn the VPN on without it. | src/components/layout/service-migration-dialog.tsx:159 |
 | `layout.components.subscription.daysLeft` | Expires in {{count}} days | src/components/layout/layout-subscription.tsx:96 |
 | `layout.components.subscription.expired` | Subscription expired | src/components/layout/layout-subscription.tsx:74 |
-| `layout.components.subscription.expiredHint` | Your Locus subscription has ended. Contact the person who sold you the code to renew it, then activate again. | src/components/layout/layout-subscription.tsx:75 |
+| `layout.components.subscription.expiredHint` | Your Chrysalis subscription has ended. Contact the person who sold you the code to renew it, then activate again. | src/components/layout/layout-subscription.tsx:75 |
 | `layout.components.subscription.expiresToday` | Expires today | src/components/layout/layout-subscription.tsx:93 |
-| `layout.components.subscription.hint` | When your Locus subscription ends. | src/components/layout/layout-subscription.tsx:111 |
+| `layout.components.subscription.hint` | When your Chrysalis subscription ends. | src/components/layout/layout-subscription.tsx:111 |
 | `layout.components.subscription.oneDayLeft` | Expires in 1 day | src/components/layout/layout-subscription.tsx:95 |
 | `layout.components.subscription.unconfirmed` | Subscription status unavailable | src/components/layout/layout-subscription.tsx:84 |
-| `layout.components.subscription.unconfirmedHint` | Locus has not confirmed your subscription with the server yet. Connect once on a working network and this will update. | src/components/layout/layout-subscription.tsx:85 |
-| `layout.components.sysproxyPrivilege.alternative` | If you would rather not install the service, turning system proxy off in Locus also stops this prompt. | src/components/layout/sysproxy-privilege-dialog.tsx:162 |
+| `layout.components.subscription.unconfirmedHint` | Chrysalis has not confirmed your subscription with the server yet. Connect once on a working network and this will update. | src/components/layout/layout-subscription.tsx:85 |
+| `layout.components.sysproxyPrivilege.alternative` | If you would rather not install the service, turning system proxy off in Chrysalis also stops this prompt. | src/components/layout/sysproxy-privilege-dialog.tsx:162 |
 | `layout.components.sysproxyPrivilege.applying` | Applying your system proxy change… | src/components/layout/sysproxy-privilege-dialog.tsx:75 |
 | `layout.components.sysproxyPrivilege.installing` | Installing the system service. This may ask for permission. | src/components/layout/sysproxy-privilege-dialog.tsx:73 |
 | `layout.components.sysproxyPrivilege.later` | Later | src/components/layout/sysproxy-privilege-dialog.tsx:148 |
-| `layout.components.sysproxyPrivilege.message` | Locus was not allowed to change the system proxy. Installing the Locus service lets it make proxy changes with your permission, and this prompt will not come back. | src/components/layout/sysproxy-privilege-dialog.tsx:33 |
+| `layout.components.sysproxyPrivilege.message` | Chrysalis was not allowed to change the system proxy. Installing the Chrysalis service lets it make proxy changes with your permission, and this prompt will not come back. | src/components/layout/sysproxy-privilege-dialog.tsx:33 |
 | `layout.components.sysproxyPrivilege.restarting` | Service installed. Restarting the core through it… | src/components/layout/sysproxy-privilege-dialog.tsx:74 |
 | `layout.components.sysproxyPrivilege.title` | Could not set the system proxy | src/components/layout/sysproxy-privilege-dialog.tsx:40 |
-| `layout.components.sysproxyPrivilege.tunMessage` | TUN mode needs the Locus service to take over network traffic. Once it is installed, TUN mode will be turned on for you. | src/components/layout/sysproxy-privilege-dialog.tsx:34 |
+| `layout.components.sysproxyPrivilege.tunMessage` | TUN mode needs the Chrysalis service to take over network traffic. Once it is installed, TUN mode will be turned on for you. | src/components/layout/sysproxy-privilege-dialog.tsx:34 |
 | `layout.components.sysproxyPrivilege.tunTitle` | TUN mode needs the system service | src/components/layout/sysproxy-privilege-dialog.tsx:41 |
-| `shared.update.body` | Locus {{version}} is ready to install. The update takes a moment and your connection will drop while it installs. | src/components/layout/update-prompt.tsx:214 |
-| `shared.update.connectionNotice` | You can keep using Locus until you install. | src/components/layout/update-prompt.tsx:251 |
+| `shared.update.body` | Chrysalis {{version}} is ready to install. The update takes a moment and your connection will drop while it installs. | src/components/layout/update-prompt.tsx:214 |
+| `shared.update.connectionNotice` | You can keep using Chrysalis until you install. | src/components/layout/update-prompt.tsx:251 |
 | `shared.update.downloading` | Downloading… | src/components/layout/update-prompt.tsx:225 |
 | `shared.update.downloadingPercent` | Downloading… {{percent}}% | src/components/layout/update-prompt.tsx:226 |
 | `shared.update.installNow` | Install now | src/components/layout/update-prompt.tsx:199 |
 | `shared.update.later` | Later | src/components/layout/update-prompt.tsx:200 |
-| `shared.update.restartNotice` | Locus may close and reopen by itself to finish. Do not force-quit it. | src/components/layout/update-prompt.tsx:235 |
+| `shared.update.restartNotice` | Chrysalis may close and reopen by itself to finish. Do not force-quit it. | src/components/layout/update-prompt.tsx:235 |
 
 ## Toasts and notifications
 
@@ -262,7 +262,7 @@ says, edit the rows under that screen's heading.
 | `settings.feedback.errors.sysproxy.coreNotReady` | The system proxy could not be enabled because the VPN is not running. Turn the VPN on and try again. | src/services/notice-service.ts:83 |
 | `settings.feedback.errors.sysproxy.directFallback` | Failed to set the system proxy; traffic has been switched back to a direct connection. | src/services/notice-service.ts:84 |
 | `settings.feedback.errors.sysproxy.guardStopped` | The system proxy guard stopped after failing several times running. The system proxy is no longer being kept in place. | src/services/notice-service.ts:85 |
-| `settings.feedback.errors.sysproxy.privilegeRequired` | Cannot set the system proxy: Locus needs permission for that change. Install the Locus service and try again — this prompt will not come back. | src/services/notice-service.ts:87 |
+| `settings.feedback.errors.sysproxy.privilegeRequired` | Cannot set the system proxy: Chrysalis needs permission for that change. Install the Chrysalis service and try again — this prompt will not come back. | src/services/notice-service.ts:87 |
 | `settings.feedback.errors.sysproxy.systemCallFailed` | The system proxy change did not go through. This is usually temporary, so try again. | src/services/notice-service.ts:89 |
 | `settings.feedback.notifications.clash.changeFailed` | Failed to change core | src/pages/_layout/utils/notification-handlers.ts:143<br>src/services/notice-service.ts:64 |
 | `settings.feedback.notifications.clash.changeSuccess` | Core changed successfully | src/pages/_layout/utils/notification-handlers.ts:138 |

@@ -39,13 +39,13 @@ shipped it.
 
 | Group | Source of truth | Examples |
 |---|---|---|
-| **Struct fields** | `client/src-tauri/src/locus/contract.rs` | `device_fingerprint`, `server_config`, `uot_port`, `expires_at` |
+| **Struct fields** | `client/src-tauri/src/chrysalis/contract.rs` | `device_fingerprint`, `server_config`, `uot_port`, `expires_at` |
 | **Enum wire values** | `LookupStatus` in the same file | `ok`, `unbound`, `already_used`, `suspended`, `expired`, `not_found` |
-| **Endpoints** | `routerAdd()` in `server/pb_hooks/*.js`, and the call sites in `locus/` | `POST /api/activate`, `POST /api/heartbeat`, `GET /api/release` |
+| **Endpoints** | `routerAdd()` in `server/pb_hooks/*.js`, and the call sites in `chrysalis/` | `POST /api/activate`, `POST /api/heartbeat`, `GET /api/release` |
 | **Platform keys → artifact names** | `contract.rs` | `macos_arm` → `locus-darwin-arm64` |
-| **Proxy and group names** | `client/src-tauri/src/locus/tier.rs` | `Locus` / `Locus Auto` / `Locus-UoT` |
+| **Proxy and group names** | `client/src-tauri/src/chrysalis/tier.rs` | `Chrysalis` / `Chrysalis Auto` / `Chrysalis-UoT` |
 | **Hub URLs** | `contract.rs` | canonical and legacy hub hosts |
-| **IPC commands** | `cmd/locus.rs`, `lib.rs`, `client/src/**` | `locus_status`, `locus_connect`, … |
+| **IPC commands** | `cmd/chrysalis.rs`, `lib.rs`, `client/src/**` | `chrysalis_status`, `chrysalis_connect`, … |
 
 The struct fields are **snake_case on the wire**. `contract.rs` carries no
 `rename_all`, which is load-bearing: `device_fingerprint` and `server_config` go

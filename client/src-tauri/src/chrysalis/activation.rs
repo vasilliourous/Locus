@@ -5,7 +5,7 @@
 //! semantics are not negotiable — they are the existing agreement with the hub
 //! and with codes already printed on physical cards.
 
-use crate::locus::contract::{ActivateResponse, CodeRequest, LookupResponse, LookupStatus};
+use crate::chrysalis::contract::{ActivateResponse, CodeRequest, LookupResponse, LookupStatus};
 use anyhow::{Context as _, Result, bail};
 use serde::Serialize;
 
@@ -17,7 +17,7 @@ use serde::Serialize;
 /// generated code fail on the device.
 pub const CHARSET: &[u8] = b"ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 
-/// The prefix on every Locus activation code.
+/// The prefix on every Chrysalis activation code.
 pub const PREFIX: &str = "RQ";
 
 /// Length of the code without separators: `RQ` + 3×4 + 1 checksum = 15.
@@ -84,13 +84,16 @@ pub fn validate_code(code: &str) -> std::result::Result<String, CodeError> {
 
     if cleaned.len() != CODE_LEN {
         return Err(CodeError::Malformed {
-            detail: format!("A Locus code is {CODE_LEN} characters — that one is {}", cleaned.len()),
+            detail: format!(
+                "A Chrysalis code is {CODE_LEN} characters — that one is {}",
+                cleaned.len()
+            ),
         });
     }
 
     if !cleaned.starts_with(PREFIX) {
         return Err(CodeError::Malformed {
-            detail: format!("A Locus code starts with {PREFIX}"),
+            detail: format!("A Chrysalis code starts with {PREFIX}"),
         });
     }
 
@@ -98,7 +101,7 @@ pub fn validate_code(code: &str) -> std::result::Result<String, CodeError> {
         if char_index(c).is_none() {
             return Err(CodeError::Malformed {
                 detail: format!(
-                    "That code contains '{c}', which is not used in Locus codes \
+                    "That code contains '{c}', which is not used in Chrysalis codes \
                      (the alphabet omits I, O, 0 and 1)"
                 ),
             });
@@ -198,7 +201,7 @@ pub enum ActivationOutcome {
         code: String,
         tier: String,
         fingerprint: String,
-        config: Option<crate::locus::contract::TierConfig>,
+        config: Option<crate::chrysalis::contract::TierConfig>,
         udp_relay: bool,
         /// The code's expiry as the hub reported it at activation time, if any.
         ///
@@ -357,7 +360,7 @@ fn classify_lookup(response: &LookupResponse) -> CodeCheck {
 
 /// Posts a JSON body to a hub endpoint and returns the parsed response.
 ///
-/// The client comes from [`crate::locus::hub`], not from a builder here: a
+/// The client comes from [`crate::chrysalis::hub`], not from a builder here: a
 /// hand-built client trusts only the operating system's certificate store, and
 /// on a Windows machine that has not taken its root-certificate updates that
 /// store cannot verify the hub's chain. The student sees "invalid peer
@@ -372,7 +375,7 @@ where
     T: serde::de::DeserializeOwned,
     B: Serialize + Sync,
 {
-    let hub = crate::locus::contract::hub_url().await;
+    let hub = crate::chrysalis::contract::hub_url().await;
     let url = format!("{hub}{path}");
 
     // The routing decision, including the maintenance tunnel. See
@@ -380,12 +383,12 @@ where
     // call that produced no HTTP response at all, which is what a network that
     // blocks the hub by name does.
     let hub_client =
-        crate::locus::activation_tunnel::hub_client_for(&hub, crate::locus::hub::Timeout::Activation).await;
+        crate::chrysalis::activation_tunnel::hub_client_for(&hub, crate::chrysalis::hub::Timeout::Activation).await;
     if hub_client.diagnosis().is_some() {
         // Once per process is enough; the diagnosis is a property of the
         // machine, not of this request. The warn names the store, so a support
         // log no longer reads as though the hub's certificate expired.
-        tracing::warn!(target: "locus::hub", "{}", hub_client.describe());
+        tracing::warn!(target: "chrysalis::hub", "{}", hub_client.describe());
     }
 
     let response = match hub_client.client().post(&url).json(&body).send().await {
@@ -409,13 +412,15 @@ where
             // one transport that presents no name. Only those failures are
             // retried — see `Failure::retryable_over_tunnel` for why a DNS
             // failure, a certificate error or a timeout must not be.
-            let failure = crate::locus::hub::Failure::classify(&error);
-            if failure.retryable_over_tunnel() && crate::locus::activation_tunnel::activation_tunnel_available() {
+            let failure = crate::chrysalis::hub::Failure::classify(&error);
+            if failure.retryable_over_tunnel() && crate::chrysalis::activation_tunnel::activation_tunnel_available() {
                 tracing::warn!(
-                    target: "locus::activation_tunnel",
+                    target: "chrysalis::activation_tunnel",
                     "the direct connection to the hub was reset; retrying {path} through the activation tunnel"
                 );
-                match crate::locus::activation_tunnel::post(path, &body, crate::locus::hub::Timeout::Activation).await {
+                match crate::chrysalis::activation_tunnel::post(path, &body, crate::chrysalis::hub::Timeout::Activation)
+                    .await
+                {
                     Ok(value) => return Ok(value),
                     Err(tunnel_error) => {
                         // Both routes failed. Report the ORIGINAL cause with the
@@ -423,7 +428,7 @@ where
                         // what the student's network did and the tunnel failure is
                         // usually a consequence of the same policy.
                         return Err(anyhow::anyhow!(
-                            "could not reach the Locus hub at {url}: {}.{} The activation tunnel was \
+                            "could not reach the Chrysalis hub at {url}: {}.{} The activation tunnel was \
                              tried as well and also failed: {tunnel_error:#}",
                             describe_chain(&error),
                             failure.remedy().map(|remedy| format!(" {remedy}")).unwrap_or_default(),
@@ -434,7 +439,7 @@ where
 
             let remedy = failure.remedy().map(|remedy| format!(" {remedy}")).unwrap_or_default();
             anyhow::bail!(
-                "could not reach the Locus hub at {url}: {}.{remedy}",
+                "could not reach the Chrysalis hub at {url}: {}.{remedy}",
                 describe_chain(&error)
             )
         }
@@ -461,21 +466,22 @@ async fn retry_over_maintenance<B: Serialize + Sync>(
     hub: &str,
     body: &B,
 ) -> Option<reqwest::Response> {
-    if !crate::locus::activation_tunnel::note_failure_and_decide_retry(error) {
+    if !crate::chrysalis::activation_tunnel::note_failure_and_decide_retry(error) {
         return None;
     }
     let url = format!("{hub}{path}");
     tracing::warn!(
-        target: "locus::activation_tunnel",
+        target: "chrysalis::activation_tunnel",
         "the direct connection to the hub produced no response; retrying {path} through the maintenance tunnel"
     );
     // `_retry`, not `hub_client_for`: this is the one call site allowed to START a
     // maintenance engine. Reading only a warm one meant a cold launch found none and
     // retried direct into the same failure — see `maintenance_proxy_or_start`.
     let retry =
-        crate::locus::activation_tunnel::hub_client_for_retry(hub, crate::locus::hub::Timeout::Activation).await;
+        crate::chrysalis::activation_tunnel::hub_client_for_retry(hub, crate::chrysalis::hub::Timeout::Activation)
+            .await;
     let sent = retry.client().post(&url).json(body).send().await;
-    if crate::locus::activation_tunnel::log_retry_outcome(&sent) {
+    if crate::chrysalis::activation_tunnel::log_retry_outcome(&sent) {
         sent.ok()
     } else {
         None
@@ -497,7 +503,7 @@ async fn parse_hub_response<T: serde::de::DeserializeOwned>(response: reqwest::R
         .with_context(|| format!("the hub returned an unreadable response ({status})"))?;
 
     serde_json::from_str(&text)
-        .with_context(|| format!("the hub returned something that is not a Locus response ({status}): {text}"))
+        .with_context(|| format!("the hub returned something that is not a Chrysalis response ({status}): {text}"))
 }
 
 /// Renders a `reqwest::Error` **and its source chain**, which `{error}` and
@@ -607,7 +613,7 @@ pub async fn lookup_code(code: &str, fingerprint: &str) -> Result<CodeCheck> {
 // These described the `/api/device-recognise` call, which asked the hub whether
 // it remembered this device so the code prompt could be skipped. That whole
 // mechanism is gone: the client authenticates with its activation code and
-// nothing else. See `crate::locus::credential` for how the code survives a
+// nothing else. See `crate::chrysalis::credential` for how the code survives a
 // reinstall now.
 
 /// What the hub did with a sign-out notification.
@@ -622,7 +628,7 @@ pub async fn lookup_code(code: &str, fingerprint: &str) -> Result<CodeCheck> {
 ///   signed out twice, or whose code the operator already released, lands here,
 ///   and the student's local state is exactly what they asked for.
 /// * an `Err` — the hub could not be reached or answered unintelligibly. The
-///   caller reports this as "signed out here, but we could not tell Locus",
+///   caller reports this as "signed out here, but we could not tell Chrysalis",
 ///   which is true and actionable, rather than as a failed sign-out.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ReleaseOutcome {
@@ -652,7 +658,7 @@ pub enum ReleaseOutcome {
 ///
 /// It does not clear `codes.activated_at`. Possession of a code is enough to
 /// release this device's hold on it, but not to restart the term or to free the
-/// code for a stranger — see [`crate::locus::contract::ReleaseRequest`] and the
+/// code for a stranger — see [`crate::chrysalis::contract::ReleaseRequest`] and the
 /// hub hook it talks to.
 pub async fn release(code: &str, fingerprint: &str) -> Result<ReleaseOutcome> {
     let canonical = validate_code(code).map_err(anyhow::Error::new)?;
@@ -664,11 +670,11 @@ pub async fn release(code: &str, fingerprint: &str) -> Result<ReleaseOutcome> {
         bail!("refusing to release with a device fingerprint that is too short");
     }
 
-    let body = crate::locus::contract::ReleaseRequest {
+    let body = crate::chrysalis::contract::ReleaseRequest {
         code: &canonical,
         fingerprint,
     };
-    let response: crate::locus::contract::ReleaseResponse = post_json("/api/release-entitlement", &body).await?;
+    let response: crate::chrysalis::contract::ReleaseResponse = post_json("/api/release-entitlement", &body).await?;
 
     // Switched on the hub's own code, not the HTTP status — see
     // `ReleaseResponse`. 200 means it recorded something; 404 means "not
@@ -678,7 +684,7 @@ pub async fn release(code: &str, fingerprint: &str) -> Result<ReleaseOutcome> {
         200 => Ok(ReleaseOutcome::Recorded),
         404 => Ok(ReleaseOutcome::NothingToRelease),
         other => bail!(
-            "the Locus hub refused the sign-out ({}): {}",
+            "the Chrysalis hub refused the sign-out ({}): {}",
             other,
             if response.message.is_empty() {
                 "no reason given"
@@ -819,7 +825,7 @@ mod tests {
     fn maps_the_one_code_per_device_refusal_to_its_own_outcome() {
         let already = ActivateResponse {
             code: 409,
-            message: "This device is already activated on another Locus code.".into(),
+            message: "This device is already activated on another Chrysalis code.".into(),
             tier: None,
             device_fingerprint: None,
             server_config: None,
@@ -833,7 +839,7 @@ mod tests {
         // that word. A 409 never reaches that arm — this asserts the message is
         // also safe for a client that only sees the text, e.g. through the
         // ServerError fallback of a build older than this one.
-        let as_text = "This device is already activated on another Locus code. \
+        let as_text = "This device is already activated on another Chrysalis code. \
                        One code works on one device.";
         assert!(
             !as_text.to_ascii_lowercase().contains("suspended"),

@@ -25,7 +25,7 @@ is doing its job; the hub is serving the wrong file. Full narrative in
 >
 > | # | What | Blocked on |
 > |---|---|---|
-> | 1 | A release carries `installer-Locus_<v>_x64-setup.exe` **and its `.sig`** | CI + `LOCUS_UPDATE_KEY` |
+> | 1 | A release carries `installer-Chrysalis_<v>_x64-setup.exe` **and its `.sig`** | CI + `LOCUS_UPDATE_KEY` |
 > | 2 | The **host's** `fetch-release.py` resolves the installer | a deploy (`hooks-sync.sh --fetch-service`) |
 > | 3 | `update_config` is re-published | console → Fetch & publish |
 >
@@ -40,9 +40,9 @@ is doing its job; the hub is serving the wrong file. Full narrative in
 `v3.2.14` has the installer but no signature over it:
 
 ```console
-$ curl -s https://api.github.com/repos/vasilliourous/Locus/releases/tags/v3.2.14 \
+$ curl -s https://api.github.com/repos/vasilliourous/Chrysalis/releases/tags/v3.2.14 \
     | python3 -c "import json,sys; print([a['name'] for a in json.load(sys.stdin)['assets']])"
-… 'installer-Locus_3.2.14_x64-setup.exe' …   # present
+… 'installer-Chrysalis_3.2.14_x64-setup.exe' …   # present
 …                                             # NO installer-*.sig
 ```
 
@@ -63,7 +63,7 @@ corrected, the rest of this is unnecessary.
 curl -s "https://<domain>/api/update?version=<prev>&platform=windows" | python3 -m json.tool
 ```
 
-- `"url": "…/installer-Locus_…-setup.exe"` → already fixed, stop.
+- `"url": "…/installer-Chrysalis_…-setup.exe"` → already fixed, stop.
 - `"url": "…/locus-windows-amd64.exe"` → proceed.
 - HTTP `204` → nothing is being offered at all; check `update_config.active`.
 
@@ -79,7 +79,7 @@ deliberately, because an unsigned installer reaches nobody.
 cd client
 pnpm release-version X.Y.Z          # writes ALL FIVE version sites
 git add -A && git commit -m "chore(release): X.Y.Z"
-git tag -a vX.Y.Z -m "Locus client vX.Y.Z"
+git tag -a vX.Y.Z -m "Chrysalis client vX.Y.Z"
 git push origin main
 git push origin vX.Y.Z              # the tag triggers the build
 ```
@@ -93,15 +93,15 @@ git push origin vX.Y.Z              # the tag triggers the build
 **This is the gate.** Do not publish until the signature is attached:
 
 ```sh
-gh release view vX.Y.Z --repo vasilliourous/Locus --json assets \
+gh release view vX.Y.Z --repo vasilliourous/Chrysalis --json assets \
   -q '.assets[].name' | sort
 ```
 
 Required, and the last line is the one that is easy to be missing:
 
 ```text
-installer-Locus_X.Y.Z_x64-setup.exe
-installer-Locus_X.Y.Z_x64-setup.exe.sig      ← REQUIRED
+installer-Chrysalis_X.Y.Z_x64-setup.exe
+installer-Chrysalis_X.Y.Z_x64-setup.exe.sig      ← REQUIRED
 locus-darwin-amd64
 locus-darwin-amd64.sig
 locus-darwin-arm64
@@ -116,9 +116,9 @@ manifest.json
 Also confirm CI's manifest names the installer:
 
 ```sh
-curl -sL https://github.com/vasilliourous/Locus/releases/download/vX.Y.Z/manifest.json \
+curl -sL https://github.com/vasilliourous/Chrysalis/releases/download/vX.Y.Z/manifest.json \
   | python3 -c "import json,sys; print(json.load(sys.stdin)['platforms']['windows'])"
-# -> {'file': 'installer-Locus_X.Y.Z_x64-setup.exe', 'sha256': '…', 'signature': '…'}
+# -> {'file': 'installer-Chrysalis_X.Y.Z_x64-setup.exe', 'sha256': '…', 'signature': '…'}
 ```
 
 No `.sig` on the release → CI is not signing the installer. Fix CI and re-tag;
@@ -175,10 +175,10 @@ ssh $HOST 'cd /root/server/scripts && \
 ssh $HOST 'rm -rf /root/server/scripts/__pycache__'
 
 # 5. Restart, then POLL health rather than sleeping a fixed amount.
-ssh $HOST 'systemctl restart locus-fetch; sleep 3; \
-  systemctl is-active locus-fetch; \
+ssh $HOST 'systemctl restart chrysalis-fetch; sleep 3; \
+  systemctl is-active chrysalis-fetch; \
   curl -s -o /dev/null -w "health=%{http_code}\n" http://127.0.0.1:8091/health; \
-  journalctl -u locus-fetch --since "-2 min" --no-pager -p err -q'
+  journalctl -u chrysalis-fetch --since "-2 min" --no-pager -p err -q'
 ```
 
 Then verify by **hash and behaviour**, which is the part that catches a deploy
@@ -196,7 +196,7 @@ import importlib.util
 s = importlib.util.spec_from_file_location(\"fr\", \"fetch-release.py\")
 m = importlib.util.module_from_spec(s); s.loader.exec_module(m)
 print(m.resolve_platform_names(\"<version>\"))"'
-# windows -> installer-Locus_<version>_x64-setup.exe
+# windows -> installer-Chrysalis_<version>_x64-setup.exe
 ```
 
 **Rollback**, if the new fetcher misbehaves:
@@ -204,7 +204,7 @@ print(m.resolve_platform_names(\"<version>\"))"'
 ```sh
 ssh $HOST 'cd /root/server/scripts && \
   cp $(ls -1t fetch-release.py.bak-* | head -1) fetch-release.py && \
-  systemctl restart locus-fetch'
+  systemctl restart chrysalis-fetch'
 ```
 
 On a host with password-only access, supply a transport rather than editing the
@@ -231,7 +231,7 @@ VPS=root@<host> SSH="sshpass -e ssh" server/scripts/hooks-sync.sh --fetch-servic
 a deploy that "succeeded" without changing anything:
 
 ```sh
-ssh root@<host> 'grep -c "installer-Locus" /root/server/scripts/fetch-release.py'
+ssh root@<host> 'grep -c "installer-Chrysalis" /root/server/scripts/fetch-release.py'
 # -> at least 1. 0 means the old file is still there.
 ```
 
@@ -271,10 +271,10 @@ hand a client:
 curl -s "https://<domain>/api/update?version=<prev>&platform=windows" | python3 -m json.tool
 ```
 
-The URL must end in `installer-Locus_<v>_x64-setup.exe`, and `sha256` must match
+The URL must end in `installer-Chrysalis_<v>_x64-setup.exe`, and `sha256` must match
 the installer's, not the raw binary's. A `signature` whose decoded text ends
-`trusted comment: Locus_windows-installer` is the installer's own signature;
-`trusted comment: Locus_windows` is the **raw binary's** and means step 2 did not
+`trusted comment: Chrysalis_windows-installer` is the installer's own signature;
+`trusted comment: Chrysalis_windows` is the **raw binary's** and means step 2 did not
 take effect.
 
 ```sh

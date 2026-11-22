@@ -79,7 +79,7 @@ value — a filename, a wire key, a version, an encoding — that value is a
 **contract**, and the failure mode is not "side A is wrong" but **"A and B
 disagree, and nothing compares them."**
 
-Locus has several of these — artifact filenames, wire field names, the signature
+Chrysalis has several of these — artifact filenames, wire field names, the signature
 encoding, the version. **Which ones they are, and which sides must agree, is
 [`../../AGENTS.md`](../../AGENTS.md)'s "Traps" list and `check-consistency.sh`'s
 own guards; it is not restated here**, because a contract listed in two places is
@@ -131,8 +131,8 @@ green while covering nothing. If a check skips on a condition, the skip must be
 loud.
 
 The live example is `update_signature_contract.rs`. Its mismatch assertion runs
-**only when `.locus-keys/locus_update.pub` exists**, and it resolves that path from
-`CARGO_MANIFEST_DIR/..` — the repo root. A key generated at `client/.locus-keys/`
+**only when `.chrysalis-keys/chrysalis_update.pub` exists**, and it resolves that path from
+`CARGO_MANIFEST_DIR/..` — the repo root. A key generated at `client/.chrysalis-keys/`
 is therefore invisible to it: no file, no assertion, green test, over the one
 relationship the test exists to check. It was found by deliberately probing with
 the wrong key, not by reading the test — which is the general lesson: **a skip

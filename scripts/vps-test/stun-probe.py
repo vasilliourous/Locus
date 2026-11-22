@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Corrected STUN / NAT-behaviour probe for the Locus test VPS.
+"""Corrected STUN / NAT-behaviour probe for the Chrysalis test VPS.
 
 Why the previous version lied: several public STUN servers (Google, Cloudflare,
 sipnet) are behind anycast and only return an XOR-MAPPED-ADDRESS when the
@@ -27,7 +27,7 @@ import sys
 import time
 
 MAGIC = 0x2112A442
-SOFTWARE = b"locus-stun-probe"
+SOFTWARE = b"chrysalis-stun-probe"
 SHORT_TERM_KEY = b"VOkJxbRl1RmTxUk/WvJxBt"  # RFC 5769 test vector
 
 
@@ -39,7 +39,7 @@ def _attr(t, v):
     return struct.pack("!HH", t, len(v)) + _pad(v)
 
 
-def build_request(username=b"locus"):
+def build_request(username=b"chrysalis"):
     tid = os.urandom(12)
     body = b""
     body += _attr(0x0006, username)              # USERNAME
@@ -154,7 +154,7 @@ def main():
         print("  VERDICT: inconclusive — fewer than two servers answered.")
     print("\n  NOTE: this is the NAT path for THIS VPS. Clients behind the N4L")
     print("  school network have their own NAT, and that one is what the game")
-    print("  console sees when the Locus client is NOT in TUN mode.")
+    print("  console sees when the Chrysalis client is NOT in TUN mode.")
 
 
 if __name__ == "__main__":

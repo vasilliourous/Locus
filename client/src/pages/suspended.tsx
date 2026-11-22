@@ -2,7 +2,7 @@ import { Box, Typography } from '@mui/material'
 import { useTranslation } from 'react-i18next'
 
 import { SupportBlock } from '@/components/shared/support-block'
-import type { LocusStatus } from '@/services/locus'
+import type { ChrysalisStatus } from '@/services/chrysalis'
 
 /**
  * The screen an operator's suspension lands on.
@@ -56,13 +56,13 @@ interface Props {
    * The status the gate already read, or `null` if it has not settled.
    *
    * Passed in rather than fetched here. This screen used to issue its own
-   * `locusStatus()` on mount, which made it a third independent reader of a fact
+   * `chrysalisStatus()` on mount, which made it a third independent reader of a fact
    * two other surfaces also read — and the one that disagreed was the one the
    * student was looking at. The gate's read is the authoritative one, so this
    * renders from it and owns no state at all: there is nothing here that can go
    * stale relative to the screen that chose to show it.
    */
-  status: LocusStatus | null
+  status: ChrysalisStatus | null
 }
 
 const SuspendedScreen = ({ status }: Props) => {

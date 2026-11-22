@@ -54,7 +54,7 @@ interface Release {
 // The filenames the client's updater looks for. If these do not match, updates
 // silently never apply, so the page names them explicitly.
 const EXPECTED: { key: string; filename: string; label: string }[] = [
-  { key: 'linux', filename: 'locus-linux-amd64', label: 'Linux (amd64)' },
+  { key: 'linux', filename: 'locus-linux-amd64', label: 'Linux (amd64)' },  // DEPRECATED ALIAS: artefact name, see docs/reference/NAME-MIGRATION.md
   { key: 'windows', filename: 'locus-windows-amd64.exe', label: 'Windows (amd64)' },
   { key: 'macos_intel', filename: 'locus-darwin-amd64', label: 'macOS (Intel)' },
   { key: 'macos_arm', filename: 'locus-darwin-arm64', label: 'macOS (Apple Silicon)' },
@@ -393,7 +393,7 @@ onMounted(() => {
     <div v-if="macDownloads.length" class="mac-downloads">
       <h3>macOS download (for people, not clients)</h3>
       <p class="muted">
-        The compressed, ad-hoc-signed <code>Locus.app</code> for each
+        The compressed, ad-hoc-signed <code>Chrysalis.app</code> for each
         architecture. A student who cannot open the <code>.dmg</code> should be
         given this instead — the signature moves the Gatekeeper failure into
         System Settings → Privacy &amp; Security → <strong>Open Anyway</strong>,

@@ -1,5 +1,5 @@
 {
-    # Locus Caddyfile — Template
+    # Chrysalis Caddyfile — Template
     # Used by setup.sh which injects DOMAIN via heredoc substitution.
     # For manual deploy: sed -i 's/${DOMAIN}/your.domain.com/g' this file
     # rate_limit is configured per-handle below
@@ -188,7 +188,11 @@ ${DOMAIN} {
 # static file server and a strict CSP. See the long note in modules/05-caddy.sh
 # for the full reasoning.
 # ══════════════════════════════════════════════════════════════
-locusvpn.jadedns.uk {
+# Both landing names on ONE block. `chrysalisvpn` is the canonical name; the
+# `locusvpn` name is a DEPRECATED ALIAS kept serving until DNS is re-pointed —
+# it resolves today and the new name does not. See
+# docs/reference/NAME-MIGRATION.md.
+chrysalisvpn.jadedns.uk, locusvpn.jadedns.uk {
     root * /var/www/site
     file_server
 

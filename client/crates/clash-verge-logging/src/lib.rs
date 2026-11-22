@@ -42,7 +42,7 @@ pub enum Type {
     /// The application's own lifecycle banner (version, startup milestones).
     ///
     /// Was `ClashVergeRev`, which printed `[ClashVergeRev]` in every log file and
-    /// console session — an inherited name for what is now the Locus client, and
+    /// console session — an inherited name for what is now the Chrysalis client, and
     /// the first thing anyone sees in a log. Renamed rather than merely
     /// re-labelled so no future caller can reach for the old meaning; the
     /// variant is used in exactly one place (`utils/resolve/mod.rs`).

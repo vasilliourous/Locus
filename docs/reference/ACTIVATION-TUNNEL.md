@@ -4,7 +4,7 @@
 audience:    builder + human-operator
 status:      live
 authoritative-for: why enrolment is blocked on a censored network, what the activation tunnel is, and what is not yet proven about it
-verified-against: server/modules/09-activation-tunnel.sh, server/modules/05-caddy.sh, server/modules/08-firewall.sh, client/src-tauri/src/locus/hub/client.rs, client/src-tauri/src/locus/activation_tunnel.rs, client/src-tauri/src/locus/activation.rs, client/src-tauri/src/locus/heartbeat.rs, client/src-tauri/tests/activation_tunnel_end_to_end.rs
+verified-against: server/modules/09-activation-tunnel.sh, server/modules/05-caddy.sh, server/modules/08-firewall.sh, client/src-tauri/src/chrysalis/hub/client.rs, client/src-tauri/src/chrysalis/activation_tunnel.rs, client/src-tauri/src/chrysalis/activation.rs, client/src-tauri/src/chrysalis/heartbeat.rs, client/src-tauri/tests/activation_tunnel_end_to_end.rs
 ```
 
 > **Status of this work: both halves built and guarded in the tree; the mechanism
@@ -15,7 +15,7 @@ verified-against: server/modules/09-activation-tunnel.sh, server/modules/05-cadd
 > shipped build. All three are fixed with guards; none is verified on hardware.
 > Read "What is verified" (§4) and §6.6 before treating any of it as working.
 >
-> *Updated 2026-11-01: the client half now exists (`locus/activation_tunnel.rs`,
+> *Updated 2026-11-01: the client half now exists (chrysalis/activation_tunnel.rs`,
 > wired at `activation.rs::post_json` and `heartbeat.rs::beat`), and building it
 > exposed that the server's `local_addr`/`local_port` forward does not exist — see
 > §6.3.*
@@ -27,7 +27,7 @@ verified-against: server/modules/09-activation-tunnel.sh, server/modules/05-cadd
 A student on a school network could not activate. The client reported:
 
 ```text
-Could not reach the Locus hub at https://<hub>/api/activate:
+Could not reach the Chrysalis hub at https://<hub>/api/activate:
   error sending request for url (https://<hub>/api/activate).
 ```
 
@@ -129,7 +129,7 @@ client ──SS (no readable name)──▶ :8453 ssserver
 | The opened port | `server/modules/08-firewall.sh` (`ACTIVATION_TUNNEL_PORT`, default 8453) |
 | Module ordering | `server/setup.sh` — after `02` (needs `ssserver`) and `06` (needs `:8090`), before `08` |
 | The guards | `server/scripts/check-consistency.sh` §40 |
-| The **client** half | `client/src-tauri/src/locus/activation_tunnel.rs` — see §6 |
+| The **client** half | `client/src-tauri/src/chrysalis/activation_tunnel.rs` — see §6 |
 | Its proof | `client/src-tauri/tests/activation_tunnel_end_to_end.rs` |
 
 ### 3.1 The allowlist is the security boundary
@@ -168,7 +168,7 @@ the endpoint that mints entitlements would be the weakest link.
 > bucket — the first five in a class would activate and the rest would be told
 > "too many attempts", which a client reports as a failure to reach the hub.
 >
-> The forwarder now sets `X-Locus-Bootstrap` to a digest it computes itself
+> The forwarder now sets `X-Chrysalis-Bootstrap` to a digest it computes itself
 > (`sha256(bootstrap key | peer address)`, truncated to 32 hex characters). It is
 > per-source, reveals no address, and cannot be forged by the client because the
 > forwarder overwrites any value the client sent. Both hooks read it after the
@@ -189,7 +189,7 @@ Where it lives:
 | | |
 |---|---|
 | Source of truth | `ACTIVATION_TUNNEL_KEY` in `server/secrets.env.age` (see [`../operate/SECRETS-MANAGEMENT.md`](../operate/SECRETS-MANAGEMENT.md)) |
-| On the box | `/etc/locus/activation-tunnel.key`, mode `0600`, directory `0700` |
+| On the box | `/etc/chrysalis/activation-tunnel.key`, mode `0600`, directory `0700` |
 | In the repo | **nowhere** — a tracked credential is a build failure (`check-consistency.sh` §29) |
 
 If the key is absent from the secrets bundle the module **generates one and warns
@@ -268,7 +268,7 @@ generate-and-warn. Remaining work:
 Recorded here because they turned a locatable fault into a mystery, and each is a
 bug in its own right.
 
-1. **The error is truncated before it is shown.** `locus/activation.rs` formats
+1. **The error is truncated before it is shown.** chrysalis/activation.rs` formats
    `"{error}"`, where `reqwest::Error`'s `Display` is the generic outer message
    ("error sending request for url …"). The cause is in the `source()` chain and
    is discarded.
@@ -287,7 +287,7 @@ bug in its own right.
 
    Fixed by walking `source()` in `activation.rs::describe_chain` and
    `heartbeat.rs::describe_beat_chain`.
-2. **`locus::hub::diagnose()` has no callers.** The one function written to
+2. **`chrysalis::hub::diagnose()` has no callers.** The one function written to
    distinguish a root-store failure from a reachability failure is `pub` and
    never invoked, so the diagnostic does not reach a support log.
 3. **`Failure::Transport` is a catch-all.** A DNS failure, a refused connection
@@ -309,12 +309,12 @@ bug in its own right.
 ## 6. The client half — built 2026-11-01
 
 **This section used to say "there is no client code that uses this tunnel." That
-is no longer true.** The client half is `client/src-tauri/src/locus/activation_tunnel.rs`,
+is no longer true.** The client half is `client/src-tauri/src/chrysalis/activation_tunnel.rs`,
 and the fallback is wired at the two call sites that resolve the hub through
 `contract::hub_url()`:
 
-- `locus/activation.rs::post_json` — `/api/activate`, `/api/code-lookup`
-- `locus/heartbeat.rs::beat` — `/api/heartbeat`
+- chrysalis/activation.rs::post_json` — `/api/activate`, `/api/code-lookup`
+- chrysalis/heartbeat.rs::beat` — `/api/heartbeat`
 
 Scope stays **activation and heartbeat**. Tunnelling the update path is a separate
 decision with its own signature surface and is still not part of this work — the
@@ -355,7 +355,7 @@ Neither is visible in a test that only covers the fallback decision.
   `the_config_dials_the_hub_and_not_the_local_machine`, which was shown failing
   against the old value.
 - **The key was not reliably compiled in, and nothing said so.** `build.rs` now
-  re-emits `LOCUS_ACTIVATION_TUNNEL_KEY` as a `rustc-env` with an explicit
+  re-emits `CHRYSALIS_ACTIVATION_TUNNEL_KEY` as a `rustc-env` with an explicit
   `cargo:rerun-if-env-changed` (cargo does not reliably rebuild a crate for an
   `option_env!` that was absent last time), and stamps whether one was present so
   the binary can report it. `activation_tunnel::build_stamp()` is logged at
@@ -404,7 +404,7 @@ where that say does not matter.
 > the very failure `Failure::Dns` names. The engine now carries an **ordered
 > candidate list** — the name first, then
 > `contract::ACTIVATION_TUNNEL_ADDR` (a compiled address literal, overridable at
-> build time via `LOCUS_ACTIVATION_TUNNEL_ADDR`) — and `Failure::Dns` is retryable
+> build time via `CHRYSALIS_ACTIVATION_TUNNEL_ADDR`) — and `Failure::Dns` is retryable
 > over the tunnel because of it. The group is a `url-test` over both candidates;
 > a `select` group would have stayed on its first member forever. `§48` guards the
 > constant: it must be an IPv4 literal, it must be built into the candidate list,
@@ -452,7 +452,7 @@ passed.
 
 ### 6.5 The bootstrap key
 
-Compiled in via `option_env!("LOCUS_ACTIVATION_TUNNEL_KEY")`, absent by default,
+Compiled in via `option_env!("CHRYSALIS_ACTIVATION_TUNNEL_KEY")`, absent by default,
 never tracked. Absent ⇒ the tunnel is unavailable and the fallback is not
 attempted; the build is still complete. CI's `verify` job reports presence on
 every run and warns loudly on a tag, because a release shipped without it strands
@@ -503,13 +503,13 @@ still an operator action nobody has taken.
 > one with an empty 403.
 >
 > Two readings, and nothing here can separate them:
-> (a) the deployed `locus-activation-tunnel` service is not running `ssserver`
+> (a) the deployed `chrysalis-activation-tunnel` service is not running `ssserver`
 > with this module's config (a different process is on the port, or the module
 > has not been deployed since 2026-11-07), or (b) something upstream of the hub
 > resets non-standard ports. **(a) is the one an operator can settle from the
-> box**: `systemctl status locus-activation-tunnel locus-activation-forwarder`
+> box**: `systemctl status chrysalis-activation-tunnel chrysalis-activation-forwarder`
 > and `ss -lntp | grep 8453` name the process in a single command, and a
-> `journalctl -u locus-activation-forwarder` line saying
+> `journalctl -u chrysalis-activation-forwarder` line saying
 > `listening on 127.0.0.1:18090` proves the filter is up.
 >
 > This matters more than the previous timeout did. The tunnel is now the *only*

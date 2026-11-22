@@ -1,6 +1,6 @@
-# Locus Scripts
+# Chrysalis Scripts
 
-Utility scripts for Locus code generation, printing, and operations.
+Utility scripts for Chrysalis code generation, printing, and operations.
 
 ## Files
 

@@ -7,7 +7,7 @@
 //! It is **not** a binding key, and no longer an identity of any kind. A code is
 //! single-use and not tied to a device (see `server/pb_hooks/activation.pb.js`),
 //! and the client keeps its activation code in a machine-scoped store rather than
-//! recognising a device (see [`crate::locus::credential`]).
+//! recognising a device (see [`crate::chrysalis::credential`]).
 //!
 //! So this value has exactly two uses, both non-authoritative:
 //!

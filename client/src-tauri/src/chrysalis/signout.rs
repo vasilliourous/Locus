@@ -8,7 +8,7 @@
 //! was already getting, and it is a terrible answer: reinstalling is slow, it
 //! scares students, and (until this module) it did not even work reliably,
 //! because the machine-scoped credential mirror
-//! ([`crate::locus::credential`]) deliberately survives an uninstall and would
+//! ([`crate::chrysalis::credential`]) deliberately survives an uninstall and would
 //! put the code back.
 //!
 //! So "sign out" is defined precisely, and every part of it is visible to the
@@ -44,8 +44,8 @@
 use anyhow::Result;
 use clash_verge_logging::{Type, logging};
 
-use crate::locus::activation::{self, ReleaseOutcome};
-use crate::locus::{apply, credential, device, runtime, store};
+use crate::chrysalis::activation::{self, ReleaseOutcome};
+use crate::chrysalis::{apply, credential, device, runtime, store};
 
 /// One stage of a sign-out, in the order it must run.
 ///
@@ -70,7 +70,7 @@ pub enum Step {
     /// Tell the window, so the app leaves the student's session at once.
     ///
     /// Last because it is the one step that observes the finished state: the gate
-    /// re-reads `locus_status` when this fires, and firing it before [`Self::ForgetKey`]
+    /// re-reads `chrysalis_status` when this fires, and firing it before [`Self::ForgetKey`]
     /// would have it read a device that is still signed in and re-render the app the
     /// student just left.
     AnnounceChanged,
@@ -168,7 +168,7 @@ pub async fn sign_out() -> Result<SignOutResult> {
             logging!(
                 warn,
                 Type::Config,
-                "[locus] signing out a damaged stored code; the hub was not asked: {error}"
+                "[chrysalis] signing out a damaged stored code; the hub was not asked: {error}"
             );
             HubOutcome::NotConfirmed
         }
@@ -179,7 +179,7 @@ pub async fn sign_out() -> Result<SignOutResult> {
                 logging!(
                     warn,
                     Type::Config,
-                    "[locus] the hub was not told about a sign-out: {error:#}"
+                    "[chrysalis] the hub was not told about a sign-out: {error:#}"
                 );
                 HubOutcome::NotConfirmed
             }
@@ -209,7 +209,7 @@ pub async fn sign_out() -> Result<SignOutResult> {
         logging!(
             warn,
             Type::Config,
-            "[locus] could not stop the core while signing out: {error:#}"
+            "[chrysalis] could not stop the core while signing out: {error:#}"
         );
     }
 
@@ -234,11 +234,11 @@ pub async fn sign_out() -> Result<SignOutResult> {
         logging!(
             warn,
             Type::Config,
-            "[locus] signed out, but could not clear leftover device state: {error:#}"
+            "[chrysalis] signed out, but could not clear leftover device state: {error:#}"
         );
     }
 
-    logging!(info, Type::Config, "[locus] signed out on this device");
+    logging!(info, Type::Config, "[chrysalis] signed out on this device");
 
     // Tell any live window, so the app leaves the student's session NOW.
     //
@@ -253,7 +253,7 @@ pub async fn sign_out() -> Result<SignOutResult> {
     // `"signed-out"`, never `"suspended"`: the two are different events with
     // different screens, and this one must land on the activation gate. See
     // `store::clear_entitlement` for the invariant that makes that automatic.
-    crate::locus::runtime::notify_entitlement_changed("signed-out");
+    crate::chrysalis::runtime::notify_entitlement_changed("signed-out");
 
     Ok(SignOutResult::with_hub(hub))
 }

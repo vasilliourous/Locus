@@ -1,10 +1,10 @@
-# Client identity migration — Locus
+# Client identity migration — Chrysalis
 
 ```
 audience:    builder
 status:      live
 authoritative-for: the app-id / service-name migration and what must NOT be renamed
-verified-against: client/src-tauri/tauri.conf.json, client/src-tauri/src/locus/
+verified-against: client/src-tauri/tauri.conf.json, client/src-tauri/src/chrysalis/
 ```
 
 > **Implemented for the app-data root; the privileged service name is deliberately NOT renamed.**
@@ -37,6 +37,10 @@ holding something up.
 | dev (`verge-dev`) | `io.github.clash-verge-rev.clash-verge-rev.dev` | `com.locus.client.dev` |
 | `BACKUP_DIR` | `clash-verge-rev-backup[-dev]` | `locus-backup[-dev]` |
 
+Both values are **still spelled `locus` on purpose** — they are identity, not
+branding. See [`../../docs/reference/NAME-MIGRATION.md`](../../docs/reference/NAME-MIGRATION.md)
+for why, and §5 below for the section that records the 2026-11-23 product rename.
+
 **Why this is not a cosmetic rename.** `app_home_dir()` joins this onto the
 platform data directory, and **43 call sites** resolve through it:
 
@@ -60,7 +64,7 @@ operate on the new root before the old contents arrived.
 Rules, deliberately conservative because the failure mode is a half-copied config
 directory:
 
-- **Only runs when the current root does not exist.** An existing Locus root is
+- **Only runs when the current root does not exist.** An existing Chrysalis root is
   never touched, so this is safe to call on every launch and is a no-op after the
   first successful run.
 - **Renames, never copies.** `fs::rename` is atomic within a filesystem, so a
@@ -96,7 +100,7 @@ root** against the caller's, and by an owner token file *inside* the root
 ### 2.3 Migration checklist for a real install
 
 1. First launch under `com.locus.client` adopts the legacy directory; confirm the
-   log/stderr line `[locus] adopted pre-Locus application data from …`.
+   log/stderr line `[chrysalis] adopted pre-Chrysalis application data from …`.
 2. Confirm the activation code / tier survived (the client should not ask to
    activate again).
 3. On Windows with the Service installed, confirm core start works; if it asks to
@@ -153,7 +157,7 @@ These are user-visible and are *not* load-bearing:
 | `src-tauri/src/utils/schtasks.rs` | `clash-verge-task-{user,admin}.xml` | Windows scheduled tasks |
 | `src-tauri/src/utils/macos_launch_guard.rs` | `Contents/MacOS/clash-verge` in install-location checks | **must match the real bundle binary name** |
 | `src/pages/settings.tsx` | `t.me/clash_verge_re` Telegram link | |
-| `src/components/setting/mods/update-viewer.tsx` | `https://locus.app/releases/...` | placeholder domain — needs a real decision |
+| `src/components/setting/mods/update-viewer.tsx` | `https://chrysalis.app/releases/...` | placeholder domain — needs a real decision |
 
 The deep-link scheme and the bundle binary name are a **matched pair**: changing
 one without the other breaks deep links and the macOS launch guard respectively.
@@ -161,9 +165,35 @@ Check both sides before editing.
 
 ---
 
-## 5. Related
+## 5. The 2026-11-23 product rename (Locus → Chrysalis)
 
-- `client/docs/ARCHITECTURE.md` — what to cut from upstream and where Locus logic goes
+The product name moved from **Locus** to **Chrysalis**. That was a *naming*
+change, and this file's subject — *identity* — deliberately did not move with it.
+
+**What changed:** `productName`, `publisher`, the crate and npm package names, the
+`src-tauri/src/locus/` module tree (`→ chrysalis/`), the 15 IPC commands, the
+`locus_*` config fields, `CHRYSALIS_COLORS`, the runtime file names the app
+creates (`chrysalis-backup`, `chrysalis.yaml`), and all user-facing copy.
+
+**What did not, and why** — each is an identity with the fleet hanging off it:
+
+| Retained | Because |
+|---|---|
+| `APP_ID` = `com.locus.client` | the app-data root (§2). Renaming it rotates the directory the activation code, device fingerprint and Windows service token live in |
+| the minisign **key** and `LOCUS_UPDATE_KEY` | installed clients only accept updates signed by the key compiled into them |
+| artefact file names (`locus-linux-amd64`, …) | resolved from the GitHub Release by the hub; see `NAME-MIGRATION.md` |
+
+**Consequence, stated so nobody re-opens it:** an installed Chrysalis keeps the
+same data directory, the same update identity and the same signing key as the
+Locus build it replaces. That is why this rename needed no data-root adoption and
+no key rotation — and why `LEGACY_APP_IDS` above still holds only the upstream
+Clash Verge Rev identities, not `com.locus.client`.
+
+---
+
+## 6. Related
+
+- `client/docs/ARCHITECTURE.md` — what to cut from upstream and where Chrysalis logic goes
 - `client/docs/LOGIC-INVENTORY.md` — the modules to write
 - `docs/reference/STILL-OPEN.md` — what is genuinely still open
 - `docs/reference/FIXES.md` — the historical defect log

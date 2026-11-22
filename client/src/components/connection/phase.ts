@@ -1,4 +1,4 @@
-import type { LocusStatus } from '@/services/locus'
+import type { ChrysalisStatus } from '@/services/chrysalis'
 
 /**
  * The connection phase a settled (not mid-transition) status implies.
@@ -52,7 +52,7 @@ export type ConnectionPhase =
    *
    * These were one phase (`unknown`) until it caused a visible lie: the screen
    * rendered "This device needs an activation code before it can connect" for the
-   * one render between mounting and the first `locusStatus()` reply, on a device
+   * one render between mounting and the first `chrysalisStatus()` reply, on a device
    * that was perfectly well activated. The reporter saw it on every navigation
    * Home -> Settings, for "milliseconds, sometimes over a second" — the length of
    * the status read, which proves the tunnel with a real request through it and so
@@ -81,7 +81,7 @@ export type ConnectionPhase =
   | 'disconnecting'
   | 'connected'
 
-export const phaseFromStatus = (status: LocusStatus): ConnectionPhase => {
+export const phaseFromStatus = (status: ChrysalisStatus): ConnectionPhase => {
   if (!status.activated) return 'unactivated'
   // Before the connected/connecting split, because this is the state in which
   // the PLAN tunnel is not what is carrying the app's own traffic. A device on a

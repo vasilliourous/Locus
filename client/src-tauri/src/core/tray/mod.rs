@@ -40,7 +40,7 @@ use menu_def::{MenuIds, MenuTexts};
 type ProxyMenuItem = (Option<Submenu<Wry>>, Vec<Box<dyn IsMenuItem<Wry>>>);
 
 const TRAY_CLICK_DEBOUNCE_MS: u64 = 300;
-pub const TRAY_ID: &str = "locus-tray";
+pub const TRAY_ID: &str = "chrysalis-tray";
 
 #[derive(Clone, Copy)]
 struct TrayMenuOptions {
@@ -329,7 +329,7 @@ impl Tray {
         );
 
         let tooltip = format!(
-            "Locus {}\n{}: {}\n{}: {}\n{}: {}",
+            "Chrysalis {}\n{}: {}\n{}: {}\n{}: {}",
             reassembled_version,
             sys_proxy_text,
             switch_str(system_proxy),
@@ -1008,13 +1008,13 @@ fn on_menu_event(_: &AppHandle, event: MenuEvent) {
                 feat::toggle_tun_mode(None).await;
             }
             MenuIds::CONNECT => {
-                if let Err(error) = cmd::locus_connect().await {
+                if let Err(error) = cmd::chrysalis_connect().await {
                     logging!(error, Type::Tray, "Failed to connect from tray: {error:?}");
                 }
                 logging_error!(Type::Tray, Tray::global().update_menu().await);
             }
             MenuIds::DISCONNECT => {
-                if let Err(error) = cmd::locus_disconnect().await {
+                if let Err(error) = cmd::chrysalis_disconnect().await {
                     logging!(error, Type::Tray, "Failed to disconnect from tray: {error:?}");
                 }
                 logging_error!(Type::Tray, Tray::global().update_menu().await);

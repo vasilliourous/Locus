@@ -1,4 +1,4 @@
-// Locus Admin API — server-side surface for the web console.
+// Chrysalis Admin API — server-side surface for the web console.
 //
 // WHY THIS EXISTS: managing the hub previously required SSH + Python + sqlite.
 // That is fine for an engineer and hopeless day-to-day. This hook exposes the
@@ -1290,7 +1290,7 @@ routerAdd("POST", "/api/admin/console", function(e) {
             // are different: a value the hub accepts but the client rejects is
             // silently ignored forever, and the operator sees a saved setting
             // that does nothing. Absolute https, no path — the same rule the
-            // client applies in `locus::contract::resolve_hub_url`.
+            // client applies in `chrysalis::contract::resolve_hub_url`.
             //
             // Empty string CLEARS it (the operator withdrawing the offer). A
             // missing key leaves it alone, so an older console cannot wipe a

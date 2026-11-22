@@ -134,7 +134,7 @@ instant.**
 The client does **not** re-enter a code, does not restart, and the tunnel is not
 interrupted. The heartbeat interval is 5 minutes at minimum, jittered ±10%.
 
-> **One guard that must stay:** `cmd/locus.rs` writes the stored expiry only
+> **One guard that must stay:** `cmd/chrysalis.rs` writes the stored expiry only
 > `if expires_at.is_some()`. An older hub sends `null`, and writing that would
 > wipe a date the client legitimately holds. A renewal always sends a value, so
 > it passes.

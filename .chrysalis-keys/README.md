@@ -1,4 +1,4 @@
-# `.locus-keys/` — a cache, not a home
+# `.chrysalis-keys/` — a cache, not a home
 
 **This directory is empty after a clone, and that is the intended state.** The
 only committed file here is this README.
@@ -13,31 +13,31 @@ So the arrangement is now:
 
 | Copy | Where | Recoverable? |
 |---|---|---|
-| **Durable** | `LOCUS_UPDATE_KEY_B64` in [`server/secrets.env.age`](../server/secrets.env.age) (committed) | **Yes** — clone + passphrase |
-| CI | GitHub Actions secret `LOCUS_UPDATE_KEY` | No — Actions secrets are write-only by design |
-| Offline | `~/.locus-secrets/locus_update.key`, outside the repo | Yes |
-| **Cache** | `locus_update.key` in this directory | **Don't care** — regenerated every session |
+| **Durable** | `LOCUS_UPDATE_KEY_B64` (a DEPRECATED ALIAS key name inside the bundle — see [`../docs/reference/NAME-MIGRATION.md`](../docs/reference/NAME-MIGRATION.md)) in [`server/secrets.env.age`](../server/secrets.env.age) (committed) | **Yes** — clone + passphrase |
+| CI | GitHub Actions secret `LOCUS_UPDATE_KEY` (also a DEPRECATED ALIAS name; renaming it is an operator action, not a code change) | No — Actions secrets are write-only by design |
+| Offline | `~/.chrysalis-secrets/chrysalis_update.key`, outside the repo | Yes |
+| **Cache** | `chrysalis_update.key` in this directory | **Don't care** — regenerated every session |
 
 ## Extracting the key (every session that signs)
 
-`.locus-keys/locus_update.key` is **not kept between sessions.** Rehydrate it
+`.chrysalis-keys/chrysalis_update.key` is **not kept between sessions.** Rehydrate it
 from the bundle when you need to sign, and remove it when you are done:
 
 ```sh
 # 1. Put the passphrase somewhere the script can read it (or let it prompt).
 #    This is the same passphrase secrets-decrypt.sh uses.
-export LOCUS_SECRETS_PASSPHRASE_FILE=decryptionkeyforsecretsdeleteafteruse.txt
+export CHRYSALIS_SECRETS_PASSPHRASE_FILE=decryptionkeyforsecretsdeleteafteruse.txt
 
 # 2. Verify the bundle's key is the one the client trusts, writing nothing.
-./server/scripts/locus-key-extract.sh --check
+./server/scripts/chrysalis-key-extract.sh --check
 
-# 3. Extract it. Writes .locus-keys/ as 0700 and both files as 0600.
-./server/scripts/locus-key-extract.sh
+# 3. Extract it. Writes .chrysalis-keys/ as 0700 and both files as 0600.
+./server/scripts/chrysalis-key-extract.sh
 
 # ...sign what you need to sign...
 
 # 4. Remove the cache. This is not optional housekeeping; it is the point.
-./server/scripts/locus-key-extract.sh --remove
+./server/scripts/chrysalis-key-extract.sh --remove
 ```
 
 The script does three things worth knowing about, and they are the reason to use
@@ -55,7 +55,7 @@ it rather than `base64 -d` by hand:
 ## Handling rules
 
 - **Never `git add -f` anything here except this README.** `git ls-files
-  .locus-keys/` must print exactly `.locus-keys/README.md`; `check-consistency.sh`
+  .chrysalis-keys/` must print exactly `.chrysalis-keys/README.md`; `check-consistency.sh`
   §5b fails the build if it prints anything else.
 - **Never treat the file here as the backup.** If you find yourself copying it
   somewhere "just in case", the thing to do instead is confirm
@@ -71,7 +71,7 @@ it rather than `base64 -d` by hand:
 
 ## How it is checked
 
-- `server/scripts/locus-key-extract.sh --check` — re-derives the public half and
+- `server/scripts/chrysalis-key-extract.sh --check` — re-derives the public half and
   compares key IDs. Fails loudly on a stale bundle entry or a rotated pubkey.
 - `server/scripts/release-gate.sh` step 5 — the same comparison for the on-disk
   file, and the gate that fails a release rather than signing with a wrong key.

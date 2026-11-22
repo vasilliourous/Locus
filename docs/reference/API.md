@@ -1,4 +1,4 @@
-# Locus API Reference
+# Chrysalis API Reference
 
 ```
 audience:    builder
@@ -7,7 +7,7 @@ authoritative-for: the hub's HTTP API contracts (activation, heartbeat, releases
 verified-against: server/pb_hooks/*.pb.js
 ```
 
-> Complete API contracts for the Locus server, as implemented by the
+> Complete API contracts for the Chrysalis server, as implemented by the
 > PocketBase JS hooks and Caddy reverse proxy.
 
 ---
@@ -15,7 +15,7 @@ verified-against: server/pb_hooks/*.pb.js
 ## Base URL
 
 `https://networkingguides.jadedns.uk` — the canonical hub, and the default
-compiled into the client (`locus::contract::HUB_URL`).
+compiled into the client (`chrysalis::contract::HUB_URL`).
 
 **Two names serve this API.** The hub's previous name,
 `https://networkingguides.duckdns.org` (alias `contract::LEGACY_HUB_URL`), is on
@@ -224,7 +224,7 @@ update signal and a refreshed tier config.
   "update_url": "https://networkingguides.jadedns.uk/updates/2.1.0/locus-linux-amd64",
   "update_sha256": "abc123...",
   "update_linux": "https://.../updates/2.1.0/locus-linux-amd64",
-  "update_windows": "https://.../updates/2.1.0/installer-Locus_2.1.0_x64-setup.exe",
+  "update_windows": "https://.../updates/2.1.0/installer-Chrysalis_2.1.0_x64-setup.exe",
   "update_macos_intel": "https://.../updates/2.1.0/locus-darwin-amd64",
   "update_macos_arm": "https://.../updates/2.1.0/locus-darwin-arm64",
   "update_sha256_linux": "abc123...",
@@ -295,7 +295,7 @@ way out (`server/pb_hooks/heartbeat.pb.js`), frozen because deployed clients rea
 >
 > The trade, stated: a suspended device holds a live bearer credential on disk. It
 > cannot be used (the tunnel is down and the heartbeat loop is stopped), and a
-> sign-out still removes it entirely. See `locus::store::record_suspension`.
+> sign-out still removes it entirely. See `chrysalis::store::record_suspension`.
 
 ---
 
@@ -482,7 +482,7 @@ attempts.
 ### `POST /api/release-entitlement`
 
 A student pressed "Sign out on this device". The client forgets the code locally
-(`client/src-tauri/src/locus/signout.rs`) and this endpoint records that the code
+(`client/src-tauri/src/chrysalis/signout.rs`) and this endpoint records that the code
 was signed out of, so the operator can tell **"this student moved to a new
 computer"** apart from **"this key is being shared"**. From the console those two
 reports are otherwise identical.
@@ -595,7 +595,7 @@ device, and guessing is how a Windows client is handed a Linux binary.
 ```json
 {
   "version": "2.4.0",
-  "url": "https://<domain>/updates/2.4.0/installer-Locus_2.4.0_x64-setup.exe",
+  "url": "https://<domain>/updates/2.4.0/installer-Chrysalis_2.4.0_x64-setup.exe",
   "signature": "<base64 minisign signature>",
   "sha256": "abc123…"
 }
@@ -639,7 +639,7 @@ served openly from `/updates/*`.
   "version": "2.4.0",
   "platforms": {
     "linux":       { "url": "https://<domain>/updates/2.4.0/locus-linux-amd64",       "sha256": "abc123…", "signature": "…" },
-    "windows":     { "url": "https://<domain>/updates/2.4.0/installer-Locus_2.4.0_x64-setup.exe", "sha256": "def456…", "signature": "…" },
+    "windows":     { "url": "https://<domain>/updates/2.4.0/installer-Chrysalis_2.4.0_x64-setup.exe", "sha256": "def456…", "signature": "…" },
     "macos_intel": { "url": "https://<domain>/updates/2.4.0/locus-darwin-amd64",      "sha256": "ghi789…", "signature": "…" },
     "macos_arm":   { "url": "https://<domain>/updates/2.4.0/locus-darwin-arm64",      "sha256": "jkl012…", "signature": "…" }
   }

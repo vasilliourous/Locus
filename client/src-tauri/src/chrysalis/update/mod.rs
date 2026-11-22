@@ -1,4 +1,4 @@
-//! The Locus update path.
+//! The Chrysalis update path.
 //!
 //! Replaces the retired client's self-replacing binary and the upstream Tauri
 //! updater's static manifest with a **hub-mediated, entitlement-aware,
