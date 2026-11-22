@@ -163,6 +163,14 @@ whale.txt
 # and `git add -A` is how the classes it does not cover get committed.
 .brief/
 
+# The documentation audit report (root, `DOC-AUDIT-*.md`). Scratch, like
+# `.brief/` above: it records what the doc set got wrong on a date, and every
+# durable conclusion from it belongs in the file that owns the rule once the
+# fixes land. Explicit for the same reason as `.brief/` — there is no generic
+# root-`*.md` rule, and `git add -A` is how an unowned prose copy gets committed
+# and then drifts, which is the exact defect the report is about.
+DOC-AUDIT-*.md
+
 # Secrets (encrypted is fine; plaintext never)
 .secrets.env
 age-key.txt
