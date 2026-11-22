@@ -1732,7 +1732,7 @@ echo "10. No volatile fact (IP address / hub URL) inlined in live documentation"
 DOCS_TO_SCAN=$(cd "$REPO" && { find docs client/docs -name '*.md' 2>/dev/null; \
         find . -maxdepth 1 -name '*.md' 2>/dev/null; } \
     | grep -vE '^\./' \
-    | grep -vE '^docs/reference/FIXES\.md$|^docs/history/|^docs/archive/|^docs/business/redesign/archive/|^docs/operate/CLAIMS\.md$|^DOC-AUDIT-[0-9-]+\.md$' \
+    | grep -vE '^docs/reference/FIXES\.md$|^docs/history/|^docs/archive/|^docs/business/redesign/archive/|^docs/operate/CLAIMS\.md$|^DOC-AUDIT-[0-9-]+\.md$|^\.renovation-handover\.md$' \
     | sort)
 
 # An IPv4 literal. Deliberately does NOT flag addresses that are provably NOT the
@@ -4366,9 +4366,10 @@ INDEX_EXEMPT = {
     'AGENTS.md', 'CLAUDE.md', 'GEMINI.md',
     # The front door.
     'README.md', 'CONTRIBUTING.md',
-    # Not documentation in the index sense: a licence, and the audit's own
-    # untracked scratch (gitignored, so it is normally absent).
-    'LICENSE', 'DOC-AUDIT-2026-11-22.md',
+    # Not documentation in the index sense: a licence, and gitignored scratch
+    # that quotes what it found (the audit file quotes addresses; a handover note
+    # records unfinished work).
+    'LICENSE', 'DOC-AUDIT-2026-11-22.md', '.renovation-handover.md',
 }
 
 def md_files(root):

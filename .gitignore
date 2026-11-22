@@ -281,3 +281,10 @@ URGENT-*.md
 .guard-proof/
 .verify-arm/
 .verify-intel/
+
+# Added 2026-11-22: the renovation handover note. Scratch, written to be deleted,
+# and it names the outstanding items (an un-deleted asset tree, an unrun gate set,
+# a credential-shaped filename) — none of which belong in a published repository.
+# Same reasoning as URGENT-*.md above: the durable record of what was fixed is in
+# docs/reference/FIXES.md and STILL-OPEN.md; this file is the working state.
+.renovation-handover.md
