@@ -46,11 +46,18 @@ is done, and what is left:
   **logs** rather than resetting silently.
 
 **Still to do:**
-- **Applying the throttle to a running Core.** `free_throttle_mbps` is parsed and
-  stored, and **nothing yet lowers a live Core's speed from it**. The decision to
-  throttle works; the act does not exist. This is the largest remaining gap and
-  the one whose absence a student would notice — see
+- **Applying a slower speed past the allowance.** Not built, and deliberately
+  so: the free plan's 1 Mbps ceiling is the hub's per-port `tc` class and is
+  already in force, so the only way to go *slower* is a privileged per-OS shaper
+  — and a defect there degrades the tunnel for **paying** users who share the
+  client build. What the client does instead is refuse a *new* free tunnel once
+  the allowance is spent (`usage::allows_new_connection`), which is real and
+  observable; `free_throttle_mbps` stays stored-but-unapplied. See
   [`../reference/STILL-OPEN.md`](../reference/STILL-OPEN.md).
+- **The counter's writer.** Fixed 2026-11-23 — the allowance was computed and
+  never counted, because `Usage::record` had no caller. Guarded now by
+  `check-consistency.sh` §23(h); see
+  [`../reference/FIXES.md`](../reference/FIXES.md).
 - **Operator control from the console.** The allowance is a hook value today;
   making it console-editable is what lets the operator change it without a
   deploy.

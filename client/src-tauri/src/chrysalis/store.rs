@@ -727,14 +727,21 @@ pub async fn store_usage(usage: &crate::chrysalis::usage::Usage) -> Result<()> {
 /// the caller must **not** apply any throttle in that case. Absence is not
 /// "zero speed".
 ///
-/// NOTE (2026-11-01): this value is persisted and readable, and **nothing applies
-/// it to a running Core** — and, as measured, nothing *can* at the config level.
-/// The engine accepts `rate-limit` and `max-rate` on outbounds and on inbound
-/// listeners but enforces neither: a 8 MiB download measured 233 MB/s unshaped,
-/// 234 MB/s with `rate-limit: 1`, 379 MB/s with `max-rate: 1000000`, and 355 MB/s
-/// through a rate-limited inbound listener. The value is kept because the hub
-/// sends it and a future shaper — a per-OS action, not a profile field — will need
-/// it. See `STILL-OPEN.md`.
+/// NOTE (2026-11-01, amended 2026-11-23): this value is persisted and readable,
+/// and **nothing lowers a running Core's speed from it** — and, as measured,
+/// nothing *can* at the config level. The engine accepts `rate-limit` and
+/// `max-rate` on outbounds and on inbound listeners but enforces neither: an
+/// 8 MiB download measured 233 MB/s unshaped, 234 MB/s with `rate-limit: 1`,
+/// 379 MB/s with `max-rate: 1000000`, and 355 MB/s through a rate-limited inbound
+/// listener.
+///
+/// What the client enforces instead is the *decision*, not a speed: a spent
+/// allowance refuses a new free tunnel ([`crate::chrysalis::usage::allows_new_connection`]).
+/// The free plan's 1 Mbps ceiling is the hub's per-port `tc` class and applies
+/// either way, so a slower speed is not needed to bound a free student — and a
+/// privileged shaper would risk the paying tiers that share this build. The value
+/// is kept because the hub sends it and a shaper would need it. See
+/// `STILL-OPEN.md`.
 #[must_use]
 pub async fn throttle_mbps() -> Option<u32> {
     crate::config::Config::verge()

@@ -3283,6 +3283,98 @@ else
         fi
     fi
 
+    # (h) THE METER MUST HAVE A WRITER, AND THE VERDICT MUST HAVE A CALLER.
+    #
+    # WHY THIS EXISTS, and why it is a guard rather than a test.
+    #
+    # The free tier's allowance shipped "BUILT": `chrysalis::usage` was written,
+    # tested with a fake clock and documented as working — and the counter in the
+    # field never moved. `Usage::record` and `store::store_usage` had **no
+    # caller**. Every test called `record` directly, so every test passed while
+    # nothing in the app ever produced a number, and the usage bar read a
+    # permanent zero. A student reported exactly that: "the counter for 15GB does
+    # not count up or update in any way".
+    #
+    # This is the failure mode unit tests are structurally blind to. Testing a
+    # function proves the function works; only a guard on the WIRING can tell you
+    # it is connected. It is the same class as the UoT silent no-op (FIXES.md 29)
+    # and the `throttle_mbps` case directly above: a value that arrives, is
+    # stored, and is never consumed.
+    #
+    # WHAT IT ASSERTS: that the meter exists, that its producer is called from
+    # outside the meter's own tests, that the flush is awaited somewhere, and that
+    # the allowance it bills against is mirrored from the heartbeat. Each of these
+    # was the missing link at some point in the fix; each is greppable.
+    #
+    # VERIFIED TO FAIL: commenting out the `set_allowance_mb` call in
+    # `runtime.rs`, or the `meter::observe` call in `traffic_probe.rs`, each
+    # produces a BAD line below.
+    CLIENT_METER="$REPO/client/src-tauri/src/chrysalis/meter.rs"
+    CLIENT_PROBE="$REPO/client/src-tauri/src/core/manager/traffic_probe.rs"
+    CLIENT_RUNTIME="$REPO/client/src-tauri/src/chrysalis/runtime.rs"
+    if [ ! -f "$CLIENT_METER" ]; then
+        bad "the free-tier meter (chrysalis/meter.rs) is missing — the usage counter has no producer"
+    else
+        if grep -Eq 'pub fn observe\(' "$CLIENT_METER"; then
+            ok "the free-tier meter exposes a producer for the usage counter"
+        else
+            bad "the free-tier meter has no producer — the counter would never advance"
+        fi
+        # The producer must be CALLED from the traffic sample path. Anchor on the
+        # call, not a mention: the name also appears in meter.rs's own docs.
+        if [ -f "$CLIENT_PROBE" ] && grep -Eq 'meter::observe\(' "$CLIENT_PROBE"; then
+            ok "the Core's traffic samples are fed into the free-tier meter"
+        else
+            bad "nothing feeds the Core's traffic into the meter — the allowance would read a permanent zero (the reported defect)"
+        fi
+        # …and the flush must be awaited, or the count lives only in memory and a
+        # restart loses the whole month.
+        if grep -Eq 'meter::flush\(' "$CLIENT_PROBE" || grep -Eq 'meter::flush\(' "$CLIENT_METER"; then
+            ok "the meter's accumulated bytes are written to the config"
+        else
+            bad "the meter accumulates but never flushes — the stored window would never advance"
+        fi
+        # The accumulator must be DEBITED, not zeroed. Two reviewed defects lived
+        # here: a `swap(0)` before the store lost the bytes on a failed write, and
+        # a `store(0)` after it erased a sample that landed mid-flush. Both are
+        # silent under-counting, which is the same class as the reported bug and
+        # invisible from the UI.
+        #
+        # Anchored on the CALL EXPRESSION (`pending.fetch_sub(`), not a bare
+        # `fetch_sub(` mention: the function's own doc explains the fix using that
+        # word, and one of the tests names it in prose — so a looser grep stayed
+        # green with the implementation replaced by a store of zero. Observed
+        # failing that way before the anchor was tightened.
+        if grep -Eq 'fn debit_written\(' "$CLIENT_METER" && grep -Eq 'pending\.fetch_sub\(' "$CLIENT_METER"; then
+            ok "the meter debits only what it wrote, so a failed or in-flight sample is not lost"
+        else
+            bad "the meter does not debit its accumulator correctly — a failed flush or a mid-flush sample would silently lose bytes"
+        fi
+        # …and a zeroing clear must never come back in the flush path.
+        if grep -Eq 'pending\.store\(0' "$CLIENT_METER"; then
+            bad "the meter clears its accumulator with a store of zero — a sample landing mid-flush would be erased"
+        else
+            ok "the meter never zeroes its accumulator outright"
+        fi
+        # …and the allowance it bills against must be mirrored from the hub, or
+        # `has_allowance` stays false and every sample is rebaselined unbilled.
+        if [ -f "$CLIENT_RUNTIME" ] && grep -Eq 'meter::set_allowance_mb\(' "$CLIENT_RUNTIME"; then
+            ok "the hub's allowance is mirrored into the meter"
+        else
+            bad "the hub's allowance never reaches the meter — nothing would be billed, and the counter would stay at zero"
+        fi
+        # The spent verdict must gate something, or "throttled" is a colour.
+        if grep -Eq 'pub fn allows_new_connection\(' "$CLIENT_METER" "$REPO/client/src-tauri/src/chrysalis/usage.rs"; then
+            if grep -Eq 'allows_new_connection\(' "$REPO/client/src-tauri/src/cmd/chrysalis.rs"; then
+                ok "a spent allowance is enforced on the connect path"
+            else
+                bad "a spent allowance is computed but never enforced — 'throttled' would only recolour the bar"
+            fi
+        else
+            warn "no allows_new_connection helper found — cannot check the throttle gate"
+        fi
+    fi
+
     # (g) THE PROSE ABOUT THE CAPS, not just the caps.
     #
     # WHY THIS EXISTS. The (a)–(f) checks all passed while two DOCUMENTS

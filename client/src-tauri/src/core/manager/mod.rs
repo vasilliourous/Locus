@@ -176,6 +176,14 @@ impl CoreManager {
         // Same rule for the observed traffic: a byte count is evidence about the
         // process that moved it, and this is a different process.
         traffic_probe::clear();
+        // …and the same rule for the free tier's lifetime totals. These are the
+        // Core's cumulative counters, which reset to zero on a restart; keeping
+        // the old baseline would make the first sample after a restart look like
+        // a total that went backwards. `meter` rebaselines rather than billing, so
+        // this is belt-and-braces — but relying on the guard alone would mean the
+        // restart path depends on the subtraction being right, and the stored
+        // window (the student's actual consumption) is deliberately untouched.
+        crate::chrysalis::meter::core_changed();
         self.run_state.core_started(mode);
     }
 
@@ -194,6 +202,7 @@ impl CoreManager {
         // egress cache this one is populated by a stream rather than by the status
         // path — nothing else would clear it before the next Core's first sample.
         traffic_probe::clear();
+        crate::chrysalis::meter::core_changed();
         self.run_state.core_stopped();
     }
 

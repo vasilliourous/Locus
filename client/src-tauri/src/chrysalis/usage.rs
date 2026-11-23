@@ -280,6 +280,116 @@ pub const fn sane_allowance_mb(raw: u64) -> u64 {
     }
 }
 
+/// The bytes to bill for a step from one lifetime total to the next.
+///
+/// # Why this is not a subtraction
+///
+/// The Core reports `upTotal`/`downTotal` as **lifetime** totals that reset to
+/// zero whenever the Core restarts. A plain `new - prev` therefore has two
+/// failure modes, and one of them is unrecoverable:
+///
+/// * The Core restarts and the total drops → `0u64 - 5120` **wraps** to
+///   ~1.8 × 10^19 bytes. One restart would mark the allowance spent forever, and
+///   the student would be throttled for the rest of the window with no way to
+///   clear it short of a reinstall. `saturating_sub` is not enough either: it
+///   returns zero, which is the right answer only by accident.
+/// * The total is somehow ahead of itself by an implausible amount → a single
+///   sample bills more than the allowance.
+///
+/// So a decrease is not "negative bytes"; it is **evidence that the counter we
+/// were subtracting from belongs to a different Core**. The honest answer is
+/// zero, and the caller rebaselines. Same rule for a step larger than the
+/// allowance itself: that is a restart or a rebaseline artefact, not a student
+/// moving more than their whole month in one second.
+///
+/// Returns `None` when the sample carries no billable delta and the caller must
+/// **rebaseline** rather than treat it as zero bytes. Conflating the two would
+/// leave the baseline stale and bill the entire gap on the next healthy sample.
+#[must_use]
+pub const fn billable_delta(prev_total: u64, new_total: u64, allowance_bytes: u64) -> Option<u64> {
+    // A decrease, or no movement at all: not billable, and the baseline must be
+    // reset to the new total. `None` rather than `Some(0)` because the caller's
+    // next step differs — a reset of the baseline, not a bill of nothing.
+    if new_total <= prev_total {
+        return None;
+    }
+    let delta = new_total - prev_total;
+    // A single second's sample cannot legitimately exceed the whole allowance.
+    // At the free tier's 1 Mbps that is ~125 KB/s, so this only fires on a
+    // rebaseline artefact or a corrupt field — and the safe direction is to
+    // rebaseline, not to spend a month of data on one sample.
+    if delta > allowance_bytes {
+        return None;
+    }
+    Some(delta)
+}
+
+/// What the client does about a spent allowance.
+///
+/// # This is the whole of the enforcement, and why it is this instead of a speed cap
+///
+/// The decided behaviour is "throttled further, not cut off", and the only
+/// mechanism that *works* is the hub's own `tc` class: the free tier's port is
+/// capped at 1 Mbps unconditionally and per-port (`server/modules/04-tc.sh`, class
+/// 1:10 on 8443 and 1:20 on 8447), so the free plan cannot exceed 1 Mbps whether
+/// or not this client cooperates.
+///
+/// A client-side *speed* reduction was the obvious implementation and was
+/// measured to be impossible at the config level: the vendored engine accepts
+/// `rate-limit` and `max-rate` and enforces neither (an 8 MiB download measured
+/// 234 MB/s with `rate-limit: 1` against a 233 MB/s baseline — see
+/// `docs/reference/STILL-OPEN.md`). Shipping the field would have been a no-op
+/// that looked like a working limiter. Going below 1 Mbps would require
+/// privileged per-OS shaping (`tc`/`pfctl`/WFP), and a defect there degrades the
+/// tunnel for **paying** users, who share the same client build — the one outcome
+/// that must not happen.
+///
+/// So the client's honest contribution is the decision, applied as a **refusal to
+/// carry new free traffic** once the allowance is spent. The student keeps the
+/// hub's 1 Mbps while it lasts and loses the tunnel when the month is spent,
+/// which is a real consequence they can observe, rather than a banner over an
+/// unchanged speed.
+///
+/// It is structurally incapable of affecting a paying tier: [`AllowanceState`]
+/// is `Unlimited` whenever no allowance applies, and `Unlimited` never reaches
+/// this function. A paying student has no `free_allowance_mb` on the wire, so
+/// there is no value that could gate them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ThrottleDecision {
+    /// Carry traffic normally.
+    Allow,
+    /// The allowance is spent for this window: do not open a new free tunnel.
+    RefuseNewConnections,
+}
+
+/// Decides what to do about a classified allowance.
+///
+/// Deliberately a decision about **new** connections, never about the live one.
+/// Tearing down a tunnel a student is using mid-session would drop a lesson or a
+/// call, and the boundary is one they can plan around ("it ran out, I will renew
+/// before tomorrow"). A running connection is also the only thing that lets them
+/// reach the hub to see their own state.
+#[must_use]
+pub const fn decision(state: AllowanceState) -> ThrottleDecision {
+    match state {
+        // A paying tier, or a hub that sends no allowance. Never gate this —
+        // an unknown key must not stop a paying student's traffic.
+        AllowanceState::Unlimited => ThrottleDecision::Allow,
+        AllowanceState::Within { .. } | AllowanceState::Warning { .. } => ThrottleDecision::Allow,
+        AllowanceState::Throttled { .. } => ThrottleDecision::RefuseNewConnections,
+    }
+}
+
+/// Whether a new tunnel may be opened, given the stored window and allowance.
+///
+/// The one call site is the connect path, so this is the whole of the gate and
+/// there is no second copy to disagree with it. `allowance` is `None` for a
+/// paying tier and for a hub that switched the quota off, and both allow.
+#[must_use]
+pub fn allows_new_connection(usage: &Usage, allowance_bytes: Option<u64>, now_ms: u64) -> bool {
+    decision(usage.classify(allowance_bytes, now_ms)) == ThrottleDecision::Allow
+}
+
 // `WARN_FRACTION` is the documented value the integer comparison above encodes.
 // This pins the two together: if someone edits the constant without editing the
 // comparison, the test below fails rather than the docs drifting.
@@ -462,6 +572,91 @@ mod tests {
         assert_eq!(sane_allowance_mb(MAX_SANE_ALLOWANCE_MB + 1), MAX_SANE_ALLOWANCE_MB);
         assert_eq!(sane_allowance_mb(5120), 5120, "a real value is untouched");
         assert_eq!(sane_allowance_mb(0), 0, "zero still means off");
+    }
+
+    /// A spent allowance refuses a NEW connection, and nothing else does.
+    #[test]
+    fn only_a_spent_allowance_refuses_a_new_connection() {
+        let allowance = 10240 * MB;
+        assert!(
+            allows_new_connection(&used(0), Some(allowance), T0),
+            "a fresh window must connect"
+        );
+        assert!(
+            allows_new_connection(&used(allowance * 9 / 10), Some(allowance), T0),
+            "past the warning line but under the allowance must still connect — the free data is the product"
+        );
+        assert!(
+            !allows_new_connection(&used(allowance), Some(allowance), T0),
+            "exactly at the allowance is spent, and must refuse"
+        );
+        assert!(
+            !allows_new_connection(&used(allowance + 1), Some(allowance), T0),
+            "past the allowance must refuse"
+        );
+    }
+
+    /// **The rule that protects the paying tiers.** No allowance never refuses.
+    ///
+    /// This is the assertion that makes the gate safe to ship: a paying student
+    /// receives no `free_allowance_mb`, so `classify` returns `Unlimited` and the
+    /// decision is `Allow` no matter how many bytes are on the counter. If this
+    /// ever regresses, paying customers are locked out by a counter they never
+    /// had — which is why the test uses an absurd used_bytes rather than a small
+    /// one.
+    #[test]
+    fn no_allowance_never_refuses_a_connection() {
+        let enormous = used(u64::MAX / 2);
+        assert!(
+            allows_new_connection(&enormous, None, T0),
+            "a paying tier must never be gated"
+        );
+        assert!(
+            allows_new_connection(&enormous, Some(0), T0),
+            "the operator switching the quota off must never gate anyone"
+        );
+        assert_eq!(decision(AllowanceState::Unlimited), ThrottleDecision::Allow);
+    }
+
+    /// The restart trap: a lifetime total that goes DOWN must bill nothing.
+    ///
+    /// This is the test that fails against the obvious implementation. With a
+    /// plain `new - prev` (or `wrapping_sub`) a Core restart bills
+    /// `u64::MAX - prev + 1` bytes and marks the allowance spent permanently.
+    /// The assertion is `None` — rebaseline — and not zero, because a zero the
+    /// caller mistakes for "moved 0 bytes" leaves a stale baseline that then
+    /// bills the whole gap on the next sample.
+    #[test]
+    fn a_total_that_goes_backwards_bills_nothing_and_rebaselines() {
+        let allowance = 10240 * MB;
+        // A Core that had moved 5 GiB restarts and reports a near-zero total.
+        assert_eq!(billable_delta(5 * 1024 * MB, 0, allowance), None);
+        assert_eq!(billable_delta(5 * 1024 * MB, 512, allowance), None);
+        // An unchanged total is not "backwards", and also bills nothing — but it
+        // must still rebaseline, or the caller keeps a baseline it cannot trust.
+        assert_eq!(billable_delta(4096, 4096, allowance), None);
+    }
+
+    /// The ordinary case: an increasing total bills exactly the difference.
+    #[test]
+    fn an_increasing_total_bills_the_difference() {
+        let allowance = 10240 * MB;
+        assert_eq!(billable_delta(0, 1024, allowance), Some(1024));
+        assert_eq!(billable_delta(1024, 4096, allowance), Some(3072));
+        // A total that starts at zero on the first ever sample is normal.
+        assert_eq!(billable_delta(0, 1, allowance), Some(1));
+    }
+
+    /// A single sample cannot legitimately exceed the whole allowance.
+    ///
+    /// At 1 Mbps a one-second sample is ~125 KB, so a jump larger than the
+    /// month's allowance is a rebaseline artefact rather than a student moving
+    /// data. The safe direction is to rebaseline, never to bill it.
+    #[test]
+    fn a_step_larger_than_the_allowance_rebaselines_instead_of_billing() {
+        let allowance = 10240 * MB;
+        assert_eq!(billable_delta(0, allowance + 1, allowance), None);
+        assert_eq!(billable_delta(0, allowance, allowance), Some(allowance));
     }
 
     /// The clamped allowance must not misclassify a fresh window as throttled.

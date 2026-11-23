@@ -1168,6 +1168,16 @@ const fn connect_allowed(state: &crate::core::runstate::RunState) -> bool {
 const SUBSCRIPTION_LAPSED_MESSAGE: &str = "This Chrysalis code has expired, so the VPN will not connect. Contact the person \
      who sold you the code to renew it, then activate again.";
 
+/// What the connection screen says when the free tier's allowance is spent.
+///
+/// Says three things and nothing more: what happened (the month's data is used),
+/// what that means (no new connection until it resets), and the action (renew or
+/// contact the seller). It deliberately does **not** claim a slower speed — the
+/// free plan's 1 Mbps cap is the hub's and applies either way, and promising a
+/// slowdown the app does not perform was the defect `STILL-OPEN.md` records.
+const ALLOWANCE_SPENT_MESSAGE: &str = "You have used this month's free data allowance, so the VPN will not \
+     connect again until it resets. Contact the person who sold you the code to move to a plan without an allowance.";
+
 /// Whether a stored expiry permits a new connection.
 ///
 /// Split out so the rule is testable without an app handle, like
@@ -1217,6 +1227,44 @@ pub async fn chrysalis_connect() -> CmdResult<ConnectionResult> {
 
     let activation =
         stored.ok_or_else(|| super::coded_error("CHRYSALIS_NOT_ACTIVATED", "This device is not activated yet."))?;
+
+    // The free tier's allowance, checked LAST of the refusals because it is the
+    // only one that is a product boundary rather than a fault — and the only one
+    // that must never fire for a paying student.
+    //
+    // Placed AFTER the activation check on purpose: an unactivated device has no
+    // stored window, so `classify` would read `used_bytes: 0` against an allowance
+    // that is only present if a code once existed — and a student who had never
+    // activated would be told their free data was spent. The refusals are ordered
+    // most-specific-first for that reason.
+    //
+    // This is where the throttle actually acts. A spent allowance refuses a NEW
+    // tunnel; it never tears down a live one, because dropping a connection the
+    // student is in the middle of using is a different (and much worse) decision
+    // than declining to start one, and the live tunnel is how they reach the hub
+    // to see their own state.
+    //
+    // `allows_new_connection` is `Allow` when no allowance applies, which is what
+    // keeps this structurally incapable of gating a paying tier: a paying student
+    // is not sent `free_allowance_mb`, so `classify` returns `Unlimited`, and
+    // `Unlimited` never refuses. See `usage::ThrottleDecision` for why this is a
+    // refusal rather than the speed cap the design originally described.
+    {
+        let usage = store::usage().await;
+        let allowance_bytes = verge
+            .latest_arc()
+            .chrysalis_allowance_mb
+            .filter(|mb| *mb > 0)
+            .map(|mb| crate::chrysalis::usage::sane_allowance_mb(mb) * crate::chrysalis::usage::MIB);
+        if !crate::chrysalis::usage::allows_new_connection(&usage, allowance_bytes, now_ms()) {
+            logging!(
+                warn,
+                Type::Cmd,
+                "[chrysalis] refusing to connect: the free tier's allowance is spent for this window"
+            );
+            return Err(super::coded_error("CHRYSALIS_ALLOWANCE_SPENT", ALLOWANCE_SPENT_MESSAGE));
+        }
+    }
 
     // Refuse a lapsed subscription BEFORE anything else, and before writing
     // anything.

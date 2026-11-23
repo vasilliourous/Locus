@@ -838,6 +838,55 @@ do is lower it further.
 
 ---
 
+### The free tier's counter had no writer — FIXED 2026-11-23
+
+**Reported by a student:** "the limiter does not seem to kick in, or even if it
+does, the counter for 15GB does not count up or update in any way." The report
+was exactly right, and the cause was not the arithmetic.
+
+`chrysalis::usage` was written, fake-clock tested and documented as BUILT — and
+`Usage::record` and `store::store_usage` had **no caller anywhere in the tree**.
+Every test called `record` directly, so every test passed while nothing in the
+app ever produced a number. `used_bytes` was permanently `0`, `percent_used()`
+was permanently `0`, and `classify()` could never return `throttled`.
+
+**The lesson is about testing, not arithmetic.** A unit test proves a function
+works; it cannot tell you the function is *connected*. This is the same class as
+the UoT silent no-op (FIXES.md 29) and the `throttle_mbps` reader check in §23(f):
+a value that arrives, is stored, and is never consumed. It is now guarded by
+§23(h), which asserts the producer, the flush, the allowance mirror and the gate
+each have a caller — and was observed emitting three BAD lines against the broken
+wiring before it was kept.
+
+**What was built:** `chrysalis/meter.rs` consumes the Core's lifetime
+`upTotal`/`downTotal` off the `/traffic` stream (the same socket `traffic_probe`
+reads, a different question), folds it through `usage::billable_delta` into the
+stored window, and flushes on bytes-or-time. Counting is gated on a free-tier
+allowance **and** a tunnel that is actually carrying traffic.
+
+**The restart trap, tested both ways.** A Core restart resets the totals to zero,
+and a naive subtraction wraps to ~1.8 × 10¹⁹ bytes — one restart marks the month
+spent permanently. `billable_delta` returns `None` (rebaseline) on any decrease,
+and the meter has no second copy of that rule; an earlier draft did have one,
+and it made the restart test pass while the arithmetic wrapped. The test that
+catches it uses a *partial* drop (1000 → 500), because a drop to zero is masked by
+`unwrap_or(0)`.
+
+**The throttle, closed in the direction that is safe.** The free plan's 1 Mbps
+ceiling is the hub's per-port `tc` class and applies regardless. A client-side
+speed cap would need a privileged per-OS shaper, and a defect there degrades the
+tunnel for **paying** users who share the build — the one outcome ruled out. So
+the client enforces the decision instead: a spent allowance refuses a new free
+tunnel on the connect path (`usage::allows_new_connection`), never tears down a
+live one. `Unlimited` never refuses, so a paying tier cannot be gated by a
+counter it was never given.
+
+**NOT verified:** that a real device crossing the allowance is refused on its
+next connect. That needs a live hub and a spent code; the rule is tested, the
+end-to-end is not.
+
+---
+
 ### The free tier's hub half is not deployed, and no free code has been exercised
 
 **Added 2026-10-04.** The free tier's quota now exists end to end in the tree: a

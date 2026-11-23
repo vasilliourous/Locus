@@ -52,6 +52,7 @@ use std::sync::OnceLock;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::Duration;
 
+use crate::{Type, logging};
 use parking_lot::Mutex;
 use tauri::async_runtime::JoinHandle;
 use tokio::time::Instant;
@@ -265,6 +266,42 @@ fn mark(up: u64, down: u64) {
     sink().mark(up, down);
 }
 
+/// Wall-clock milliseconds, for the meter's window arithmetic.
+///
+/// Separate from the sink's internal epoch deliberately: the sink's millis are
+/// relative to process start and must never be confused with a wall clock, while
+/// the allowance window is persisted with real timestamps. A clamp at epoch
+/// guarantees no negative value ever reaches stored state.
+fn now_epoch_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX))
+}
+
+/// Whether this sample should be billed against the free tier's allowance.
+///
+/// Two conditions, both required, and both decided elsewhere — this function only
+/// reads them so the rule has one home:
+///
+/// * **A free tier with an allowance.** Read from the meter's mirror of the hub's
+///   latest word; `None` is a paying tier or a hub that switched the quota off,
+///   and a paying tier must never accumulate a count the UI would have to
+///   suppress.
+/// * **A tunnel carrying the student's traffic.** A sample taken while the tunnel
+///   is not proven ready is the Core moving probe bytes, not the student moving
+///   data, and billing it would make "0 GB used" false on a device that carried
+///   nothing.
+///
+/// For the second half this uses the traffic sink's own activity verdict rather
+/// than re-probing readiness: `observe_readiness` is async, asks the Core through
+/// the very tunnel being measured, and is already the caller of this stream — so
+/// asking it here would be a probe per second and a cycle. `is_active` is the
+/// same "the tunnel is carrying bytes right now" signal the readiness decision
+/// consumes, so counting is gated on the same evidence.
+fn meter_should_count() -> bool {
+    crate::chrysalis::meter::has_allowance() && sink().is_active()
+}
+
 /// Starts the app's own `/traffic` subscription, if the tray rate task (which
 /// shows the same numbers) is not already holding one.
 ///
@@ -355,6 +392,35 @@ impl TrafficStreamTask {
                             match stream.next_event(TRAFFIC_STALE_TIMEOUT, || false).await {
                                 crate::utils::connections_stream::StreamConsumeState::Event(event) => {
                                     mark(event.up, event.down);
+                                    // The free tier's allowance is fed from the SAME
+                                    // sample, deliberately: one socket, one reading,
+                                    // two questions ("is it working now" and "how much
+                                    // ever"). The totals are passed only when the Core
+                                    // sent them, and `meter::observe` decides nothing
+                                    // about the subscription — it is told whether to
+                                    // count, so a paying tier or a silent tunnel can
+                                    // never be billed by accident.
+                                    if let Some(totals) = event.totals {
+                                        let now_ms = now_epoch_ms();
+                                        crate::chrysalis::meter::observe(
+                                            totals.up_total,
+                                            totals.down_total,
+                                            meter_should_count(),
+                                        );
+                                        // Flushing here keeps the stored window
+                                        // bounded without a second task: the
+                                        // stream already ticks at 1 Hz and this
+                                        // runs a handful of times a minute.
+                                        if crate::chrysalis::meter::flush_due(now_ms)
+                                            && let Err(err) = crate::chrysalis::meter::flush(now_ms).await
+                                        {
+                                            logging!(
+                                                debug,
+                                                Type::Config,
+                                                "could not persist the free-tier usage window: {err:#}"
+                                            );
+                                        }
+                                    }
                                 }
                                 crate::utils::connections_stream::StreamConsumeState::Stale => {
                                     // A quiet stream is a gone stream. Drop the claim

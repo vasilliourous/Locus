@@ -21,6 +21,7 @@ pub mod device;
 pub mod expiry;
 pub mod heartbeat;
 pub mod hub;
+pub mod meter;
 pub mod runtime;
 pub mod signout;
 pub mod store;

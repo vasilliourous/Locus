@@ -715,6 +715,15 @@ async fn handle_success(response: &crate::chrysalis::heartbeat::HeartbeatRespons
             "[chrysalis] could not store the free-tier allowance: {error:#}"
         );
     }
+    // …and mirror it into the meter, which is what actually bills samples. This
+    // is the line that makes the counter run: without it `meter::has_allowance`
+    // stays false forever, every sample is rebaselined instead of billed, and the
+    // usage bar reads a permanent zero — the defect this whole path exists to fix.
+    //
+    // Written unconditionally, including when the hub sends nothing, for the same
+    // reason the store write above is: absence means "no allowance applies", and
+    // a stale value left in place would bill a student the hub had released.
+    crate::chrysalis::meter::set_allowance_mb(response.free_allowance_mb);
     // …and the speed to drop to once it is spent. Same rule: the hub's latest
     // word replaces the previous one, including when that word is "nothing".
     if let Err(error) = store::store_throttle_mbps(response.free_throttle_mbps).await {

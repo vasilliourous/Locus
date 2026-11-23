@@ -24,6 +24,81 @@ commercial gaps, [`../business/17-not-built.md`](../business/17-not-built.md).
 
 ---
 
+## THE FREE TIER'S COUNTER HAD NO WRITER, AND EVERY TEST PASSED (2026-11-23, unreleased)
+
+**Reported:** "the limiter does not seem to kick in, or even if it does, the
+counter for 15GB does not count up or update in any way."
+
+**It never counted.** `chrysalis::usage` held the window, the rollover, the 80%
+line and the throttle classification, pure and fake-clock tested, documented as
+BUILT. `Usage::record` and `store::store_usage` had **no caller in the tree**.
+The stored window was never written, so `used_bytes` was permanently `0`,
+`percent_used()` was permanently `0`, and `classify()` could never reach
+`throttled`. The usage bar rendered a bar that could not move.
+
+**The class of defect is the one tests cannot see.** Every test called `record`
+directly, so every test proved the arithmetic and none proved the wiring. This
+is the same shape as the UoT silent no-op (§29) and the `throttle_mbps` reader
+check in §23(f): a value that arrives, is persisted, and is never consumed —
+except here the value was never even produced. A pure module with a green suite
+is not a working feature; it is a working *function*.
+
+**The fix has three parts, and the third is the one that matters.**
+
+1. `chrysalis/meter.rs` is the producer: it folds the Core's lifetime
+   `upTotal`/`downTotal` from the `/traffic` stream into the stored window. It is
+   deliberately not `traffic_probe`'s sink — that module ignores totals on purpose
+   (`upTotal > 0` is a latch, not evidence) and its tests pin that.
+2. Counting is gated on a free-tier allowance **and** a tunnel carrying the
+   student's traffic, so a paying tier or a probe-only sample is rebaselined
+   rather than billed.
+3. `check-consistency.sh` §23(h) asserts the producer, the flush, the allowance
+   mirror and the throttle gate each have a caller. **Observed failing first**:
+   with the `meter::observe` call, the `set_allowance_mb` call and the
+   `allows_new_connection` gate removed, it emits three BAD lines — one of which
+   restates the student's report.
+
+**A second defect inside the fix.** The first draft of the meter had its own
+"did the total go backwards" check, and a test that dropped both totals to zero.
+Against a `wrapping_sub` implementation the test **passed**, because
+`unwrap_or(0)` masked the wrap and the extra check hid it: a guard that could not
+fail, in the change whose whole point was a guard that could not fail. The rule
+now lives only in `usage::billable_delta`, and the test uses a *partial* drop
+(1000 → 500) where a wrap bills 1.8 × 10¹⁹ bytes. That version fails.
+
+**The throttle, closed where it is safe.** The free plan's 1 Mbps ceiling is the
+hub's per-port `tc` class and applies regardless; a client-side speed cap is a
+measured no-op at the config level and would need privileged per-OS shaping to go
+lower, which risks the paying tiers that share the build. So the client enforces
+the decision — a spent allowance refuses a *new* free tunnel — and `Unlimited`
+never refuses, which is what keeps a paid plan unreachable by this code.
+
+**Two more defects found in review, both silent data loss in the flush.**
+
+The first draft of `flush` cleared the accumulator with `swap(0)` **before**
+awaiting the store, so a failed write lost those bytes permanently — the
+allowance would silently under-count, the mirror image of the reported bug. The
+obvious repair, `store(0)` after a successful write, was worse: it erases a
+sample that landed while the write was in flight, because `observe` had already
+added it. The debit is now `fetch_sub(written)` behind `debit_written`, which
+removes exactly what was written and nothing else. Concurrency was the second
+half: two flushes could each read the accumulator and then read-modify-write the
+same stored window, the second overwriting the first's addition — so the whole
+flush is serialised on a **tokio** mutex (a `parking_lot` guard held across
+`.await` is unsound; clippy rejects it, and it was the first thing written here).
+
+*A test in this change was itself a guard that could not fail.* The first version
+of `a_sample_landing_during_a_flush_is_not_erased` re-implemented the subtraction
+beside the code, so it passed against `store(0)`. It now drives
+`debit_written` — the function the real flush calls — and was observed failing
+(`left: 0, right: 500`) against the zeroing version. That is the third
+cannot-fail guard in a change whose subject is cannot-fail guards.
+
+**Unverified:** that a real device crossing the allowance is refused on its next
+connect. That needs a live hub and a spent code.
+
+---
+
 ## A GUARD THAT COULD NOT FAIL, AND THE DEAD SURFACE IT WAS HIDING (2026-11-23, unreleased)
 
 Found by a read-only assessment of the tree. Four defects, and the same shape in
