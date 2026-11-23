@@ -254,7 +254,7 @@ Not exhaustive — the point is the *classes*, because each had its own hazard:
 | `docs/archive/`, `docs/history/` | Retired and reference material. The folder carries the status, and a historical document naming a dead path is history, not rot. |
 | Historical quotations in `FIXES.md`, `CLAIMS.md` §5, and CI comments | A defect log that says a message read something else is a false record. Each such mention is marked `(now …)` where it matters; the `D:\a\Locus\Locus` CI-workspace path in `CLAIMS.md` A8 is marked **historical string, not a live identifier**. |
 | Genuine English "locus" | None found outside `vendor/`. If one appears, it is not a defect. |
-| The cat logo | Contains no text; verified by grep over every `.svg`. Not touched. |
+| ~~The cat logo~~ **Now replaced** | It carried no text, so this register never governed it. It was replaced by the FlClash glyph on 2026-11-23 for brand reasons, not naming ones — see `client/src-tauri/icons/README.md`. The row is kept, struck through, because a reader grepping for the mark should find where it went. |
 
 ## 7. Related
 

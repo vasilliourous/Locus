@@ -152,16 +152,26 @@ export const UpdatePrompt = () => {
     setInstalling(true)
     try {
       await chrysalisInstallUpdate()
-      // Reached only when the install did NOT restart the app — Windows exits
-      // into the NSIS installer instead, so this is the Linux/macOS path, and
-      // even there the new binary is not running until a restart.
+      // Two paths reach here, and they end differently:
+      //
+      //  * Windows — never reaches the promise's success on a real install: the
+      //    plugin launches the NSIS setup and exits the process. A resolution
+      //    here means the installer returned without taking the app down, which
+      //    is exactly when the dialog must stay useful rather than vanish.
+      //  * macOS / Linux — the installer replaced the app on disk and returned,
+      //    and the backend now **relaunches** (see `chrysalis_install_update`), so
+      //    this process is on its way out with a new binary behind it. Closing the
+      //    dialog is right, and it is what the restart is about to do anyway.
+      //
+      // It is left `installing` on purpose: `setInstalling(false)` in `finally`
+      // would flash the buttons back for a frame before the relaunch kills the
+      // window. The comment below is what a student sees in that window.
       setOpen(false)
     } catch (err) {
       // Shown in the dialog rather than as a toast: the student is looking at
       // this dialog, and a failure here needs a retry, not a message that
       // disappears while they read it.
       setError(errorDetail(err))
-    } finally {
       setInstalling(false)
     }
   }, [])

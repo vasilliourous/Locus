@@ -379,6 +379,13 @@ describe('there is exactly one appearance', () => {
       'useThemeMode',
       'resolveThemeMode',
       'CHRYSALIS_LIGHT',
+      // The override that outlived the registry. Added 2026-11-23, when it was
+      // deleted: it was parsed, patched and saved for four days after the layer
+      // around it went, because nothing could see that it had no reader.
+      'theme_setting',
+      'IVergeTheme',
+      'applyThemeSetting',
+      'css_injection',
     ]
     const offenders: string[] = []
     for (const file of files) {
@@ -401,12 +408,112 @@ describe('there is exactly one appearance', () => {
     expect(() => read('../src/pages/_themes.ts')).toThrow()
   })
 
+  it('the palette override is gone from the backend and the wire type', () => {
+    // `theme_setting` was the last piece of the theme layer and the hardest to
+    // notice, because it was not *broken* — it was inert. `IVerge` parsed it,
+    // `patch_config` copied it, `save_file` wrote it back, and no code ever read
+    // it, so removing it changes no behaviour and every test stayed green either
+    // way. That is exactly why this assertion has to exist and why it is a
+    // source scan rather than a behavioural one.
+    //
+    // Two files, because the field lived in both: Rust owns the YAML, and the
+    // ambient TS type is what a future UI would bind a control to. A field in
+    // only one of them is a half-restored layer.
+    //
+    // Demonstrated failing by putting `pub theme_setting: Option<String>,` back
+    // into `config/verge.rs` — the scan finds it and this goes red while every
+    // other test in the suite stays green.
+    //
+    // The files' own comments still name the field in prose (they explain what
+    // was removed and why), which is why the scan is over `readCode` — comments
+    // stripped, the same rule every colour assertion above uses. Without that,
+    // the explanation of the removal would fail the guard against it, and the
+    // tempting fix would be to delete the explanation.
+    for (const file of [
+      '../src-tauri/src/config/verge.rs',
+      '../src/types/global.d.ts',
+    ]) {
+      expect(
+        readCode(file),
+        `${file} still declares a palette override`,
+      ).not.toMatch(/\btheme_setting\b\s*[?:]/)
+    }
+  })
+
   it('every tier wire name still has a badge colour', () => {
     // The tier table was NOT removed with the theme layer: its keys are frozen
     // wire names and the tint is redundant encoding for a label, not a palette.
     // Losing one here means a paying student sees a bare wire name.
     for (const wire of ['strike', 'budget', 'free', 'eco']) {
       expect(TIER_COLORS[wire], `${wire} has no badge colour`).toBeDefined()
+    }
+  })
+})
+
+describe('the mark is legible on the surfaces it is drawn on', () => {
+  /**
+   * The glyph's gradients are the one colour in this project that the palette
+   * does not supply.
+   *
+   * `src/assets/image/glyph.svg` is FlClash's artwork, adopted whole (see
+   * `src-tauri/icons/README.md`). Its three gradient stops are read out of the
+   * file and asserted here rather than trusted, because everything else in this
+   * file's subject — every palette value — is checked, and a mark that vanished
+   * into its ground would be the same class of defect as unreadable body text.
+   *
+   * `§9` of `/COLOURS.md` sets the floor for a non-text UI mark at 3:1, and the
+   * ground is `background`, not `surface`: `layout-sidebar.tsx` paints nothing, so
+   * the mark sits on the body's `--background-color`. Asserting against `surface`
+   * was the first draft and it was measuring a card the mark is never drawn on.
+   *
+   * THE FINDING THAT MADE THIS TEST WORTH WRITING. The glyph's top bar runs
+   * `#726BF1 -> #5B5EE1`, and that darker end is **2.87:1 against `surface`** —
+   * below the floor. It is fine against `background` (3.36:1), which is where the
+   * mark is, so this is not a defect today. It is recorded here because the
+   * margin is thin: moving the mark onto a card, or adopting a darker artwork,
+   * trips the floor, and this is the check that would say so instead of leaving
+   * somebody to notice a muddy gradient.
+   *
+   * What this CANNOT tell you: whether it looks right. A ratio says two values
+   * are distinguishable, not that they are pleasant — a person has to look.
+   */
+  const readGlyph = () => {
+    const svg = readFileSync(
+      path.join(__dirname, '../src/assets/image/glyph.svg'),
+      'utf8',
+    )
+    // Both ends of every `<stop>` in the file. Sorted so the assertion does not
+    // depend on the order the gradients happen to be declared in.
+    const stops = [...svg.matchAll(/stop-color="(#[0-9A-Fa-f]{6})"/g)].map(
+      (m) => m[1],
+    )
+    return stops
+  }
+
+  it('every gradient stop in the glyph clears 3:1 on the page ground', () => {
+    const stops = readGlyph()
+    // Guard the guard: an empty list would make the loop below pass vacuously,
+    // which is exactly the "check that cannot fail" this file exists to avoid.
+    expect(stops.length, 'glyph.svg declares no gradient stops').toBeGreaterThan(
+      0,
+    )
+    for (const stop of stops) {
+      expect(
+        contrast(stop, palette.background),
+        `${stop} is below the 3:1 non-text floor on background`,
+      ).toBeGreaterThanOrEqual(3)
+    }
+  })
+
+  it('the glyph is not painted in a palette colour', () => {
+    // The point of adopting this artwork is that it IS the artwork. A stop that
+    // matched a palette value would mean somebody had started recolouring it,
+    // which is the drift `COLOURS.md` §8 warns about.
+    const paletteValues = new Set(
+      Object.values(palette).map((v) => String(v).toUpperCase()),
+    )
+    for (const stop of readGlyph()) {
+      expect(paletteValues.has(stop.toUpperCase())).toBe(false)
     }
   })
 })

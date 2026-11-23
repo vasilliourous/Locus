@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  The application mark: two bars and a dot on a 30° lattice, pitch 61.76,
+  radius 23.16 — the FlClash glyph.
+
+  This is the in-repo master. `client/scripts/generate-icons.mjs` reads it and
+  renders every raster surface from it (app icon, tile set, tray, favicon,
+  landing page). Do not edit the geometry here without regenerating: the script
+  compares bytes, so an edit that is not re-rendered fails the check pass.
+
+  The gradients below are the mark's own values and are the ONE colour in this
+  file that is not read from `client/src/pages/_theme.tsx`. They are the artwork,
+  not a palette: every surface the app draws carries them unchanged, which is
+  what "the icon is the FlClash glyph" means. See COLOURS.md §8.
+-->
+<svg width="240" height="240" viewBox="0 0 240 240" xmlns="http://www.w3.org/2000/svg">
+  <title>Chrysalis mark</title>
+  <defs>
+    <linearGradient id="top" x1="0" y1="8.31" x2="0" y2="124.11" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#726BF1"/>
+      <stop offset="1" stop-color="#5B5EE1"/>
+    </linearGradient>
+    <linearGradient id="mid" x1="0" y1="96.53" x2="0" y2="177.59" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#4183F2"/>
+      <stop offset="1" stop-color="#1C76E0"/>
+    </linearGradient>
+    <linearGradient id="dot" x1="0" y1="184.76" x2="0" y2="231.08" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#66B6F4"/>
+      <stop offset="1" stop-color="#4FA8E1"/>
+    </linearGradient>
+  </defs>
+  <g stroke-width="46.32" stroke-linecap="round">
+    <line x1="59.68" y1="100.95" x2="180.02" y2="31.47" stroke="url(#top)"/>
+    <line x1="90.56" y1="154.43" x2="150.74" y2="119.69" stroke="url(#mid)"/>
+  </g>
+  <circle cx="121.44" cy="207.92" r="23.16" fill="url(#dot)"/>
+</svg>

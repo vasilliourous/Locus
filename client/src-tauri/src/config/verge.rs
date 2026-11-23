@@ -109,8 +109,20 @@ pub struct IVerge {
 
     pub proxy_host: Option<String>,
 
-    pub theme_setting: Option<IVergeTheme>,
-
+    // `theme_setting` was removed on 2026-11-23 with the last of the theme layer.
+    //
+    // It was a per-field override of the MUI palette (`primary_color`, `font_family`,
+    // `css_injection`, …) inherited from Clash Verge Rev. Nothing ever read it:
+    // `services/theme.ts` builds the one palette with `createTheme(...)` taking no
+    // argument, so the struct below was parsed, patched, written back by `save_file`
+    // and consumed by nobody. Three documents still described it as "the only
+    // runtime input to the palette", which is why it survived this long — a stored
+    // preference with no reader looks exactly like a feature from the outside.
+    //
+    // Safe on upgrade for the same reason `theme_mode`/`theme_id` were: `IVerge`
+    // derives `Deserialize` with no `deny_unknown_fields`, so a `verge.yaml` written
+    // by an older build still loads, the key is ignored, and the next `save_file`
+    // drops it. There is nothing to migrate because there was nothing to apply.
     pub web_ui_list: Option<Vec<String>>,
 
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -438,6 +450,26 @@ pub struct IVerge {
     /// `None` means no install has been attempted since the last one finished.
     pub chrysalis_update_install_stage: Option<String>,
 
+    /// What the application looked like immediately before an installer was run.
+    ///
+    /// `<version>|<sha256 of the executable>`, written by
+    /// [`crate::chrysalis::update::relabel::record_pre_exit`] as the last step
+    /// before the hand-off, and **taken** (read then cleared) by the next launch.
+    ///
+    /// # Why this is not the same field as `chrysalis_update_install_stage`
+    ///
+    /// That one records where an attempt *got to*; this one records what there was
+    /// to compare against *afterwards*. They answer different questions and only
+    /// this one can answer the reported one — "the update installs but nothing
+    /// changes". On Windows the installer is launched and the process exits
+    /// whether or not it succeeded, so "how far did we get" is always `launched`
+    /// and is silent about the outcome. A digest across the restart is the only
+    /// observation that distinguishes a real install from a setup that declined.
+    ///
+    /// `None` means no install has been attempted since the last launch compared
+    /// one. See [`crate::chrysalis::update::relabel`].
+    pub chrysalis_update_pre_exit: Option<String>,
+
     // ── The free tier's usage window ─────────────────────────────────────────
     //
     // The allowance is counted CLIENT-SIDE, because the hub has no per-user
@@ -520,22 +552,6 @@ pub struct IVergeTestItem {
     pub name: Option<String>,
     pub icon: Option<String>,
     pub url: Option<String>,
-}
-
-#[derive(Default, Debug, Clone, Deserialize, Serialize)]
-pub struct IVergeTheme {
-    pub primary_color: Option<String>,
-    pub secondary_color: Option<String>,
-    pub primary_text: Option<String>,
-    pub secondary_text: Option<String>,
-
-    pub info_color: Option<String>,
-    pub error_color: Option<String>,
-    pub warning_color: Option<String>,
-    pub success_color: Option<String>,
-
-    pub font_family: Option<String>,
-    pub css_injection: Option<String>,
 }
 
 impl IVerge {
@@ -764,7 +780,6 @@ impl IVerge {
         patch!(proxy_auto_config);
         patch!(pac_file_content);
         patch!(proxy_host);
-        patch!(theme_setting);
         patch!(web_ui_list);
         patch!(clash_core);
         patch!(hotkeys);

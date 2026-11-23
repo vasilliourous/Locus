@@ -16,9 +16,16 @@ const OS = getSystem()
  * "for light mode": the machinery that made a second one possible was deleted on
  * purpose, and re-adding it means re-adding the whole layer.
  *
- * `theme_setting` overrides still apply where the palette reaches MUI (see
- * `theme.ts`), so a student who had set a custom colour keeps it. That is a
- * *preference*, not a theme, and it does not create a second appearance.
+ * # There is no runtime input at all
+ *
+ * `theme_setting` — the per-field override of the palette inherited from Clash
+ * Verge Rev — was the last survivor of the layer and was deleted on 2026-11-23.
+ * It never had a reader: this file's `defaultTheme` is projected by
+ * `services/theme.ts` with no argument, so no stored preference could change a
+ * colour. Three documents claimed otherwise, which is what kept it alive.
+ *
+ * So the values below are the *only* ones a student will ever see, and the answer
+ * to "can a user change the palette?" is no, not "not yet".
  */
 
 /**
@@ -71,9 +78,11 @@ export const chrysalisFontFamily = `-apple-system, BlinkMacSystemFont, "Segoe UI
  * The MUI-shaped projection of {@link CHRYSALIS_COLORS}.
  *
  * These are the fields `theme.ts` reads: everything else in the MUI palette is
- * derived from them. `theme_setting` overrides each as `setting.X || dt.X` in
- * that module, which is the shipped precedence and is unchanged — a student's own
- * colour wins, and this object is the default it falls back to.
+ * derived from them. The shape is the retired override's vocabulary (it was what
+ * `theme_setting` used to produce), kept because `theme.ts` and
+ * `tests/theme-colors.test.ts` both read these names — but there is no longer a
+ * `setting.X || dt.X` precedence, because there is no `setting.X`. Each field is
+ * the value below, always.
  */
 export const defaultTheme = {
   primary_color: CHRYSALIS_COLORS.accent,

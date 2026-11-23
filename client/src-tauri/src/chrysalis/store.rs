@@ -667,6 +667,37 @@ pub async fn clear_update_install_stage() -> Result<()> {
     .await
 }
 
+/// Records the application's fingerprint immediately before an installer is run.
+///
+/// The counterpart to [`record_update_install_stage`], and it exists for the
+/// failure that one cannot describe: an install that completes and replaces
+/// nothing. On Windows the plugin exits the process at the hand-off regardless of
+/// the installer's result, so the only place the outcome can be observed is the
+/// **next** launch, and the only thing that launch can compare against is what
+/// was written here. See [`crate::chrysalis::update::relabel`].
+pub async fn record_update_pre_exit(payload: &str) -> Result<()> {
+    save_verge(|draft| {
+        draft.chrysalis_update_pre_exit = Some(payload.to_owned().into());
+    })
+    .await
+}
+
+/// Reads **and clears** the pending-update fingerprint.
+///
+/// Taken rather than read, so the comparison that follows can happen exactly once
+/// per attempted update. A plain read would re-report "this device did not update"
+/// on every launch until another install overwrote the record, which is how a
+/// real warning becomes noise nobody reads — the same reasoning as the offer's
+/// single terminal state.
+pub async fn take_update_pre_exit() -> Result<Option<String>> {
+    let mut taken: Option<String> = None;
+    save_verge(|draft| {
+        taken = draft.chrysalis_update_pre_exit.take().map(|value| value.to_string());
+    })
+    .await?;
+    Ok(taken)
+}
+
 /// Forgets a previous refusal, after the device is entitled again.
 ///
 /// Called on a successful activation. Without this a student who renews would

@@ -73,12 +73,13 @@ footer {
   margin-bottom: 1.25rem;
 }
 
-/* The icon is `currentColor`, the same as in the app, so it inherits the
-   theme here too rather than needing a second file per mode. */
+/* The mark carries its own gradients, so it is NOT `currentColor` and does not
+   follow the theme — the same artwork is drawn in both modes. The fixed size is
+   the whole rule; anything colour-related here would be overwritten by the
+   glyph's own `fill`/`stroke` and would only mislead the next reader. */
 .brand__mark {
   width: 3.5rem;
   height: 3.5rem;
-  color: var(--accent);
   flex: none;
 }
 

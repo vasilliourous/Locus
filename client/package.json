@@ -16,6 +16,8 @@
     "web:build": "tsc --noEmit && vite build",
     "web:serve": "vite preview",
     "prebuild": "node scripts/prebuild.mjs",
+    "icons": "node scripts/generate-icons.mjs",
+    "icons:check": "node scripts/generate-icons.mjs --check",
     "release-version": "node scripts/release-version.mjs",
     "release:autobuild": "pnpm release-version autobuild",
     "release:deploytest": "pnpm release-version deploytest",

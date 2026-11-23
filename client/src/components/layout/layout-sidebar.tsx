@@ -3,7 +3,7 @@ import { Box, List, Menu, MenuItem, SvgIcon, useTheme } from '@mui/material'
 import { useCallback, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
-import iconDark from '@/assets/image/icon_dark.svg?react'
+import glyph from '@/assets/image/glyph.svg?react'
 import LogoSvg from '@/assets/image/logo.svg?react'
 import { useVerge } from '@/hooks/use-verge'
 import { useNavMenuOrder } from '@/pages/_layout/hooks'
@@ -28,12 +28,10 @@ export const LayoutSidebar = (props: LayoutSidebarProps) => {
   const { t } = useTranslation()
   const theme = useTheme()
   const { verge, mutateVerge, patchVerge } = useVerge()
-  // One mark, always. The SVG is `fill: currentColor`, so its colour comes from
-  // the theme's `primary.main` and no second file is needed. This used to pick
-  // between a solid and an outlined variant from the resolved light/dark mode;
-  // with one permanent appearance that choice collapsed to a constant. Marks:
-  // `/COLOURS.md` §8.
-  const iconMark = iconDark
+  // One mark, always. The glyph is the FlClash artwork and carries its own
+  // gradients, so — unlike the previous single-colour shield — it does NOT
+  // resolve `currentColor` from `primary.main`. Marks: `/COLOURS.md` §8.
+  const iconMark = glyph
   const [menuUnlocked, setMenuUnlocked] = useState(false)
   const [menuContextPosition, setMenuContextPosition] =
     useState<MenuContextPosition | null>(null)
@@ -125,11 +123,10 @@ export const LayoutSidebar = (props: LayoutSidebarProps) => {
     <div className="layout-content__left">
       {/* Logo.
           //
-          // Both marks follow the theme through `currentColor` rather than a
-          // per-theme asset — a duplicated asset per theme is a file that gets
-          // forgotten. `color` rather than `fill`: the imported components
-          // resolve `currentColor` from the inherited `color`, so one declaration
-          // drives the shield and the wordmark together.
+          // Two marks, and they colour differently. The wordmark resolves
+          // `currentColor` from the inherited `color`, so one declaration on the
+          // wrapper drives it. The glyph does NOT: it carries its own gradients
+          // as artwork, so the wrapper's colour passes through it untouched.
           //
           // The one thing this wordmark must not do is ignore the theme, which
           // it did for its whole early life through a hardcoded `fill`. */}

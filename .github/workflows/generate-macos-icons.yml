@@ -1,0 +1,90 @@
+# Regenerate `icon.icns`, the one mark the generator cannot produce on Linux.
+#
+# WHY THIS EXISTS
+#   `client/scripts/generate-icons.mjs` renders every raster mark from
+#   `client/src/assets/image/glyph.svg`, but a `.icns` needs `iconutil`, which is
+#   macOS-only. This job is that missing step, and nothing else.
+#
+# WHY THERE IS NO `Assets.car`
+#   There used to be one, and it was a problem: a compiled asset catalog takes
+#   PRECEDENCE over `icon.icns` inside a bundle, so while the catalog held the old
+#   artwork a correctly regenerated `.icns` changed nothing on a Mac — the Dock
+#   still drew the old mark. Only Apple's `actool` can author a catalog, so it
+#   could not be fixed from Linux either.
+#
+#   It was removed from `bundle.icon` on 2026-11-23. macOS resolves the icon from
+#   `icon.icns`, which is the normal arrangement for a Tauri app distributed
+#   outside the App Store. Do not re-add a catalog without regenerating it in the
+#   same commit: `check-consistency.sh` §54 now fails on a stray `.car` in
+#   `icons/` precisely so a stale one cannot creep back.
+#
+# WHY IT COMMITS NOTHING
+#   An icon is the one artifact whose correctness nothing can compile-check, and
+#   these are binary. The job uploads the file; a human looks at it and commits it.
+#
+# USAGE
+#   Run "Generate macOS icon assets" from the Actions tab, download the artifact,
+#   and put `icon.icns` in `client/src-tauri/icons/`.
+name: Generate macOS icon assets
+
+on:
+  workflow_dispatch:
+
+jobs:
+  macos-icons:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Render the per-size masters from the vector
+        # `iconutil` wants the full `.iconset` ladder. Every size is rendered from
+        # the SVG at its own resolution rather than downscaled from one 1024
+        # master: a single master scaled to 16 px erodes the margin and softens
+        # the glyph's two bars into one mass.
+        run: |
+          set -euo pipefail
+          test -f client/src/assets/image/glyph.svg \
+            || { echo "::error::missing client/src/assets/image/glyph.svg"; exit 1; }
+
+          SET="$RUNNER_TEMP/AppIcon.iconset"
+          mkdir -p "$SET"
+          for spec in 16:icon_16x16 32:icon_16x16@2x 32:icon_32x32 64:icon_32x32@2x \
+                      128:icon_128x128 256:icon_128x128@2x 256:icon_256x256 \
+                      512:icon_256x256@2x 512:icon_512x512 1024:icon_512x512@2x; do
+            px="${spec%%:*}"
+            name="${spec##*:}"
+            rsvg-convert client/src/assets/image/glyph.svg -w "$px" -h "$px" -o "$SET/$name.png"
+          done
+          ls -la "$SET"
+
+      - name: Compile icon.icns
+        run: |
+          set -euo pipefail
+          iconutil -c icns "$RUNNER_TEMP/AppIcon.iconset" -o "$RUNNER_TEMP/icon.icns"
+          file "$RUNNER_TEMP/icon.icns"
+          # Prove it decodes to the expected frame count rather than trusting a
+          # non-empty file. A `.icns` with zero frames is a plausible-looking
+          # failure that installs and shows a generic icon.
+          python3 - "$RUNNER_TEMP/icon.icns" <<'PY'
+          import struct, sys
+          data = open(sys.argv[1], 'rb').read()
+          magic, length = struct.unpack('>4sI', data[:8])
+          if magic != b'icns':
+              raise SystemExit(f"not an icns: {magic!r}")
+          if length != len(data):
+              raise SystemExit(f"declared {length} bytes, file is {len(data)}")
+          offset, frames = 8, []
+          while offset < len(data):
+              tag = data[offset:offset + 4].decode('ascii', 'replace')
+              size = struct.unpack('>I', data[offset + 4:offset + 8])[0]
+              frames.append(tag)
+              offset += size
+          print("frames:", ' '.join(frames), f"({len(frames)} total)")
+          if len(frames) < 8:
+              raise SystemExit(f"expected at least 8 frames, found {len(frames)}")
+          PY
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: icon.icns
+          path: ${{ runner.temp }}/icon.icns

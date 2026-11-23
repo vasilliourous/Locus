@@ -346,12 +346,16 @@ that layer existed, never as an instruction, because every file it names is gone
 
 Two properties are worth keeping in mind if a second appearance is ever proposed:
 
-- **Shape and decoration travelled by CSS variables** (`--card-radius`,
-  `--control-radius`) and one `<style id="chrysalis-theme-decoration">` element. The
-  variables survive — there is one set of values and `cardSx` still reads
-  `var(--card-radius, 12px)` — but nothing injects a decoration any more.
-- **`setting.X || dt.X` is unchanged.** It is the only runtime input to the
-  palette, and it is a preference, not a mode.
+- **Shape travelled by CSS variables** (`--card-radius`,
+  `--control-radius`). The variables survive — there is one set of values and
+  `cardSx` still reads `var(--card-radius, 12px)` — but nothing injects a
+  decoration any more; the `<style id="chrysalis-theme-decoration">` element went
+  with the hook that wrote it.
+- **There is no palette override.** This section used to say "`setting.X || dt.X`
+  is unchanged … it is a preference, not a mode". That was false: the projection
+  never read a `setting`, so the only effect of the sentence was to keep
+  `theme_setting` alive in `IVerge` after the layer around it was deleted. The
+  field was removed on 2026-11-23 and `/COLOURS.md` §1 records it.
 
 `src/pages/_surfaces.ts` defines the shared card styling, so every card is the
 same object. Note the app zeroes MUI's shadow scale app-wide and uses a 1px border
@@ -367,4 +371,4 @@ instead — a card that relied on `elevation` would be invisible.
 | Connections table, Rules browser, Unlock checker | Tools for choosing between nodes, or unrelated to a VPN. |
 | Node picker, core selector, TUN/system-proxy switches, ports, DNS | One server per tier, one core, decided by Chrysalis and the hub. Exposing them is the interface the product exists to remove. |
 | Deep links entirely | They existed solely to import subscription URLs. |
-| A Chrysalis logo asset | `src-tauri/icons/*` is still the Clash Verge Rev mark. A separate 48×48 shield is a brand decision nobody has taken, so the activation screen shows the wordmark alone. Marks: [`/COLOURS.md`](../../COLOURS.md) §8. |
+| A separately-drawn brand mark | `src/assets/image/glyph.svg` is the FlClash glyph every generated icon is rendered from — the app icon, the tray set and the favicon (`/COLOURS.md` §8, `src-tauri/icons/README.md`). It is the mark itself, not a variant of one, so the activation screen shows it rather than a separate 48×48 drawing. |

@@ -92,7 +92,13 @@ async fn resolve_setup() {
         async { init_chrysalis_update_poll() },
     );
 
-    Handle::refresh_clash();
+    // Before `refresh_tray_menu` and before the window is shown, in this order:
+    // a launch that follows a failed install records `not-replaced`, and the
+    // Account page reads that record. Spawned rather than awaited because hashing
+    // the executable is file I/O on the start-up path, and a slow disk must not
+    // delay the first paint — the verdict is only ever displayed.
+    init_chrysalis_update_relabel();
+
     refresh_tray_menu().await;
     resolve_done();
 }
@@ -176,6 +182,25 @@ async fn init_auto_backup() {
 /// through a stored credential rather than a live window.
 fn init_chrysalis_update_poll() {
     crate::chrysalis::update::poll::start(Handle::app_handle().clone());
+}
+
+/// Settles whether the last update attempt actually replaced this application.
+///
+/// Runs at launch, before anything can offer another update, because this is the
+/// first moment the answer exists: on Windows the installer is launched and the
+/// process exits without ever returning, so the attempt itself cannot know its own
+/// outcome. The record it left behind is compared against the running executable
+/// here — see [`crate::chrysalis::update::relabel`], which is where the reasoning
+/// lives.
+///
+/// Placed in `resolve_setup`'s join rather than in the heartbeat because it must
+/// run for an **unactivated** device too: nothing about a failed install depends on
+/// being entitled, and an unactivated device stranded on an old build is the case
+/// an update is the only cure for.
+fn init_chrysalis_update_relabel() {
+    AsyncHandler::spawn(|| async {
+        crate::chrysalis::update::relabel::classify_on_launch(env!("CARGO_PKG_VERSION")).await;
+    });
 }
 
 /// Resumes the heartbeat for an already-activated device.

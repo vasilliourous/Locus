@@ -309,10 +309,13 @@ const UPDATER_PLUGIN_KEY: &str = "updater";
 /// | `PayloadChecked` | the bytes are not an installer; this is refused, not a crash |
 /// | `SignatureVerified` | died between verification and the hand-off, before the plugin was involved |
 /// | `Launched` | **the plugin was called.** A crash from here on is the installer's, not ours |
+/// | `Replaced` | the next launch saw a different executable: the update took |
+/// | `NotReplaced` | the next launch saw the SAME executable after a fresh release |
 ///
-/// `Launched` is the important one: it means our whole pipeline finished and
-/// every check passed, so the search moves to the installer itself rather than
-/// to the download.
+/// The first four are written during the attempt; the last two are written by
+/// the **next** launch, once it can see what the installer actually did
+/// (`super::relabel`). That split is deliberate — the attempt cannot know its own
+/// outcome, because on Windows the plugin takes the process down before returning.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum InstallStage {
     /// The artifact was downloaded, hashed and staged.
@@ -323,6 +326,33 @@ pub enum InstallStage {
     SignatureVerified,
     /// Handing over to the plugin, which may exit the process on Windows.
     Launched,
+    /// Recorded by the **next launch**: the running executable is not the one the
+    /// installer was given. The update applied.
+    Replaced,
+    /// Recorded by the **next launch**: the running executable is byte-for-byte
+    /// what it was before the hand-off, on a version the installer was supposed
+    /// to replace — and the app nevertheless reports the new version nowhere.
+    ///
+    /// This is the fault the report could not describe: "the update installs but
+    /// the icons never change" and "the update never installed" are the same
+    /// sentence from the outside, and only a comparison across the restart
+    /// separates them.
+    NotReplaced,
+}
+
+/// What a launch compares against, after an install was attempted.
+///
+/// Written **before** the hand-off by [`super::relabel::record_pre_exit`] and
+/// consumed on the next launch by [`super::relabel::classify`]. Its own type
+/// rather than a stringly payload so the writer and the reader cannot disagree
+/// about the encoding — the class of defect that made `download_*`/`update_*`
+/// silently wrong.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PreExitSnapshot {
+    /// The version that was running when the installer was handed the bytes.
+    pub version: String,
+    /// SHA-256 of that executable.
+    pub exe_sha256: String,
 }
 
 impl InstallStage {
@@ -337,6 +367,8 @@ impl InstallStage {
             Self::PayloadChecked => "payload-checked",
             Self::SignatureVerified => "signature-verified",
             Self::Launched => "launched",
+            Self::Replaced => "replaced",
+            Self::NotReplaced => "not-replaced",
         }
     }
 
@@ -368,6 +400,8 @@ impl InstallStage {
             "payload-checked" => Some(Self::PayloadChecked),
             "signature-verified" => Some(Self::SignatureVerified),
             "launched" => Some(Self::Launched),
+            "replaced" => Some(Self::Replaced),
+            "not-replaced" => Some(Self::NotReplaced),
             _ => None,
         }
     }
@@ -394,10 +428,49 @@ impl InstallStage {
             // filters this out: the plugin was called, so the process exiting is
             // the expected outcome rather than an interruption.
             Self::Launched => "the installer was launched",
+            // Also unreachable here — both are *terminal* outcomes, and the one
+            // that matters (`NotReplaced`) gets its own, longer sentence through
+            // [`Self::not_replaced_report`] rather than being squeezed into the
+            // "stopped before it finished" frame, which would be wrong: it
+            // finished, and did nothing.
+            Self::Replaced | Self::NotReplaced => "the last update finished",
         };
         format!(
             "The last update stopped before it finished: {what} (stage: {}).",
             self.key()
+        )
+    }
+
+    /// Whether this stage describes an attempt that never completed.
+    ///
+    /// The single predicate every consumer uses, so "is this a fault?" is answered
+    /// in one place instead of being re-derived by the status command, the Account
+    /// page and any future reader — the four-way disagreement `FIXES.md` records
+    /// for the offer's terminal states.
+    #[must_use]
+    pub const fn needs_attention(self) -> bool {
+        matches!(
+            self,
+            Self::Downloaded | Self::PayloadChecked | Self::SignatureVerified | Self::NotReplaced
+        )
+    }
+
+    /// The sentence for the one outcome that is a silent fault: the installer ran
+    /// and the application did not change.
+    ///
+    /// Named separately from [`Self::interrupted_report`] because the framing is
+    /// different and stating it the other way would be a lie: the update did not
+    /// "stop", it completed and replaced nothing. A student reading that needs to
+    /// know they are still on the old build — and, because the icon never changes
+    /// either, that is the explanation for the sentence they actually reported.
+    #[must_use]
+    pub fn not_replaced_report(was: &str, expected: &str) -> String {
+        format!(
+            "The update to {expected} finished, but this device is still running {was}: the \
+             installer completed without replacing the application. That is why nothing changed \
+             after updating, including the icon. Report this to support with the line above \
+             (stage: {}).",
+            Self::NotReplaced.key()
         )
     }
 }
@@ -703,6 +776,39 @@ impl ReadyInstall {
             Type::System,
             "[chrysalis] update {version}: handing {version} to the platform installer"
         );
+
+        // ── The comparison the next launch will make, recorded before we lose the
+        //    chance to make it ──
+        //
+        // Deliberately here, and not after `install()` below: on Windows the plugin
+        // `ShellExecuteW`s the setup and calls `process::exit(0)` **whether or not
+        // the setup replaced anything** (`tauri-plugin-updater` 2.11.0,
+        // `updater.rs:876`). There is no `Err` for a declined elevation and no
+        // value returned for a `/UPDATE` that chose not to overwrite, so every
+        // branch after that call is unreachable on the platform where the reported
+        // symptom ("updating changes nothing, including the icon") actually
+        // happens.
+        //
+        // So the *before* state is written here, next to the `Launched` stage and
+        // for the same reason, and the *after* state is read by the next launch.
+        // Best-effort: failing to fingerprint must not refuse an update that is
+        // otherwise fine, and a missing record reads as `Unknown` rather than as a
+        // success (`super::relabel`).
+        match super::relabel::record_pre_exit(&version, &current_executable()).await {
+            Ok(snapshot) => logging!(
+                debug,
+                Type::System,
+                "[chrysalis] update {version}: recorded the pre-install fingerprint of {}",
+                snapshot.version
+            ),
+            Err(error) => logging!(
+                warn,
+                Type::System,
+                "[chrysalis] update {version}: could not record the pre-install fingerprint \
+                 ({error:#}); a failed install will not be detectable on the next launch"
+            ),
+        }
+
         // The LAST thing written before the plugin may call `process::exit(0)`.
         // A device that comes back up with this as its last recorded stage got
         // all the way through our side, which moves the defect to the installer.
@@ -710,6 +816,16 @@ impl ReadyInstall {
 
         self.update.install(bytes).context("the update could not be installed")
     }
+}
+
+/// The path of the running executable, or one that cannot be read.
+///
+/// Returning the empty path on failure rather than `Option` keeps the call site
+/// readable, and `fingerprint` turns it into an error the caller logs — which is
+/// the honest outcome: no snapshot, and the next launch says `Unknown` rather than
+/// claiming a successful install.
+fn current_executable() -> std::path::PathBuf {
+    std::env::current_exe().unwrap_or_else(|_| std::path::PathBuf::new())
 }
 
 /// Extracts the hub's checksum from a manifest the plugin preserved.
@@ -1094,6 +1210,11 @@ mod tests {
             InstallStage::PayloadChecked,
             InstallStage::SignatureVerified,
             InstallStage::Launched,
+            // Added with the relabel work. They are written by a *later* launch
+            // than the one that wrote the four above, which is exactly the case a
+            // round trip has to cover: the reader is a different process.
+            InstallStage::Replaced,
+            InstallStage::NotReplaced,
         ] {
             assert_eq!(
                 InstallStage::stored(Some(stage.key())),
@@ -1137,5 +1258,63 @@ mod tests {
                 "the report must name the stage so support has a value to search for"
             );
         }
+    }
+
+    /// Exactly the stages that mean "something needs the student's attention",
+    /// and nothing else.
+    ///
+    /// This predicate is the one `chrysalis_update_status` filters on, so a stage
+    /// landing on the wrong side is either a silent fault (`NotReplaced` not
+    /// reported) or a permanent false alarm (`Replaced` reported on a healthy
+    /// device). Both directions are asserted, because only one of them shows up
+    /// in testing: a wrong *report* is visible, a wrong *silence* is not.
+    ///
+    /// Demonstrated failing by adding `Self::Replaced` to the `matches!` list —
+    /// the healthy outcome then renders a warning beside every successful update.
+    #[test]
+    fn only_real_faults_need_attention() {
+        let faults = [
+            InstallStage::Downloaded,
+            InstallStage::PayloadChecked,
+            InstallStage::SignatureVerified,
+            InstallStage::NotReplaced,
+        ];
+        for stage in faults {
+            assert!(stage.needs_attention(), "{stage:?} must be reported");
+        }
+
+        let clean = [InstallStage::Launched, InstallStage::Replaced];
+        for stage in clean {
+            assert!(
+                !stage.needs_attention(),
+                "{stage:?} must NOT be reported — it is a completed hand-off or a \
+                 confirmed install, and reporting it makes every update look broken"
+            );
+        }
+    }
+
+    /// The "installed and changed nothing" sentence says what a student needs and
+    /// does not dress it as a crash.
+    ///
+    /// Demonstrated failing by routing `NotReplaced` through
+    /// `interrupted_report`, whose wording is "stopped before it finished" — the
+    /// opposite of what happened, on the one outcome where the difference decides
+    /// whether a student thinks they are up to date.
+    #[test]
+    fn the_not_replaced_sentence_explains_the_icon() {
+        let text = InstallStage::not_replaced_report("3.4.4", "3.4.5");
+        assert!(
+            text.contains("still running 3.4.4"),
+            "must name what is running: {text}"
+        );
+        assert!(text.contains("3.4.5"), "must name what was expected: {text}");
+        assert!(
+            text.to_lowercase().contains("icon"),
+            "the reported symptom is the icon, so the sentence has to connect them: {text}"
+        );
+        assert!(
+            !text.contains("stopped before it finished"),
+            "it finished; saying otherwise sends the reader after the wrong fault: {text}"
+        );
     }
 }

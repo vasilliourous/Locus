@@ -55,6 +55,11 @@ enum IconKind {
     Common,
     SysProxy,
     Tun,
+    /// FlClash's `status_4`. No caller selects it yet — this client has no
+    /// safe-mode branch — but the arm exists so the asset it maps to is loaded
+    /// by something rather than being a file nothing references.
+    #[allow(dead_code)]
+    SafeMode,
 }
 
 pub struct Tray {
@@ -66,6 +71,79 @@ pub struct Tray {
     /// — is a real answer everywhere instead of a `cfg` the caller has to mirror.
     /// Only macOS ever starts it; see `update_speed_task`.
     speed_controller: speed_task::TraySpeedController,
+}
+
+/*
+ * The per-scale tray ladder.
+ *
+ * FlClash ships its unix tray as `status_N.png` plus `@2x`/`@3x`/`@4x`, because a
+ * panel on a HiDPI display wants a bigger bitmap rather than a stretched one. The
+ * files are committed at every step so the choice is real; these two functions are
+ * what makes them loaded rather than orphaned.
+ *
+ * `#[allow(dead_code)]` on the whole block: only Linux calls it, and the build
+ * that runs this check is Linux, but `cargo clippy --all-targets` builds the
+ * others too.
+ */
+/// The session's tray scale factor, clamped to the ladder's range.
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+fn tray_scale_factor() -> usize {
+    // `GDK_SCALE` is what a GTK panel uses, and it is what the tray host reads.
+    // Absent means 1x. Parsed rather than trusted: a malformed value falls back
+    // to 1 instead of panicking on a string from the environment.
+    std::env::var("GDK_SCALE")
+        .ok()
+        .and_then(|v| v.trim().parse::<usize>().ok())
+        .unwrap_or(1)
+        .clamp(1, 4)
+}
+
+/// One state at one ladder step.
+#[cfg(target_os = "linux")]
+fn tray_png(status: u8, scale: usize) -> &'static [u8] {
+    // The match is exhaustive over the committed ladder on purpose: a missing
+    // `@3x` is a compile error rather than a runtime fallback that silently
+    // serves the 2x file.
+    match (status, scale) {
+        (1, 1) => include_bytes!("../../../icons/tray-icon.png"),
+        (1, 2) => include_bytes!("../../../icons/tray-icon@2x.png"),
+        (1, 3) => include_bytes!("../../../icons/tray-icon@3x.png"),
+        (1, _) => include_bytes!("../../../icons/tray-icon@4x.png"),
+        (2, 1) => include_bytes!("../../../icons/tray-icon-sys.png"),
+        (2, 2) => include_bytes!("../../../icons/tray-icon-sys@2x.png"),
+        (2, 3) => include_bytes!("../../../icons/tray-icon-sys@3x.png"),
+        (2, _) => include_bytes!("../../../icons/tray-icon-sys@4x.png"),
+        (3, 1) => include_bytes!("../../../icons/tray-icon-tun.png"),
+        (3, 2) => include_bytes!("../../../icons/tray-icon-tun@2x.png"),
+        (3, 3) => include_bytes!("../../../icons/tray-icon-tun@3x.png"),
+        (3, _) => include_bytes!("../../../icons/tray-icon-tun@4x.png"),
+        (4, 1) => include_bytes!("../../../icons/tray-icon-safe.png"),
+        (4, 2) => include_bytes!("../../../icons/tray-icon-safe@2x.png"),
+        (4, 3) => include_bytes!("../../../icons/tray-icon-safe@3x.png"),
+        (4, _) => include_bytes!("../../../icons/tray-icon-safe@4x.png"),
+        _ => include_bytes!("../../../icons/tray-icon.png"),
+    }
+}
+
+/*
+ * The macOS template ladder. Same idea, states 1 and 4 only (see `default_icon`).
+ * Declared in a helper for the same reason: `include_bytes!` is the only way a
+ * file is "loaded", and the provenance check reads this file to decide whether a
+ * committed tray asset has a consumer.
+ */
+/// One template state at one ladder step.
+#[cfg(target_os = "macos")]
+fn tray_template_png(safe_mode: bool, scale: usize) -> &'static [u8] {
+    match (safe_mode, scale) {
+        (false, 1) => include_bytes!("../../../icons/tray-icon-mono.png"),
+        (false, 2) => include_bytes!("../../../icons/tray-icon-mono@2x.png"),
+        (false, 3) => include_bytes!("../../../icons/tray-icon-mono@3x.png"),
+        (false, _) => include_bytes!("../../../icons/tray-icon-mono@4x.png"),
+        (true, 1) => include_bytes!("../../../icons/tray-icon-safe-mono.png"),
+        (true, 2) => include_bytes!("../../../icons/tray-icon-safe-mono@2x.png"),
+        (true, 3) => include_bytes!("../../../icons/tray-icon-safe-mono@3x.png"),
+        (true, _) => include_bytes!("../../../icons/tray-icon-safe-mono@4x.png"),
+    }
 }
 
 impl TrayState {
@@ -84,7 +162,9 @@ impl TrayState {
 
     async fn load_icon(verge: &IVerge, kind: IconKind) -> (bool, Cow<'_, [u8]>) {
         let (custom_enabled, icon_name) = match kind {
-            IconKind::Common => (verge.common_tray_icon.unwrap_or(false), "common"),
+            IconKind::Common | IconKind::SafeMode => {
+                (verge.common_tray_icon.unwrap_or(false), "common")
+            }
             IconKind::SysProxy => (verge.sysproxy_tray_icon.unwrap_or(false), "sysproxy"),
             IconKind::Tun => (verge.tun_tray_icon.unwrap_or(false), "tun"),
         };
@@ -103,32 +183,78 @@ impl TrayState {
     fn default_icon(verge: &IVerge, kind: IconKind) -> (bool, Cow<'_, [u8]>) {
         #[cfg(target_os = "macos")]
         {
+            // macOS reads a TEMPLATE: black-on-alpha, tinted by the OS. The
+            // assets are PNG because a menu bar asks for a scale factor (a 4x
+            // display wants 72 px, not an ICO frame picked from a container).
+            //
+            // Only `1` and `4` exist as templates, and that is upstream's own
+            // split, not a shortcut: FlClash's launcher picks `status_1` for
+            // every non-safe-mode case when the icon is templated
+            // (`lib/common/tray.dart`: `_isTemplate(monochrome) || !isStart => 1`),
+            // because a template discards the colour that distinguishes 2 and 3.
             let is_mono = verge.tray_icon.as_deref().unwrap_or("monochrome") == "monochrome";
             if is_mono {
-                return (
-                    false,
-                    match kind {
-                        IconKind::Common => Cow::Borrowed(include_bytes!("../../../icons/tray-icon-mono.ico")),
-                        IconKind::SysProxy => {
-                            Cow::Borrowed(include_bytes!("../../../icons/tray-icon-sys-mono-new.ico"))
-                        }
-                        IconKind::Tun => Cow::Borrowed(include_bytes!("../../../icons/tray-icon-tun-mono-new.ico")),
-                    },
-                );
+                // A menu bar picks its bitmap by the screen's backing scale, so
+                // the ladder step is chosen here (Tauri hands the host one bitmap).
+                let scale = tray_scale_factor();
+                let safe = matches!(kind, IconKind::SafeMode);
+                return (false, Cow::Borrowed(tray_template_png(safe, scale)));
             }
         }
 
-        #[cfg(not(target_os = "macos"))]
-        let _ = verge;
+        #[cfg(target_os = "linux")]
+        {
+            // Linux panels draw the tray at the session's scale factor, and this
+            // platform hands the host a single RGBA bitmap (Tauri's `Image` has no
+            // per-scale variant support), so the right asset is chosen HERE and
+            // the OS sees one already-sharp bitmap.
+            //
+            // Picking the nearest ladder step at or below the system scale:
+            // a 2x display gets the 36 px asset rather than an 18 px one the host
+            // would upscale, and a 1x display is not handed a 4x bitmap to
+            // downsample for no reason.
+            let _ = verge;
+            let scale = tray_scale_factor();
+            return (
+                false,
+                match kind {
+                    IconKind::Common => Cow::Borrowed(tray_png(1, scale)),
+                    IconKind::SysProxy => Cow::Borrowed(tray_png(2, scale)),
+                    IconKind::Tun => Cow::Borrowed(tray_png(3, scale)),
+                    IconKind::SafeMode => Cow::Borrowed(tray_png(4, scale)),
+                },
+            );
+        }
 
-        (
-            false,
-            match kind {
-                IconKind::Common => Cow::Borrowed(include_bytes!("../../../icons/tray-icon.ico")),
-                IconKind::SysProxy => Cow::Borrowed(include_bytes!("../../../icons/tray-icon-sys.ico")),
-                IconKind::Tun => Cow::Borrowed(include_bytes!("../../../icons/tray-icon-tun.ico")),
-            },
-        )
+        #[cfg(target_os = "windows")]
+        {
+            let _ = verge;
+            // Windows wants the multi-frame ICO: the taskbar picks 16/20/24 px
+            // out of the container by DPI, which a single PNG cannot serve.
+            return (
+                false,
+                match kind {
+                    IconKind::Common => Cow::Borrowed(include_bytes!("../../../icons/tray-icon.ico")),
+                    IconKind::SysProxy => Cow::Borrowed(include_bytes!("../../../icons/tray-icon-sys.ico")),
+                    IconKind::Tun => Cow::Borrowed(include_bytes!("../../../icons/tray-icon-tun.ico")),
+                    IconKind::SafeMode => Cow::Borrowed(include_bytes!("../../../icons/tray-icon-safe.ico")),
+                },
+            );
+        }
+
+        #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
+        {
+            let _ = verge;
+            (
+                false,
+                match kind {
+                    IconKind::Common => Cow::Borrowed(include_bytes!("../../../icons/tray-icon.ico")),
+                    IconKind::SysProxy => Cow::Borrowed(include_bytes!("../../../icons/tray-icon-sys.ico")),
+                    IconKind::Tun => Cow::Borrowed(include_bytes!("../../../icons/tray-icon-tun.ico")),
+                    IconKind::SafeMode => Cow::Borrowed(include_bytes!("../../../icons/tray-icon-safe.ico")),
+                },
+            )
+        }
     }
 }
 

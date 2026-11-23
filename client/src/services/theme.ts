@@ -25,9 +25,10 @@ import {
  * identity defeats every `memo` below it" trap the client has already paid for.
  *
  * So the theme is built exactly once, at module load, and the window-chrome
- * variables are written exactly once. Nothing below has a runtime input except
- * `theme_setting`, which is a stored preference rather than a mode — see
- * {@link applyThemeSetting}.
+ * variables are written exactly once. Nothing below has a runtime input at all:
+ * the `theme_setting` override this docblock used to name as one was deleted on
+ * 2026-11-23 with the rest of the layer, and it was never read here anyway —
+ * {@link buildTheme} takes no argument and the palette is a constant.
  *
  * # The trap this file was written around
  *
@@ -82,8 +83,9 @@ export const chrysalisTheme = buildTheme()
  * change the palette and the scrollbars, selection colour and dialog paper follow
  * without an edit here.
  *
- * Idempotent and safe to call again — which is what makes it usable from a
- * `theme_setting` change (a stored preference) without rebuilding the theme.
+ * Idempotent, so a second call is harmless − but nothing calls it a second time.
+ * It used to be reachable from a `theme_setting` change; that preference had no
+ * reader and is gone (2026-11-23).
  */
 export const applyTheme = (theme: MuiTheme = chrysalisTheme) => {
   // Guarded rather than assumed. This module is imported by the palette test,

@@ -17,6 +17,54 @@ re-argued; the evidence for each is a world claim in
 
 ---
 
+## The Windows icon report is diagnosed, and only half of it is proven
+
+**Added 2026-11-23.** Read the [`FIXES.md`](FIXES.md) entry first. What shipped is a
+**comparison that did not exist before** plus the icons themselves; what it cannot
+prove is that a given Windows device's taskbar bitmap changed.
+
+**What is now knowable, and was not before.** `chrysalis_update_pre_exit` holds
+`<version>|<sha256 of the executable>`, written before the hand-off and taken by the
+next launch (`chrysalis::update::relabel`). That launch records one of:
+
+| recorded | what it means |
+|---|---|
+| `replaced` | the binary changed. The install worked |
+| `not-replaced` | the binary is byte-identical: the installer ran and did nothing |
+| *(nothing)* | no snapshot was written — an older build, or the fingerprint failed |
+
+`not-replaced` renders on the Account page with the version still running and the one
+expected. **That is the half this change establishes.** A device reporting it is
+stranded on an old build, and the icon never changing is a *consequence* rather than
+a separate mystery.
+
+**What is NOT proven, stated so nobody reads it as closed:**
+
+1. **That the fix makes any particular device update successfully.** The change
+   detects a failed install and stops the app claiming otherwise; it does not make
+   the NSIS setup replace a locked binary. Whether the reported devices were failing
+   at elevation, at a locked image, or not failing at all is **unobserved** — the
+   next report will say which, from the Account-page line.
+2. **That a successful install now changes the icon on screen.** The icon lives in
+   the binary, so `replaced` implies a new icon file; whether Explorer serves the
+   old bitmap from its per-user cache is the OS's behaviour and not something the
+   client can force. If a device reports `replaced` **and** shows an old icon, that
+   is a cache problem with a different remedy (removing the cached entry, or a
+   logoff), and it is worth knowing that it is a different problem.
+3. **The macOS mark is CLOSED, by removal rather than regeneration.** `icon.icns`
+   was regenerated from `glyph.svg` (eight frames, 32–1024 px), and `Assets.car`
+   — which outranked it in the bundle and still held the old art — was dropped from
+   `bundle.icon` and deleted. What is NOT verified is that a Mac draws the new mark;
+   that needs one Mac running this build, which is the observation below.
+
+**What would close it:** one Windows device and one Mac running this build.
+On Windows: install an update, read `interruptedUpdate` on the Account page, and say
+whether the taskbar icon moved. On macOS: regenerate `icon.icns` from `icon.png` on a
+Mac and confirm the dock icon. Both are one observation each, and neither can be
+made from here.
+
+---
+
 ## The Windows update crash is instrumented, not proven fixed
 
 **Added 2026-11-23.** Read [`FIXES.md`](FIXES.md) for that entry first. A Windows

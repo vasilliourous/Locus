@@ -915,21 +915,20 @@ interface IVergeConfig {
   system_proxy_bypass?: string
   web_ui_list?: string[]
   hotkeys?: string[]
-  theme_setting?: {
-    primary_color?: string
-    secondary_color?: string
-    primary_text?: string
-    secondary_text?: string
-    info_color?: string
-    error_color?: string
-    warning_color?: string
-    success_color?: string
-    font_family?: string
-    css_injection?: string
-    background_image?: string
-    background_blend_mode?: string
-    background_opacity?: number
-  }
+  /**
+   * `theme_setting` was removed on 2026-11-23, with the last of the theme layer.
+   *
+   * It described a per-field override of the palette (`primary_color`,
+   * `font_family`, `css_injection`, …). Nothing read it — the one theme is built
+   * from `CHRYSALIS_COLORS` with no runtime input — and three documents described
+   * it as live, which is why it outlived the theme registry by four days.
+   *
+   * Kept as a comment rather than a field for the reason `theme_mode`/`theme_id`
+   * are: a field nobody reads is a field the next reader assumes is load-bearing.
+   * An older `verge.yaml` may still carry the key; `IVerge` has no
+   * `deny_unknown_fields`, so it is ignored on read and dropped on the next save.
+   * Do not reintroduce it as a setting.
+   */
   auto_close_connection?: boolean
   auto_check_update?: boolean
   default_latency_test?: string

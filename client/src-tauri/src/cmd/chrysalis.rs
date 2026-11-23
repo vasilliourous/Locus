@@ -1757,19 +1757,31 @@ pub async fn chrysalis_update_status() -> UpdateStatus {
         _ => None,
     };
 
-    // ── Did a previous attempt die mid-install? ──
+    // ── Did a previous attempt die mid-install, or finish and do nothing? ──
     //
     // `Launched` is NOT interrupted: the plugin was called, so the process going
     // away is the expected outcome there and saying otherwise would report every
-    // successful update as a crash. Every other recorded stage means an attempt
-    // began and never reached its hand-off. `InProgress` in this session cannot
-    // happen — the command is not reachable while an install holds the prompt —
-    // so any value found here is from a previous run.
-    let interrupted_update =
-        crate::chrysalis::update::InstallStage::stored(data.chrysalis_update_install_stage.as_deref())
-            .filter(|stage| *stage != crate::chrysalis::update::InstallStage::Launched)
-            .map(crate::chrysalis::update::InstallStage::interrupted_report);
-
+    // successful update as a crash.
+    //
+    // `Replaced` and `NotReplaced` are written by the NEXT launch
+    // (`update::relabel`), not by the attempt. `Replaced` is the clean outcome and
+    // renders nothing. `NotReplaced` is the reported symptom made visible: the
+    // installer completed, the binary did not change, and this device is still on
+    // the old build — which is also why its icon never changed. It is the one
+    // stage whose sentence is built separately (`not_replaced_report`), because it
+    // did not "stop before finishing": it finished and replaced nothing.
+    //
+    // Grouping it with `interrupted_update` rather than adding a field keeps the
+    // Account page's existing block as the single place a broken update is
+    // reported, so a future reader has one thing to look at rather than two.
+    let stage = crate::chrysalis::update::InstallStage::stored(data.chrysalis_update_install_stage.as_deref());
+    let interrupted_update = stage.filter(|stage| stage.needs_attention()).map(|stage| match stage {
+        crate::chrysalis::update::InstallStage::NotReplaced => {
+            let expected = data.chrysalis_update_offered.as_deref().unwrap_or_default();
+            crate::chrysalis::update::InstallStage::not_replaced_report(current, expected)
+        }
+        other => other.interrupted_report(),
+    });
     UpdateStatus {
         current_version: current.to_owned(),
         offered_version: offered,
@@ -1984,6 +1996,19 @@ pub async fn chrysalis_install_update(app: tauri::AppHandle) -> CmdResult<()> {
                 "[chrysalis] could not clear the update stage record: {clear:#}"
             );
         }
+        // The pre-exit fingerprint is cleared for a different reason: it exists to
+        // be compared on the NEXT launch, and this attempt returned a refusal, so
+        // there is no next-launch question to answer. Leaving it would make the
+        // following launch record `not-replaced` — reporting an install that never
+        // ran as one that completed and changed nothing, which is a false alarm on
+        // a device that has already been told the truth on screen.
+        if let Err(clear) = store::take_update_pre_exit().await {
+            logging!(
+                warn,
+                Type::System,
+                "[chrysalis] could not clear the pending-update record: {clear:#}"
+            );
+        }
         return Err(super::coded_error("CHRYSALIS_UPDATE_INSTALL_FAILED", detail));
     }
 
@@ -1996,6 +2021,40 @@ pub async fn chrysalis_install_update(app: tauri::AppHandle) -> CmdResult<()> {
     // The offer is spent. Clearing it stops the prompt reappearing for a version
     // the student now has, including after the restart the install may trigger.
     let _ = store::clear_update_offer().await;
+
+    // ── Relaunch, so the install actually takes effect ──
+    //
+    // Reaching this line at all means the platform installer **returned**, which
+    // only happens on macOS and Linux: on Windows the plugin exits the process at
+    // the hand-off (`updater.rs:876`), so control never gets here and the NSIS
+    // setup is responsible for restarting the app.
+    //
+    // Everywhere else the old image keeps running with the code it started with —
+    // which is why a student could watch an install "succeed" and still see the
+    // old window, the old taskbar entry and the old tray icon. Nothing is wrong
+    // with the file on disk; the process reading it is the previous build. Asking
+    // the plugin to install and then not relaunching was the missing half.
+    //
+    // Relaunch rather than prompt: the install already dropped the connection (the
+    // installer replaced a running binary), so there is no session left to protect,
+    // and leaving the app on a stale binary is the state this whole change exists
+    // to remove. `feat::restart_app` is the same path the "Restart" menu item uses:
+    // it stops the core, shuts the embedded server, and re-executes.
+    //
+    // Spawned, not awaited, because this command's own IPC response is delivered
+    // by the process that is about to be replaced. Waiting for the restart inside
+    // the command would mean the dialog never hears back on the one platform where
+    // it could have shown a progress state.
+    #[cfg(not(target_os = "windows"))]
+    {
+        logging!(
+            info,
+            Type::System,
+            "[chrysalis] the installer returned; relaunching to run {installed_version}"
+        );
+        crate::process::AsyncHandler::spawn(|| async { crate::feat::restart_app().await });
+    }
+
     Ok(())
 }
 

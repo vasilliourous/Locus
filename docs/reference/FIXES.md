@@ -24,6 +24,94 @@ commercial gaps, [`../business/17-not-built.md`](../business/17-not-built.md).
 
 ---
 
+## AN UPDATE THAT REPLACED NOTHING LOOKED EXACTLY LIKE ONE THAT WORKED, AND THE ICONS SAID SO (2026-11-23, unreleased)
+
+**Reported:** "updates don't successfully manage to change the taskbar icon, the icon
+on the window itself, and the system tray icon."
+
+**The icon was the symptom; nothing compared the binary.** Three separate things
+produced that sentence, and only one of them was about icons at all:
+
+1. **Nothing in the product had ever compared the executable before an install with
+   the executable after one.** On Windows the plugin `ShellExecuteW`s the NSIS
+   setup `perMachine` and then calls `std::process::exit(0)`
+   (`tauri-plugin-updater` 2.11.0, `updater.rs:876`) **regardless of whether the
+   setup succeeded**. A declined elevation, a locked image, or a `/UPDATE` that
+   decided not to overwrite leaves the old binary with the old icon, exits the
+   process exactly as cleanly as a real install, and the next launch reports "up to
+   date" — because the version string it compares against is the one the *hub*
+   advertises, not the one on disk. One silent failed install strands a device
+   permanently: the offer is spent, so the prompt never returns.
+2. **macOS and Linux installed and then did not relaunch.** `install()` returns
+   there, `chrysalis_install_update` cleared the offer and returned, and the prompt
+   closed — over a process still running the previous binary. The file on disk was
+   new; the thing drawing the window was not.
+3. **The marks themselves were another program's.** Every raster in
+   `src-tauri/icons/` and the favicon were the Clash Verge Rev cat, in every release
+   up to 3.4.4, through a re-identification that changed the product name, the app
+   id and the wordmark. So even a *correct* update never changed the logo.
+
+**What changed, and the order it runs in.** `chrysalis::update::relabel` records
+`<version>|<sha256 of the running executable>` immediately before the hand-off —
+next to the `Launched` stage, for the same reason that stage exists: it is the last
+moment the process is guaranteed alive — and compares it on the **next** launch,
+which is the first moment the answer exists. `Replaced` is silent; `NotReplaced`
+renders on the Account page with a sentence that names the version still running,
+the version expected, and why the icon did not change either. The attempt cannot
+report its own outcome, so it writes its record before the branch instead of after
+it — the rule the entry below already established.
+
+On macOS and Linux the command now relaunches through `feat::restart_app` once the
+installer returns, so the new binary is what the student is looking at.
+
+**The icons are now generated from the FlClash glyph.** `client/scripts/generate-icons.mjs`
+renders every size from `src/assets/image/glyph.svg` at its own resolution — not
+downscaled from one master, which erodes the margin and softens the glyph into a
+smudge at 16 px — on the palette's `background`, read out of `_theme.tsx`. The
+glyph's own gradients are the artwork and are not recoloured. The tray is FlClash's
+four `status_*` assets, copied verbatim, replacing the status discs that had been
+recoloured into the palette. `pnpm icons:check` compares bytes, so a hand-edited
+icon and a source change that nobody re-rendered are both failures, and §54 of
+`check-consistency.sh` now runs that comparison — it previously checked only that
+the named files existed, which is how the landing favicon stayed the green cat.
+`icon.icns` needs macOS tooling and is produced — already regenerated from the
+glyph — by `.github/workflows/generate-macos-icons.yml`. `Assets.car` was removed
+from `bundle.icon` entirely, because a compiled catalog outranks `icon.icns` in a
+bundle and only `actool` can author one.
+
+**Guards, each observed failing.** `an_unchanged_executable_is_not_replaced` — the
+central claim — was watched going red against an injected `if true`, which is the
+shipped behaviour: an attempt recorded, so a success reported, whatever the bytes
+said. `only_real_faults_need_attention` pins both directions, because a wrong
+*silence* is invisible in testing. `the_not_replaced_sentence_explains_the_icon`
+fails against routing `NotReplaced` through the "stopped before it finished"
+wording, which is the opposite of what happened.
+`check-consistency.sh` §54 was shown failing by pointing `nsis.installerIcon` at a
+name nothing produces, and `pnpm icons:check` by overwriting `32x32.png` by hand.
+
+**The theme layer is now fully gone.** `theme_setting` — the per-field palette
+override inherited from Clash Verge Rev — was parsed, patched, saved and **read by
+nothing** (`services/theme.ts` builds the one theme with no argument). It survived
+the registry's deletion by four days because three documents described it as the
+only runtime input to the palette. All three are corrected, the field is removed
+from `IVerge` and from the ambient type, and a new assertion fails if either
+declares it again.
+
+**Unverified, and it is the part this does not claim.** No Windows machine is
+available here, so whether a real device's taskbar bitmap changes is **structural**.
+What is proven is that the next report can distinguish the two cases: a device that
+comes back with `not-replaced` did not install, and one that comes back with
+`replaced` did — in which case a stale icon is the OS's cache and not ours. macOS
+`icon.icns` is regenerated from the glyph and `Assets.car` is no longer bundled, so
+there is no stale macOS mark to explain; see `client/src-tauri/icons/README.md`.
+
+**Rule kept.** "It updated but nothing changed" is not a rendering bug to be
+believed or disbelieved — it is a comparison nobody was making. Write the *before*
+state somewhere durable, compare it at the first moment the *after* exists, and the
+sentence becomes a fact with a version number in it.
+
+---
+
 ## A WINDOWS UPDATE STALLED BELOW 50% AND TOOK THE PROCESS WITH IT (2026-11-23, unreleased)
 
 **Reported:** "when updating on Windows, during the first downloading it stalls on a
