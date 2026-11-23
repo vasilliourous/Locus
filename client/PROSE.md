@@ -147,7 +147,7 @@ says, edit the rows under that screen's heading.
 | `home.components.connection.account.language` | Language | src/pages/account.tsx:432 |
 | `home.components.connection.account.lastChecked` | Last confirmed {{time}} | src/pages/account.tsx:287 |
 | `home.components.connection.account.noExpiryYet` | Your subscription end date is not available yet. It will appear after this device next contacts Chrysalis. | src/pages/account.tsx:205 |
-| `home.components.connection.account.notActivated` | This device is not activated. Enter the code from your card to connect. | src/pages/account.tsx:664 |
+| `home.components.connection.account.notActivated` | This device is not activated. Enter the code from your card to connect. | src/pages/account.tsx:694 |
 | `home.components.connection.account.notActivatedToCheck` | Activate a code first — there is nothing to confirm yet. | src/pages/account.tsx:272 |
 | `home.components.connection.account.off` | Off | src/pages/account.tsx:472 |
 | `home.components.connection.account.on` | On | src/pages/account.tsx:471 |
@@ -155,15 +155,15 @@ says, edit the rows under that screen's heading.
 | `home.components.connection.account.plan` | Plan | src/pages/account.tsx:132 |
 | `home.components.connection.account.platform` | Platform | src/pages/account.tsx:354 |
 | `home.components.connection.account.preferences` | Preferences | src/pages/account.tsx:426 |
-| `home.components.connection.account.refresh` | Refresh | src/pages/account.tsx:635 |
-| `home.components.connection.account.refreshBusy` | A status read was already running | src/pages/account.tsx:626 |
-| `home.components.connection.account.refreshed` | Up to date — status re-read | src/pages/account.tsx:624 |
-| `home.components.connection.account.refreshFailed` | Could not re-read the status | src/pages/account.tsx:627 |
-| `home.components.connection.account.storedCodeDamaged` | The sign-in saved on this computer is damaged and could not be used, so Chrysalis is asking you to enter your code again. Your plan and its remaining time are not affected. | src/pages/account.tsx:663 |
+| `home.components.connection.account.refresh` | Refresh | src/pages/account.tsx:665 |
+| `home.components.connection.account.refreshBusy` | A status read was already running | src/pages/account.tsx:656 |
+| `home.components.connection.account.refreshed` | Up to date — status re-read | src/pages/account.tsx:654 |
+| `home.components.connection.account.refreshFailed` | Could not re-read the status | src/pages/account.tsx:657 |
+| `home.components.connection.account.storedCodeDamaged` | The sign-in saved on this computer is damaged and could not be used, so Chrysalis is asking you to enter your code again. Your plan and its remaining time are not affected. | src/pages/account.tsx:693 |
 | `home.components.connection.account.subscription` | Subscription | src/pages/account.tsx:128 |
 | `home.components.connection.account.thisDevice` | This device | src/pages/account.tsx:305 |
 | `home.components.connection.account.today` | Today | src/pages/account.tsx:152 |
-| `home.components.connection.account.updateBlocked` | Chrysalis cannot update itself right now: {{reason}} | src/pages/account.tsx:539 |
+| `home.components.connection.account.updateBlocked` | Chrysalis cannot update itself right now: {{reason}} | src/pages/account.tsx:569 |
 | `home.components.connection.account.updateCheckOff` | Automatic update checking is off, so Chrysalis is not being told about new versions. Turn it on above to receive fixes. | src/pages/account.tsx:504 |
 | `home.components.connection.account.updateCheckOffAction` | Turn on automatic updates | src/pages/account.tsx:521 |
 
@@ -191,12 +191,12 @@ says, edit the rows under that screen's heading.
 
 | Key | Text | Code |
 |---|---|---|
-| `layout.components.navigation.menu.collapseNavBar` | Collapse navigation bar | src/components/layout/layout-sidebar.tsx:215 |
-| `layout.components.navigation.menu.expandNavBar` | Expand navigation bar | src/components/layout/layout-sidebar.tsx:214 |
-| `layout.components.navigation.menu.lock` | Lock menu order | src/components/layout/layout-sidebar.tsx:222 |
-| `layout.components.navigation.menu.reorderMode` | Menu reorder mode | src/components/layout/layout-sidebar.tsx:181 |
-| `layout.components.navigation.menu.restoreDefaultOrder` | Restore default order | src/components/layout/layout-sidebar.tsx:230 |
-| `layout.components.navigation.menu.unlock` | Unlock menu order | src/components/layout/layout-sidebar.tsx:223 |
+| `layout.components.navigation.menu.collapseNavBar` | Collapse navigation bar | src/components/layout/layout-sidebar.tsx:212 |
+| `layout.components.navigation.menu.expandNavBar` | Expand navigation bar | src/components/layout/layout-sidebar.tsx:211 |
+| `layout.components.navigation.menu.lock` | Lock menu order | src/components/layout/layout-sidebar.tsx:219 |
+| `layout.components.navigation.menu.reorderMode` | Menu reorder mode | src/components/layout/layout-sidebar.tsx:178 |
+| `layout.components.navigation.menu.restoreDefaultOrder` | Restore default order | src/components/layout/layout-sidebar.tsx:227 |
+| `layout.components.navigation.menu.unlock` | Unlock menu order | src/components/layout/layout-sidebar.tsx:220 |
 | `layout.components.navigation.tabs.home` | Home | src/pages/_navigation-meta.ts:18 |
 | `layout.components.navigation.tabs.settings` | Settings | src/pages/_navigation-meta.ts:22 |
 
@@ -234,13 +234,13 @@ says, edit the rows under that screen's heading.
 | `layout.components.sysproxyPrivilege.title` | Could not set the system proxy | src/components/layout/sysproxy-privilege-dialog.tsx:40 |
 | `layout.components.sysproxyPrivilege.tunMessage` | TUN mode needs the Chrysalis service to take over network traffic. Once it is installed, TUN mode will be turned on for you. | src/components/layout/sysproxy-privilege-dialog.tsx:34 |
 | `layout.components.sysproxyPrivilege.tunTitle` | TUN mode needs the system service | src/components/layout/sysproxy-privilege-dialog.tsx:41 |
-| `shared.update.body` | Chrysalis {{version}} is ready to install. The update takes a moment and your connection will drop while it installs. | src/components/layout/update-prompt.tsx:214 |
-| `shared.update.connectionNotice` | You can keep using Chrysalis until you install. | src/components/layout/update-prompt.tsx:251 |
-| `shared.update.downloading` | Downloading… | src/components/layout/update-prompt.tsx:225 |
-| `shared.update.downloadingPercent` | Downloading… {{percent}}% | src/components/layout/update-prompt.tsx:226 |
-| `shared.update.installNow` | Install now | src/components/layout/update-prompt.tsx:199 |
-| `shared.update.later` | Later | src/components/layout/update-prompt.tsx:200 |
-| `shared.update.restartNotice` | Chrysalis may close and reopen by itself to finish. Do not force-quit it. | src/components/layout/update-prompt.tsx:235 |
+| `shared.update.body` | Chrysalis {{version}} is ready to install. The update takes a moment and your connection will drop while it installs. | src/components/layout/update-prompt.tsx:224 |
+| `shared.update.connectionNotice` | You can keep using Chrysalis until you install. | src/components/layout/update-prompt.tsx:261 |
+| `shared.update.downloading` | Downloading… | src/components/layout/update-prompt.tsx:235 |
+| `shared.update.downloadingPercent` | Downloading… {{percent}}% | src/components/layout/update-prompt.tsx:236 |
+| `shared.update.installNow` | Install now | src/components/layout/update-prompt.tsx:209 |
+| `shared.update.later` | Later | src/components/layout/update-prompt.tsx:210 |
+| `shared.update.restartNotice` | Chrysalis may close and reopen by itself to finish. Do not force-quit it. | src/components/layout/update-prompt.tsx:245 |
 
 ## Toasts and notifications
 
@@ -281,7 +281,7 @@ says, edit the rows under that screen's heading.
 | `settings.sections.proxyControl.messages.installedCheckProxy` | The service is installed and the core is running through it. Check the system proxy switch and make your change again if it did not take. | src/components/layout/sysproxy-privilege-dialog.tsx:121 |
 | `settings.sections.proxyControl.messages.installedCoreNotOnService` | The service is installed, but the core is not running through it. Check the core and try again. | src/components/layout/sysproxy-privilege-dialog.tsx:127 |
 | `settings.sections.proxyControl.messages.installedProxyRestored` | The service is installed, the core is running through it, and your system proxy change has been applied. | src/components/layout/sysproxy-privilege-dialog.tsx:122 |
-| `settings.sections.system.fields.autoLaunch` | Auto Launch | src/pages/account.tsx:556 |
+| `settings.sections.system.fields.autoLaunch` | Auto Launch | src/pages/account.tsx:586 |
 | `settings.sections.system.notifications.tunMode.autoDisabled` | TUN Mode automatically disabled due to service unavailable | src/pages/_layout/utils/notification-handlers.ts:69 |
 | `settings.sections.system.notifications.tunMode.autoDisableFailed` | Failed to disable TUN Mode automatically | src/pages/_layout/utils/notification-handlers.ts:73 |
 | `settings.statuses.clash.restarting` | Restarting Core... | src/hooks/use-service-installer.ts:33 |
@@ -291,7 +291,7 @@ says, edit the rows under that screen's heading.
 | `shared.feedback.notices.raw` | {{message}} | src/components/layout/notice-manager.tsx:137<br>src/services/notice-service.ts:255 |
 | `shared.feedback.notifications.common.copySuccess` | Copy Success | src/components/layout/notice-manager.tsx:177 |
 | `shared.feedback.notifications.importSubscriptionSuccess` | Import subscription successful | src/pages/_layout/utils/notification-handlers.ts:19 |
-| `shared.feedback.notifications.updateAvailable` | Update Available | src/components/layout/update-prompt.tsx:198 |
+| `shared.feedback.notifications.updateAvailable` | Update Available | src/components/layout/update-prompt.tsx:208 |
 | `shared.feedback.validation.config.bootFailed` | Boot subscription configuration validation failed. Started with the default configuration; please check the subscription configuration file. | src/pages/_layout/utils/notification-handlers.ts:98 |
 | `shared.feedback.validation.config.coreChangeFailed` | Configuration validation failed when switching the kernel. Started with the default configuration; please check the subscription configuration file. | src/pages/_layout/utils/notification-handlers.ts:101 |
 | `shared.feedback.validation.config.failed` | Subscription configuration validation failed. Please check the subscription configuration file; modifications have been rolled back. | src/pages/_layout/utils/notification-handlers.ts:105 |
@@ -375,9 +375,9 @@ says, edit the rows under that screen's heading.
 | `backend:tray.globalMode` | Global Mode | client/src-tauri/src/core/tray/menu_def.rs:30 |
 | `backend:tray.directMode` | Direct Mode | client/src-tauri/src/core/tray/menu_def.rs:31 |
 | `backend:tray.outboundModes` | Outbound Modes | client/src-tauri/src/core/tray/menu_def.rs:32 |
-| `backend:tray.rule` | Rule | client/src-tauri/src/core/tray/mod.rs:738 |
-| `backend:tray.direct` | Direct | client/src-tauri/src/core/tray/mod.rs:737 |
-| `backend:tray.global` | Global | client/src-tauri/src/core/tray/mod.rs:736 |
+| `backend:tray.rule` | Rule | client/src-tauri/src/core/tray/mod.rs:876 |
+| `backend:tray.direct` | Direct | client/src-tauri/src/core/tray/mod.rs:875 |
+| `backend:tray.global` | Global | client/src-tauri/src/core/tray/mod.rs:874 |
 | `backend:tray.profiles` | Profiles | client/src-tauri/src/core/tray/menu_def.rs:33 |
 | `backend:tray.proxies` | Proxies | client/src-tauri/src/core/tray/menu_def.rs:34 |
 | `backend:tray.systemProxy` | System Proxy | client/src-tauri/src/core/tray/menu_def.rs:35 |
@@ -398,9 +398,9 @@ says, edit the rows under that screen's heading.
 | `backend:tray.vergeVersion` | Verge Version | client/src-tauri/src/core/tray/menu_def.rs:50 |
 | `backend:tray.more` | More | client/src-tauri/src/core/tray/menu_def.rs:51 |
 | `backend:tray.exit` | Exit | client/src-tauri/src/core/tray/menu_def.rs:52 |
-| `backend:tray.tooltip.systemProxy` | System Proxy | client/src-tauri/src/core/tray/mod.rs:320 |
-| `backend:tray.tooltip.tun` | TUN | client/src-tauri/src/core/tray/mod.rs:321 |
-| `backend:tray.tooltip.profile` | Profile | client/src-tauri/src/core/tray/mod.rs:322 |
+| `backend:tray.tooltip.systemProxy` | System Proxy | client/src-tauri/src/core/tray/mod.rs:458 |
+| `backend:tray.tooltip.tun` | TUN | client/src-tauri/src/core/tray/mod.rs:459 |
+| `backend:tray.tooltip.profile` | Profile | client/src-tauri/src/core/tray/mod.rs:460 |
 
 ## Deliberately not in the manifest
 
