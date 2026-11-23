@@ -452,9 +452,23 @@ jobs:
       - name: Report the activation tunnel key
         working-directory: .
         env:
-          CHRYSALIS_ACTIVATION_TUNNEL_KEY: ${{ secrets.CHRYSALIS_ACTIVATION_TUNNEL_KEY }}
+          # THE SECRET NAMES STAY `LOCUS_*`. Only the ENV VAR names are Chrysalis.
+          #
+          # The rename of 2026-11-23 moved `secrets.CHRYSALIS_*` into this file but
+          # created no such Actions secret, and Actions secrets are per-repository
+          # and not carried by a rename. The result was a tagged release that
+          # failed `verify` at "Report the activation tunnel key" on 2026-11-23 —
+          # a correct guard firing on a name that had drifted, not on a missing
+          # capability. `docs/reference/NAME-MIGRATION.md` §3 keeps this class of
+          # name on purpose (the same reason `LOCUS_UPDATE_KEY` is retained): a
+          # secret's name is a handle to something outside this repo, so it is a
+          # deployment contract, not a label.
+          #
+          # The env var each one feeds IS `CHRYSALIS_*`, because that is what the
+          # Rust `option_env!` reads; the mapping is line-by-line below.
+          CHRYSALIS_ACTIVATION_TUNNEL_KEY: ${{ secrets.LOCUS_ACTIVATION_TUNNEL_KEY }}
           CHRYSALIS_ACTIVATION_TUNNEL_ADDR: ${{ vars.CHRYSALIS_ACTIVATION_TUNNEL_ADDR }}
-          CHRYSALIS_FREE_TIER_KEY: ${{ secrets.CHRYSALIS_FREE_TIER_KEY }}
+          CHRYSALIS_FREE_TIER_KEY: ${{ secrets.LOCUS_FREE_TIER_KEY }}
         run: |
           set -euo pipefail
           # Report the bootstrap ADDRESS as well as the key. The address is not a
@@ -482,7 +496,7 @@ jobs:
             # release is a promise to a deployment.
             echo "::error::CHRYSALIS_ACTIVATION_TUNNEL_KEY is not set, so this RELEASE would ship without the activation tunnel."
             echo "::error::No device on a network that blocks the hub by name could activate with it, and nothing in the artifact would say so."
-            echo "::error::Set it with: gh secret set CHRYSALIS_ACTIVATION_TUNNEL_KEY --repo ${GITHUB_REPOSITORY:-<owner>/<repo>}"
+            echo "::error::Set it with: gh secret set LOCUS_ACTIVATION_TUNNEL_KEY --repo ${GITHUB_REPOSITORY:-<owner>/<repo>}"
             echo "::error::The value is the hub's ACTIVATION_TUNNEL_KEY (server/secrets.env.age). See docs/operate/SECRETS-MANAGEMENT.md."
             exit 1
           else
@@ -502,7 +516,7 @@ jobs:
             echo "CHRYSALIS_FREE_TIER_KEY is present (value not printed; length ${#CHRYSALIS_FREE_TIER_KEY} bytes)"
           elif [ "${{ github.ref_type }}" = "tag" ]; then
             echo "::error::CHRYSALIS_FREE_TIER_KEY is not set, so this RELEASE would ship without the maintenance tunnel."
-            echo "::error::Set it with: gh secret set CHRYSALIS_FREE_TIER_KEY --repo ${GITHUB_REPOSITORY:-<owner>/<repo>}"
+            echo "::error::Set it with: gh secret set LOCUS_FREE_TIER_KEY --repo ${GITHUB_REPOSITORY:-<owner>/<repo>}"
             echo "::error::The value is the hub's ECO_PASS (server/secrets.env.age). See docs/operate/SECRETS-MANAGEMENT.md."
             exit 1
           else
@@ -1405,7 +1419,7 @@ jobs:
           # The value is not a normal secret: it ships in the binary, so it must
           # be assumed public. The hub's allowlist and rate limit are what bound
           # it (docs/reference/ACTIVATION-TUNNEL.md §3.1).
-          CHRYSALIS_ACTIVATION_TUNNEL_KEY: ${{ secrets.CHRYSALIS_ACTIVATION_TUNNEL_KEY }}
+          CHRYSALIS_ACTIVATION_TUNNEL_KEY: ${{ secrets.LOCUS_ACTIVATION_TUNNEL_KEY }}
           # The compiled address fallback the tunnel dials when DNS is filtered.
           # A repository VARIABLE rather than a secret: it is not confidential and
           # it is meant to be readable by anyone auditing what a release dials.
