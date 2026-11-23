@@ -7418,16 +7418,40 @@ def read(path):
     except OSError:
         return None
 
-# (register anchor, file, literal that must survive in that file)
+# (register anchor, file, expected literal)
+#
 # The anchor is the substring the register uses to introduce that name, so a row
 # dropped from the register fails here separately: the two halves cannot drift
 # into agreeing on a shorter list.
+#
+# The literal is what the file must hold, and it is NOT always the old spelling.
+# Three kinds of row live in this one list:
+#
+#   * a name that was KEPT -> the literal is the `locus` spelling;
+#   * a name that was RETIRED -> the literal is the `chrysalis` spelling, and a
+#     `locus` reappearing there is the defect, because the deployed half and the
+#     fleet still read or write it (the bootstrap header, /etc/chrysalis,
+#     chrysalis-fetch.service, the ssh-alias probe);
+#   * a name with a FORM check -> a sentinel, inspected below.
+#
+# WHY THE LIST GREW. The register named the ssh alias as `chrysalis-hub` for all
+# three scripts while deploy.sh, publish-release.sh and verify-release.sh each
+# still said `locus-hub`: a documented fact disagreeing with the code, which is
+# the one thing this page exists to prevent. A single row per NAME covers the
+# class and not the instances, so every row that repeats a file exists on purpose.
 CHECKS = [
+    # ── Retained spellings: the `locus` form must survive ──
     ("com.locus.client",         "client/src-tauri/tauri.conf.json",          "com.locus.client"),
     ("com.locus.client",         "client/src-tauri/src/utils/dirs.rs",        "com.locus.client"),
+    ("com.locus.client.dev",     "client/src-tauri/src/utils/dirs.rs",        "com.locus.client.dev"),
     ("locus-backup",             "client/src-tauri/src/utils/dirs.rs",        "locus-backup"),
-    ("locus-linux-amd64",        "client/src-tauri/src/chrysalis/contract.rs","locus-linux-amd64"),
+    ("locus-linux-amd64",        "client/src-tauri/src/chrysalis/contract.rs", "locus-linux-amd64"),
     ("locus-linux-amd64",        "server/scripts/fetch-release.py",           "locus-linux-amd64"),
+    ("locus-linux-amd64",        "server/scripts/publish-release.sh",         "locus-linux-amd64"),
+    ("locus-linux-amd64",        "server/scripts/verify-release.sh",          "locus-linux-amd64"),
+    ("locus-linux-amd64",        "server/templates/Caddyfile",                "locus-linux-amd64"),
+    ("locus-linux-amd64",        "server/modules/05-caddy.sh",                "locus-linux-amd64"),
+    ("locus-linux-amd64",        "server/console/src/views/Releases.vue",     "locus-linux-amd64"),
     ("LOCUS_UPDATE_KEY_B64",     "server/scripts/chrysalis-key-extract.sh",   "LOCUS_UPDATE_KEY_B64"),
     # The encrypt-side FORM CHECK, not just a doc: a required-var list naming the
     # wrong spelling refuses every re-encrypt with "LOCUS_UPDATE_KEY_B64(absent)".
@@ -7436,13 +7460,46 @@ CHECKS = [
     # of this row passed against the very defect it exists to catch.
     ("LOCUS_UPDATE_KEY_B64",     "server/scripts/secrets-encrypt.sh",          "REQUIRED_VARS"),
     ("LOCUS_UPDATE_KEY",         ".github/workflows/client.yml",              "LOCUS_UPDATE_KEY"),
+    ("locusvpn.jadedns.uk",      "server/modules/05-caddy.sh",                "locusvpn.jadedns.uk"),
+    ("locusvpn.jadedns.uk",      "server/templates/Caddyfile",                "locusvpn.jadedns.uk"),
+    ("vasilliourous/Locus",      "server/scripts/fetch-release.py",           "vasilliourous/Locus"),
+
+    # ── Retired spellings: the `chrysalis` form must be what is READ/WRITTEN ──
     ("X-Locus-Bootstrap",        "server/modules/09-activation-tunnel.sh",    "X-Chrysalis-Bootstrap"),
     ("X-Locus-Bootstrap",        "server/pb_hooks/activation.pb.js",          "x-chrysalis-bootstrap"),
     ("X-Locus-Bootstrap",        "server/pb_hooks/code_lookup.pb.js",         "x-chrysalis-bootstrap"),
-    ("LOCUS_SECRETS_PASSPHRASE", "server/scripts/secrets-decrypt.sh",         "LOCUS_SECRETS_PASSPHRASE"),
-    ("locusvpn.jadedns.uk",      "server/modules/05-caddy.sh",                "locusvpn.jadedns.uk"),
+    ("/etc/locus/",              "server/modules/09-activation-tunnel.sh",    "/etc/chrysalis/"),
+    ("locus-fetch.service",      "server/modules/05-caddy.sh",                "chrysalis-fetch.service"),
+    # The ssh alias. The probe tries the NEW alias; the bare host is the fallback
+    # for a machine that has not added it yet.
     ("locus-hub",                "server/scripts/deploy.sh",                  "chrysalis-hub"),
-    ("vasilliourous/Locus",      "server/scripts/fetch-release.py",           "vasilliourous/Locus"),
+    ("locus-hub",                "server/scripts/publish-release.sh",         "chrysalis-hub"),
+    ("locus-hub",                "server/scripts/verify-release.sh",          "chrysalis-hub"),
+    # The config field a client is pointed at the hub alias with. Renamed in the
+    # rename; the log line that tells an operator to set it said `locus_...`
+    # until the stale-prose check below was added.
+    ("chrysalis_hub_override",   "server/modules/05-caddy.sh",                "chrysalis_hub_override"),
+    ("chrysalis_hub_override",   "client/src-tauri/src/config/verge.rs",      "chrysalis_hub_override"),
+]
+
+# The FOUR scripts that accept the pre-rename passphrase variable. Asserted as a
+# class: each must name BOTH spellings. A fallback deleted from one of them is a
+# host that can no longer deploy, and nothing else in this tree would notice.
+PASSPHRASE_FALLBACK_FILES = [
+    "server/setup.sh",
+    "server/restore.sh",
+    "server/scripts/secrets-decrypt.sh",
+    "server/scripts/secrets-encrypt.sh",
+]
+
+# Files that still WRITE a `locus` spelling where the rename moved it. These are
+# not retained names and have no register row: they are prose telling an operator
+# or a reader to use an identifier that no longer exists. A named list, not a
+# blanket ban - the register explicitly cannot promise "no locus anywhere"
+# (legacy/, vendor/, docs/archive/ are all legitimately old).
+NO_STALE_PROSE = [
+    ("server/modules/05-caddy.sh",       r"locus_hub_override"),
+    ("client/src/services/chrysalis.ts", r"locus[A-Za-z_]*"),
 ]
 
 reg = read("docs/reference/NAME-MIGRATION.md") or ""
@@ -7475,15 +7532,95 @@ for anchor, path, literal in CHECKS:
         continue
     if literal not in body:
         print("BAD\t%s no longer contains `%s`." % (path, literal))
-        print("BAD\t  That spelling is a contract with deployed clients or a live")
-        print("BAD\t  hostname, not a leftover. If it was deliberately retired, remove")
-        print("BAD\t  its row from docs/reference/NAME-MIGRATION.md in the SAME change.")
+        print("BAD\t  Either a retained name was renamed (a contract with deployed")
+        print("BAD\t  clients or a live hostname) or a retired one was not applied.")
+        print("BAD\t  If it was deliberately retired, change its row in")
+        print("BAD\t  docs/reference/NAME-MIGRATION.md in the SAME change.")
     else:
         print("OK\t%s - `%s` present" % (path, literal))
 
-for anchor, _path, _literal in CHECKS:
-    if anchor not in reg:
-        print("BAD\tthe register no longer documents `%s` - a retained name lost its reason" % anchor)
+# ── The passphrase fallback, as a class rather than four rows ──
+#
+# THE OBVIOUS VERSION OF THIS CHECK DOES NOT WORK, and it shipped first anyway.
+# `"LOCUS_SECRETS_PASSPHRASE" in body` is satisfied by the alias's own NAME being
+# mentioned anywhere: the error string, the PASS_SRC label, the comment above the
+# block. Deleting the fallback branch therefore left SEVEN other mentions of the
+# identifier in restore.sh and the check still said OK. That is the same defect
+# §53's REQUIRED_VARS row was narrowed for one section earlier, so the rule is
+# applied the same way here: match the `elif` LINE that makes the variable live,
+# not the file.
+FALLBACK_RE = re.compile(
+    r'el(?:if|se if)\s+\[\s+-n\s+"\$\{(LOCUS_SECRETS_PASSPHRASE(?:_FILE)?)[^}]*\}"\s+\]')
+
+
+def fallback_lines(body):
+    """The `elif` branches that actually make the old spellings live."""
+    return set(m.group(1) for m in FALLBACK_RE.finditer(body))
+
+
+for path in PASSPHRASE_FALLBACK_FILES:
+    body = read(path)
+    if body is None:
+        print("BAD\t%s is missing - the passphrase fallback cannot be checked" % path)
+        continue
+    found = fallback_lines(body)
+    reads_new = re.search(r'CHRYSALIS_SECRETS_PASSPHRASE(?:_FILE)?', body) is not None
+    if not reads_new:
+        print("BAD\t%s does not read `CHRYSALIS_SECRETS_PASSPHRASE*`." % path)
+        print("BAD\t  The old spelling is a FALLBACK, not the primary: the name the")
+        print("BAD\t  register documents must work on its own.")
+        continue
+    if "LOCUS_SECRETS_PASSPHRASE" in found:
+        print("OK\t%s - falls back to `LOCUS_SECRETS_PASSPHRASE`" % path)
+    elif "LOCUS_SECRETS_PASSPHRASE_FILE" in found:
+        print("BAD\t%s falls back only to the _FILE spelling." % path)
+        print("BAD\t  A host that sets the variable directly is no longer accepted.")
+    else:
+        print("BAD\t%s has no live `LOCUS_SECRETS_PASSPHRASE` fallback branch." % path)
+        print("BAD\t  A host that was never re-provisioned still passes the old")
+        print("BAD\t  name, and this script would now fail there. A mention in a")
+        print("BAD\t  comment or an error string does not count - only the `elif`")
+        print("BAD\t  that tests the variable does.")
+
+# ── Prose that names something the rename moved ──
+for path, pattern in NO_STALE_PROSE:
+    body = read(path)
+    if body is None:
+        print("BAD\t%s is missing - its stale-name check cannot run" % path)
+        continue
+    hits = []
+    for n, line in enumerate(body.splitlines(), 1):
+        m = re.search(pattern, line)
+        if m:
+            hits.append((n, m.group(0), line.strip()))
+    if not hits:
+        print("OK\t%s - no stale `locus` spelling" % path)
+        continue
+    for n, word, line in hits[:4]:
+        print("BAD\t%s:%d names `%s`, which the rename moved." % (path, n, word))
+        print("BAD\t  %s" % line[:110])
+    print("BAD\t  A reader is being told to use an identifier that does not exist.")
+
+# The anchor must appear on a LINE OF ITS OWN SECTION, not merely somewhere in the
+# prose. A plain `anchor in reg` was satisfied by a passing mention: the register
+# explains `com.locus.client` inside the row for `com.locus.client` itself, so a
+# row deleted from the table still passed because the paragraph above quoted it.
+# Requiring the anchor inside a `|`-led table row (or a heading/bold line for the
+# prose-only rows) is what makes the check about the ROW.
+seen_anchor = set()
+for anchor, path_arg, literal in CHECKS:
+    key = (anchor, path_arg)
+    if key in seen_anchor:
+        continue
+    seen_anchor.add(key)
+    row_like = [ln for ln in reg.splitlines()
+                if anchor in ln and (ln.lstrip().startswith('|')
+                                     or ln.lstrip().startswith('#')
+                                     or ln.lstrip().startswith('*'))]
+    if not row_like:
+        print("BAD\tthe register has no table row documenting `%s`." % anchor)
+        print("BAD\t  A mention in prose is not a row: it carries no 'Where', no")
+        print("BAD\t  'Why' and no 'Retires when', which is the whole of section 3.")
 
 # The register must keep its REASONING, not just its names: a stub that lists
 # identifiers without a retirement condition is a second copy of a fact that can
@@ -7491,6 +7628,31 @@ for anchor, _path, _literal in CHECKS:
 for phrase in ("Retires when", "updater identity", "LANDING_DOMAIN_LEGACY"):
     if phrase.lower() not in reg.lower():
         print("BAD\tthe register has lost its '%s' reasoning - it is listing names, not explaining them" % phrase)
+
+# Every alias a reader will grep for and then "fix" needs a ROW. These four were
+# in the tree but missing from the register before this guard existed; the tag
+# says which half of the register they belong to, so a failure names the file to
+# edit rather than repeating one message four times.
+for phrase, where in (
+    ("com.locus.client.dev",       "3.2"),
+    ("chrysalis_hub_override",     "3.8"),
+    ("LOCUS_SECRETS_PASSPHRASE_FILE", "3.5"),
+    ("locusvpn.jadedns.uk",        "3.6"),
+):
+    if phrase not in reg:
+        print("BAD\tregister %s does not document `%s`." % (where, phrase))
+        print("BAD\t  It is a retained alias with no stated reason, so the next")
+        print("BAD\t  grep will 'finish' the rename and find out from a ticket.")
+
+# The retirement rule needs a home, and it has to be dateable. Per-name conditions
+# ("setup.sh re-run", "DNS moves") are the right shape for a claim about the
+# world, but none of them is checkable and none names a version. Section 3.0 is
+# where the release that drops the aliases is recorded.
+if "## 3.0" not in reg:
+    print("BAD\tthe register has no section 3.0 - the release that drops the")
+    print("BAD\t  aliases has no home, so 'retires when' is prose and cannot be held to.")
+else:
+    print("OK\tthe register carries section 3.0, the dated retirement rule")
 PY
 )
     if [ -z "$retain_report" ]; then

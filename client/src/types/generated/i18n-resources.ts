@@ -120,12 +120,6 @@ export interface TranslationResources {
           takingLonger: string
           toggleHint: string
         }
-        ipInfo: {
-          errors: {
-            loadWithDetails: string
-            noServices: string
-          }
-        }
         traffic: {
           chartStyles: {
             linear: string
@@ -210,21 +204,6 @@ export interface TranslationResources {
       }
     }
     profiles: {
-      components: {
-        menu: {
-          editFile: string
-        }
-      }
-      modals: {
-        editor: {
-          actions: {
-            format: string
-          }
-          messages: {
-            readOnly: string
-          }
-        }
-      }
       page: {
         feedback: {
           errors: {
@@ -240,11 +219,6 @@ export interface TranslationResources {
           }
           notices: {
             discardedKeys: string
-          }
-        }
-        importForm: {
-          actions: {
-            paste: string
           }
         }
       }
@@ -340,14 +314,10 @@ export interface TranslationResources {
     }
     shared: {
       actions: {
-        cancel: string
-        close: string
         hideDetails: string
         new: string
         refreshPage: string
-        resetToDefault: string
         retry: string
-        save: string
         showDetails: string
       }
       editorModes: {
@@ -430,10 +400,6 @@ export interface TranslationResources {
       }
       validation: {
         invalidRegex: string
-      }
-      window: {
-        maximize: string
-        minimize: string
       }
     }
   }

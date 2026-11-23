@@ -133,7 +133,8 @@ export const chrysalisUpdateStagingDir = () =>
  * backend's own explanation rather than hanging, so the button can always be
  * pressed again.
  */
-export const chrysalisConnect = () => invoke<ConnectionResult>('chrysalis_connect')
+export const chrysalisConnect = () =>
+  invoke<ConnectionResult>('chrysalis_connect')
 
 /**
  * Abandons an in-flight connect.
@@ -142,7 +143,8 @@ export const chrysalisConnect = () => invoke<ConnectionResult>('chrysalis_connec
  * cancelled is the failure mode where a student is left with a spinner and no
  * move but to kill the app.
  */
-export const chrysalisCancelConnect = () => invoke<void>('chrysalis_cancel_connect')
+export const chrysalisCancelConnect = () =>
+  invoke<void>('chrysalis_cancel_connect')
 
 /**
  * Brings the tunnel down.
@@ -166,7 +168,8 @@ export const chrysalisUpdateStatus = () =>
  * exits, so this may never resolve — callers must treat completion as "expect a
  * restart" rather than assuming the promise settles.
  */
-export const chrysalisInstallUpdate = () => invoke<void>('chrysalis_install_update')
+export const chrysalisInstallUpdate = () =>
+  invoke<void>('chrysalis_install_update')
 
 /**
  * Forgets an offered update without installing it.
@@ -174,7 +177,8 @@ export const chrysalisInstallUpdate = () => invoke<void>('chrysalis_install_upda
  * Called when the student dismisses the prompt, so they are not asked again for
  * the same version on every launch. A newer offer still prompts.
  */
-export const chrysalisDismissUpdate = () => invoke<void>('chrysalis_dismiss_update')
+export const chrysalisDismissUpdate = () =>
+  invoke<void>('chrysalis_dismiss_update')
 
 /**
  * Signs this computer out of its activation code.
@@ -196,4 +200,5 @@ export const chrysalisDismissUpdate = () => invoke<void>('chrysalis_dismiss_upda
  * Rejects only when the LOCAL half failed, in which case nothing changed on this
  * computer and the message says so.
  */
-export const chrysalisSignOut = () => invoke<SignOutResult>('chrysalis_sign_out')
+export const chrysalisSignOut = () =>
+  invoke<SignOutResult>('chrysalis_sign_out')

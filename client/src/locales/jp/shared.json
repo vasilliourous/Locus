@@ -1,10 +1,6 @@
 {
   "actions": {
-    "cancel": "キャンセル",
-    "close": "閉じる",
-    "save": "保存",
     "new": "新規作成",
-    "resetToDefault": "デフォルト値にリセット",
     "retry": "Retry",
     "refreshPage": "Refresh Page",
     "showDetails": "Show Details",
@@ -25,10 +21,6 @@
   },
   "validation": {
     "invalidRegex": "Invalid regular expression"
-  },
-  "window": {
-    "maximize": "最大化",
-    "minimize": "最小化"
   },
   "editorModes": {
     "visualization": "可視化",

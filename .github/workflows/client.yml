@@ -353,7 +353,30 @@ jobs:
           # range, because `steps:` appears BEFORE the matrix in this file and
           # that range can never close (it silently produced zero labels the
           # first time this was written).
-          labels=$(grep -A200 '^      matrix:' .github/workflows/client.yml \
+          #
+          # ── WHY THE RANGE STOPS AT `steps:`, AND WHY `-A200` WAS NOT ENOUGH ──
+          #
+          # This used to be `grep -A200 '^      matrix:'`, a FIXED 200-line
+          # window. The matrix ends at line ~885 and `steps:` begins two lines
+          # later, so the window ran ~130 lines INTO the build job's own steps —
+          # every `- os: …` written anywhere in those steps was harvested as a
+          # runner label. That is harmless today because no step contains one,
+          # and it is a trap rather than a bug: the failure it produces is a
+          # phantom label with no history, reported as
+          # "no completed history found (first run on this label?)" — a WARNING
+          # that reads like a benign first run, not like the scan being wrong.
+          # Reproduced by adding one `- os: ubuntu-22.04-bogus` line to a step:
+          # it appeared in the label list.
+          #
+          # `awk` bounds the range by MEANING instead of by a line count: it
+          # starts at the matrix key and stops at the first line indented no
+          # deeper than the matrix's siblings, which is `steps:` (4 spaces) and
+          # then `release:`/`preview:` (2 spaces). A step can never be inside the
+          # matrix block, so it can never contribute a label.
+          labels=$(awk '
+            /^      matrix:/ { inm = 1; next }
+            inm && /^    [a-z]/ { inm = 0 }
+            inm' .github/workflows/client.yml \
                    | sed -n 's/^[[:space:]]*-[[:space:]]*os:[[:space:]]*\([^[:space:]]*\).*/\1/p' \
                    | sort -u)
           [ -n "$labels" ] || { echo "::error::could not read any matrix labels"; exit 1; }
@@ -685,6 +708,61 @@ jobs:
       # first, so it cannot pass by finding nothing to compare.
       - name: Locale keys are in parity with English
         run: pnpm exec vitest run tests/locale-parity.test.ts
+
+      # ── No `[dependency]` in package.json that nothing imports ──
+      #
+      # `knip` has been a devDependency with a curated `knip.json` since the fork
+      # and NOTHING ran it. It was not a theoretical gap: on 2026-11-23 it
+      # reported 16 runtime dependencies with zero references in `src/`,
+      # `scripts/` or `tests/` — including a `react-markdown` + `rehype-raw` +
+      # `rehype-sanitize` chain that ships inside the renderer bundle and is on no
+      # code path this product uses. That is attack surface and install weight
+      # carried for a feature that was never built.
+      #
+      # WHY `--dependencies` AND NOT THE DEFAULT, WHICH IS THE WHOLE POINT OF THIS
+      # STEP. The full report is still red on inherited Clash Verge Rev surface:
+      # ~37 unreferenced files (the entire `uri-parser/` tree, a set of
+      # `use-*` hooks) and ~114 exports. Gating on that would be a gate nobody can
+      # pass, which is the same as no gate — and it was the reason the script sat
+      # unwired for the life of the fork. Gating on `--dependencies` is a check
+      # that is GREEN TODAY and fails the moment someone adds a dependency that
+      # nothing imports, which is the defect class that actually accumulated.
+      #
+      # `unresolved` and `unlisted` are included on purpose: they catch a package
+      # that IS imported and NOT declared, which breaks a clean `pnpm install`
+      # rather than merely bloating one.
+      #
+      # It does not need a build, a compiler, or the sidecars — it is a static
+      # scan of the tree — so it belongs in this job rather than `build (linux)`.
+      - name: No dependency in package.json that nothing imports
+        # THE `grep` IS WHAT MAKES THIS A GATE, and it is not decoration.
+        #
+        # `knip --dependencies` (the shortcut) prints the dependencies it finds
+        # AND still exits non-zero for unused files/exports from `knip.json`'s
+        # `include` list — so as a plain command it would be red on day one for
+        # ~37 files and ~114 exports this step does not gate on, and a red gate
+        # nobody can fix is a gate nobody reads.
+        #
+        # `--include` narrows what is REPORTED to the three classes that matter
+        # here, and the grep turns "did it print a section" into the exit status.
+        # `--include` names are what `knip --help` documents: there is no
+        # `hardDependencies` type in this version (`knip` 6.35.1), and passing one
+        # makes knip exit 0 having done nothing — a failure mode this step was
+        # written with and caught only because the guard was run against a
+        # deliberately unused dependency.
+        #
+        # `unlisted`/`unresolved` are in the filter because a package that is
+        # IMPORTED and not declared breaks a clean `pnpm install`, which is worse
+        # than a dependency that merely bloats one.
+        run: |
+          set -euo pipefail
+          out=$(pnpm exec knip --include dependencies,unlisted,unresolved --no-exit-code 2>&1)
+          if printf '%s\n' "$out" | grep -qE '^(Unused dependencies|Unused devDependencies|Unlisted|Unresolved) '; then
+            printf '%s\n' "$out"
+            echo "::error::package.json declares something nothing imports, or imports something it does not declare. See client/knip.json."
+            exit 1
+          fi
+          echo "No unused or undeclared dependency."
 
       # ── Rust tests and lints have MOVED to the `linux` build job ──
       #

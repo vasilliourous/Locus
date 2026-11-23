@@ -1,10 +1,5 @@
 {
   "page": {
-    "importForm": {
-      "actions": {
-        "paste": "Pegar"
-      }
-    },
     "feedback": {
       "errors": {
         "createFailed": "No se pudo crear la suscripción",
@@ -19,21 +14,6 @@
       },
       "notices": {
         "discardedKeys": "Las extensiones escribieron {{keys}}, campos gestionados por los ajustes, por lo que esos valores se descartaron"
-      }
-    }
-  },
-  "components": {
-    "menu": {
-      "editFile": "Editar archivo"
-    }
-  },
-  "modals": {
-    "editor": {
-      "actions": {
-        "format": "Formatear documento"
-      },
-      "messages": {
-        "readOnly": "No se puede editar en modo de solo lectura"
       }
     }
   }

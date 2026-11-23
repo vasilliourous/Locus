@@ -1,10 +1,6 @@
 {
   "actions": {
-    "cancel": "إلغاء",
-    "close": "إغلاق",
-    "save": "حفظ",
     "new": "جديد",
-    "resetToDefault": "إعادة تعيين إلى الافتراضي",
     "retry": "Retry",
     "refreshPage": "Refresh Page",
     "showDetails": "Show Details",
@@ -25,10 +21,6 @@
   },
   "validation": {
     "invalidRegex": "Invalid regular expression"
-  },
-  "window": {
-    "maximize": "تكبير",
-    "minimize": "تصغير"
   },
   "editorModes": {
     "visualization": "تصور",

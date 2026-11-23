@@ -59,8 +59,38 @@ languages; a consistency script that asserts ~11 old literals by regex; and
 
 ## 3. The retained names — the complete list
 
+### 3.0 When these retire, and who decides
+
 Each row: **what stays**, **why it cannot move in this change**, and **what would
 retire it**. The "Where" column names the file that owns the value.
+
+Per-name conditions ("`setup.sh` re-run", "DNS moves", "the operator renames the
+repo") are the right shape for a fact about the world, and each row in §3.1–§3.7
+carries its own. What none of them can do is tell you **which release** drops an
+alias, and that is the question the next reader actually has: every `locus`
+string left in this tree will otherwise be re-litigated by whoever greps next.
+
+**Two classes, two different answers.**
+
+| Class | Rows | Who retires it | Gate |
+|---|---|---|---|
+| **A migration-owned alias** — a fallback this rename *added*, accepted only for the transition | `LOCUS_SECRETS_PASSPHRASE*` (§3.5); the old bootstrap-header spelling, once deployed (§3.4) | Whoever closes the migration, in one change that removes both spellings' readers and the register row together | None can be written from a checkout: the condition is "every deployed host has been re-provisioned", which is a world claim (`CLAIMS.md` §5), not a tree fact |
+| **A fleet contract** — a name installed software or DNS depends on | `com.locus.client*` (§3.2); the `locus-*` artefact names (§3.1); `LOCUS_UPDATE_KEY*`; `locusvpn.jadedns.uk` (§3.6); `vasilliourous/Locus` (§3.7) | An **identity release**: versioned, with its own note in `docs/operate/RELEASING.md`, never a tidy-up | `check-consistency.sh` §53 fails the moment one disappears, which is deliberate: the tree cannot tell a correct retirement from the bug |
+
+**The rule, in one sentence:** *a class-A alias is deleted in the first release
+after its condition is met and that release is recorded here and in `CLAIMS.md`;
+a class-B name is never retired by a rename, only by a release that says so.*
+
+**Where the next one is recorded.** When a class-A alias is dropped, add a row
+below with the version and the date. §53 fails if this section is removed, so the
+record cannot disappear while the aliases are still in the tree:
+
+| Dropped | Release | Date | What made it safe |
+|---|---|---|---|
+| *(nothing yet — the migration is open)* | | | |
+
+This is deliberately a table with no rows rather than a sentence: a sentence
+would say the same thing and could not be updated in place.
 
 ### 3.1 Artefact file names
 
@@ -100,7 +130,16 @@ the bundle key.** `chrysalis-key-extract.sh` extracts it and
 | Script | Reads | Accepts the new name too? |
 |---|---|---|
 | `server/scripts/chrysalis-key-extract.sh` | `LOCUS_UPDATE_KEY_B64` | Yes — tries `LOCUS_…` first, then `CHRYSALIS_…` |
-| `server/scripts/secrets-encrypt.sh` | `LOCUS_UPDATE_KEY_B64` (required-var list) | Not yet — a re-encrypted bundle under the new name would fail the form check until this list is updated |
+| `server/scripts/secrets-encrypt.sh` | `LOCUS_UPDATE_KEY_B64` (required-var list) | Yes — `CHRYSALIS_UPDATE_KEY_B64` in the plaintext satisfies the form check, because the check is a search for either spelling. The required-var row itself keeps the old name because that is the name the committed bundle actually has. |
+
+Both halves are pinned by §53: the extractor's literal, and the `REQUIRED_VARS`
+block of the encryptor (scoped to the block, not the file — see that guard's
+comment for why the first attempt at it passed against the bug it was written
+to catch).
+
+Neither script is covered by a test, because both need the real passphrase and
+the real ciphertext. What §53 can do is refuse a rename that would make them
+wrong, which is the class the migration actually produced.
 
 The rename **broke both** during this migration: an over-eager
 `CHRYSALIS_UPDATE_KEY_B64` substitution left the extractor failing with *"the
@@ -110,8 +149,11 @@ against the real bundle, not by reading them — the extractor's failure is a
 silent one that only appears at signing time. That is why this row exists **and**
 why the scripts carry a comment naming this page.
 
-Verified 2026-11-23 against the committed bundle: decryption succeeds, and the
-extracted key's ID is `4DA9B48F39251CEF` (`CLAIMS.md` A25).
+Verified against the committed bundle (`CLAIMS.md` A25, dated there): decryption
+succeeds and reports 12 variables, and the extracted key's ID is
+`4DA9B48F39251CEF`, which is the value compiled into the client. The key ID is a
+fact about the ciphertext, so it belongs in `CLAIMS.md` with its date rather than
+in this sentence; this page states only what the scripts *read*.
 
 ### 3.4 The bootstrap header (a matched pair)
 
@@ -139,14 +181,34 @@ because a half-moved carve publishes or hides the signing key.
 | Retained | Where | Why | Retires when |
 |---|---|---|---|
 | `locusvpn.jadedns.uk` | served **alongside** `chrysalisvpn.jadedns.uk` on one Caddy block: `server/templates/Caddyfile`, `server/modules/05-caddy.sh` (`LANDING_DOMAIN_LEGACY`), recorded in `docs/state.toml` `[site.domain_legacy]` | DNS and TLS are a deployment, not a commit. The old name resolves today; the new one does not yet. Serving both means the page never 404s between the rename and the DNS change. | `chrysalisvpn.jadedns.uk` answers on the box → set `LANDING_DOMAIN_LEGACY=""` and drop the row from `state.toml`. |
-| `/etc/locus/…`, `locus-fetch.service`, `locus-upload.service` | `server/modules/09-activation-tunnel.sh`, `05-caddy.sh`, `08-firewall.sh` | **Renamed in the repository** to `/etc/chrysalis/` and `chrysalis-fetch.service`. On a live box the old unit and key path exist until `setup.sh` re-runs; the repo copy is inert until then. `locus-upload.service` survives only as a *retirement* target in `05-caddy.sh` — it is the name the script disables. | `setup.sh` re-run on the hub. The `locus-upload` mention is a historical reference and should stay until no box can still have it. |
-| `locus-hub` (ssh alias) | `server/scripts/deploy.sh`, `publish-release.sh`, `verify-release.sh` | An alias in the **operator's** `~/.ssh/config`, not in this repository. Renaming the literal in the scripts breaks deploy on the machine that has the old alias, and nothing in CI would notice. | The operator adds `chrysalis-hub` to their ssh config; then the literal changes. |
+| `/etc/locus/…`, `locus-fetch.service` | `server/modules/09-activation-tunnel.sh`, `05-caddy.sh`, `08-firewall.sh` | **Renamed in the repository** to `/etc/chrysalis/` and `chrysalis-fetch.service`. On a live box the old unit and key path exist until `setup.sh` re-runs; the repo copy is inert until then. §53 pins both retired spellings in `09-activation-tunnel.sh` and `05-caddy.sh`, because a `locus` reappearing in either is the silent half of this row: the box keeps the old path and the repo stops reading it. | `setup.sh` re-run on the hub (class B — see §3.0). |
+| `locus-hub` (ssh alias) | the probe in `server/scripts/deploy.sh`, `publish-release.sh`, `verify-release.sh` | An alias in the **operator's** `~/.ssh/config`, not in this repository. The scripts **probe `chrysalis-hub` first** and fall back to the bare host; the alias itself lives on the operator's machine, so a probe for a name that is not configured there is a no-op rather than an error — which is why the fallback exists and why nothing in CI would notice its absence. | The operator adds `chrysalis-hub` to their ssh config (class B — see §3.0). When no operator machine needs the fallback, the probe's else-branch goes. |
+
+The service `05-caddy.sh` **disables** is `chrysalis-upload.service`, not a
+`locus` name: that unit was already carried the new spelling before this
+migration, and the function retires it because leaving it running holds port 8091
+against `chrysalis-fetch`. An earlier revision of this row called it
+`locus-upload.service`, which no file in the tree ever contained — the kind of
+plausible-looking alias this page exists to keep out.
 
 ### 3.7 The GitHub repository
 
 | Retained | Where | Why | Retires when |
 |---|---|---|---|
 | `vasilliourous/Locus` | `server/scripts/fetch-release.py` (`GITHUB_REPO`), `publish-release.sh`, `verify-release.sh`, `deploy-site.sh`, `server/templates/chrysalis-fetch.service`, `server/site/index.html` | The remote's name is a hosting decision, and the hub fetches releases from it **unauthenticated** — a rename that races a deploy breaks publishing. `GITHUB_REPO` is an env override, so the hub can be pointed at a new name without a code change. | The operator renames the repo; then the defaults change in one commit. |
+
+### 3.8 A `locus` that survived in PROSE, not in code
+
+The rows above are names something *reads*. This one was a sentence: when
+`HUB_ALIAS_DOMAIN` is set, `05-caddy.sh` logs how to point a client at the alias,
+and until this row existed it said **`locus_hub_override`** — a `verge.yaml` field
+the rename had already called `chrysalis_hub_override`. Nothing reads the log, so
+nothing failed; an operator would have followed it and set a key the client
+ignores.
+
+| Retained (wrong) | Where | Why it is here | Retires when |
+|---|---|---|---|
+| ~~`locus_hub_override`~~ → `chrysalis_hub_override` | `server/modules/05-caddy.sh` (log line); `client/src-tauri/src/config/verge.rs` (the field); `server/pb_hooks/update.pb.js` (comment) | The field is **local** config, like the other `locus_*` fields §4 lists, so the rename moved it and the operator-facing prose did not follow. §53 now fails if the old spelling reappears in either file. | Never — it is already the new name. The row is the record of a prose defect, not an alias. |
 
 ## 4. What was renamed, for the record
 

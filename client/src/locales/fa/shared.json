@@ -1,10 +1,6 @@
 {
   "actions": {
-    "cancel": "لغو",
-    "close": "بستن",
-    "save": "ذخیره",
     "new": "جدید",
-    "resetToDefault": "بازنشانی به پیش‌فرض",
     "retry": "Retry",
     "refreshPage": "Refresh Page",
     "showDetails": "Show Details",
@@ -25,10 +21,6 @@
   },
   "validation": {
     "invalidRegex": "Invalid regular expression"
-  },
-  "window": {
-    "maximize": "بزرگ‌نمایی",
-    "minimize": "کوچک‌نمایی"
   },
   "editorModes": {
     "visualization": "تجسم",

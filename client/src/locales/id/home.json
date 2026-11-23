@@ -135,12 +135,6 @@
         "lapsedAction": "Contact whoever sold you the code to renew it.",
         "suspendedAction": "Ask them to lift the suspension. You can connect again without re-entering your code or restarting the app."
       }
-    },
-    "ipInfo": {
-      "errors": {
-        "loadWithDetails": "Gagal mendapatkan info IP: {{message}}",
-        "noServices": "Tidak ada layanan deteksi IP yang tersedia"
-      }
     }
   }
 }

@@ -33,6 +33,13 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
+// The consumption-site scan lives in its own module so `tests/prose-locate.test.ts`
+// calls the SAME functions this generator does. A test that re-implemented the
+// scan would pass while the generator stayed broken — which is exactly how the
+// selector-form blind spot survived: the four keys it missed rendered a Code cell
+// of `—` and nothing anywhere failed.
+import { backendCode, locate } from './prose-locate.mjs'
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const ROOT = path.resolve(__dirname, '..')
 const SRC = path.join(ROOT, 'src')
@@ -295,75 +302,6 @@ const readBackend = () => {
   return out
 }
 
-/** Frontend files that render, excluding tests and the locale bundles. */
-const sourceFiles = () => {
-  const out = []
-  const walk = (dir) => {
-    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-      const full = path.join(dir, entry.name)
-      if (entry.isDirectory()) {
-        if (entry.name === 'locales' || entry.name === 'generated') continue
-        walk(full)
-      } else if (
-        /\.(ts|tsx)$/.test(entry.name) &&
-        !/\.test\./.test(entry.name)
-      ) {
-        // `src/types/generated/` is the complete key list, written so TypeScript
-        // can reject a typo. It references EVERY key by construction, so counting
-        // it as a usage makes every string look reachable — it would have hidden
-        // the orphan check entirely.
-        out.push(full)
-      }
-    }
-  }
-  walk(SRC)
-  return out
-}
-
-const files = sourceFiles().map((f) => ({
-  rel: path.relative(ROOT, f),
-  text: fs.readFileSync(f, 'utf8'),
-}))
-
-/**
- * Where a frontend key is referenced.
- *
- * Three access forms exist in this tree, and a scan that knows only the first
- * will call a live string an orphan:
- *
- *   1. `t('home.components.…')`           — the normal case
- *   2. `$.home.components.…`              — i18next's selector object, used
- *                                            outside React (`services/api.ts`,
- *                                            `hooks/use-clash.ts`)
- *   3. a key held in a variable and passed — `connect-notice.ts` returns
- *      `{ key: 'home.…' }`, `notification-handlers.ts` passes literals into
- *      `showNotice.*`. Both are plain `'…'` literals, so the same scan finds
- *      them; only the CALL SITE differs, which is why this searches for the
- *      quoted key rather than for `t(`.
- */
-const locate = (key) => {
-  const hits = []
-  // The `$.` form is written as a property path, not a string, so the whole key
-  // appears as `${key.slice(ns.length)}` with the namespace as the root.
-  const dotKey = key.split('.').slice(1).join('.')
-  for (const { rel, text } of files) {
-    const needles = [`'${key}'`, `"${key}"`, `\`${key}\``, `$.${dotKey}`]
-    for (const needle of needles) {
-      const at = text.indexOf(needle)
-      if (at === -1) continue
-      const line = text.slice(0, at).split('\n').length
-      hits.push(`${rel}:${line}`)
-      break
-    }
-  }
-  return hits
-}
-
-const readRust = (rel) => {
-  const full = path.join(ROOT, rel)
-  return fs.existsSync(full) ? fs.readFileSync(full, 'utf8') : ''
-}
-
 // ── assembly ────────────────────────────────────────────────────────────────
 
 /**
@@ -431,33 +369,11 @@ const backendWhere = (key) => {
   if (k.startsWith('tray.')) return 'Native tray menu (`core/tray/menu_def.rs`)'
   if (k.startsWith('notifications.'))
     return 'OS notification (`utils/notification.rs`)'
-  if (k.startsWith('service.')) return 'macOS privilege prompt (`cmd/chrysalis.rs`)'
+  if (k.startsWith('service.'))
+    return 'macOS privilege prompt (`cmd/chrysalis.rs`)'
   if (k.startsWith('launchGuard.'))
     return 'macOS first-run guard (`utils/macos_launch_guard.rs`)'
   return 'Native dialog'
-}
-
-const backendCode = (key) => {
-  const k = key.replace('backend:', '')
-  const leaf = k.split('.').pop()
-  const roots = [
-    'client/src-tauri/src/core/tray/menu_def.rs',
-    'client/src-tauri/src/utils/notification.rs',
-    'client/src-tauri/src/utils/macos_launch_guard.rs',
-    'client/src-tauri/src/cmd/chrysalis.rs',
-  ]
-  const hits = []
-  for (const rel of roots) {
-    const text = readRust(rel)
-    if (!text) continue
-    const idx =
-      text.indexOf(`"${leaf}"`) !== -1
-        ? text.indexOf(`"${leaf}"`)
-        : text.indexOf(`.${leaf}`)
-    if (idx === -1) continue
-    hits.push(`${rel}:${text.slice(0, idx).split('\n').length}`)
-  }
-  return hits
 }
 
 const escapeCell = (s) => s.replace(/\|/g, '\\|').replace(/\n/g, ' ').trim()
@@ -559,7 +475,7 @@ const render = ({ byArea, unattributed, excludedStrings, total }) => {
   w()
   w('`src/locales/en/` is the canonical bundle, but the app ships in 13')
   w('languages, and each of the other 12 owns the same key set. A rewrite of a')
-  w('row in this file therefore has **three** possible outcomes, and only the')
+  w('row in this file therefore has **four** possible outcomes, and only the')
   w('first is a finished job:')
   w()
   w(
@@ -570,7 +486,24 @@ const render = ({ byArea, unattributed, excludedStrings, total }) => {
     '| a real translation | leaves it alone | the **old** meaning, in their language |',
   )
   w('| a copy of the old English | leaves it alone | the **old** English |')
-  w('| the key is absent | leaves it absent | English, by i18next fallback |')
+  w('| the key is absent | leaves it absent | English, by fallback |')
+  w(
+    '| a value the app cannot read | leaves it alone | nothing — the build fails |',
+  )
+  w()
+  w('That last row is not hypothetical and is the one here that is not merely')
+  w(
+    'stale. The **native** strings are read by rust_i18n at COMPILE time, and a',
+  )
+  w('lint-free YAML file can still fail it: a malformed `clash-verge-i18n/')
+  w(
+    'locales/*.yml` stops `cargo build` with `proc macro panicked: Parse file …',
+  )
+  w(
+    'failed`, on whichever platform builds it. `prose:apply` writes English only,',
+  )
+  w('so a native row you rewrite leaves the other twelve untouched and valid —')
+  w('but if you touch them by hand, run `cargo build -p clash-verge-i18n`.')
   w()
   w('So `prose:apply` makes the change true for `en` and for any key still')
   w('falling back — and **not** for a string someone translated. That is not a')
@@ -588,8 +521,15 @@ const render = ({ byArea, unattributed, excludedStrings, total }) => {
   )
   w('why the count below is a floor, not a total.')
   w()
-  w('Changing a `{{placeholder}}` or a count-sensitive string needs the')
-  w('plural forms re-checked in every language too; i18next will not warn.')
+  w(
+    'Changing a placeholder needs the value re-checked in every language, and in',
+  )
+  w('the right syntax: `{{used}}` in a JSON bundle (i18next), `{mode}` in')
+  w('`en.yml` (rust_i18n). A count-sensitive string — `{{count}} days` — needs')
+  w('its plural forms re-checked too: Japanese has one, Russian three, and')
+  w(
+    'i18next will not warn when a rewrite changes which case a number falls into.',
+  )
   w()
 
   return lines.join('\n')

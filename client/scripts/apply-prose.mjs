@@ -10,7 +10,7 @@
  *
  * # Why a script rather than a person copying
  *
- * 332 strings across 5 JSON bundles and 1 YAML file. A manual pass misses some,
+ * 333 strings across 5 JSON bundles and 1 YAML file. A manual pass misses some,
  * and a missed one is invisible: the screen still renders, in the old voice,
  * beside the new one. This applies every row it can and then **verifies nothing
  * was skipped** — a row it could not write is a failure, not a warning.
@@ -19,7 +19,7 @@
  *
  * · **Touch a row whose text still equals the original.** `PROSE.md` is
  *   generated, so most rows are unchanged; rewriting them is a no-op that would
- *   hide a real edit among 332.
+ *   hide a real edit among 333.
  * · **Write a value into a bundle key that does not exist.** A renamed key in
  *   the manifest is a manifest that has drifted from the code.
  * · **Apply a row for a backend string without matching its Rust call site.**
@@ -142,13 +142,30 @@ const getPath = (obj, dotted) => {
 }
 
 /**
- * Every `{{name}}` in a string.
+ * Every placeholder in a string — in either of the app's two syntaxes.
  *
- * i18next substitutes these; a lost one renders a double space where a number
- * should be, which no type checker and no test notices. This is the only guard
- * on the apply path that can actually fail on a copy edit.
+ * The two bundles are substituted by two different engines, and they do not
+ * agree on syntax:
+ *
+ *   · i18next (`src/locales/en/*.json`)  → `{{used}}`, `{{count}}`
+ *   · rust_i18n (`clash-verge-i18n/locales/en.yml`) → `{mode}`, `{reason}`
+ *
+ * A lost placeholder renders a gap where a number or a mode name should be,
+ * which no type checker and no test notices. This is the only guard on the apply
+ * path that can fail on a copy edit.
+ *
+ * It used to match `\{\{…\}\}` only. There is no `{{` anywhere in `en.yml`, so
+ * **every native placeholder was unguarded**: rewriting
+ * `Switched to {mode}.` as `Mode changed.` was accepted and written, and the
+ * student's OS notification would say "Mode changed." forever, with no error.
+ * Both families are matched because a row can only belong to one of them, and
+ * the union costs nothing.
  */
-const placeholders = (s) => new Set(s.match(/\{\{\s*\w+\s*\}\}/g) ?? [])
+const placeholders = (s) =>
+  new Set([
+    ...(s.match(/\{\{\s*\w+\s*\}\}/g) ?? []),
+    ...(s.match(/\{\s*\w+\s*\}/g) ?? []),
+  ])
 
 const placeholdersSurvive = (original, replacement) => {
   const want = placeholders(original)
@@ -326,7 +343,7 @@ const findYamlLeaf = (yaml, dotted) => {
   const parts = dotted.split('.')
   let indent = 0
   let start = 0
-  let lines = yaml.split('\n')
+  const lines = yaml.split('\n')
   for (let i = 0; i < parts.length; i += 1) {
     const want = parts[i]
     const isLast = i === parts.length - 1

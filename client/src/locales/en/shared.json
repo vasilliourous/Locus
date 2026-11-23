@@ -1,10 +1,6 @@
 {
   "actions": {
-    "cancel": "Cancel",
-    "close": "Close",
-    "save": "Save",
     "new": "New",
-    "resetToDefault": "Reset to Default",
     "retry": "Retry",
     "refreshPage": "Refresh Page",
     "showDetails": "Show Details",
@@ -25,10 +21,6 @@
   },
   "validation": {
     "invalidRegex": "Invalid regular expression"
-  },
-  "window": {
-    "maximize": "Maximize",
-    "minimize": "Minimize"
   },
   "editorModes": {
     "visualization": "Visualization",

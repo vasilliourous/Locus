@@ -1,10 +1,5 @@
 {
   "page": {
-    "importForm": {
-      "actions": {
-        "paste": "붙여넣기"
-      }
-    },
     "feedback": {
       "errors": {
         "createFailed": "프로필을 만들지 못했습니다",
@@ -19,21 +14,6 @@
       },
       "notices": {
         "discardedKeys": "확장 설정 또는 스크립트가 앱 설정이 관리하는 {{keys}} 필드를 작성하여 해당 값은 무시되었습니다"
-      }
-    }
-  },
-  "components": {
-    "menu": {
-      "editFile": "파일 편집"
-    }
-  },
-  "modals": {
-    "editor": {
-      "actions": {
-        "format": "문서 포맷"
-      },
-      "messages": {
-        "readOnly": "읽기 전용 편집기에서는 편집할 수 없습니다"
       }
     }
   }

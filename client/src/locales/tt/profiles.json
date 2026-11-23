@@ -1,10 +1,5 @@
 {
   "page": {
-    "importForm": {
-      "actions": {
-        "paste": "Кую"
-      }
-    },
     "feedback": {
       "errors": {
         "createFailed": "Профиль төзеп булмады",
@@ -19,21 +14,6 @@
       },
       "notices": {
         "discardedKeys": "Киңәйтмәләр Көйләүләр белән идарә ителә торган {{keys}} кырларын язды, шуңа күрә бу кыйммәтләр кире кагылды"
-      }
-    }
-  },
-  "components": {
-    "menu": {
-      "editFile": "Файлны үзгәртү"
-    }
-  },
-  "modals": {
-    "editor": {
-      "actions": {
-        "format": "Документны форматлау"
-      },
-      "messages": {
-        "readOnly": "Уку режимында үзгәртү мөмкин түгел"
       }
     }
   }

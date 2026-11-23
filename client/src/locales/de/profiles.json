@@ -1,10 +1,5 @@
 {
   "page": {
-    "importForm": {
-      "actions": {
-        "paste": "Einfügen"
-      }
-    },
     "feedback": {
       "errors": {
         "createFailed": "Abonnement konnte nicht erstellt werden",
@@ -19,21 +14,6 @@
       },
       "notices": {
         "discardedKeys": "Erweiterungen haben {{keys}} gesetzt, die von den Einstellungen verwaltet werden, daher wurden diese Werte verworfen"
-      }
-    }
-  },
-  "components": {
-    "menu": {
-      "editFile": "Datei bearbeiten"
-    }
-  },
-  "modals": {
-    "editor": {
-      "actions": {
-        "format": "Dokument formatieren"
-      },
-      "messages": {
-        "readOnly": "Bearbeitung im schreibgeschützten Modus nicht möglich"
       }
     }
   }

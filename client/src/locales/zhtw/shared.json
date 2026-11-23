@@ -1,10 +1,6 @@
 {
   "actions": {
-    "cancel": "取消",
-    "close": "關閉",
-    "save": "儲存",
     "new": "新增",
-    "resetToDefault": "重設為預設值",
     "retry": "重試",
     "refreshPage": "重新整理頁面",
     "showDetails": "顯示詳情",
@@ -25,10 +21,6 @@
   },
   "validation": {
     "invalidRegex": "無效的正規表示式"
-  },
-  "window": {
-    "maximize": "最大化",
-    "minimize": "最小化"
   },
   "editorModes": {
     "visualization": "視覺化",

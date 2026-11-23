@@ -15,7 +15,12 @@
     "cycles"
   ],
   "ignoreBinaries": ["rustc", "cc"],
-  "ignoreDependencies": ["lint-staged"],
+  "ignoreDependencies": [
+    "lint-staged",
+    "foxts",
+    "@tauri-apps/plugin-http",
+    "@tauri-apps/plugin-opener"
+  ],
   "ignoreIssues": {
     "src/types/generated/**": ["exports", "types"]
   },

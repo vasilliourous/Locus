@@ -1,10 +1,6 @@
 {
   "actions": {
-    "cancel": "Отмена",
-    "close": "Закрыть",
-    "save": "Сохранить",
     "new": "Новый",
-    "resetToDefault": "Сбросить настройки",
     "retry": "Повторить",
     "refreshPage": "Обновить страницу",
     "showDetails": "Показать подробности",
@@ -25,10 +21,6 @@
   },
   "validation": {
     "invalidRegex": "Недопустимое регулярное выражение"
-  },
-  "window": {
-    "maximize": "Развернуть",
-    "minimize": "Свернуть"
   },
   "editorModes": {
     "visualization": "Визуализация",

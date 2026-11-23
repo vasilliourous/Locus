@@ -23,7 +23,9 @@ import { CHRYSALIS_COLORS } from '@/pages/_theme'
 export const cardSx = (theme: Theme): SxProps<Theme> => ({
   borderRadius: `var(--card-radius, 12px)`,
   border: `1px solid ${
-    theme.palette.mode === 'light' ? theme.palette.divider : CHRYSALIS_COLORS.border
+    theme.palette.mode === 'light'
+      ? theme.palette.divider
+      : CHRYSALIS_COLORS.border
   }`,
   bgcolor: theme.palette.background.paper,
 })

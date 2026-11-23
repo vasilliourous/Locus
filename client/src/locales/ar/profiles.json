@@ -1,10 +1,5 @@
 {
   "page": {
-    "importForm": {
-      "actions": {
-        "paste": "لصق"
-      }
-    },
     "feedback": {
       "errors": {
         "createFailed": "تعذّر إنشاء الملف الشخصي",
@@ -19,21 +14,6 @@
       },
       "notices": {
         "discardedKeys": "كتبت الإضافات الحقول {{keys}} التي تديرها الإعدادات، لذلك تم تجاهل هذه القيم"
-      }
-    }
-  },
-  "components": {
-    "menu": {
-      "editFile": "تعديل الملف"
-    }
-  },
-  "modals": {
-    "editor": {
-      "actions": {
-        "format": "تنسيق المستند"
-      },
-      "messages": {
-        "readOnly": "لا يمكن التعديل في محرر القراءة فقط"
       }
     }
   }

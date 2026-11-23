@@ -21,8 +21,7 @@ This document is the procedure. What each string *is* belongs in
 ## 1. What you are editing
 
 `client/PROSE.md` is **generated from the tree**, not maintained by hand. It holds
-every user-facing string in the app — 332 of them at the time of writing — each
-with three facts:
+every user-facing string in the app — 333 of them — each with three facts:
 
 | Column | What it is | Why you need it |
 |---|---|---|
@@ -36,6 +35,14 @@ The third column is the one people misread. A string's storage is always
 `pages/connect-notice.ts`, and the sign-out outcome strings from
 `components/shared/sign-out-card.tsx`. That column is how you find the screen when
 a rewrite needs the surrounding code to make sense.
+
+**Every row has one.** A `—` in that cell is a bug, not a string without a home:
+it means the scan could not find the call site, and the two ways that happens
+have both already happened in this repo — i18next's selector form
+`i18n.t(($) => $.a.b.c)`, where the key is a bare property path and not a quoted
+string, and a Rust file list resolved against the wrong root. Both are now
+guarded by `tests/prose-locate.test.ts`, which fails when any row's Code cell is
+empty.
 
 ### The headings are the screen map
 
@@ -69,7 +76,7 @@ pnpm prose:apply
 # 4. regenerate the manifest from the new state
 pnpm prose
 
-# 5. the four gates (§4)
+# 5. the gates (§4)
 pnpm typecheck && pnpm test && pnpm lint && pnpm prose:check
 ```
 
@@ -87,19 +94,31 @@ line number. `pnpm prose:check` in step 5 catches that, and CI runs the same che
 
 ## 3. What the applier refuses, and why that is the point
 
-Four refusals. Each is a real mistake, not a hypothetical:
+Five refusals. Each is a real mistake, not a hypothetical:
 
-**Placeholders.** `{{count}}` and friends are substituted by i18next. A rewrite
-that drops one renders `expires in  days` — no type checker sees it, no test
-fails, and it only shows up on a screen with a real number in it. The applier
-compares the placeholder set of the original against the replacement and rejects
-the row:
+**Placeholders.** The app has **two** placeholder syntaxes, substituted by two
+different engines, and a rewrite must keep whichever one the row is in:
+
+| Where | Syntax | Example |
+|---|---|---|
+| `src/locales/en/*.json` | i18next | `{{used}} of {{total}}` |
+| `clash-verge-i18n/locales/en.yml` | rust_i18n | `Switched to {mode}.` |
+
+A rewrite that drops one renders `expires in  days`, or an OS notification
+saying "Mode changed." forever — no type checker sees it, no test fails, and it
+only shows up on a screen with a real value in it. The applier compares the
+placeholder set of the original against the replacement and rejects the row:
 
 ```
 1 row(s) NOT applied:
   home.components.connection.subscriptionExpiresIn — placeholders changed: {{count}} ->
+  backend:notifications.clashModeChanged.body — placeholders changed: {mode} ->
 Nothing was written.
 ```
+
+The single-brace form was **not** guarded until it was found by testing: there is
+no `{{` anywhere in `en.yml`, so the guard matched nothing in that file and every
+native placeholder was unchecked. Both forms are matched now.
 
 **A key that is not in the bundle.** The manifest has drifted from the code —
 someone renamed a key, or deleted the string. Regenerate, do not force.
@@ -122,7 +141,7 @@ write path, so a half-applied copy pass is not a state you can reach.
 | Gate | Command | What it catches |
 |---|---|---|
 | Types | `pnpm typecheck` | a `t()` key that no longer exists (`TranslationKey` is generated) |
-| Tests | `pnpm test` | the palette guards; a copy change should never touch them |
+| Tests | `pnpm test` | the palette guards **and `tests/prose-locate.test.ts`**; a copy change should never touch the palette guards |
 | Lint | `pnpm lint` | unused imports left behind when a label moved |
 | Manifest | `pnpm prose:check` | `PROSE.md` disagreeing with the tree |
 | Cross-repo | `bash server/scripts/check-consistency.sh` | **§41**: the support address must exist exactly once. See the trap below. |
@@ -131,6 +150,14 @@ write path, so a half-applied copy pass is not a state you can reach.
 `.github/workflows/client.yml`, so a stale manifest fails CI rather than being
 noticed by whoever next opens the file. It is a string comparison — it cannot be
 satisfied by anything but the real generated output.
+
+**What `prose:check` cannot see, and the test that covers it.** `--check` compares
+the generated text against the committed file. If the generated Code column was
+*wrong when it was generated*, comparing it to itself is clean — a stale manifest
+and a differently-stale manifest agree. That is how four live strings and all 68
+native rows sat behind a `—` with every gate green. `tests/prose-locate.test.ts`
+runs inside `pnpm test`, calls the same `scripts/lib/prose-locate.mjs` the
+generator does, and fails on any row whose consumption site does not resolve.
 
 ### The `i18n:format` trap
 
@@ -252,7 +279,9 @@ before/after output before you trust it.**
 
 ## 8. Not verified
 
-- The gate list in §4 was run by hand on this tree, not observed in CI.
+- The gate list in §4 was run by hand on this tree, not observed in CI. The
+  commands themselves ran green locally; whether `verify` runs them in the same
+  order on a runner is read from `client.yml`, not watched.
 - The claim that `preview` publishes on a prose-only push is read from
   `client.yml`'s `paths` filter and `preview`'s `if:`. It was not watched running.
 - The per-locale coverage in §5 is a count from `i18n:check`, not a review of any

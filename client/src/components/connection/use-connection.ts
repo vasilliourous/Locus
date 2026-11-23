@@ -30,7 +30,8 @@ export type { ConnectionPhase }
  * re-checks entitlement in Rust — so a value that is a few seconds old can only
  * affect what is painted, never what is allowed.
  */
-let statusSeed: { phase: ConnectionPhase; status: ChrysalisStatus } | null = null
+let statusSeed: { phase: ConnectionPhase; status: ChrysalisStatus } | null =
+  null
 
 /**
  * The tunnel state machine, lifted from the home card that used to own it.
@@ -312,7 +313,9 @@ export const useConnection = (): ConnectionState => {
     connectInFlightRef.current = connecting
 
     try {
-      const result = connecting ? await chrysalisConnect() : await chrysalisDisconnect()
+      const result = connecting
+        ? await chrysalisConnect()
+        : await chrysalisDisconnect()
       // The backend's sentence is shown when it carries an explanation rather
       // than a bare confirmation. A timed-out connect returns `connected: false`
       // WITH the reason, and swallowing it would leave a student watching a

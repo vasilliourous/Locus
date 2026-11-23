@@ -1,10 +1,5 @@
 {
   "page": {
-    "importForm": {
-      "actions": {
-        "paste": "چسباندن"
-      }
-    },
     "feedback": {
       "errors": {
         "createFailed": "ایجاد پروفایل ناموفق بود",
@@ -19,21 +14,6 @@
       },
       "notices": {
         "discardedKeys": "افزونه‌ها فیلدهای {{keys}} را نوشتند که توسط تنظیمات مدیریت می‌شوند، بنابراین این مقادیر نادیده گرفته شدند"
-      }
-    }
-  },
-  "components": {
-    "menu": {
-      "editFile": "ویرایش فایل"
-    }
-  },
-  "modals": {
-    "editor": {
-      "actions": {
-        "format": "فرمت‌بندی سند"
-      },
-      "messages": {
-        "readOnly": "نمی‌توان در ویرایشگر فقط خواندنی ویرایش کرد"
       }
     }
   }

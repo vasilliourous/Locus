@@ -1,10 +1,6 @@
 {
   "actions": {
-    "cancel": "Batal",
-    "close": "Tutup",
-    "save": "Simpan",
     "new": "Baru",
-    "resetToDefault": "Setel Ulang ke Default",
     "retry": "Retry",
     "refreshPage": "Refresh Page",
     "showDetails": "Show Details",
@@ -25,10 +21,6 @@
   },
   "validation": {
     "invalidRegex": "Invalid regular expression"
-  },
-  "window": {
-    "maximize": "Maksimalkan",
-    "minimize": "Minimalkan"
   },
   "editorModes": {
     "visualization": "Visualisasi",

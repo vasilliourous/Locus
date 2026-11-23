@@ -17,6 +17,38 @@ re-argued; the evidence for each is a world claim in
 
 ---
 
+## The inherited dead surface — measured, not removed
+
+**Added 2026-11-23.** The dependency class is closed (see
+[`FIXES.md`](FIXES.md) for that entry). The *file* and *export* classes are not,
+and the numbers are now measured rather than guessed, because a `knip` report is
+reproducible from any checkout.
+
+**What is still there, and why it was left:**
+
+- **~36 unreferenced frontend files** — the whole `src/utils/uri-parser/` tree
+  (13 files), a set of `src/hooks/use-*.ts` hooks, `services/webdav-status.ts`,
+  `scroll-top-button.tsx`. Inherited Clash Verge Rev surface with no Call site in
+  this product. Deleting them is a real diff across files nobody has reviewed.
+- **~114 unused exports and ~29 unused exported types**, mostly `components/base/`
+  re-exports and generated IPC types. Some are legitimately public-in-shape.
+
+**Why this is a separate entry and not part of the fix.** A gate on these classes
+would be red on day one, and a gate that cannot be passed is one nobody reads —
+that is precisely why `knip` sat unwired for the life of the fork. The dependency
+gate added in `verify` is green today and catches the class that actually
+accumulated (packages, not files).
+
+**What would close it:** a sweep that deletes the `uri-parser/` tree and the dead
+hooks behind the full gate set, then narrows the `knip` `include` list in
+`client/knip.json` one class at a time. Not started, and deliberately not bundled
+into the rename.
+
+**Unverified here:** nothing in this entry was run; it is a `knip --report`
+reading taken against the current tree.
+
+---
+
 ## The suspension fix — every gap needs the same two things: a code and a deployed hub
 
 **Added 2026-11-22.** Four defects fixed; **none of it has been run end to end.**

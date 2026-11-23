@@ -1,10 +1,5 @@
 {
   "page": {
-    "importForm": {
-      "actions": {
-        "paste": "Tempel"
-      }
-    },
     "feedback": {
       "errors": {
         "createFailed": "Gagal membuat profil",
@@ -19,21 +14,6 @@
       },
       "notices": {
         "discardedKeys": "Ekstensi menulis {{keys}} yang dikelola oleh Pengaturan, sehingga nilai tersebut diabaikan"
-      }
-    }
-  },
-  "components": {
-    "menu": {
-      "editFile": "Ubah Berkas"
-    }
-  },
-  "modals": {
-    "editor": {
-      "actions": {
-        "format": "Format dokumen"
-      },
-      "messages": {
-        "readOnly": "Tidak dapat mengedit di editor hanya baca"
       }
     }
   }

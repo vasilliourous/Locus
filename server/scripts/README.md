@@ -29,7 +29,7 @@ Two conventions hold across this directory:
 | `fix-tier-configs.py` | Repair `tier_configs` on a live hub (empty collection, stale passwords, wrong port) without a full re-seed |
 | `add-signature-columns.py` | Add the `signature_<platform>` columns to `update_config` on a live hub. **Deliberately not `seed-pb.py`**, which would overwrite the live release row with the empty `1.0.0` placeholder |
 | `stamp-batch.py` | Stamp middleman/expiry onto a freshly generated batch of codes. Called by `setup.sh`; exists as a file (not an inline heredoc) because nesting Python inside `setup.sh`'s own heredocs is a quoting trap |
-| `codes.json` | The `RQ-` activation-code set used to seed a fresh database — a fresh DB has an empty `codes` collection |
+| `codes.json` | The `RQ-` activation-code set used to seed a fresh database — a fresh DB has an empty `codes` collection. **Its `tier` values must name a row `seed-pb.py` seeds** (`free`, `budget`, `strike`), because `activation.pb.js` resolves the tier against `tier_configs` and treats a miss as "no connection details". The set was five `eco` + five `stealth` + five `strike` — two retired rows — until 2026-11-23; it is now five of each salable row |
 | `seed-live.py` | **DEPRECATED.** Near-duplicate of `seed-pb.py`; kept only for reference. Use `seed-pb.py` |
 
 ## Publishing a release

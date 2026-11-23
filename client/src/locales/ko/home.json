@@ -135,12 +135,6 @@
         "lapsedAction": "Contact whoever sold you the code to renew it.",
         "suspendedAction": "Ask them to lift the suspension. You can connect again without re-entering your code or restarting the app."
       }
-    },
-    "ipInfo": {
-      "errors": {
-        "loadWithDetails": "IP 정보를 가져오지 못했습니다: {{message}}",
-        "noServices": "사용 가능한 IP 감지 서비스가 없습니다"
-      }
     }
   }
 }

@@ -1,10 +1,5 @@
 {
   "page": {
-    "importForm": {
-      "actions": {
-        "paste": "Paste"
-      }
-    },
     "feedback": {
       "errors": {
         "createFailed": "Failed to create profile",
@@ -19,21 +14,6 @@
       },
       "notices": {
         "discardedKeys": "Extensions wrote {{keys}}, which Settings manages, so those values were discarded"
-      }
-    }
-  },
-  "components": {
-    "menu": {
-      "editFile": "Edit File"
-    }
-  },
-  "modals": {
-    "editor": {
-      "actions": {
-        "format": "Format document"
-      },
-      "messages": {
-        "readOnly": "Cannot edit in read-only editor"
       }
     }
   }

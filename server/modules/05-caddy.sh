@@ -616,7 +616,7 @@ CADDY
             warn "Caddyfile still contains a __HUB_ placeholder — the alias block is malformed"
         else
             log "✓ Hub alias block added: ${HUB_ALIAS_DOMAIN} → ${DOMAIN} (same paths)"
-            log "  A client must be pointed at it with locus_hub_override; the"
+            log "  A client must be pointed at it with chrysalis_hub_override; the"
             log "  built-in hub address is unchanged and keeps working."
         fi
     else

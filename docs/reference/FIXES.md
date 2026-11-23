@@ -24,6 +24,95 @@ commercial gaps, [`../business/17-not-built.md`](../business/17-not-built.md).
 
 ---
 
+## A GUARD THAT COULD NOT FAIL, AND THE DEAD SURFACE IT WAS HIDING (2026-11-23, unreleased)
+
+Found by a read-only assessment of the tree. Four defects, and the same shape in
+three of them: **a check that reported success because it could not see the thing
+it was checking.** Each is now demonstrated failing against the defect it names.
+
+**1. The i18n "unused keys" report was structurally always zero.**
+
+`client/scripts/cleanup-unused-i18n.mjs` answered "which strings does nothing
+render". It scanned `src/` for usages — including `src/types/generated/`, which
+mirrors **every** key so TypeScript can reject a typo. Every key therefore
+matched itself and the report said `unused=0` for the whole tree, forever. It was
+reported as clean while 12 live-but-orphaned strings and (after the deletions
+below) two strings whose only consumer was gone sat in the bundles.
+
+`prose-locate.mjs` already excluded that directory for exactly this reason, and
+the comment there says so; this script did not. It is now excluded from the usage
+scan, and the report can fail.
+
+**2. …and then it immediately named two strings the app renders.**
+
+Closing the blind spot surfaced `settings.modals.clashPort.messages.portTooLow`
+and `…portTooHigh`, thrown at a student from `hooks/use-clash.ts` in i18next's
+selector form `i18n.t(($) => $.a.b.c)`. The collector had no branch for an arrow
+body, resolved the call to `null`, and offered both for deletion. `prose-locate.mjs`
+grew the identical branch after it made four live strings read as unreachable;
+the two scans now agree about what a usage is, which is the property that was
+missing.
+
+*The first attempt at that branch changed nothing*, and the reason is worth
+keeping: the recovered path begins with the selector's `$` root
+(`$.settings.…`), which fails the key pattern and is silently discarded. A branch
+that returns the wrong shape looks exactly like a branch that was never reached.
+
+**3. Sixteen runtime dependencies that nothing imports, one of them a shipped XSS surface.**
+
+`knip` has been a devDependency with a curated `knip.json` since the fork and
+**nothing ran it** — it appeared in no workflow and no document. On first run it
+reported 16 unreferenced runtime packages and 3 devDependencies. Removed:
+`lodash-es`, `nanoid`, `qrcode.react`, `react-hook-form`, `react-markdown`,
+`rehype-raw`, `rehype-sanitize`, `remark-gfm`, `compare-versions`, `@dnd-kit/dom`,
+`@dnd-kit/collision`, `@types/lodash-es`, `axios`, `husky`.
+
+The markdown chain (`react-markdown` + `rehype-raw` + `rehype-sanitize` +
+`remark-gfm`) is the one that matters beyond install weight: it is a
+renderer-side HTML pipeline, bundled into the app, with no code path that calls
+it. Attack surface carried for a feature that was never built.
+
+**Four packages knip named are NOT dead and were kept**, which is the reason this
+was done by hand rather than by `--fix`:
+`foxts` (imported by `services/api.ts`), `@tauri-apps/plugin-http` and
+`@tauri-apps/plugin-opener` (imported by the two files below), and `@emotion/*`
++ the remaining `@dnd-kit` packages (reached by the same route). All four are in
+`ignoreDependencies` with that reason recorded. **Do not trust `knip` output to
+be a delete list.**
+
+**4. The dead files were `PROSE.md`'s last unresolved rows.**
+
+`src/services/api.ts` and `src/utils/open-external-url.ts` were reachable from
+nothing (verified: no `from '@/services/api'` or `from '@/utils/open-external-url'`
+anywhere, and neither export used). A file nothing imports cannot render, so its
+strings are not reachable by a student. Both are deleted rather than left for the
+prose manifest to cite as a call site.
+
+The result on `PROSE.md`: **72 rows whose Code cell read `—` ("a student cannot
+reach this") became 0**, and no new dash was introduced. That is the honest
+measure of how much of the report was unfounded.
+
+The two `ipInfo` strings went with the file, and
+`tests/prose-locate.test.ts` was narrowed from four keys to the two that are
+genuinely reachable — asserting the removed pair would have re-added a dependency
+on dead code in order to pass.
+
+**The rule this produces.** Each of the three checks reported success, and each
+was asked "can you fail?" only after it was made to answer honestly. This
+repository's own fourth rule — *a guard must be shown to fail against the code it
+catches* — is what turned all three up, and applying it is how the new
+`knip` gate below was accepted.
+
+**The gate added, and its scope.** `verify` now runs
+`knip --include dependencies,unlisted,unresolved` and fails on any of those four
+sections. It is deliberately **not** the default report: the inherited Clash Verge
+Rev surface is still red on ~36 unreferenced files and ~114 exports, and a gate
+that cannot be passed is a gate nobody reads — which is exactly why the script sat
+unwired. The dependency class is a check that is green today and fails the moment
+someone adds a package nothing imports.
+
+---
+
 ## KICK-OUT, AND AN UPDATE PROMPT THAT COULD NOT END (2026-11-18, unreleased)
 
 Reported as: *"the app needs to be more active — a pop-up to kick a user out; updates

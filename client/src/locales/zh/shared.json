@@ -1,10 +1,6 @@
 {
   "actions": {
-    "cancel": "取消",
-    "close": "关闭",
-    "save": "保存",
     "new": "新建",
-    "resetToDefault": "重置为默认值",
     "retry": "重试",
     "refreshPage": "刷新页面",
     "showDetails": "显示详情",
@@ -25,10 +21,6 @@
   },
   "validation": {
     "invalidRegex": "无效的正则表达式"
-  },
-  "window": {
-    "maximize": "最大化",
-    "minimize": "最小化"
   },
   "editorModes": {
     "visualization": "可视化",

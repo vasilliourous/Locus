@@ -1,10 +1,5 @@
 {
   "page": {
-    "importForm": {
-      "actions": {
-        "paste": "Yapıştır"
-      }
-    },
     "feedback": {
       "errors": {
         "createFailed": "Profil oluşturulamadı",
@@ -19,21 +14,6 @@
       },
       "notices": {
         "discardedKeys": "Uzantılar, Ayarlar tarafından yönetilen {{keys}} alanlarını yazdığı için bu değerler yok sayıldı"
-      }
-    }
-  },
-  "components": {
-    "menu": {
-      "editFile": "Dosyayı Düzenle"
-    }
-  },
-  "modals": {
-    "editor": {
-      "actions": {
-        "format": "Belgeyi biçimlendir"
-      },
-      "messages": {
-        "readOnly": "Salt okunur düzenleyicide düzenlenemez"
       }
     }
   }

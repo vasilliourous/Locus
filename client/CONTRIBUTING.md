@@ -166,11 +166,21 @@ pnpm build -- --no-bundle
 **Code quality checks:**
 
 ```bash
-# Rust backend
+# Rust — four gates, and passing tests says nothing about the other three
+cargo test --manifest-path src-tauri/Cargo.toml --lib
 cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets --features clippy -- -D warnings
+cargo fmt --manifest-path src-tauri/Cargo.toml --check
+bash ../scripts/check-rust-deps.sh     # the fourth, and it is a CARGO gate
 # Frontend
 pnpm lint
 ```
+
+> **`check-rust-deps.sh` is not redundant with `-D warnings`.** It fails on a
+> `[dependency]` that nothing uses. Clippy prints that warning and exits **0**,
+> because `cargo::unused_dependencies` is a *cargo* lint and `-D warnings` is a
+> *rustc* flag — so the class is invisible to every compiler gate. Run all four
+> before pushing Rust; this repository has already paid for the discovery that
+> three of them can be green.
 
 **Code formatting:**
 
@@ -180,6 +190,12 @@ cargo fmt --manifest-path src-tauri/Cargo.toml --check
 # Frontend
 pnpm format:check
 ```
+
+> `pnpm lint` is eslint over `src/` and does **not** format `scripts/*.mjs`.
+> `pnpm format:check` (biome) is the gate that covers them, and the `lint-staged`
+> hook runs `biome format --write` on the same files at commit time — so a script
+> that fails `format:check` gets rewritten silently as part of an unrelated diff.
+> Run it before committing a script change.
 
 ### Submitting Your Changes
 

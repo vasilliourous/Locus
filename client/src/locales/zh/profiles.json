@@ -1,10 +1,5 @@
 {
   "page": {
-    "importForm": {
-      "actions": {
-        "paste": "粘贴"
-      }
-    },
     "feedback": {
       "errors": {
         "createFailed": "创建订阅失败",
@@ -19,21 +14,6 @@
       },
       "notices": {
         "discardedKeys": "扩展配置或脚本写入了由应用设置接管的字段 {{keys}}，这些值已被丢弃"
-      }
-    }
-  },
-  "components": {
-    "menu": {
-      "editFile": "编辑文件"
-    }
-  },
-  "modals": {
-    "editor": {
-      "actions": {
-        "format": "格式化文档"
-      },
-      "messages": {
-        "readOnly": "无法在只读模式下编辑"
       }
     }
   }

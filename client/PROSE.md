@@ -16,7 +16,7 @@ verified-against: generated from src/locales/en/ and clash-verge-i18n/locales/en
 > `node scripts/prose-manifest.mjs` regenerates this file after the code
 > changes. `--check` fails if it is stale.
 
-**333 strings.** Each row is: the key, the text, where in the app a
+**321 strings.** Each row is: the key, the text, where in the app a
 student meets it, and the exact `file:line` that references it.
 
 Changing a row changes that string only. To change what a whole screen
@@ -273,8 +273,8 @@ says, edit the rows under that screen's heading.
 | `settings.feedback.notifications.updater.withClashProxySuccess` | Update with Clash proxy successfully | src/pages/_layout/utils/notification-handlers.ts:87 |
 | `settings.modals.clashPort.messages.automaticFallback` | Port {{oldPort}} was in use, so this session runs on {{newPort}}. Your setting is unchanged and {{oldPort}} is retried on the next start. | src/pages/_layout/utils/notification-handlers.ts:148 |
 | `settings.modals.clashPort.messages.automaticFallbackFailed` | Automatic mixed proxy port fallback failed: {{error}} | src/pages/_layout/utils/notification-handlers.ts:155 |
-| `settings.modals.clashPort.messages.portTooHigh` | The port must be 65535 or lower | — |
-| `settings.modals.clashPort.messages.portTooLow` | The port must be 1000 or higher | — |
+| `settings.modals.clashPort.messages.portTooHigh` | The port must be 65535 or lower | src/hooks/use-clash.ts:56 |
+| `settings.modals.clashPort.messages.portTooLow` | The port must be 1000 or higher | src/hooks/use-clash.ts:51 |
 | `settings.modals.dns.protection.autoDisabled` | DNS Overwrite was disabled to preserve the custom DNS settings in the current subscription. | src/pages/_layout/utils/notification-handlers.ts:44 |
 | `settings.sections.proxyControl.actions.installService` | Install Service | src/components/layout/service-migration-dialog.tsx:144<br>src/components/layout/sysproxy-privilege-dialog.tsx:145 |
 | `settings.sections.proxyControl.actions.switchToServiceMode` | Switch to service mode | src/components/layout/sysproxy-privilege-dialog.tsx:146 |
@@ -310,15 +310,6 @@ says, edit the rows under that screen's heading.
 | `shared.feedback.validation.yaml.readError` | YAML read error, changes reverted | src/pages/_layout/utils/notification-handlers.ts:121 |
 | `shared.feedback.validation.yaml.syntaxError` | YAML syntax error, changes reverted | src/pages/_layout/utils/notification-handlers.ts:119 |
 
-## Network readouts
-
-*IP lookup errors, shown where a public address is displayed* — 2 strings.
-
-| Key | Text | Code |
-|---|---|---|
-| `home.components.ipInfo.errors.loadWithDetails` | Failed to get IP info: {{message}} | — |
-| `home.components.ipInfo.errors.noServices` | No IP detection services are available | — |
-
 ## Error screen
 
 *What a crash renders instead of the page* — 10 strings.
@@ -342,74 +333,74 @@ says, edit the rows under that screen's heading.
 
 | Key | Text | Code |
 |---|---|---|
-| `backend:notifications.dashboardToggled.title` | Dashboard | — |
-| `backend:notifications.dashboardToggled.body` | Dashboard visibility has been updated. | — |
-| `backend:notifications.clashModeChanged.title` | Mode Switch | — |
-| `backend:notifications.clashModeChanged.body` | Switched to {mode}. | — |
-| `backend:notifications.systemProxyToggled.title` | System Proxy | — |
-| `backend:notifications.systemProxyToggled.on` | System proxy has been enabled. | — |
-| `backend:notifications.systemProxyToggled.off` | System proxy has been disabled. | — |
-| `backend:notifications.systemProxyFailed.title` | System Proxy | — |
-| `backend:notifications.systemProxyFailed.body` | The system proxy could not be set. Open Clash Verge to see why. | — |
-| `backend:notifications.systemProxyGuardStopped.title` | System Proxy Guard | — |
-| `backend:notifications.systemProxyGuardStopped.body` | The guard stopped after failing several times running. Open Clash Verge to see why. | — |
-| `backend:notifications.tunModeToggled.title` | TUN Mode | — |
-| `backend:notifications.tunModeToggled.on` | TUN mode has been enabled. | — |
-| `backend:notifications.tunModeToggled.off` | TUN mode has been disabled. | — |
-| `backend:notifications.lightweightModeEntered.title` | Lightweight Mode | — |
-| `backend:notifications.lightweightModeEntered.body` | Entered lightweight mode. | — |
-| `backend:notifications.profilesReactivated.title` | Profiles | — |
-| `backend:notifications.profilesReactivated.body` | Profile Reactivated. | — |
-| `backend:notifications.appQuit.title` | About to Exit | — |
-| `backend:notifications.appQuit.body` | Clash Verge is about to exit. | — |
-| `backend:service.adminInstallPrompt` | Installing the Clash Verge service requires administrator privileges. | — |
-| `backend:service.adminUninstallPrompt` | Uninstalling the Clash Verge service requires administrator privileges. | — |
-| `backend:launchGuard.currentExeError` | Unable to determine the application location: {error} | — |
-| `backend:launchGuard.homeDirError` | Unable to determine the current user's home directory. The application will exit: {error} | — |
-| `backend:launchGuard.translocated` | macOS is running this application from a temporary App Translocation path. In Finder, move it manually to /Applications or ~/Applications, then reopen it. | — |
-| `backend:launchGuard.notInBundle` | The executable is not inside an application bundle. | — |
-| `backend:launchGuard.canonicalizeBundleError` | Unable to resolve the application bundle path: {error} | — |
-| `backend:launchGuard.bundleNameError` | Unable to determine the application bundle name. The application will exit. | — |
-| `backend:launchGuard.replacePrompt` | An application already exists at {destination}. Replace it and relaunch from Applications? | — |
-| `backend:launchGuard.movePrompt` | To start the background service safely, the application must be moved to {destination}. Move and relaunch it now? | — |
-| `backend:launchGuard.createApplicationsDirError` | Unable to create the Applications directory: {error} | — |
-| `backend:launchGuard.moveFailed` | Failed to move the application. Move it manually in Finder and try again. | — |
-| `backend:launchGuard.replaceFailed` | Unable to replace the existing application safely: {error} | — |
-| `backend:launchGuard.relaunchFailed` | The application was copied, but it could not be relaunched automatically. Open it manually from Applications. | — |
-| `backend:launchGuard.cancel` | Cancel | — |
-| `backend:launchGuard.move` | Move | — |
-| `backend:launchGuard.ok` | OK | — |
-| `backend:tray.dashboard` | Dashboard | — |
-| `backend:tray.ruleMode` | Rule Mode | — |
-| `backend:tray.globalMode` | Global Mode | — |
-| `backend:tray.directMode` | Direct Mode | — |
-| `backend:tray.outboundModes` | Outbound Modes | — |
-| `backend:tray.rule` | Rule | — |
-| `backend:tray.direct` | Direct | — |
-| `backend:tray.global` | Global | — |
-| `backend:tray.profiles` | Profiles | — |
-| `backend:tray.proxies` | Proxies | — |
-| `backend:tray.systemProxy` | System Proxy | — |
-| `backend:tray.tunMode` | TUN Mode | — |
-| `backend:tray.connect` | Connect | — |
-| `backend:tray.disconnect` | Disconnect | — |
-| `backend:tray.closeAllConnections` | Close All Connections | — |
-| `backend:tray.lightweightMode` | Lightweight Mode | — |
-| `backend:tray.copyEnv` | Copy Environment Variables | — |
-| `backend:tray.confDir` | Configuration Directory | — |
-| `backend:tray.coreDir` | Core Directory | — |
-| `backend:tray.logsDir` | Log Directory | — |
-| `backend:tray.openDir` | Open Directory | — |
-| `backend:tray.appLog` | Application Log | — |
-| `backend:tray.coreLog` | Core Log | — |
-| `backend:tray.restartClash` | Restart Clash Core | — |
-| `backend:tray.restartApp` | Restart Application | — |
-| `backend:tray.vergeVersion` | Verge Version | — |
-| `backend:tray.more` | More | — |
-| `backend:tray.exit` | Exit | — |
-| `backend:tray.tooltip.systemProxy` | System Proxy | — |
-| `backend:tray.tooltip.tun` | TUN | — |
-| `backend:tray.tooltip.profile` | Profile | — |
+| `backend:notifications.dashboardToggled.title` | Dashboard | client/src-tauri/src/utils/notification.rs:39 |
+| `backend:notifications.dashboardToggled.body` | Dashboard visibility has been updated. | client/src-tauri/src/utils/notification.rs:40 |
+| `backend:notifications.clashModeChanged.title` | Mode Switch | client/src-tauri/src/utils/notification.rs:44 |
+| `backend:notifications.clashModeChanged.body` | Switched to {mode}. | client/src-tauri/src/utils/notification.rs:45 |
+| `backend:notifications.systemProxyToggled.title` | System Proxy | client/src-tauri/src/utils/notification.rs:51 |
+| `backend:notifications.systemProxyToggled.on` | System proxy has been enabled. | client/src-tauri/src/utils/notification.rs:53 |
+| `backend:notifications.systemProxyToggled.off` | System proxy has been disabled. | client/src-tauri/src/utils/notification.rs:55 |
+| `backend:notifications.systemProxyFailed.title` | System Proxy | client/src-tauri/src/utils/notification.rs:62 |
+| `backend:notifications.systemProxyFailed.body` | The system proxy could not be set. Open Clash Verge to see why. | client/src-tauri/src/utils/notification.rs:63 |
+| `backend:notifications.systemProxyGuardStopped.title` | System Proxy Guard | client/src-tauri/src/utils/notification.rs:67 |
+| `backend:notifications.systemProxyGuardStopped.body` | The guard stopped after failing several times running. Open Clash Verge to see why. | client/src-tauri/src/utils/notification.rs:68 |
+| `backend:notifications.tunModeToggled.title` | TUN Mode | client/src-tauri/src/utils/notification.rs:72 |
+| `backend:notifications.tunModeToggled.on` | TUN mode has been enabled. | client/src-tauri/src/utils/notification.rs:74 |
+| `backend:notifications.tunModeToggled.off` | TUN mode has been disabled. | client/src-tauri/src/utils/notification.rs:76 |
+| `backend:notifications.lightweightModeEntered.title` | Lightweight Mode | client/src-tauri/src/utils/notification.rs:82 |
+| `backend:notifications.lightweightModeEntered.body` | Entered lightweight mode. | client/src-tauri/src/utils/notification.rs:83 |
+| `backend:notifications.profilesReactivated.title` | Profiles | client/src-tauri/src/utils/notification.rs:87 |
+| `backend:notifications.profilesReactivated.body` | Profile Reactivated. | client/src-tauri/src/utils/notification.rs:88 |
+| `backend:notifications.appQuit.title` | About to Exit | client/src-tauri/src/utils/notification.rs:92 |
+| `backend:notifications.appQuit.body` | Clash Verge is about to exit. | client/src-tauri/src/utils/notification.rs:93 |
+| `backend:service.adminInstallPrompt` | Installing the Clash Verge service requires administrator privileges. | client/src-tauri/src/core/service.rs:773 |
+| `backend:service.adminUninstallPrompt` | Uninstalling the Clash Verge service requires administrator privileges. | client/src-tauri/src/core/service.rs:712 |
+| `backend:launchGuard.currentExeError` | Unable to determine the application location: {error} | client/src-tauri/src/utils/macos_launch_guard.rs:174 |
+| `backend:launchGuard.homeDirError` | Unable to determine the current user's home directory. The application will exit: {error} | client/src-tauri/src/utils/macos_launch_guard.rs:182 |
+| `backend:launchGuard.translocated` | macOS is running this application from a temporary App Translocation path. In Finder, move it manually to /Applications or ~/Applications, then reopen it. | client/src-tauri/src/utils/macos_launch_guard.rs:191 |
+| `backend:launchGuard.notInBundle` | The executable is not inside an application bundle. | client/src-tauri/src/utils/macos_launch_guard.rs:197 |
+| `backend:launchGuard.canonicalizeBundleError` | Unable to resolve the application bundle path: {error} | client/src-tauri/src/utils/macos_launch_guard.rs:200 |
+| `backend:launchGuard.bundleNameError` | Unable to determine the application bundle name. The application will exit. | client/src-tauri/src/utils/macos_launch_guard.rs:220 |
+| `backend:launchGuard.replacePrompt` | An application already exists at {destination}. Replace it and relaunch from Applications? | client/src-tauri/src/utils/macos_launch_guard.rs:227 |
+| `backend:launchGuard.movePrompt` | To start the background service safely, the application must be moved to {destination}. Move and relaunch it now? | client/src-tauri/src/utils/macos_launch_guard.rs:229 |
+| `backend:launchGuard.createApplicationsDirError` | Unable to create the Applications directory: {error} | client/src-tauri/src/utils/macos_launch_guard.rs:236 |
+| `backend:launchGuard.moveFailed` | Failed to move the application. Move it manually in Finder and try again. | client/src-tauri/src/utils/macos_launch_guard.rs:250 |
+| `backend:launchGuard.replaceFailed` | Unable to replace the existing application safely: {error} | client/src-tauri/src/utils/macos_launch_guard.rs:257 |
+| `backend:launchGuard.relaunchFailed` | The application was copied, but it could not be relaunched automatically. Open it manually from Applications. | client/src-tauri/src/utils/macos_launch_guard.rs:275 |
+| `backend:launchGuard.cancel` | Cancel | client/src-tauri/src/utils/macos_launch_guard.rs:336 |
+| `backend:launchGuard.move` | Move | client/src-tauri/src/utils/macos_launch_guard.rs:337 |
+| `backend:launchGuard.ok` | OK | client/src-tauri/src/utils/macos_launch_guard.rs:355 |
+| `backend:tray.dashboard` | Dashboard | client/src-tauri/src/core/tray/menu_def.rs:28 |
+| `backend:tray.ruleMode` | Rule Mode | client/src-tauri/src/core/tray/menu_def.rs:29 |
+| `backend:tray.globalMode` | Global Mode | client/src-tauri/src/core/tray/menu_def.rs:30 |
+| `backend:tray.directMode` | Direct Mode | client/src-tauri/src/core/tray/menu_def.rs:31 |
+| `backend:tray.outboundModes` | Outbound Modes | client/src-tauri/src/core/tray/menu_def.rs:32 |
+| `backend:tray.rule` | Rule | client/src-tauri/src/core/tray/mod.rs:738 |
+| `backend:tray.direct` | Direct | client/src-tauri/src/core/tray/mod.rs:737 |
+| `backend:tray.global` | Global | client/src-tauri/src/core/tray/mod.rs:736 |
+| `backend:tray.profiles` | Profiles | client/src-tauri/src/core/tray/menu_def.rs:33 |
+| `backend:tray.proxies` | Proxies | client/src-tauri/src/core/tray/menu_def.rs:34 |
+| `backend:tray.systemProxy` | System Proxy | client/src-tauri/src/core/tray/menu_def.rs:35 |
+| `backend:tray.tunMode` | TUN Mode | client/src-tauri/src/core/tray/menu_def.rs:36 |
+| `backend:tray.connect` | Connect | client/src-tauri/src/core/tray/menu_def.rs:37 |
+| `backend:tray.disconnect` | Disconnect | client/src-tauri/src/core/tray/menu_def.rs:38 |
+| `backend:tray.closeAllConnections` | Close All Connections | client/src-tauri/src/core/tray/menu_def.rs:39 |
+| `backend:tray.lightweightMode` | Lightweight Mode | client/src-tauri/src/core/tray/menu_def.rs:40 |
+| `backend:tray.copyEnv` | Copy Environment Variables | client/src-tauri/src/core/tray/menu_def.rs:41 |
+| `backend:tray.confDir` | Configuration Directory | client/src-tauri/src/core/tray/menu_def.rs:42 |
+| `backend:tray.coreDir` | Core Directory | client/src-tauri/src/core/tray/menu_def.rs:43 |
+| `backend:tray.logsDir` | Log Directory | client/src-tauri/src/core/tray/menu_def.rs:44 |
+| `backend:tray.openDir` | Open Directory | client/src-tauri/src/core/tray/menu_def.rs:45 |
+| `backend:tray.appLog` | Application Log | client/src-tauri/src/core/tray/menu_def.rs:46 |
+| `backend:tray.coreLog` | Core Log | client/src-tauri/src/core/tray/menu_def.rs:47 |
+| `backend:tray.restartClash` | Restart Clash Core | client/src-tauri/src/core/tray/menu_def.rs:48 |
+| `backend:tray.restartApp` | Restart Application | client/src-tauri/src/core/tray/menu_def.rs:49 |
+| `backend:tray.vergeVersion` | Verge Version | client/src-tauri/src/core/tray/menu_def.rs:50 |
+| `backend:tray.more` | More | client/src-tauri/src/core/tray/menu_def.rs:51 |
+| `backend:tray.exit` | Exit | client/src-tauri/src/core/tray/menu_def.rs:52 |
+| `backend:tray.tooltip.systemProxy` | System Proxy | client/src-tauri/src/core/tray/mod.rs:320 |
+| `backend:tray.tooltip.tun` | TUN | client/src-tauri/src/core/tray/mod.rs:321 |
+| `backend:tray.tooltip.profile` | Profile | client/src-tauri/src/core/tray/mod.rs:322 |
 
 ## Deliberately not in the manifest
 
@@ -418,27 +409,35 @@ listed with the reason, so "why is this not editable here?" has an answer.
 
 | Key prefix | Why it is out of scope |
 |---|---|
-| `profiles.*` (14 strings) | The profiles UI was removed in 3.1.0. The keys stay because `notice-service.ts` maps them from Rust `PROFILE_*` error codes, which `cmd/profile.rs` still emits — deleting them would break a live toast. Not reachable from a screen. |
-| `shared.actions.*` (9 strings) | The `components/base/` control set (dialog, search box, chip editor, text field, loading, switch, fieldset) is not rendered by any screen — the two-tab UI builds its own. The keys stay for now; deleting them is a separate change that should also delete the components. |
+| `profiles.*` (10 strings) | The profiles UI was removed in 3.1.0. The keys stay because `notice-service.ts` maps them from Rust `PROFILE_*` error codes, which `cmd/profile.rs` still emits — deleting them would break a live toast. Not reachable from a screen. |
+| `shared.actions.*` (5 strings) | The `components/base/` control set (dialog, search box, chip editor, text field, loading, switch, fieldset) is not rendered by any screen — the two-tab UI builds its own. The keys stay for now; deleting them is a separate change that should also delete the components. |
 | `shared.editorModes.*` (2 strings) | Only the chip editor above uses it; unrendered. |
 | `shared.labels.*` (1 strings) | `retryAttempts` is read by the traffic error boundary, which is reachable — but the label is a bare technical noun with no unit and no context, and it is the one string in the app that reads as an engine detail rather than a sentence. Listed here so a copy pass sees it; fix the row in `traffic-error-boundary.tsx` rather than the bundle if you want it gone. |
 | `shared.placeholders.*` (5 strings) | Only the search box and text field above use these; both unrendered. |
 | `shared.statuses.*` (1 strings) | Only the empty-state and chip editor above use it; both unrendered. |
 | `shared.validation.*` (1 strings) | Only the search box above uses it; unrendered. |
-| `shared.window.*` (2 strings) | The custom title bar has no text labels: the window controls are icon buttons with `aria-label` set from their own icon component. Kept for a title bar that never renders. |
 
 ## Not English-only: what a rewrite does and does not reach
 
 `src/locales/en/` is the canonical bundle, but the app ships in 13
 languages, and each of the other 12 owns the same key set. A rewrite of a
-row in this file therefore has **three** possible outcomes, and only the
+row in this file therefore has **four** possible outcomes, and only the
 first is a finished job:
 
 | The other locale's value | What `prose:apply` does | What a student sees |
 |---|---|---|
 | a real translation | leaves it alone | the **old** meaning, in their language |
 | a copy of the old English | leaves it alone | the **old** English |
-| the key is absent | leaves it absent | English, by i18next fallback |
+| the key is absent | leaves it absent | English, by fallback |
+| a value the app cannot read | leaves it alone | nothing — the build fails |
+
+That last row is not hypothetical and is the one here that is not merely
+stale. The **native** strings are read by rust_i18n at COMPILE time, and a
+lint-free YAML file can still fail it: a malformed `clash-verge-i18n/
+locales/*.yml` stops `cargo build` with `proc macro panicked: Parse file …
+failed`, on whichever platform builds it. `prose:apply` writes English only,
+so a native row you rewrite leaves the other twelve untouched and valid —
+but if you touch them by hand, run `cargo build -p clash-verge-i18n`.
 
 So `prose:apply` makes the change true for `en` and for any key still
 falling back — and **not** for a string someone translated. That is not a
@@ -452,5 +451,8 @@ elsewhere is `missing`, and a value identical to English in a locale that
 normally translates is not distinguishable from a fallback copy — which is
 why the count below is a floor, not a total.
 
-Changing a `{{placeholder}}` or a count-sensitive string needs the
-plural forms re-checked in every language too; i18next will not warn.
+Changing a placeholder needs the value re-checked in every language, and in
+the right syntax: `{{used}}` in a JSON bundle (i18next), `{mode}` in
+`en.yml` (rust_i18n). A count-sensitive string — `{{count}} days` — needs
+its plural forms re-checked too: Japanese has one, Russian three, and
+i18next will not warn when a rewrite changes which case a number falls into.

@@ -19,6 +19,24 @@ const DEFAULT_BACKEND_SOURCE_DIRS = [
   path.resolve(__dirname, '../crates'),
 ]
 const EXCLUDE_USAGE_DIRS = [FRONTEND_LOCALES_DIR, BACKEND_LOCALES_DIR]
+
+// ── The generated key list is not a USAGE ──
+//
+// `src/types/generated/` mirrors every key so TypeScript can reject a typo
+// (`i18n-keys.ts`) and so the `t()` resources are typed (`i18n-resources.ts`).
+// Both name EVERY key by construction.
+//
+// Counting that directory as usage makes `unused` structurally always 0, and
+// this script reported "No issues detected" for strings nothing rendered — the
+// exact shape of a check that cannot fail. Found 2026-11-23, when two strings
+// whose only consumer (`services/api.ts`) had just been deleted were still
+// reported as used; the blind spot then hid the whole class. `prose-locate.mjs`
+// already excludes this directory for the same reason, and that scan is the one
+// that actually names an unreachable string.
+//
+// It is EXCLUDED FROM THE SCAN, not whitelisted: a whitelist entry would have to
+// name each key as it appears, which is the same maintenance burden as the file.
+const EXCLUDE_USAGE_SUBDIRS = ['generated']
 const DEFAULT_BASELINE_LANG = 'en'
 const IGNORE_DIR_NAMES = new Set([
   '.git',
@@ -234,6 +252,17 @@ function collectSourceFiles(sourceDirs, options = {}) {
           filePath.startsWith(`${excluded}${path.sep}`),
         ) ||
         EXCLUDE_USAGE_DIRS.includes(filePath)
+      ) {
+        return false
+      }
+      // The generated type mirror names every key, so counting it as usage would
+      // make `unused` always 0 — see the constant's comment.
+      if (
+        EXCLUDE_USAGE_SUBDIRS.some((sub) =>
+          filePath.startsWith(
+            `${path.join(DEFAULT_FRONTEND_SOURCE_DIRS[0], 'types', sub)}${path.sep}`,
+          ),
+        )
       ) {
         return false
       }
@@ -528,6 +557,49 @@ function resolveKeyFromExpression(
 
   if (ts.isIdentifier(node)) {
     return resolveBindingValue(node.text, scopeStack)
+  }
+
+  // ── i18next's selector form: `i18n.t(($) => $.a.b.c)` ──
+  //
+  // The key here is a BARE PROPERTY PATH inside an arrow body — no quotes, and no
+  // `$.` immediately before it in the source. Without this branch the collector
+  // resolved the call to `null`, fell through to the prefix check, and reported a
+  // live string as unused.
+  //
+  // `prose-locate.mjs` grew the identical branch for the identical reason, after
+  // it made four live strings read as unreachable. That scan and this one must
+  // agree about what counts as a usage, or this script offers to delete a string
+  // the app renders on a screen a student can reach.
+  //
+  // Found 2026-11-23, immediately after the generated-key blind spot was closed
+  // and made this the next thing to surface: `settings.modals.clashPort.
+  // messages.portTooLow` and `…portTooHigh` are thrown at the student from
+  // `hooks/use-clash.ts` in exactly this form.
+  if (ts.isArrowFunction(node)) {
+    const body = node.body
+    // `getCallExpressionChain` walks to the ROOT identifier, so the selector's
+    // `$` comes back as the first segment and the joined string is
+    // `$.settings.modals.…`. That is not a key: `KEY_PATTERN` rejects it and
+    // `addKeyIfValid` silently drops the usage — which is why the first version
+    // of this branch changed nothing. The selector root is the i18next resource
+    // object, not a namespace, so it is stripped here rather than in
+    // `getCallExpressionChain`, which other call sites rely on unchanged.
+    const fromPath = (path) => {
+      const chain = getCallExpressionChain(path)
+      if (chain[0] !== '$') return null
+      return chain.slice(1).join('.')
+    }
+    if (ts.isPropertyAccessExpression(body)) return fromPath(body)
+    if (
+      ts.isBlock(body) &&
+      body.statements.length === 1 &&
+      ts.isReturnStatement(body.statements[0]) &&
+      body.statements[0].expression &&
+      ts.isPropertyAccessExpression(body.statements[0].expression)
+    ) {
+      return fromPath(body.statements[0].expression)
+    }
+    return null
   }
 
   if (ts.isCallExpression(node)) {

@@ -1,10 +1,5 @@
 {
   "page": {
-    "importForm": {
-      "actions": {
-        "paste": "貼上"
-      }
-    },
     "feedback": {
       "errors": {
         "createFailed": "建立訂閱失敗",
@@ -19,21 +14,6 @@
       },
       "notices": {
         "discardedKeys": "擴充設定或腳本寫入了由應用程式設定接管的欄位 {{keys}}，這些值已被捨棄"
-      }
-    }
-  },
-  "components": {
-    "menu": {
-      "editFile": "編輯檔案"
-    }
-  },
-  "modals": {
-    "editor": {
-      "actions": {
-        "format": "格式化文件"
-      },
-      "messages": {
-        "readOnly": "無法在唯讀模式下編輯"
       }
     }
   }

@@ -1,10 +1,6 @@
 {
   "actions": {
-    "cancel": "İptal",
-    "close": "Kapat",
-    "save": "Kaydet",
     "new": "Yeni",
-    "resetToDefault": "Varsayılana Sıfırla",
     "retry": "Yeniden Dene",
     "refreshPage": "Sayfayı Yenile",
     "showDetails": "Ayrıntıları Göster",
@@ -25,10 +21,6 @@
   },
   "validation": {
     "invalidRegex": "Geçersiz düzenli ifade"
-  },
-  "window": {
-    "maximize": "Büyüt",
-    "minimize": "Küçült"
   },
   "editorModes": {
     "visualization": "Görselleştirme",

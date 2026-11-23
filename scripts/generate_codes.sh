@@ -17,8 +17,27 @@
 #
 # `free` is the customer-facing Free plan's row; `strike` is the paid plan
 # (called "Full" on the card — the row name is frozen, see
-# docs/business/04-tiers.md §4.6). `eco` still resolves for codes already in the
-# field and is not sold.
+# docs/business/04-tiers.md §4.6).
+#
+# THREE SALABLE ROWS, and every one of them must have a `tier_configs` row or
+# the code activates into a device that cannot connect:
+#   free    the Free plan
+#   budget  the middle rung (docs/business/04-tiers.md §4.2.5)
+#   strike  the paid plan, printed as "Full" (the row name is frozen, §4.6)
+#
+# `eco` and `stealth` are RETIRED rows. This script used to accept neither and
+# reject `budget`, which is the opposite of the truth in both directions:
+# `budget` is sold and was un-generatable, while an `eco` code is not sold at
+# all. `seed-pb.py` is what creates the rows, and it seeds exactly the three
+# above, so the list here is read from the same three names rather than
+# guessed.
+#
+# WHY A WRONG TIER IS SILENT: `activation.pb.js` looks the tier up with
+# `findFirstRecordByFilter("tier_configs", ...)` and treats a miss as `cfgRec =
+# null`, then returns code 200 with no `server_config`. The client reports
+# "Activated, but the connection details could not be set up" (it does not lie
+# about that), but the student is already marked redeemed. Generate only the
+# rows above.
 #
 # Output: Prints codes to stdout AND saves to <tier>-codes.txt
 #   Also creates a JSON array for PocketBase import if requested.
@@ -140,7 +159,11 @@ if [ -z "$HUB_URL" ] || [ -z "$ADMIN_TOKEN" ] || [ -z "$TIER" ] || [ -z "$COUNT"
     echo "               (NOT /root/.admin_api_token — that is the app-level"
     echo "               ADMIN_API_TOKEN used by the unbind hook, rejected by"
     echo "               PocketBase 0.22 with 401)"
-    echo "  tier         free | strike   (free = the Free plan; strike = the paid plan, shown as Full)"
+    echo "  tier         free | budget | strike"
+    echo "               (free = the Free plan; budget = the middle rung; strike ="
+    echo "               the paid plan, shown as Full. Every other value has no"
+    echo "               tier_configs row and activates into a device that cannot"
+    echo "               connect — see the header.)"
     echo "  count        Number of codes to generate"
     echo ""
     echo "Environment:"
@@ -149,11 +172,28 @@ if [ -z "$HUB_URL" ] || [ -z "$ADMIN_TOKEN" ] || [ -z "$TIER" ] || [ -z "$COUNT"
     exit 1
 fi
 
-# Validate tier
-if [ "$TIER" != "free" ] && [ "$TIER" != "strike" ]; then
-    echo "Error: Tier must be 'free' or 'strike' (the paid row is 'strike', shown as Full)"
-    exit 1
-fi
+# Validate tier.
+#
+# The list is the three rows `seed-pb.py` seeds into `tier_configs`; a tier that
+# is not in that collection is accepted by every layer here and then fails
+# silently at activation time (see the header). `eco` and `stealth` are retired
+# rows and are refused on purpose: accepting them would let an operator mint
+# codes that cannot resolve.
+case "$TIER" in
+    free|budget|strike) ;;
+    eco|stealth)
+        echo "Error: '$TIER' is a RETIRED tier row — no tier_configs row is seeded"
+        echo "       for it, so a code minted under it cannot connect. Use one of:"
+        echo "       free, budget, strike."
+        exit 1
+        ;;
+    *)
+        echo "Error: Tier must be one of: free, budget, strike"
+        echo "       (free = Free plan; budget = middle rung; strike = the paid"
+        echo "       plan, shown as Full). Got: '$TIER'"
+        exit 1
+        ;;
+esac
 
 # Validate count
 if ! [ "$COUNT" -gt 0 ] 2>/dev/null; then

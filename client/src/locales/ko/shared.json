@@ -1,10 +1,6 @@
 {
   "actions": {
-    "cancel": "취소",
-    "close": "닫기",
-    "save": "저장",
     "new": "새로 만들기",
-    "resetToDefault": "기본값으로 재설정",
     "retry": "재시도",
     "refreshPage": "페이지 새로고침",
     "showDetails": "세부정보 보기",
@@ -25,10 +21,6 @@
   },
   "validation": {
     "invalidRegex": "잘못된 정규식"
-  },
-  "window": {
-    "maximize": "최대화",
-    "minimize": "최소화"
   },
   "editorModes": {
     "visualization": "시각화",
