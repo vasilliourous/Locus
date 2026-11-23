@@ -24,6 +24,95 @@ commercial gaps, [`../business/17-not-built.md`](../business/17-not-built.md).
 
 ---
 
+## A WINDOWS UPDATE STALLED BELOW 50% AND TOOK THE PROCESS WITH IT (2026-11-23, unreleased)
+
+**Reported:** "when updating on Windows, during the first downloading it stalls on a
+percentage below 50%, then crashes forcing a close of the program. This is recurring,
+I have seen it on a few test devices."
+
+**What the report could not say, and why that was our fault.** Every check the update
+path performs sits *before* the installer — SHA-256 in `apply::download`, the payload
+shape in `install`, the minisign signature inside the plugin's `install()` — and each
+is a `Result`. The last thing persisted was `"[chrysalis] downloading update …"`.
+After that the only signal was the process disappearing, which is the *same*
+observation for "a check refused it", "the process was killed" and "the installer
+launched" — because on Windows the plugin's `install_inner` ends in
+`std::process::exit(0)` (`tauri-plugin-updater` 2.11.0, `updater.rs:876`) whether the
+setup started or not.
+
+So "stalls below 50%" and "below 50% is where signing happens" were indistinguishable
+in the product. Three reports, one sentence each, and no way to separate them.
+
+**What the change does, in the order it runs.** `ReadyInstall::install` is now four
+persisted stages written to the config *before* the next step
+(`chrysalis_update_install_stage`, `InstallStage` in `chrysalis/update/install.rs`):
+
+| last recorded stage | what it means |
+|---|---|
+| `downloaded` | died reading the staged bytes back — the alloc or the file |
+| `payload-checked` | the bytes are not an installer; refused, not a crash |
+| `signature-verified` | all our checks passed; died before the plugin was involved |
+| `launched` | **the plugin was called.** A crash from here is the installer's |
+
+That is one new value and it turns the next report into a located one. It is
+deliberately not a log line: the plugin exits the process, and a buffered logger's
+last line can go with it, whereas a store write is on disk before the next step.
+
+**And it is read, because a record nobody reads is the same defect.** The first draft
+of this change wrote the stage and surfaced nothing — a value that is persisted and
+never consumed, which is the shape `FIXES.md` already names twice (the free-tier
+counter with no writer above; `throttle_mbps`, §23(f)). `chrysalis_update_status` now
+returns `interruptedUpdate` when the stored stage is anything but `launched`, and the
+Account page renders it, so the student sees it on the next launch. A round-trip test
+(`every_stage_reads_back_as_itself`) was **observed failing** when `key()` and
+`stored()` were made to disagree — without it, that drift reads as "no attempt", which
+is exactly the silence being removed.
+
+**The pre-exit hook was empty, which also cost verification.** `UpdaterBuilder`
+exposes `on_before_exit` — the plugin's only call between "the bytes were accepted"
+and `process::exit(0)` — and it was not registered. It is now, so the log says the
+app is exiting *before* the process is taken down.
+
+**Signature verification moved out of the plugin's exit path.** It ran inside
+`install()`. A refusal there and a successful launch were both "the process exited,
+nothing logged" — the exact ambiguity above. `chrysalis/update/verify.rs` runs the
+plugin's own decode chain (base64 → UTF-8 text → `PublicKey::decode` →
+`verify_stream`), streamed from the staged file, *before* the hand-off. So a
+signature problem is now a returned error the student is shown, at a stage recorded
+in the table above, instead of a window that vanishes.
+
+Two properties of that module are worth naming, because both are this repository's
+own traps. **It streams:** the plugin verifies a `Vec<u8>` of the whole artifact, and
+a 60 MB allocation on top of a running VPN core is what killed the previous download
+path; `verify_stream` costs one 256 KiB buffer. **It is the same code the test calls:**
+`tests/update_signature_contract.rs` used to carry its own copy of the decode
+(`base64_to_string`), which is a check that can agree with itself while disagreeing
+with both the plugin and the product. It now calls the product's function, and the
+existing bare-key test was **observed failing** against an injected
+`from_utf8_lossy` (no UTF-8 requirement) — the guard is shown to fail against the
+defect it exists to catch.
+
+**A second fact this established:** a real signature from the shipped key verifies
+through the product's check (`a_real_signature_verifies_through_the_products_check`,
+running against `.chrysalis-keys/`, with a tamper case that must be rejected). It
+does not need a 60 MB installer — the chain does not care about the payload — so this
+is verification evidence that exists on a machine with no Windows hardware.
+
+**Unverified, and it is the part the fix does not claim.** No Windows machine is
+available here, so this change is **structural**: it does not prove *why* the process
+died, and it does not prove the crash is gone. What it proves is that the next device
+that does it will leave a stage name and a flushed log behind instead of a percentage.
+The two candidates it does **not** rule out: the plugin's `write_to_temp` copying the
+artifact into a second temp dir whose `Result` is discarded (a `CopyFileEx` failure
+there is silent, and every failure looks identical from outside), and the installer
+itself failing after a successful hand-off. `launched` versus `signature-verified` is
+precisely the line that separates those two.
+
+**Rule kept.** A path whose every branch ends in the process dying cannot report
+itself; the record has to be written *before* the branch, not after it.
+
+---
+
 ## THE FREE TIER'S COUNTER HAD NO WRITER, AND EVERY TEST PASSED (2026-11-23, unreleased)
 
 **Reported:** "the limiter does not seem to kick in, or even if it does, the

@@ -92,6 +92,10 @@ flate2 = "1.1.10"
 reqwest_dav = "0.3.3"
 aes-gcm = { version = "0.11.1" }
 base64 = "0.23.1"
+# The updater's own signature check uses this crate (via tauri-plugin-updater).
+# A direct dependency, not only a dev one, because `chrysalis::update::verify`
+# runs the plugin's decode chain before the installer can exit the process.
+minisign-verify = "0.2.5"
 sha2 = "0.11"
 url = "2.5.8"
 getrandom = "0.4.3"
@@ -161,11 +165,6 @@ tauri-plugin-updater = "2.11.0"
 criterion = { workspace = true }
 tokio = { workspace = true, features = ["test-util"] }
 warp = { version = "0.4.3", features = ["test"] }
-# The crate `tauri-plugin-updater` calls to verify a signature. Pinned to the
-# version already in the tree (via that plugin) so the test in
-# `tests/update_signature_contract.rs` exercises the REAL decode path rather
-# than a reimplementation of it — which is the whole point of that test.
-minisign-verify = "0.2.5"
 
 [lints]
 workspace = true

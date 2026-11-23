@@ -1692,6 +1692,22 @@ pub struct UpdateStatus {
     /// era when the Account-page row was mis-wired to auto-launch. The UI uses
     /// this to point at the exact control rather than leaving them to hunt.
     pub automatic_checks_enabled: bool,
+
+    /// The last stage a previous update attempt reached, when it ended without a
+    /// conclusion this session.
+    ///
+    /// # Why this is READ, not only written
+    ///
+    /// The stage is recorded through the store before each install step
+    /// ([`crate::chrysalis::update::install::InstallStage`]) precisely so it
+    /// survives a crash — and a crash is the reported symptom. A value that is
+    /// written and never surfaced is the defect this project's own log names: a
+    /// value that arrives, is persisted, and is never consumed. So the record is
+    /// read on launch and reported here when it says an attempt did not finish.
+    ///
+    /// `None` is the ordinary case: a completed install, a refusal the student
+    /// already saw, or an attempt still running.
+    pub interrupted_update: Option<String>,
 }
 
 /// Reports the update state the prompt should render from.
@@ -1741,6 +1757,19 @@ pub async fn chrysalis_update_status() -> UpdateStatus {
         _ => None,
     };
 
+    // ── Did a previous attempt die mid-install? ──
+    //
+    // `Launched` is NOT interrupted: the plugin was called, so the process going
+    // away is the expected outcome there and saying otherwise would report every
+    // successful update as a crash. Every other recorded stage means an attempt
+    // began and never reached its hand-off. `InProgress` in this session cannot
+    // happen — the command is not reachable while an install holds the prompt —
+    // so any value found here is from a previous run.
+    let interrupted_update =
+        crate::chrysalis::update::InstallStage::stored(data.chrysalis_update_install_stage.as_deref())
+            .filter(|stage| *stage != crate::chrysalis::update::InstallStage::Launched)
+            .map(crate::chrysalis::update::InstallStage::interrupted_report);
+
     UpdateStatus {
         current_version: current.to_owned(),
         offered_version: offered,
@@ -1748,6 +1777,7 @@ pub async fn chrysalis_update_status() -> UpdateStatus {
         // Same default as the gate itself (`unwrap_or(true)`), so the status
         // never disagrees with the behaviour it describes.
         automatic_checks_enabled: data.auto_check_update.unwrap_or(true),
+        interrupted_update,
     }
 }
 
@@ -1911,11 +1941,13 @@ pub async fn chrysalis_install_update(app: tauri::AppHandle) -> CmdResult<()> {
     };
 
     let ready = pending
-        .download_to_file(&staging_dir, &sha256, on_progress)
+        .download_to_file(&app, &staging_dir, &sha256, on_progress)
         .await
         .map_err(|error| {
             let detail = format!("{error:#}");
             logging!(error, Type::System, "[chrysalis] update download failed: {detail}");
+            // Nothing reached the installer, so an older stage record would
+            // describe a previous attempt rather than this one.
             super::coded_error("CHRYSALIS_UPDATE_DOWNLOAD_FAILED", detail)
         })?;
 
@@ -1928,15 +1960,32 @@ pub async fn chrysalis_install_update(app: tauri::AppHandle) -> CmdResult<()> {
     // Hand the verified bytes to the platform installer. On Windows this exits
     // the process, so the line below may never be reached — which is why the
     // success log is emitted *before* the call, not after.
-    ready.install().map_err(|error| {
+    //
+    // A failure here is a REFUSAL we returned, not a crash: the stage record is
+    // what distinguishes them on the next launch. `install()` writes each stage
+    // to the store before the next step, and on Windows the plugin takes the
+    // process down at the last one — so a device that comes back with
+    // `signature-verified` as its last stage stopped between our check and the
+    // hand-off, and one that comes back with nothing recorded never got there.
+    if let Err(error) = ready.install().await {
         let detail = format!("{error:#}");
         logging!(
             error,
             Type::System,
             "[chrysalis] the installer refused the update: {detail}"
         );
-        super::coded_error("CHRYSALIS_UPDATE_INSTALL_FAILED", detail)
-    })?;
+        // The student has been told what went wrong in the dialog, so the
+        // leftover stage has served its purpose. Keeping it would make the next
+        // report read as a crash that never happened.
+        if let Err(clear) = store::clear_update_install_stage().await {
+            logging!(
+                warn,
+                Type::System,
+                "[chrysalis] could not clear the update stage record: {clear:#}"
+            );
+        }
+        return Err(super::coded_error("CHRYSALIS_UPDATE_INSTALL_FAILED", detail));
+    }
 
     logging!(
         info,

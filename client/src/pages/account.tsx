@@ -524,6 +524,36 @@ const AccountPage = () => {
             </Box>
           )}
 
+        {/* A previous update attempt that never finished.
+            The backend records a stage before each install step precisely so it
+            survives the crash being reported; this is the half that turns that
+            record into a sentence a student can send to support. Shown only
+            when the backend says the attempt was interrupted — a completed
+            install clears the record, and a launched installer is the expected
+            "the app closes to update" outcome, not a failure. */}
+        {updateStatus?.interruptedUpdate && (
+          <Box
+            sx={{
+              display: 'flex',
+              alignItems: 'flex-start',
+              gap: 1.5,
+              py: 0.5,
+            }}
+          >
+            <ErrorOutlineRounded
+              fontSize="small"
+              sx={{ color: 'warning.main', mt: 0.25 }}
+            />
+            <Typography
+              variant="caption"
+              color="text.secondary"
+              sx={{ lineHeight: 1.5 }}
+            >
+              {updateStatus.interruptedUpdate}
+            </Typography>
+          </Box>
+        )}
+
         {/* Any OTHER reason the offer did not appear — a version that is not
             newer, a release missing this platform's build. Support-facing, so
             it is plain text rather than a control. */}

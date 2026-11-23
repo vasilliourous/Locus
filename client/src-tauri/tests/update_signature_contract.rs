@@ -74,19 +74,29 @@ fn configured_pubkey() -> String {
         .to_owned()
 }
 
-/// Mirrors `tauri-plugin-updater`'s `base64_to_string()`, verbatim.
+/// The decode the plugin applies to BOTH the pubkey and the signature.
 ///
-/// This is the actual decode the plugin applies to BOTH the pubkey and the
-/// signature. Reproducing it here — rather than decoding to bytes — is the
-/// point: the plugin requires the decoded bytes to be valid UTF-8 *text*, and
-/// fails with `SignatureUtf8` otherwise. That requirement is what the bare-key
-/// pubkey violated.
+/// Deliberately the **product's** function (`app_lib::chrysalis::update::verify`)
+/// rather than a copy in this file. It used to be a copy here, and a copy is
+/// exactly the wrong shape for this test: the defect it exists to catch is the
+/// decode chain disagreeing with the plugin, and a reimplementation can agree
+/// with itself while disagreeing with both. Now the only way for this test to
+/// pass is for the code that runs on a student's machine to decode the way the
+/// plugin does.
+///
+/// The property being pinned: the plugin requires the decoded bytes to be
+/// valid UTF-8 *text*, not key or signature bytes. That requirement is what the
+/// bare-key pubkey violated.
 fn base64_to_string(s: &str) -> Result<String, String> {
     use base64::Engine as _;
-    let decoded = base64::engine::general_purpose::STANDARD
-        .decode(s)
-        .map_err(|e| format!("base64 decode failed: {e}"))?;
-    String::from_utf8(decoded).map_err(|e| format!("decoded bytes are not UTF-8 text: {e}"))
+    app_lib::chrysalis::update::verify::base64_to_string(s).map_err(|e| {
+        // Keep the two failure modes distinguishable in a failure message.
+        if base64::engine::general_purpose::STANDARD.decode(s).is_err() {
+            format!("base64 decode failed: {e}")
+        } else {
+            format!("decoded bytes are not UTF-8 text: {e}")
+        }
+    })
 }
 
 /// The `.pub` file in `.chrysalis-keys/`, when this checkout has one.
@@ -255,4 +265,133 @@ fn the_publish_script_guards_the_signature_shape() {
         "publish-release.sh must refuse a .sig that is not minisign's shape; \
          the hub only verifies presence, never form"
     );
+}
+
+/// A real signature from the real key must verify through the SAME function the
+/// product calls before it hands bytes to the installer.
+///
+/// # Why this test is the one that closes a reported gap
+///
+/// `ReadyInstall::install` verifies the artifact *before* `install()`, because
+/// inside `install()` a signature refusal and a successful launch are both
+/// "the process exited", and on Windows that exit is `process::exit(0)` with no
+/// log line. If this function is wrong, that check either refuses every update
+/// (fleet stranded) or accepts everything (worse). So it is exercised against
+/// real key material from `.chrysalis-keys/`, not a fixture.
+///
+/// Signing a 60 MB installer in a unit test is not reasonable, so the "artifact"
+/// is a few bytes; what is being tested is the decode and verification chain,
+/// which does not care about the payload's size or format.
+///
+/// # Skips when the key is absent
+///
+/// `.chrysalis-keys/` is a cache, empty after a clone (its README is explicit).
+/// A test that failed on a clean clone would be a test everybody deletes. When
+/// the secret key is present, this runs for real.
+#[test]
+fn a_real_signature_verifies_through_the_products_check() {
+    use app_lib::chrysalis::update::verify::{SignatureVerdict, verify_file};
+    use base64::Engine as _;
+    use std::io::Write as _;
+
+    let keys = client_dir().join("..").join(".chrysalis-keys");
+    let Some(pub_text) = local_pub_file() else {
+        eprintln!("skipping: .chrysalis-keys/chrysalis_update.pub is absent (clean clone)");
+        return;
+    };
+    let secret_path = keys.join("chrysalis_update.key");
+    if !secret_path.exists() {
+        eprintln!("skipping: the secret key is not in the cache; rehydrate it to run this");
+        return;
+    }
+
+    // Build a stand-in artifact, sign it with the REAL key, and verify it with
+    // the product's function.
+    let dir = std::env::temp_dir().join(format!("chrysalis-verify-contract-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).expect("temp dir");
+    let artifact = dir.join("artifact.exe");
+    let mut file = std::fs::File::create(&artifact).expect("create artifact");
+    file.write_all(b"MZ this stands in for an installer")
+        .expect("write artifact");
+    drop(file);
+
+    let sig_text = std::process::Command::new("minisign")
+        .args(["-S", "-s"])
+        .arg(&secret_path)
+        .args(["-m"])
+        .arg(&artifact)
+        .args(["-x"])
+        .arg(dir.join("artifact.sig"))
+        .output();
+    let Ok(output) = sig_text else {
+        eprintln!("skipping: `minisign` is not installed on this machine");
+        let _ = std::fs::remove_dir_all(&dir);
+        return;
+    };
+    assert!(
+        output.status.success(),
+        "minisign failed to sign the stand-in artifact: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let sig_file = std::fs::read_to_string(dir.join("artifact.sig")).expect("read .sig");
+    // The wire form the hub stores: base64 of the whole `.sig` file.
+    let wire = base64::engine::general_purpose::STANDARD.encode(sig_file.as_bytes());
+    // The compiled-in pubkey's format: base64 of the whole `.pub` file.
+    let pubkey_wire = base64::engine::general_purpose::STANDARD.encode(pub_text.as_bytes());
+
+    let verdict = verify_file(&artifact, &wire, &pubkey_wire).expect("the file is readable");
+    assert!(
+        matches!(verdict, SignatureVerdict::Valid),
+        "a real signature from the compiled-in key must verify, got {verdict:?}"
+    );
+
+    // Tampering must be caught. This is the half that proves the test above is
+    // not simply accepting everything.
+    std::fs::write(&artifact, b"MZ tampered with after signing").expect("tamper");
+    let verdict = verify_file(&artifact, &wire, &pubkey_wire).expect("the file is readable");
+    assert!(
+        matches!(verdict, SignatureVerdict::Rejected(_)),
+        "a tampered artifact must be REJECTED, got {verdict:?} — if this passes as \
+         Valid the check is not checking"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// The verification must be driven by the SAME pubkey the plugin uses.
+///
+/// A mismatch here is the failure mode that shipped once already: the app
+/// carries key A, the hub signs with key B, and every update is refused at the
+/// very end with an error nobody can act on. The check in `install.rs` reads
+/// `plugins.updater.pubkey` from the resolved config; this asserts that config
+/// value is the key `.chrysalis-keys/` holds, so a rotation cannot update one
+/// without the other.
+#[test]
+fn the_pubkey_used_for_verification_is_the_one_the_client_trusts() {
+    let pubkey = configured_pubkey();
+    let decoded = base64_to_string(&pubkey).expect("the configured pubkey must decode to text");
+    assert!(
+        decoded.contains("untrusted comment: "),
+        "the pubkey the product verifies against must be base64 of the whole `.pub` file"
+    );
+
+    if let Some(file_text) = local_pub_file() {
+        let file_key = file_text
+            .lines()
+            .find(|line| !line.trim().is_empty() && !line.starts_with("untrusted comment:"))
+            .expect("the .pub file must contain a key line")
+            .trim();
+        let configured_key = decoded
+            .lines()
+            .find(|line| !line.trim().is_empty() && !line.starts_with("untrusted comment:"))
+            .expect("the configured pubkey must contain a key line")
+            .trim();
+        assert_eq!(
+            configured_key, file_key,
+            "the key `update::verify` will check against is not the key in \
+             .chrysalis-keys/chrysalis_update.pub"
+        );
+    }
 }

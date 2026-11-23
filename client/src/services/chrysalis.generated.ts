@@ -339,6 +339,23 @@ export interface UpdateStatus {
    * this to point at the exact control rather than leaving them to hunt.
    */
   automaticChecksEnabled: boolean
+  /**
+   * The last stage a previous update attempt reached, when it ended without a
+   * conclusion this session.
+   *
+   * # Why this is READ, not only written
+   *
+   * The stage is recorded through the store before each install step
+   * ([`crate::chrysalis::update::install::InstallStage`]) precisely so it
+   * survives a crash — and a crash is the reported symptom. A value that is
+   * written and never surfaced is the defect this project's own log names: a
+   * value that arrives, is persisted, and is never consumed. So the record is
+   * read on launch and reported here when it says an attempt did not finish.
+   *
+   * `None` is the ordinary case: a completed install, a refusal the student
+   * already saw, or an attempt still running.
+   */
+  interruptedUpdate: string | null
 }
 
 /**

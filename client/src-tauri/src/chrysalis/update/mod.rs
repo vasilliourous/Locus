@@ -12,6 +12,7 @@
 //! | [`signal`] | Decode what the hub advertised, for *this* platform. |
 //! | [`apply`] | Download, verify SHA-256 (fail closed), stage privately. |
 //! | [`install`] | Hand the verified bytes to the platform installer. |
+//! | [`verify`] | Check the minisign signature *before* the installer can exit the process. |
 //!
 //! # What is deliberately not here
 //!
@@ -27,8 +28,10 @@
 
 pub mod apply;
 pub mod install;
+pub use install::InstallStage;
 pub mod poll;
 pub mod signal;
+pub mod verify;
 pub mod version;
 
 pub use apply::{DownloadedUpdate, UpdatePhase};

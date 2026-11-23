@@ -17,6 +17,51 @@ re-argued; the evidence for each is a world claim in
 
 ---
 
+## The Windows update crash is instrumented, not proven fixed
+
+**Added 2026-11-23.** Read [`FIXES.md`](FIXES.md) for that entry first. A Windows
+report — *"stalls on a percentage below 50%, then crashes forcing a close"* — on
+**several test devices**, and this box has no Windows hardware. What shipped is the
+ability to locate the failure, plus verification moved out of the process's exit
+path; it is not a demonstrated fix.
+
+**What is now knowable, and was not before.** `chrysalis_update_install_stage` in the
+config records the last completed stage of an install attempt
+(`downloaded` → `payload-checked` → `signature-verified` → `launched`). On the next
+occurrence, that value is the report:
+
+- **`launched`** — our whole pipeline finished and every check passed. The search
+  moves to the installer. Two sub-cases remain indistinguishable this way, and the
+  next report should say which: the setup failing after `ShellExecuteW`, or the
+  plugin's `write_to_temp` failing silently (its `std::fs::write` `Result` is
+  discarded in `tauri-plugin-updater` 2.11.0, so on a full or locked `%TEMP%` the
+  plugin exits with no error).
+- **`signature-verified`** — died between our last check and the hand-off. Nothing
+  on our side ran between those points except the plugin's `on_before_exit` — if
+  that hook's line is **not** in the log, the exit came from elsewhere.
+- **`payload-checked` / `downloaded`** — our own side; the log now has a line per
+  step, so the last one names it.
+
+**Who reads it, without anyone opening a config file.** `chrysalis_update_status`
+(`cmd/chrysalis.rs`) returns `interruptedUpdate` — a sentence naming where the last
+attempt stopped — whenever the record holds a stage that is *not* `launched`. It is
+rendered on the Account page beside the "why is this device not updating" line, so
+the student sees it on the next launch after a crash and can copy it into a support
+message. `launched` is deliberately excluded: the plugin was called, so the process
+exiting is the expected outcome, and reporting it would label every working update as
+broken.
+
+**What would close it:** one device running the instrumented build once. Read
+`interruptedUpdate` off the Account page (or `chrysalis_update_install_stage` from the
+config) plus the last few `[chrysalis] update` lines. That is enough to place the
+defect, and the fix can then be written against an observation rather than a
+hypothesis.
+
+**Why it is not being called verified without that.** The known candidates are in
+third-party code (`tauri-plugin-updater`'s Windows handoff) and in the installer's
+own UI. Asserting either from here would be the same mistake this log exists to
+stop: a sentence about a mechanism nobody ran.
+
 ## The inherited dead surface — measured, not removed
 
 **Added 2026-11-23.** The dependency class is closed (see

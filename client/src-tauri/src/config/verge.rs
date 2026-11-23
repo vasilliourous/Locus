@@ -418,6 +418,26 @@ pub struct IVerge {
     /// its cause would send a student to change a setting that is already right.
     pub chrysalis_update_check_reason: Option<String>,
 
+    /// The last completed stage of an update install, and when it finished.
+    ///
+    /// # Why a persisted stage and not just a log line
+    ///
+    /// A Windows beta reported the update stalling below 50% and then taking
+    /// the whole program down, on several devices. The install writes a line at
+    /// each step ([`crate::chrysalis::update::install::ReadyInstall::install`]),
+    /// and for most outcomes that is enough. The one it is not enough for is the
+    /// one that was reported: the plugin launches the setup and then calls
+    /// `process::exit(0)`, so a crash after that point **takes the log's last
+    /// line with it** if the logger buffers.
+    ///
+    /// This field is written through the same store as everything else, so it is
+    /// on disk before the next step starts. A device that comes back up with
+    /// `launched` as its last stage did not fail before the installer — which is
+    /// the sentence that was missing from three reports.
+    ///
+    /// `None` means no install has been attempted since the last one finished.
+    pub chrysalis_update_install_stage: Option<String>,
+
     // ── The free tier's usage window ─────────────────────────────────────────
     //
     // The allowance is counted CLIENT-SIDE, because the hub has no per-user

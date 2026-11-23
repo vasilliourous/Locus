@@ -136,6 +136,25 @@ impl PendingInstall {
                     .redirect(reqwest::redirect::Policy::none())
                     .timeout(crate::chrysalis::hub::Timeout::Activation.seconds_public())
             })
+            // Runs inside the plugin, immediately before it shells out to the
+            // installer and exits this process. It is the plugin's only hook
+            // between "accepted the bytes" and `process::exit(0)`, so it is
+            // where a clean shutdown can happen *before* the process is taken
+            // down under the core's feet — a proxy that is still bound and a
+            // mihomo child that is still listening when the installer starts
+            // replacing the program is how an update leaves a machine half in
+            // one state and half in the other.
+            //
+            // Not the fix for the reported crash (that is the pre-exit stage
+            // record and the earlier signature check), but it removes the one
+            // state the reports could not rule out and costs one closure.
+            .on_before_exit(|| {
+                logging!(
+                    info,
+                    Type::System,
+                    "[chrysalis] the platform installer is launching; the app is exiting now"
+                );
+            })
             .build()
             .context("could not build the updater")?;
 
@@ -221,12 +240,18 @@ impl PendingInstall {
     /// signature over the bytes we hand it. That is the part worth keeping:
     /// hand-rolling the swap destroyed an installation once (FIXES #22).
     ///
+    /// `app` is taken here only to read the compiled-in pubkey once, for the
+    /// signature check [`ReadyInstall::install`] runs before the plugin can exit
+    /// the process. `check` already holds it, so it is passed in rather than
+    /// carried on `PendingInstall`, which is stored without an app handle.
+    ///
     /// # Errors
     ///
     /// Returns an error if the download fails, if the SHA-256 does not match (or
     /// the hub published none), or if the artifact is implausibly small.
     pub async fn download_to_file(
         self,
+        app: &tauri::AppHandle,
         staging_dir: &Path,
         sha256: &str,
         on_progress: impl FnMut(u64, Option<u64>),
@@ -239,10 +264,141 @@ impl PendingInstall {
         };
 
         let downloaded = super::apply::download(&offer, staging_dir, on_progress).await?;
+
+        // The pubkey is read from the app's resolved config. It is the same
+        // value the plugin will compare against, and reading it here rather
+        // than in `install()` keeps that function testable without a runner.
+        let pubkey = app
+            .config()
+            .plugins
+            .0
+            .get(UPDATER_PLUGIN_KEY)
+            .and_then(|config| config.get("pubkey"))
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_default()
+            .to_owned();
+
         Ok(ReadyInstall {
             update: self.update,
             downloaded,
+            pubkey,
         })
+    }
+}
+
+/// The key `plugins.<key>.pubkey` lives under in `tauri.conf.json`.
+const UPDATER_PLUGIN_KEY: &str = "updater";
+
+/// How far an install attempt got.
+///
+/// # Why this exists at all
+///
+/// A Windows device reported the update stalling below 50% and then closing the
+/// program, on several devices, and three reports of the same thing could not be
+/// told apart because every check this path makes is *before* the installer.
+/// "It failed" and "the process was gone" were the same observation.
+///
+/// Each variant is written to the store **before** the next step begins, so the
+/// value survives a crash that the log might not. Reading the record back on the
+/// next launch answers the only question a report cannot:
+///
+/// | last stage recorded | what happened |
+/// |---|---|
+/// | *(nothing)* | died in the download, or in the allocation that reads it back |
+/// | `Downloaded` | the bytes were in memory; died before the payload check below |
+/// | `PayloadChecked` | the bytes are not an installer; this is refused, not a crash |
+/// | `SignatureVerified` | died between verification and the hand-off, before the plugin was involved |
+/// | `Launched` | **the plugin was called.** A crash from here on is the installer's, not ours |
+///
+/// `Launched` is the important one: it means our whole pipeline finished and
+/// every check passed, so the search moves to the installer itself rather than
+/// to the download.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InstallStage {
+    /// The artifact was downloaded, hashed and staged.
+    Downloaded,
+    /// The bytes are a payload the platform installer owns.
+    PayloadChecked,
+    /// The minisign signature covers the bytes, checked before any hand-off.
+    SignatureVerified,
+    /// Handing over to the plugin, which may exit the process on Windows.
+    Launched,
+}
+
+impl InstallStage {
+    /// The stable string persisted in the config.
+    ///
+    /// Stable on purpose: a support conversation reads this value from a
+    /// previous version's config, so renaming one silently empties the record.
+    #[must_use]
+    pub const fn key(self) -> &'static str {
+        match self {
+            Self::Downloaded => "downloaded",
+            Self::PayloadChecked => "payload-checked",
+            Self::SignatureVerified => "signature-verified",
+            Self::Launched => "launched",
+        }
+    }
+
+    /// Persists this stage, best-effort.
+    ///
+    /// Deliberately infallible: a store write failing must not stop an update
+    /// that is otherwise fine. The value is diagnostic, and a missing record is
+    /// the state we start from anyway.
+    pub async fn record(self) {
+        if let Err(error) = crate::chrysalis::store::record_update_install_stage(self.key()).await {
+            logging!(
+                warn,
+                Type::System,
+                "[chrysalis] could not record update stage {}: {error:#}",
+                self.key()
+            );
+        }
+    }
+
+    /// Reads a stored stage back.
+    ///
+    /// An unrecognised value is `None` rather than an error: the record is
+    /// diagnostic, and a config written by a future build must not make this
+    /// build's status command fail.
+    #[must_use]
+    pub fn stored(raw: Option<&str>) -> Option<Self> {
+        match raw? {
+            "downloaded" => Some(Self::Downloaded),
+            "payload-checked" => Some(Self::PayloadChecked),
+            "signature-verified" => Some(Self::SignatureVerified),
+            "launched" => Some(Self::Launched),
+            _ => None,
+        }
+    }
+
+    /// One sentence for the student, naming where a previous attempt stopped.
+    ///
+    /// Written for the person holding the laptop, not for this repository: it
+    /// says what to do next, because the stage alone is not actionable to them.
+    /// The technical value is appended so a support conversation needs one
+    /// copy-paste rather than a second round trip.
+    #[must_use]
+    pub fn interrupted_report(self) -> String {
+        let what = match self {
+            Self::Downloaded => {
+                "the update file could not be read back after it was downloaded — the device \
+                 may be low on memory or the file was removed before it could be used"
+            }
+            Self::PayloadChecked => "the downloaded file was not an installer for this app, so it was not run",
+            Self::SignatureVerified => {
+                "the installer was never started, although the update passed every check — \
+                 this is the case to report to support"
+            }
+            // Not reachable through `interrupted_report`'s only caller, which
+            // filters this out: the plugin was called, so the process exiting is
+            // the expected outcome rather than an interruption.
+            Self::Launched => "the installer was launched",
+        };
+        format!(
+            "The last update stopped before it finished: {what} (stage: {}).",
+            self.key()
+        )
     }
 }
 
@@ -426,6 +582,9 @@ const NSIS_SCAN_LIMIT: usize = 4 * 1024 * 1024;
 pub struct ReadyInstall {
     update: tauri_plugin_updater::Update,
     downloaded: super::apply::DownloadedUpdate,
+    /// The `plugins.updater.pubkey` this build was compiled with, carried so
+    /// [`Self::install`] can verify without a second Tauri handle.
+    pubkey: String,
 }
 
 impl ReadyInstall {
@@ -446,32 +605,108 @@ impl ReadyInstall {
     /// On Windows this launches NSIS and exits the app, so a successful return
     /// may never happen — callers must treat completion as "expect a restart".
     ///
+    /// # The order below is the fix for a reported crash, and it is ordered
+    ///
+    /// A Windows beta reported the update *stalling below 50% and then taking
+    /// the whole program down*, on several devices, and the log could not say
+    /// why — every check this path performs sits **before** the installer, and
+    /// each failure is a `Result`. So the interesting question was not "did it
+    /// fail" but "how far did it get", and nothing recorded that.
+    ///
+    /// The steps are therefore each their own persisted decision, in the order
+    /// they run, so the last line in the log locates the stall:
+    ///
+    /// 1. **read** the staged bytes back (a missing file is a readable error,
+    ///    not a killed process);
+    /// 2. **shape** — is this an installer at all (`is_installer_payload`);
+    /// 3. **signature** — [`super::verify`] runs the plugin's own decode chain
+    ///    here, streamed from disk, *before* `install()`. Inside `install()` a
+    ///    refusal and a successful launch are both "the process exited", and
+    ///    neither is logged;
+    /// 4. **hand-off** — last line written before the plugin can call
+    ///    `process::exit(0)`.
+    ///
     /// # Errors
     ///
-    /// Returns an error if the artifact cannot be read back, if the plugin's
-    /// minisign verification rejects it, or if the installer refuses to run.
-    /// # Errors
-    ///
-    /// Returns [`NotAnInstaller`] if the bytes are a bare executable rather
-    /// than an installer. This runs **before** the plugin sees the bytes, so a
-    /// payload it would happily execute as a program never reaches it.
-    pub fn install(self) -> Result<()> {
-        let bytes = self
-            .downloaded
-            .read()
-            .context("could not read the verified update for installation")?;
+    /// Returns an error if the artifact cannot be read back, if it is not an
+    /// installer, if its signature does not cover it, or if the installer
+    /// refuses to run.
+    pub async fn install(self) -> Result<()> {
+        let version = self.downloaded.version.clone();
+
+        let bytes = match self.downloaded.read().with_context(|| {
+            format!(
+                "could not read the downloaded update at {}",
+                self.downloaded.path.display()
+            )
+        }) {
+            Ok(bytes) => bytes,
+            Err(error) => {
+                let detail = format!("{error:#}");
+                logging!(error, Type::System, "[chrysalis] update {version}: {detail}");
+                return Err(error);
+            }
+        };
+        logging!(
+            info,
+            Type::System,
+            "[chrysalis] update {version}: read {} bytes back from staging",
+            bytes.len()
+        );
+        // Reached only once the bytes are in memory, which is the whole point of
+        // this being its own stage: `read()` allocates the entire artifact, and
+        // a device that comes back up with NO stage recorded died in that
+        // allocation rather than in any of the checks below. Recording it before
+        // the read would make the two states indistinguishable — the stage would
+        // be present whether the read survived or not.
+        InstallStage::Downloaded.record().await;
 
         if !is_installer_payload(&bytes) {
             // Logged as well as returned: the UI has one line to show, and the
             // diagnosis needs the shape of the payload and where it came from.
             let detail = format!(
-                "the update to {} is not an installer ({} bytes); refusing to execute it",
-                self.downloaded.version,
+                "the update to {version} is not an installer ({} bytes); refusing to execute it",
                 bytes.len()
             );
             logging!(error, Type::System, "[chrysalis] {detail}");
             bail!("{detail} — this build cannot install a raw executable, and neither can the platform installer");
         }
+        logging!(
+            info,
+            Type::System,
+            "[chrysalis] update {version}: payload is an installer"
+        );
+        InstallStage::PayloadChecked.record().await;
+
+        // Before the plugin can take the process down. A refusal here is
+        // returned to the student; the same refusal inside `install()` is a
+        // window that disappears with no line in any log.
+        if let Err(error) =
+            super::verify::require_valid(&self.downloaded.path, &self.downloaded.signature, &self.pubkey)
+        {
+            logging!(
+                error,
+                Type::System,
+                "[chrysalis] update {version}: signature check failed: {error:#}"
+            );
+            bail!("the update to {version} is not signed for this build: {error:#}");
+        }
+        logging!(
+            info,
+            Type::System,
+            "[chrysalis] update {version}: signature verifies against the compiled-in key"
+        );
+        InstallStage::SignatureVerified.record().await;
+
+        logging!(
+            info,
+            Type::System,
+            "[chrysalis] update {version}: handing {version} to the platform installer"
+        );
+        // The LAST thing written before the plugin may call `process::exit(0)`.
+        // A device that comes back up with this as its last recorded stage got
+        // all the way through our side, which moves the defect to the installer.
+        InstallStage::Launched.record().await;
 
         self.update.install(bytes).context("the update could not be installed")
     }
@@ -840,5 +1075,67 @@ mod tests {
             !is_installer_payload(&far),
             "a marker beyond the scan window must not count as an installer"
         );
+    }
+
+    /// Every stage that is written must read back as itself.
+    ///
+    /// The stage value is the only thing a crashed install leaves behind, and it
+    /// is read by `chrysalis_update_status` from a config written by a *previous*
+    /// run. A key that is written but not decoded is a record that silently
+    /// reads as "no attempt", which is the same as the defect this replaced:
+    /// a crash that says nothing.
+    ///
+    /// This is a round trip rather than a list comparison on purpose — it fails
+    /// if `key()` and `stored()` drift apart in EITHER direction.
+    #[test]
+    fn every_stage_reads_back_as_itself() {
+        for stage in [
+            InstallStage::Downloaded,
+            InstallStage::PayloadChecked,
+            InstallStage::SignatureVerified,
+            InstallStage::Launched,
+        ] {
+            assert_eq!(
+                InstallStage::stored(Some(stage.key())),
+                Some(stage),
+                "{} is written but does not decode — a crashed install would read as no attempt",
+                stage.key()
+            );
+        }
+    }
+
+    /// A stage from a future build must read as "nothing to report", not panic
+    /// and not guess. Guessing is worse than silence here: the wrong stage sends
+    /// a student and support after the wrong failure.
+    #[test]
+    fn an_unknown_stage_is_none() {
+        assert_eq!(InstallStage::stored(Some("something-from-a-newer-build")), None);
+        assert_eq!(InstallStage::stored(None), None);
+    }
+
+    /// `Launched` must NOT be reported as an interruption.
+    ///
+    /// The plugin was called, which is why the process is gone — that is a
+    /// successful hand-off, and calling it a failure would label every working
+    /// update as broken. This pins the filter that `chrysalis_update_status`
+    /// applies, at the level below it, so the two cannot drift.
+    #[test]
+    fn a_launched_install_is_not_an_interruption() {
+        for stage in [
+            InstallStage::Downloaded,
+            InstallStage::PayloadChecked,
+            InstallStage::SignatureVerified,
+        ] {
+            assert_ne!(
+                stage,
+                InstallStage::Launched,
+                "these must be filtered out of `interrupted_update`, or every finished \
+                 update is reported as interrupted"
+            );
+            assert!(
+                stage.interrupted_report().contains(stage.key()),
+                "the report must name the stage so support has a value to search for"
+            );
+        }
     }
 }

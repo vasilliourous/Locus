@@ -643,6 +643,30 @@ pub async fn record_update_check_reason(reason: Option<&crate::chrysalis::update
     .await
 }
 
+/// Records the last completed stage of an update install.
+///
+/// Written through the store, so the value is on disk before the next stage
+/// starts. That is the property being bought here: the install's final step is
+/// a hand-off to an installer that `process::exit`s this process on Windows, so
+/// a crash after it cannot report itself from the log alone. This survives the
+/// crash and says how far the attempt got — see
+/// [`crate::chrysalis::update::install::InstallStage`].
+pub async fn record_update_install_stage(stage: &str) -> Result<()> {
+    save_verge(|draft| {
+        draft.chrysalis_update_install_stage = Some(stage.to_owned().into());
+    })
+    .await
+}
+
+/// Clears the install-stage record, after an attempt ended in a way that needs
+/// no explanation (a refusal the student is shown, or an install that returned).
+pub async fn clear_update_install_stage() -> Result<()> {
+    save_verge(|draft| {
+        draft.chrysalis_update_install_stage = None;
+    })
+    .await
+}
+
 /// Forgets a previous refusal, after the device is entitled again.
 ///
 /// Called on a successful activation. Without this a student who renews would
