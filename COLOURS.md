@@ -361,13 +361,16 @@ The disc decision recorded here previously — "a disc reads at 16 px where a
 detailed glyph does not" — is **superseded**. The glyph was chosen deliberately,
 and it survives the size: its 16 px frame still resolves both bars and the dot.
 
-**The one white that is not a surface: the macOS template ink.** The template set
-(`tray-icon*-mono*.ico`) is drawn in pure white, `#FFFFFF`, and that is the only
+**The one ink that is not a surface: the macOS template ink.** The template set
+(`tray-icon*-mono*.png`) is drawn in pure black, `#000000`, and that is the only
 colour in the marks that does not come from §2. It cannot affect what a student
 sees — a template image is tinted by the OS from its alpha channel, so the RGB is
-discarded — and white is the format's convention. It is stated here, rather than
-left as a literal in the generator, because that generator is on §10's allowlist
-and an allowlisted file with an unexplained value is how a second home starts.
+discarded — and black is what upstream's own macOS assets use, which is what makes
+a future diff against them meaningful. Either black or white would look identical
+on screen; black is chosen so this repository's asset and the one it was copied
+from are the same picture. It is stated here, rather than left as a literal in the
+generator, because that generator is on §10's allowlist and an allowlisted file
+with an unexplained value is how a second home starts.
 
 
 ---

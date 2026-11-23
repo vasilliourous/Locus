@@ -24,6 +24,83 @@ commercial gaps, [`../business/17-not-built.md`](../business/17-not-built.md).
 
 ---
 
+## THE ICON COMMIT SHIPPED WITH TWO OF THE FOUR RUST GATES RED, AND THE DOC SAID THE OPPOSITE OF THE CODE (2026-11-23, unreleased)
+
+A documentation-and-gates pass over the three commits before it: the Locus →
+Chrysalis rename (`e887583`), the free-tier counter fix (`3729673`), the update
+stall record (`1621578`) and the icon migration (`708313e`). What it found is
+recorded here because none of it was visible from a green test run.
+
+**`core/tray/mod.rs` broke `cargo clippy -D warnings` and `cargo fmt --check`.**
+The icon commit rewrote the tray into a state × platform ladder and added
+`tray_png()` plus a `return` per `#[cfg]` block. `cargo test` passed (778) and the
+consistency gate passed, so the tree looked finished; two of the three gates the
+repo's own `AGENTS.md` names as load-bearing were red:
+
+- `clippy::missing_const_for_fn` on `tray_png` — every arm is an `include_bytes!`,
+  which is already const. Made `const fn`.
+- `clippy::needless_return` on the Linux block's `return`, which is *not* needless:
+  the four `#[cfg]` blocks are a chain and only one of them is the tail expression
+  per target, so on a Linux build the lint fires at a `return` that macOS and
+  Windows need. Keeping the four blocks identical is what makes the function
+  correct on every target, so this is an `#[allow]` with that reason written beside
+  it rather than a deletion that would only be right where we compile.
+- one `rustfmt` re-wrap, which is the gate that catches "wrote it quickly".
+
+This is the third gate in `AGENTS.md`'s list earning its keep: a commit whose own
+message reported "183 frontend tests, 769 Rust tests ... green" did not run
+`cargo clippy` or `cargo fmt`.
+
+**`COLOURS.md` §8 described the macOS template ink as white when the code draws it
+black.** The paragraph read *"drawn in pure white, `#FFFFFF` ... white is the
+format's convention"* — while `generate-icons.mjs` declares
+`templateInk: '#000000'`, and says in the adjacent comment that black is chosen to
+match upstream's own assets. Two further errors sat in the same clause: the files
+are `.png`, not `.ico`. Everything else in the paragraph (a template discards its
+RGB; the value must live in exactly one place) was correct, which is what made it
+convincing.
+
+It survived because **§49 checks where a colour literal lives, never whether a
+sentence about it is true**, and `generate-icons.mjs --check` compares bytes and
+cannot read prose. So the whole gate was green over a document that inverted its
+subject — the `04-tc.sh` header case this file already records, one level out.
+
+**The icon README was outside every documentation walk.** The icon migration
+created `client/src-tauri/icons/README.md`, a live authoritative document (which
+file is generated, from what, the tray matrix, the `Assets.car` removal). §28's
+scope was `docs/**`, `client/docs/**`, top-level `client/*.md` and root `*.md` —
+nested `src-tauri` documents were in none of them, so the new doc could be
+orphaned or left contradicting the generator with nothing failing. Same shape as
+audit F-02 at the root, one level in.
+
+**Guards, each observed failing first.**
+
+- §54 now compares the ink value **stated in `COLOURS.md` §8** against the
+  generator's `templateInk`, normalised hex. Seen failing in all three directions:
+  restoring the wrong sentence (`#FFFFFF`), changing `templateInk` alone, and
+  removing the hex so the paragraph names no value at all.
+- §28's index scope now walks `client/src-tauri/**/*.md`. Seen failing by deleting
+  the `icons/README.md` row from `docs/README.md`: *"live document not reachable
+  from docs/README.md"*. Adding the row without widening the scope would have made
+  the index claim unverified, which is the defect F-02 named.
+- `docs/STATE.md`'s ownership map gained a row for marks and one for colour. The
+  colour topic was not listed at all, which is how a second-hand description of a
+  colour ended up with no owner to disagree with it.
+
+**Gates after this change:** `cargo test` 778 passed, `cargo clippy
+--all-targets --features clippy -- -D warnings` clean, `cargo fmt --check` clean,
+`scripts/check-rust-deps.sh` 0 dead, `check-consistency.sh` green to the last
+section, 183 frontend tests, `tsc --noEmit` clean, `generate-icons.mjs --check` on
+the whole generated set. (No section count and no test count is stated on purpose —
+both are recomputable, and a number in a sentence drifts; see `docs/STATE.md`.)
+
+**Not verified, and not claimed.** That a Mac draws the new tray ink (the ladder
+step is a template the OS tints; only a Mac shows the result), and that a Windows
+device's taskbar bitmap changes on update — both remain in
+[`STILL-OPEN.md`](STILL-OPEN.md), unchanged by this pass.
+
+---
+
 ## AN UPDATE THAT REPLACED NOTHING LOOKED EXACTLY LIKE ONE THAT WORKED, AND THE ICONS SAID SO (2026-11-23, unreleased)
 
 **Reported:** "updates don't successfully manage to change the taskbar icon, the icon

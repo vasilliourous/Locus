@@ -99,8 +99,13 @@ fn tray_scale_factor() -> usize {
 }
 
 /// One state at one ladder step.
+///
+/// `const` because every arm is an `include_bytes!`, which is itself const: this
+/// is a table, not a computation. Kept a function rather than an inline match so
+/// the exhaustive-over-the-ladder property (a missing `@3x` is a compile error,
+/// not a runtime fallback) is written once and read once.
 #[cfg(target_os = "linux")]
-fn tray_png(status: u8, scale: usize) -> &'static [u8] {
+const fn tray_png(status: u8, scale: usize) -> &'static [u8] {
     // The match is exhaustive over the committed ladder on purpose: a missing
     // `@3x` is a compile error rather than a runtime fallback that silently
     // serves the 2x file.
@@ -162,9 +167,7 @@ impl TrayState {
 
     async fn load_icon(verge: &IVerge, kind: IconKind) -> (bool, Cow<'_, [u8]>) {
         let (custom_enabled, icon_name) = match kind {
-            IconKind::Common | IconKind::SafeMode => {
-                (verge.common_tray_icon.unwrap_or(false), "common")
-            }
+            IconKind::Common | IconKind::SafeMode => (verge.common_tray_icon.unwrap_or(false), "common"),
             IconKind::SysProxy => (verge.sysproxy_tray_icon.unwrap_or(false), "sysproxy"),
             IconKind::Tun => (verge.tun_tray_icon.unwrap_or(false), "tun"),
         };
@@ -215,6 +218,15 @@ impl TrayState {
             // downsample for no reason.
             let _ = verge;
             let scale = tray_scale_factor();
+            // `return` is NOT redundant here even though clippy cannot see that
+            // on a Linux build: these `#[cfg]` blocks are a chain, and only ONE
+            // of them is the function's tail expression per target. On Linux this
+            // block is last, so the `return` reads as needless — but on macOS and
+            // Windows a later block follows, and without it the value here would
+            // be a discarded statement and the function would fall through to the
+            // wrong arm. Keeping it identical across all four blocks is what makes
+            // this correct on every target; the allow is scoped to this one block.
+            #[allow(clippy::needless_return)]
             return (
                 false,
                 match kind {

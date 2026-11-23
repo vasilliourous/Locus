@@ -4,7 +4,7 @@
 audience:    all
 status:      live
 authoritative-for: the known blind spots of the doc set, and the one guard change still open
-verified-against: this checkout at 2026-11-22; check-consistency.sh after each change
+verified-against: this checkout at 2026-11-23; check-consistency.sh after each change
 ```
 
 A dated observation, not a rule. The live rules are [`../README.md`](../README.md)
@@ -44,6 +44,24 @@ the sentence also names the version sites is the highest-leverage guard change l
 the front door was orphaned and unguarded while §28 printed a completeness claim
 that did not cover it. §28/§8/§10 now walk root `*.md` and the word-number gap
 above is unchanged and still open.
+
+**Scope bit a second time on 2026-11-23, one level in.** Nested
+`client/src-tauri/**/*.md` was in no walk at all, so the icon migration's new
+authoritative document (`icons/README.md`) was orphanable with nothing failing.
+§28 now walks it. The lesson generalises, and is written into the guard: **an
+exemption list is safe, a scope that stops at a fixed depth is not** — the next
+document lands one level deeper than whoever wrote the walk.
+
+**The third incident, and the one no walk would have caught.** `COLOURS.md` §8
+described the macOS template ink as white while `generate-icons.mjs` draws it
+black — a correct-looking sentence whose subject was inverted. §49 passed because
+it asserts where a colour literal *lives*, not whether a sentence about that
+literal is *true*; `generate-icons.mjs --check` passed because it compares bytes
+and cannot read prose. Closing that class word-by-word is not tractable, but where
+a value has exactly one home in code and one home in prose, **the pair can be
+compared** — and §54 now does so for the template ink. The shape to look for
+next: an `x: '<value>'` in a generator and a paragraph explaining `'<value>'` in a
+document, with nothing tying the two together.
 
 ## Shape of the set, and why it is like that
 

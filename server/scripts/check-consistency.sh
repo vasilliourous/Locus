@@ -4509,11 +4509,21 @@ def md_files(root):
                 yield os.path.join(dirpath, fn).replace(os.sep, '/')
 
 def indexed_scope():
-    """Top-level `client/*.md` and root `*.md` that are documentation.
+    """Top-level `client/*.md`, root `*.md`, and `client/src-tauri/**/*.md`.
 
     Root was added 2026-11-22 (audit F-02): the front door lived outside every
     walk, so the completeness claim on `docs/README.md` did not cover it. See the
     INDEX_EXEMPT comment for which root files are exempt and why.
+
+    `client/src-tauri/` was added 2026-11-23, for the same reason one level in.
+    The icon migration produced `client/src-tauri/icons/README.md` — a live,
+    authoritative document saying which mark is generated and from what — and it
+    sat outside EVERY walk: not `docs/`, not `client/docs/`, not a top-level
+    `client/*.md`. It could therefore be orphaned or left contradicting the
+    generator with nothing failing, which is the exact shape audit F-02 found at
+    the root. Tool manuals stay excluded by name (`client/scripts/**/GUIDE.md`,
+    whose reader arrives from the tool); a NEW document under `src-tauri/` is
+    held to the index by default rather than silently skipped.
     """
     out = []
     for fn in sorted(os.listdir('client')):
@@ -4529,6 +4539,16 @@ def indexed_scope():
         if not os.path.isfile(fn) or fn in INDEX_EXEMPT:
             continue
         out.append(fn)
+    for dirpath, _dirs, files in os.walk('client/src-tauri'):
+        if any(part in dirpath for part in ('target', 'node_modules')):
+            continue
+        for fn in sorted(files):
+            if not fn.endswith('.md'):
+                continue
+            rel = os.path.join(dirpath, fn).replace(os.sep, '/')
+            if rel in INDEX_EXEMPT:
+                continue
+            out.append(rel)
     return out
 
 def front_matter(path):
@@ -7996,6 +8016,46 @@ if os.path.isdir(icons_dir):
             print('BAD\t  forever, and nothing else in this repo reads it.')
             continue
     print('OK\tevery file in icons/ is one the generator writes, or a macOS artifact')
+
+# ── The sentence about the ink, not just the ink ──
+#
+# The scans above prove the BYTES are right. None of them can see a DOCUMENT that
+# describes those bytes wrongly, and on 2026-11-23 exactly that shipped: COLOURS.md
+# §8 said the macOS template ink was "pure white, `#FFFFFF` ... white is the
+# format's convention" in the same paragraph that correctly explained a template
+# discards its RGB -- while `generate-icons.mjs` declares `templateInk: '#000000'`
+# and draws it black, matching upstream. The `--check` above passed throughout, and
+# §49 passed too: §49 asserts WHERE a colour literal lives, never whether a
+# sentence about it is TRUE. So the prose drifted with the whole gate green, which
+# is the `04-tc.sh` header case at the top of this file one level out.
+#
+# WHAT IT ASSERTS: the ink value stated in COLOURS.md §8 equals the `templateInk`
+# the generator uses, both compared as normalised lowercase hex. The value has
+# exactly one home in code and one home in prose, and this fails when they disagree.
+#
+# VERIFIED TO FAIL: restoring the old sentence ("pure white, `#FFFFFF`") produces
+# the BAD line below; so does changing `templateInk` without the document.
+colours_doc = 'COLOURS.md'
+if not os.path.exists(colours_doc):
+    print('BAD\tCOLOURS.md is missing - the template ink has no prose home')
+else:
+    doc = open(colours_doc, encoding='utf-8').read()
+    # The paragraph names the template set and states one hex value.
+    para = re.search(r'macOS template ink.{0,400}?`(#[0-9A-Fa-f]{6})`', doc, re.S)
+    ink = re.search(r"templateInk:\s*'(#[0-9A-Fa-f]{6})'", body)
+    if ink is None:
+        print('BAD\t%s declares no templateInk - the macOS template ink has no' % gen)
+        print('BAD\t  single home in code, so the document cannot be held to it')
+    elif para is None:
+        print('BAD\tCOLOURS.md states no hex for the macOS template ink - the one')
+        print('BAD\t  colour outside the palette has lost its explanation')
+    elif para.group(1).lower() != ink.group(1).lower():
+        print('BAD\tCOLOURS.md says the template ink is %s but %s draws %s' % (
+            para.group(1), gen, ink.group(1)))
+        print('BAD\t  §49 checks where a colour literal LIVES, not whether a')
+        print('BAD\t  sentence about it is true; that is how this drifted.')
+    else:
+        print('OK\tCOLOURS.md states the template ink the generator draws (%s)' % ink.group(1))
 PY
 )
     if [ -z "$icon_report" ]; then

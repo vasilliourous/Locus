@@ -158,6 +158,7 @@ that the client keeps in a machine store —
 | [`client/CONTRIBUTING.md`](../client/CONTRIBUTING.md) | live | **How to set up and submit a change to the client** — the human-facing setup and submission guide. |
 | [`client/docs/UPSTREAM-CHANGES.md`](../client/docs/UPSTREAM-CHANGES.md) | live | **Authoritative** — how the client differs from Clash Verge Rev, and the load-bearing details that look like mistakes. Read before changing anything in `client/`. |
 | [`client/docs/FRONTEND.md`](../client/docs/FRONTEND.md) | live | The shipping two-tab UI, its routing, and the rules each surface obeys. |
+| [`client/src-tauri/icons/README.md`](../client/src-tauri/icons/README.md) | live | **Every application and tray mark** — which files are generated, from what, the state × platform tray matrix, and the one artifact (`icon.icns`) that still needs a Mac. Guarded by §54. |
 | [`client/PROSE.md`](../client/PROSE.md) | live | **Every user-facing string**, where in the app a student meets it, and the `file:line` that references it. Generated; edit the wording there and run `pnpm prose:apply`. |
 | [`client/docs/SIGNING.md`](../client/docs/SIGNING.md) | live | Key custody, rotation, and the release signing pipeline. |
 | [`client/docs/IDENTITY-MIGRATION.md`](../client/docs/IDENTITY-MIGRATION.md) | live | The app-id migration and what must NOT be renamed. |

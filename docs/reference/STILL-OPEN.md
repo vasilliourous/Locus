@@ -57,6 +57,14 @@ a separate mystery.
    `bundle.icon` and deleted. What is NOT verified is that a Mac draws the new mark;
    that needs one Mac running this build, which is the observation below.
 
+   *What changed since this entry, and what did not.* The macOS **template ink** is
+   now claimed in exactly two places — `templateInk` in `generate-icons.mjs` and the
+   §8 paragraph in `COLOURS.md` — and §54 compares them, so the pair can no longer
+   disagree silently the way it did (the prose said white, the code drew black).
+   That is a claim about the *source*, not about the screen: it still does not prove
+   a Mac renders the mark, and a template's RGB is discarded before display, so no
+   observation from here could.
+
 **What would close it:** one Windows device and one Mac running this build.
 On Windows: install an update, read `interruptedUpdate` on the Account page, and say
 whether the taskbar icon moved. On macOS: regenerate `icon.icns` from `icon.png` on a

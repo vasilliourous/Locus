@@ -66,6 +66,8 @@ find its owner here first.
 | How a student keeps their entitlement | [`reference/DEVICE-IDENTITY.md`](reference/DEVICE-IDENTITY.md) |
 | Client internals & upstream diff | [`client/docs/UPSTREAM-CHANGES.md`](../client/docs/UPSTREAM-CHANGES.md) (authoritative), [`client/docs/FRONTEND.md`](../client/docs/FRONTEND.md), [`client/docs/LOGIC-INVENTORY.md`](../client/docs/LOGIC-INVENTORY.md) |
 | Client release signing | [`client/docs/SIGNING.md`](../client/docs/SIGNING.md) |
+| Every colour value, and how a surface looks | [`../COLOURS.md`](../COLOURS.md) — the only file allowed to state one; §49 guards the literal's location, not the truth of a sentence about it |
+| Every application and tray mark — what is generated, from what | [`client/src-tauri/icons/README.md`](../client/src-tauri/icons/README.md); the colour of a mark stays in [`../COLOURS.md`](../COLOURS.md) §8 |
 | Defect log (dated, append-only) | [`reference/FIXES.md`](reference/FIXES.md) |
 | What is unfinished | [`reference/STILL-OPEN.md`](reference/STILL-OPEN.md) |
 | The state of the doc set itself (dated audit) | [`reference/DOC-AUDIT.md`](reference/DOC-AUDIT.md) |
