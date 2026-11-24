@@ -2697,11 +2697,13 @@ jobs:
           # The glob below is derived from the config for that reason: the product
           # name is a single source of truth and a rename must not need a matching
           # edit in a shell pattern three thousand lines away.
-          mac_zip_prefix="$(python3 - <<'PY'
-import json
-print(json.load(open('client/src-tauri/tauri.conf.json'))['productName'])
-PY
-)"
+          # Deliberately NOT a `python3 - <<'PY'` heredoc. A heredoc terminator must
+          # sit at column 0, which ends the YAML block scalar early and makes the
+          # whole workflow unparseable — the first version of this did exactly
+          # that and GitHub rejected the file outright (0 jobs, "likely failed
+          # because of a workflow file issue"). `python3 -c` avoids the nested
+          # document problem entirely.
+          mac_zip_prefix="$(python3 -c 'import json; print(json.load(open("client/src-tauri/tauri.conf.json"))["productName"])')"
           zip_count=0
           for z in "release/installer-${mac_zip_prefix}_"*_amd64.zip \
                    "release/installer-${mac_zip_prefix}_"*_arm64.zip; do
