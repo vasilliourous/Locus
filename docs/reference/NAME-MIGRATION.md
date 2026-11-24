@@ -101,6 +101,13 @@ would say the same thing and could not be updated in place.
 The `macos_*`-key / `darwin-*`-filename asymmetry inside these names is a
 **separate** frozen fact, unrelated to the rename. Do not "tidy" it either.
 
+| Retained | Where | Why | Retires when |
+|---|---|---|---|
+| `productName: "Locus"` | `client/src-tauri/tauri.conf.json`, `client/src-tauri/tauri.macos.conf.json` | Tauri derives the bundle filenames from `productName`, and the installer name is one of them: `productName` → `<productName>_<v>_x64-setup.exe` → CI prefixes it to `installer-<productName>_<v>_x64-setup.exe`. So this single string decides whether the file the hub fetches exists. The mapping above renames `productName`, and applying it renamed the **artifacts** while `fetch-release.py`, `publish-release.sh` and `check-consistency.sh` §1e kept resolving `installer-Locus_*` — the `locus-*` rows above were held, this one was not. The result was a release that built and signed correctly, 21 assets, and a hub fetch that refused it because `installer-Chrysalis_<v>_x64-setup.exe` is not a name anything resolves. **The product is Chrysalis everywhere a person sees it** (`identifier` is `com.locus.client` for the same class of reason); this is a filename, not branding. | Same as the `locus-*` rows: both name sets published, hub resolves both, no build older than that release can be offered an update. Then rename all five sides together. |
+
+§1e of `check-consistency.sh` pins `productName` against the installer name the
+hub resolves, so this one cannot be "tidied" in isolation again.
+
 ### 3.2 Update identity
 
 | Retained | Where | Why | Retires when |

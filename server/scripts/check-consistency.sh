@@ -134,6 +134,40 @@ else
     ok "publish-release.sh no longer publishes the raw Windows binary"
 fi
 
+# `productName` must still be the one the three resolvers above agree on.
+#
+# Tauri derives the bundle filenames from `productName`, so this ONE string
+# decides whether the file the hub fetches exists: `productName` ->
+# `<productName>_<v>_x64-setup.exe` -> CI prefixes it to
+# `installer-<productName>_<v>_x64-setup.exe`. The rename changed it to
+# `Chrysalis` while fetch-release.py, publish-release.sh and the checks above
+# kept resolving `installer-Locus_*`, so v3.5.0 built green, signed all 21
+# assets, and then could not be published: `the v3.5.0 release is missing:
+# installer-Locus_3.5.0_x64-setup.exe`. Nothing failed until the hub fetch,
+# because every other check looked at a side that was internally consistent.
+#
+# See docs/reference/NAME-MIGRATION.md §3.1 — this is a FILENAME, not branding.
+_installer_product="$(python3 - "$REPO/client/src-tauri/tauri.conf.json" <<'PY' 2>/dev/null || true
+import json, sys
+try:
+    print(json.load(open(sys.argv[1])).get("productName") or "")
+except Exception:
+    print("")
+PY
+)"
+if [ -z "$_installer_product" ]; then
+    bad "could not read productName from client/src-tauri/tauri.conf.json"
+elif [ "$_installer_product" = "Locus" ]; then
+    ok "productName (Locus) matches the installer name the hub resolves"
+else
+    bad "productName is '${_installer_product}' but the hub resolves 'installer-Locus_<v>_x64-setup.exe'"
+    bad "  Tauri names the bundle from productName, so the release publishes"
+    bad "  'installer-${_installer_product}_<v>_x64-setup.exe' and fetch-release.py"
+    bad "  refuses the release as missing the Windows installer — at publish time,"
+    bad "  after a full four-platform build"
+    bad "  see docs/reference/NAME-MIGRATION.md §3.1"
+fi
+
 # Rust: the constants, and the artifact mapping for each.
 for pair in "PLATFORM_LINUX:linux" "PLATFORM_WINDOWS:windows" \
             "PLATFORM_MACOS_INTEL:macos_intel" "PLATFORM_MACOS_ARM:macos_arm"; do
