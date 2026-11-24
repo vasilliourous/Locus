@@ -2657,9 +2657,12 @@ jobs:
             base="$(basename "$f")"
             # Defensive: refuse anything that looks like an updater payload, so a
             # future naming change upstream cannot quietly publish an installer
-            # under a name fetch-release.py resolves.
+            # under a name fetch-release.py resolves. `locus-*` is the real
+            # prefix; both are matched so a future rename cannot silently
+            # disarm this guard the way the 2026-11-22 rename disarmed the
+            # signature check above.
             case "$base" in
-              chrysalis-*|manifest.json)
+              locus-*|chrysalis-*|manifest.json)
                 echo "::error::installer artifact collides with an updater name: $base"
                 exit 1
                 ;;
@@ -2870,8 +2873,8 @@ jobs:
               # installer" step above (minisign signs exact bytes, so the raw
               # binary's signature cannot stand in for the installer's).
               #
-              # `chrysalis-*` covers the raw updater payloads; the `installer-` entry
-              # is the one non-`chrysalis-` name that is genuinely an updater payload.
+              # `locus-*` covers the raw updater payloads; the `installer-` entry
+              # is the one non-`locus-` name that is genuinely an updater payload.
               sig_path = path + ".sig"
               entry = {"file": filename, "sha256": digest}
               if os.path.isfile(sig_path):
@@ -2903,18 +2906,38 @@ jobs:
         run: |
           set -euo pipefail
           missing=0
-          for f in release/chrysalis-*; do
+          # The updater payloads are named `locus-*`, NOT `chrysalis-*`: the
+          # 2026-11-22 product rename (`refactor!: rename the product from Locus
+          # to Chrysalis`) renamed this glob but never the artifacts, because
+          # `fetch-release.py` resolves those exact names from an allowlist and
+          # the deployed-client contract freezes them. So the glob matched
+          # nothing, verified nothing, and the release refused to publish with a
+          # bare literal `chrysalis-*` as its only diagnostic.
+          #
+          # Hence both halves: a glob that matches, and an assertion that it
+          # matched something. An empty glob with `set -u` still exits 0, which
+          # is the "a check that cannot fire reads exactly like one that passed"
+          # failure — so the count is checked rather than assumed.
+          checked=0
+          for f in release/locus-*; do
+            [ -f "$f" ] || continue
             case "$f" in
               *.sig) continue ;;
             esac
+            checked=$((checked + 1))
             if [ ! -f "$f.sig" ]; then
               echo "::error::no signature for $(basename "$f")"
               missing=1
             fi
           done
+          if [ "$checked" -eq 0 ]; then
+            echo "::error::no updater payload matched release/locus-* — the staging step or its names changed, so nothing was verified"
+            ls -la release/ || true
+            missing=1
+          fi
           # The Windows installer is an updater payload too (the hub serves it to
           # a client that executes it), so it must carry its own signature. This
-          # loop covers it explicitly: `release/chrysalis-*` would never match a name
+          # loop covers it explicitly: `release/locus-*` would never match a name
           # beginning `installer-`, so without this the one artifact that was
           # actually broken for three releases would be the one unchecked.
           for f in release/installer-*_x64-setup.exe; do
@@ -2932,7 +2955,7 @@ jobs:
         with:
           # Two kinds of asset, deliberately named apart.
           #
-          # `chrysalis-*` are the UPDATER payloads: raw executables the in-app
+          # `locus-*` are the UPDATER payloads: raw executables the in-app
           # updater downloads and replaces itself with. fetch-release.py resolves
           # exactly these names from an allowlist, so they must not be renamed.
           #
@@ -3017,7 +3040,7 @@ jobs:
   # deliberately a separate job from `release`, with a different asset set,
   # because the two must not be confused:
   #
-  #   * NO `manifest.json`, NO `chrysalis-*` updater payloads, NO `.sig` files.
+  #   * NO `manifest.json`, NO `locus-*` updater payloads, NO `.sig` files.
   #     Those are what `fetch-release.py` resolves, and publishing them from a
   #     branch would let an unreviewed build be pushed to the whole fleet —
   #     there is no rollout percentage and no server-driven downgrade, so a bad
@@ -3056,9 +3079,9 @@ jobs:
             base="$(basename "$f")"
             # Same guard as the release job: an installer must never end up under
             # a name that resolves as an updater payload. Nothing in this job
-            # publishes `chrysalis-*`, so this is defence against a future edit.
+            # publishes `locus-*`, so this is defence against a future edit.
             case "$base" in
-              chrysalis-*|manifest.json)
+              locus-*|chrysalis-*|manifest.json)
                 echo "::error::installer artifact collides with an updater name: $base"
                 exit 1
                 ;;

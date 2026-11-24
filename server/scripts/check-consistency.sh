@@ -2484,6 +2484,37 @@ PY
     fi
 fi
 
+# The "Verify every artifact is signed" step's glob must name the REAL updater
+# prefix.
+#
+# This guard exists because that glob was renamed and the artifacts were not.
+# `refactor!: rename the product from Locus to Chrysalis` (2026-11-22) changed
+# `for f in release/locus-*` to `for f in release/chrysalis-*` in that step, but
+# the payloads stayed `locus-*` — `fetch-release.py` resolves those names from
+# an allowlist, so they are a frozen contract. The glob then matched nothing,
+# verified nothing, and the v3.5.0 tag failed at `Release` with the bare literal
+# `chrysalis-*` as its only diagnostic, after a full four-platform build.
+#
+# A glob that matches nothing is invisible: it does not trip `set -u`, the loop
+# body never runs, and the step exits 0. So the prefix is asserted here rather
+# than trusted.
+if grep -q 'for f in release/locus-\*; do' "$WORKFLOW" 2>/dev/null; then
+    ok "the signature check globs the real updater prefix (release/locus-*)"
+else
+    bad "the \"Verify every artifact is signed\" step does not glob release/locus-*"
+    bad "  the updater payloads are named locus-* (a frozen contract with"
+    bad "  fetch-release.py); a glob naming any other prefix matches nothing, so"
+    bad "  the step passes without verifying a single artifact"
+fi
+
+if grep -q 'no updater payload matched release/locus-\*' "$WORKFLOW" 2>/dev/null; then
+    ok "the signature check asserts its glob matched something"
+else
+    bad "the signature check does not assert that its glob matched anything"
+    bad "  an empty glob exits 0; without this, 'nothing to check' is"
+    bad "  indistinguishable from 'everything checked and passed'"
+fi
+
 echo
 echo "19. Every workflow step condition names a matrix value that exists"
 # A step gated on a matrix value that the matrix never produces is a step that
