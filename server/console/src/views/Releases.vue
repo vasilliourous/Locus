@@ -393,7 +393,7 @@ onMounted(() => {
     <div v-if="macDownloads.length" class="mac-downloads">
       <h3>macOS download (for people, not clients)</h3>
       <p class="muted">
-        The compressed, ad-hoc-signed <code>Chrysalis.app</code> for each
+        The compressed, ad-hoc-signed <code>Locus.app</code> for each
         architecture. A student who cannot open the <code>.dmg</code> should be
         given this instead — the signature moves the Gatekeeper failure into
         System Settings → Privacy &amp; Security → <strong>Open Anyway</strong>,

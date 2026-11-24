@@ -288,7 +288,7 @@ fn sibling_swap_path(destination: &Path, label: &str) -> PathBuf {
     let name = destination
         .file_name()
         .and_then(|name| name.to_str())
-        .unwrap_or("Chrysalis.app");
+        .unwrap_or("Locus.app");
     destination.with_file_name(format!(".{name}.{label}-{}", std::process::id()))
 }
 
@@ -392,8 +392,8 @@ mod tests {
         let home = root.join("home");
         let system = root.join("Applications");
         let user = home.join("Applications");
-        let system_exe = executable(&system.join("Tools/Chrysalis.app"))?;
-        let user_exe = executable(&user.join("Network/Chrysalis.app"))?;
+        let system_exe = executable(&system.join("Tools/Locus.app"))?;
+        let user_exe = executable(&user.join("Network/Locus.app"))?;
 
         assert!(matches!(
             evaluate_install_location_with_roots(&system_exe, &home, &system),
@@ -410,9 +410,9 @@ mod tests {
     #[test]
     fn failed_staged_activation_preserves_existing_application() -> anyhow::Result<()> {
         let root = std::env::temp_dir().join(format!("launch-guard-swap-{}", std::process::id()));
-        let destination = root.join("Chrysalis.app");
-        let staging = root.join(".Chrysalis.app.installing");
-        let backup = root.join(".Chrysalis.app.backup");
+        let destination = root.join("Locus.app");
+        let staging = root.join(".Locus.app.installing");
+        let backup = root.join(".Locus.app.backup");
         std::fs::create_dir_all(&destination)?;
         std::fs::write(destination.join("old"), b"old")?;
         std::fs::create_dir_all(&staging)?;
@@ -439,9 +439,9 @@ mod tests {
         let system = root.join("Applications");
         let downloads = home.join("Downloads");
         std::fs::create_dir_all(&downloads)?;
-        let allowed_bundle = system.join("Chrysalis.app");
+        let allowed_bundle = system.join("Locus.app");
         let allowed_exe = executable(&allowed_bundle)?;
-        let link_in = downloads.join("Chrysalis.app");
+        let link_in = downloads.join("Locus.app");
         symlink(&allowed_bundle, &link_in)?;
         let escaped_bundle = downloads.join("Escaped.app");
         executable(&escaped_bundle)?;
@@ -474,7 +474,7 @@ mod tests {
         std::fs::create_dir_all(&downloads)?;
         std::fs::create_dir_all(&system)?;
         symlink(&downloads, home.join("Applications"))?;
-        let escaped_exe = executable(&home.join("Applications/Chrysalis.app"))?;
+        let escaped_exe = executable(&home.join("Applications/Locus.app"))?;
 
         assert!(matches!(
             evaluate_install_location_with_roots(&escaped_exe, &home, &system),
@@ -499,7 +499,7 @@ mod tests {
     #[test]
     fn translocation_and_missing_bundle_are_rejected_before_side_effects() {
         let translocated =
-            std::path::Path::new("/private/var/folders/AppTranslocation/Chrysalis.app/Contents/MacOS/chrysalis");
+            std::path::Path::new("/private/var/folders/AppTranslocation/Locus.app/Contents/MacOS/chrysalis");
         assert_eq!(
             evaluate_install_location_with_roots(
                 translocated,

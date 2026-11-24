@@ -2151,9 +2151,9 @@ jobs:
           }
           hdiutil detach "$mount"
 
-          app="$stage/Chrysalis.app"
+          app="$stage/Locus.app"
           if [ ! -d "$app" ]; then
-            echo "::error::no Chrysalis.app in $dmg"
+            echo "::error::no Locus.app in $dmg"
             ls -la "$stage" || true
             exit 1
           fi
@@ -2198,18 +2198,18 @@ jobs:
           mkdir -p "$verify"
           hdiutil attach "$dmg" -nobrowse -noverify -readonly -mountpoint "$verify"
           ok=0
-          if [ -d "$verify/Chrysalis.app" ] && codesign --verify --deep --strict "$verify/Chrysalis.app" 2>/dev/null; then
+          if [ -d "$verify/Locus.app" ] && codesign --verify --deep --strict "$verify/Locus.app" 2>/dev/null; then
             ok=1
           fi
           hdiutil detach "$verify"
 
           if [ "$ok" -ne 1 ]; then
-            echo "::error::$dmg does not contain a validly ad-hoc-signed Chrysalis.app"
+            echo "::error::$dmg does not contain a validly ad-hoc-signed Locus.app"
             ls -la "$verify" || true
             exit 1
           fi
 
-          echo "Verified: $dmg carries a signed Chrysalis.app (ad-hoc, no Developer ID)"
+          echo "Verified: $dmg carries a signed Locus.app (ad-hoc, no Developer ID)"
 
       # ── Package the macOS updater payload as a .app.tar.gz ──
       #
@@ -2242,7 +2242,7 @@ jobs:
       # the exact failure the signing step exists to move away from.
       #
       # The `tar` layout matters too: the plugin strips one leading path component
-      # (`entry.path()?.iter().skip(1)`), so the archive must hold `Chrysalis.app/...`
+      # (`entry.path()?.iter().skip(1)`), so the archive must hold `Locus.app/...`
       # rather than a bare `Contents/...`. Archiving from the parent directory
       # produces that shape.
       #
@@ -2276,9 +2276,9 @@ jobs:
           mount="$work/mnt"
           mkdir -p "$mount"
           hdiutil attach "$dmg" -nobrowse -noverify -readonly -mountpoint "$mount"
-          cp -R "$mount/Chrysalis.app" "$work/" || {
+          cp -R "$mount/Locus.app" "$work/" || {
             hdiutil detach "$mount" || true
-            echo "::error::no Chrysalis.app inside $dmg"
+            echo "::error::no Locus.app inside $dmg"
             exit 1
           }
           hdiutil detach "$mount"
@@ -2289,10 +2289,10 @@ jobs:
           # both key on `matrix.artifact`.
           tarball="artifacts/${{ matrix.artifact }}.app.tar.gz"
 
-          # `tar` from the parent so entries begin `Chrysalis.app/`, which is what
+          # `tar` from the parent so entries begin `Locus.app/`, which is what
           # the plugin's `skip(1)` expects. `--no-xattrs` keeps resource forks
           # out; `gzip -9` because a 100 MB app is a student's download.
-          ( cd "$work" && tar --no-xattrs -czf - Chrysalis.app ) > "$tarball"
+          ( cd "$work" && tar --no-xattrs -czf - Locus.app ) > "$tarball"
 
           # ── Read it back ──
           #
@@ -2300,12 +2300,12 @@ jobs:
           # artifact rather than from the step's exit status: a tar that captured
           # the wrong depth exits 0 and installs nothing.
           if ! tar -tzf "$tarball" | head -1 | grep -q '^Chrysalis\.app/'; then
-            echo "::error::$tarball does not start with Chrysalis.app/ — the updater's skip(1) would miss it"
+            echo "::error::$tarball does not start with Locus.app/ — the updater's skip(1) would miss it"
             tar -tzf "$tarball" | head -10 || true
             exit 1
           fi
           if ! tar -tzf "$tarball" | grep -q '^Chrysalis\.app/Contents/MacOS/'; then
-            echo "::error::$tarball is missing Chrysalis.app/Contents/MacOS/ — not a runnable bundle"
+            echo "::error::$tarball is missing Locus.app/Contents/MacOS/ — not a runnable bundle"
             exit 1
           fi
 
@@ -2461,7 +2461,7 @@ jobs:
           # filename, so a rename applied to one but not the other would produce
           # a signature that verifies nothing.
           setup=""
-          for f in installer/Chrysalis_*_x64-setup.exe; do
+          for f in installer/Locus_*_x64-setup.exe; do
             [ -f "$f" ] || continue
             if [ -n "$setup" ]; then
               echo "::error::more than one NSIS installer staged: '$setup' and '$f'"
@@ -2497,7 +2497,7 @@ jobs:
       # arrives quarantined and refused, where the advice is to keep the bundle
       # and clear the flag. A `.zip` of a signed `.app` is the form macOS itself
       # treats as an app bundle in transit — extracting it with Finder or
-      # `ditto -x -k` restores a `Chrysalis.app` that still carries the ad-hoc
+      # `ditto -x -k` restores a `Locus.app` that still carries the ad-hoc
       # signature, and `ditto` preserves the bundle metadata and the symlinks
       # inside `Contents/Frameworks` that a naive `zip` would flatten.
       #
@@ -2541,10 +2541,10 @@ jobs:
           mount="$work/mnt"
           mkdir -p "$mount"
           hdiutil attach "$dmg" -nobrowse -noverify -readonly -mountpoint "$mount"
-          app_src="$mount/Chrysalis.app"
+          app_src="$mount/Locus.app"
           if [ ! -d "$app_src" ]; then
             hdiutil detach "$mount" || true
-            echo "::error::no Chrysalis.app inside $dmg"
+            echo "::error::no Locus.app inside $dmg"
             exit 1
           fi
 
@@ -2560,9 +2560,9 @@ jobs:
           esac
 
           ver="$(node -p "require('./package.json').version")"
-          out="installer/Chrysalis_${ver}_${arch}.zip"
+          out="installer/Locus_${ver}_${arch}.zip"
 
-          # `--keepParent` so the archive contains `Chrysalis.app/` rather than the
+          # `--keepParent` so the archive contains `Locus.app/` rather than the
           # bundle's CONTENTS at the archive root. Without it, extracting gives
           # a loose `Contents/` directory and the result is not an app at all —
           # Finder shows a folder, and there is nothing to drag to Applications.
@@ -2584,11 +2584,11 @@ jobs:
           printf '%s\n' "$listing" | head -20 | sed 's/^/    /'
           bad=0
           printf '%s' "$listing" | grep -q 'Chrysalis\.app/' || {
-            echo "::error::$out does not contain Chrysalis.app/ — the bundle root is missing"
+            echo "::error::$out does not contain Locus.app/ — the bundle root is missing"
             bad=1
           }
           printf '%s' "$listing" | grep -q 'Chrysalis\.app/Contents/MacOS/' || {
-            echo "::error::$out does not contain Chrysalis.app/Contents/MacOS/ — the executable is missing"
+            echo "::error::$out does not contain Locus.app/Contents/MacOS/ — the executable is missing"
             bad=1
           }
           [ "$bad" -eq 0 ] || exit 1
@@ -2602,8 +2602,8 @@ jobs:
           extract="$work/extract"
           mkdir -p "$extract"
           ditto -x -k "$out" "$extract"
-          codesign --verify --deep --strict "$extract/Chrysalis.app"
-          echo "Verified: $out extracts to a validly signed Chrysalis.app"
+          codesign --verify --deep --strict "$extract/Locus.app"
+          echo "Verified: $out extracts to a validly signed Locus.app"
 
           ls -la installer/
       - uses: actions/upload-artifact@v4

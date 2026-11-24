@@ -263,7 +263,7 @@ fi
 # WHY THIS EXISTS
 #
 # The `.zip` is the one artifact that is deliberately NOT an update payload: it
-# is the compressed, ad-hoc-signed `Chrysalis.app` a PERSON downloads. The Windows
+# is the compressed, ad-hoc-signed `Locus.app` a PERSON downloads. The Windows
 # outage of 2026-10-01 was a filename that had to agree across three systems and
 # was checked on only one of them, so this name gets the same treatment from the
 # start rather than after it drifts.
@@ -271,7 +271,7 @@ fi
 # Three sites must agree:
 #
 #   1. CI       — `.github/workflows/client.yml`, "Package the macOS app for
-#                 download", which BUILDS `Chrysalis_<v>_<arch>.zip` and the release
+#                 download", which BUILDS `Locus_<v>_<arch>.zip` and the release
 #                 job which prefixes it to `installer-...`
 #   2. the hub  — `fetch-release.py`'s `MACOS_ZIP_TEMPLATE`, which RESOLVES it
 #                 from the GitHub Release
@@ -313,11 +313,12 @@ done
 # CI must produce both, and the release job must assert them present. The
 # assertion is what stops a build job that silently stopped packaging from
 # publishing a release with no macOS download at all.
-if grep -qE 'Chrysalis_\$\{ver\}_\$\{arch\}\.zip|Chrysalis_\$\{ver\}_' "$WORKFLOW" 2>/dev/null; then
+if grep -qE 'Locus_\$\{ver\}_\$\{arch\}\.zip|Locus_\$\{ver\}_' "$WORKFLOW" 2>/dev/null; then
     ok "CI builds the macOS zip under the versioned name"
 else
-    bad "no CI step builds 'Chrysalis_<v>_<arch>.zip'"
+    bad "no CI step builds 'Locus_<v>_<arch>.zip'"
     bad "  the macOS packaging step is what makes the bypassable Gatekeeper path exist"
+    bad "  the infix is productName, which is 'Locus' — see NAME-MIGRATION.md §3.1"
 fi
 if grep -q 'expected two macOS download zips' "$WORKFLOW" 2>/dev/null; then
     ok "the release job refuses to publish without both macOS zips"
@@ -2446,17 +2447,17 @@ echo "18. The Windows installer is signed, under the name the release job prefix
 #   1. the step was gated on `matrix.os == 'windows-latest'` while the matrix
 #      pins `windows-2022`, so it never ran at all (see §18's sibling check);
 #   2. once it did run, it globbed `installer-Locus_*` in a directory that only
-#      ever holds `Chrysalis_*`.
+#      ever holds `Locus_*`.
 # Both are the same failure shape: a name asserted in one half and not the other.
 # This check asserts the AGREEMENT between the two jobs rather than either half
 # (AGENTS.md, "assert the agreement").
 wf_installer="$WORKFLOW"
 if [ -f "$wf_installer" ]; then
-    # Scoped to `installer/Chrysalis_*` deliberately. Several steps iterate
+    # Scoped to `installer/Locus_*` deliberately. Several steps iterate
     # `installer/*` now (the macOS .dmg repack does), and a bare `head -1` would
     # grab whichever comes first in the file — so this check would silently stop
     # testing the step it exists for, which is the failure mode it is about.
-    sign_glob="$(grep -oE 'for f in installer/Chrysalis_[^;]+' "$wf_installer" | head -1 || true)"
+    sign_glob="$(grep -oE 'for f in installer/Locus_[^;]+' "$wf_installer" | head -1 || true)"
     prefix_src="$(grep -oE 'cp "\$f" "release/installer-\$base"' "$wf_installer" | head -1 || true)"
     # The `if:` line follows the step name, but a comment block may sit between
     # them (the file explains WHY at the point of contact). Scan forward from the
@@ -2485,15 +2486,17 @@ PY
         bad "  if that step was removed, the Windows installer ships unsigned and no"
         bad "  Windows client can install the update (RECOVER-WINDOWS-UPDATE.md)"
     else
-        # The glob must NOT carry the prefix: it runs before the rename.
+        # The glob must NOT carry the `installer-` prefix: it runs before the rename.
+        # Its INFIX is productName, so it tracks tauri.conf.json like §1e does.
         case "$sign_glob" in
-            *installer/Chrysalis_*)
-                ok "the sign step globs the pre-prefix name (installer/Chrysalis_*)"
+            *installer/Locus_*)
+                ok "the sign step globs the pre-prefix name (installer/Locus_*)"
                 ;;
             *)
                 bad "the sign step globs '${sign_glob#for f in }' in the BUILD job"
                 bad "  the 'installer-' prefix is added later by the release job, so this"
                 bad "  can never match and the step exits 1 after a full four-platform build"
+                bad "  the infix is productName, which is 'Locus' — see NAME-MIGRATION.md §3.1"
                 ;;
         esac
     fi

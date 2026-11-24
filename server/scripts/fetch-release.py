@@ -125,8 +125,8 @@ def installer_name(version):
 ## `tauri_plugin_updater` does not consume a bare binary on macOS. Its install
 ## path is `GzDecoder` + `tar::Archive` expecting
 ##
-##     Chrysalis.app.tar.gz
-##     └── Chrysalis.app/
+##     Locus.app.tar.gz
+##     └── Locus.app/
 ##         └── Contents/...
 ##
 ## and its `extract_path` there is the `.app` BUNDLE, not a single file
@@ -175,7 +175,7 @@ MANIFEST_NAME = "manifest.json"
 ## is the raw-Windows-PE mistake again, in a different costume: a legitimate
 ## release asset that is wrong in the update slot.
 ##
-## The macOS zip carries the ad-hoc-signed `Chrysalis.app`. It exists because the
+## The macOS zip carries the ad-hoc-signed `Locus.app`. It exists because the
 ## `.dmg` cannot serve the one case that matters: a student whose download is
 ## quarantined and refused, where the remedy is a bundle that survives
 ## transport intact so macOS reports the bypassable "unidentified developer"

@@ -157,6 +157,14 @@ whale.txt
 # new file. §5 of check-consistency.sh asserts nothing in this directory but the
 # README can ever be tracked.
 !.chrysalis-keys/README.md
+# Scratch space for hub operations — ssh wrappers, upload helpers, captured
+# remote output. Same class as `.secrets.env` and for the same reason: the
+# wrappers here carry the hub's password on the command line, and the captured
+# files are dumps of a live box. It is not a build artifact and nothing
+# regenerates or needs it, so `git add -A` must never reach it. This line exists
+# because it did: a `git add -A` swept nine of these files into a release-fix
+# commit, which was caught before the push and not by any check.
+.hubtmp/
 .icon-backup/
 
 # The design brief for the copy and identity rework (`.brief/`). Scratch: the
