@@ -2687,8 +2687,24 @@ jobs:
           # person runs, and it is still published. This asserts the zip, which
           # is the artifact whose whole purpose is that its contents survive
           # transport with the bundle intact.
+          #
+          # `installer-Chrysalis_*`, NOT `installer-Locus_*`. The prefix is
+          # `productName` from `tauri.conf.json`, and the 2026-11-23 rename changed
+          # that to Chrysalis while this glob kept the old literal. The 3.5.0 tag
+          # then failed HERE with "expected two macOS download zips, found 0" —
+          # after all four platforms had built, signed and uploaded successfully —
+          # which reads as a broken macOS build and was actually a stale pattern.
+          # The glob below is derived from the config for that reason: the product
+          # name is a single source of truth and a rename must not need a matching
+          # edit in a shell pattern three thousand lines away.
+          mac_zip_prefix="$(python3 - <<'PY'
+import json
+print(json.load(open('client/src-tauri/tauri.conf.json'))['productName'])
+PY
+)"
           zip_count=0
-          for z in release/installer-Locus_*_amd64.zip release/installer-Locus_*_arm64.zip; do
+          for z in "release/installer-${mac_zip_prefix}_"*_amd64.zip \
+                   "release/installer-${mac_zip_prefix}_"*_arm64.zip; do
             [ -f "$z" ] || continue
             zip_count=$((zip_count + 1))
             echo "  macOS download present: $(basename "$z")"
@@ -2752,11 +2768,19 @@ jobs:
           import glob as _glob
 
           def windows_installer():
-              # `installer-Locus_<version>_x64-setup.exe`, as staged by the
+              # `installer-<productName>_<version>_x64-setup.exe`, as staged by the
               # `release` job. `x64` is the only Windows bundle this matrix
               # produces (the target is x86_64-pc-windows-msvc).
+              #
+              # The prefix is READ from `tauri.conf.json` rather than written as a
+              # literal: the 2026-11-23 rename made `productName` Chrysalis while
+              # this glob still said `Locus`, so the 3.5.0 tag would have raised
+              # here with `found 0` — after every platform had built and signed.
+              product = json.load(
+                  open("client/src-tauri/tauri.conf.json", encoding="utf-8")
+              )["productName"]
               candidates = sorted(
-                  _glob.glob("release/installer-Locus_*_x64-setup.exe")
+                  _glob.glob(f"release/installer-{product}_*_x64-setup.exe")
               )
               if len(candidates) != 1:
                   raise SystemExit(
@@ -2891,7 +2915,7 @@ jobs:
           # loop covers it explicitly: `release/chrysalis-*` would never match a name
           # beginning `installer-`, so without this the one artifact that was
           # actually broken for three releases would be the one unchecked.
-          for f in release/installer-Locus_*_x64-setup.exe; do
+          for f in release/installer-*_x64-setup.exe; do
             [ -f "$f" ] || continue
             if [ ! -f "$f.sig" ]; then
               echo "::error::no signature for $(basename "$f") — a Windows client cannot install it"
