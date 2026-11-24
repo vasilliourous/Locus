@@ -104,7 +104,14 @@ fn tray_scale_factor() -> usize {
 /// is a table, not a computation. Kept a function rather than an inline match so
 /// the exhaustive-over-the-ladder property (a missing `@3x` is a compile error,
 /// not a runtime fallback) is written once and read once.
-#[cfg(target_os = "linux")]
+///
+/// NOT gated to Linux. It was, and that gate is what made the icon migration
+/// fail to COMPILE on macOS: the macOS arm templates the icon only when the
+/// preference is `monochrome`, and its other branch needs a coloured bitmap —
+/// which on Linux comes from here. With the function Linux-only, the macOS arm
+/// had no value to return for the non-template case, so the block evaluated to
+/// `()` and the build failed with E0317. The colours are the same assets Linux
+/// reads; only the tray host differs.
 const fn tray_png(status: u8, scale: usize) -> &'static [u8] {
     // The match is exhaustive over the committed ladder on purpose: a missing
     // `@3x` is a compile error rather than a runtime fallback that silently
@@ -195,13 +202,33 @@ impl TrayState {
             // every non-safe-mode case when the icon is templated
             // (`lib/common/tray.dart`: `_isTemplate(monochrome) || !isStart => 1`),
             // because a template discards the colour that distinguishes 2 and 3.
+            // A menu bar picks its bitmap by the screen's backing scale, so the
+            // ladder step is chosen here (Tauri hands the host one bitmap).
+            let scale = tray_scale_factor();
             let is_mono = verge.tray_icon.as_deref().unwrap_or("monochrome") == "monochrome";
             if is_mono {
-                // A menu bar picks its bitmap by the screen's backing scale, so
-                // the ladder step is chosen here (Tauri hands the host one bitmap).
-                let scale = tray_scale_factor();
                 let safe = matches!(kind, IconKind::SafeMode);
-                return (false, Cow::Borrowed(tray_template_png(safe, scale)));
+                tray_template_png(safe, scale)
+            } else {
+                // NOT a template: the student asked for the coloured mark, so the
+                // state shows in its own colour and the OS must not tint it. The
+                // same four `status_*` ladder Linux reads — states 1..3 plus the
+                // safe-mode shape — is what the menu bar gets.
+                //
+                // THIS BRANCH IS WHY THE FUNCTION COMPILES. It did not exist when
+                // the icon migration landed: the arm returned the template inside
+                // `if is_mono` and had no `else`, so on macOS — where this block
+                // is the function's tail — the block evaluated to `()` and the
+                // build failed E0317. 3.4.4 compiled only because it still had a
+                // shared coloured tail underneath; the migration replaced that
+                // tail with per-platform `return`s and dropped the fall-through.
+                // Linux CI could never see it.
+                match kind {
+                    IconKind::Common => tray_png(1, scale),
+                    IconKind::SysProxy => tray_png(2, scale),
+                    IconKind::Tun => tray_png(3, scale),
+                    IconKind::SafeMode => tray_png(4, scale),
+                }
             }
         }
 
@@ -218,14 +245,16 @@ impl TrayState {
             // downsample for no reason.
             let _ = verge;
             let scale = tray_scale_factor();
-            // `return` is NOT redundant here even though clippy cannot see that
-            // on a Linux build: these `#[cfg]` blocks are a chain, and only ONE
-            // of them is the function's tail expression per target. On Linux this
-            // block is last, so the `return` reads as needless — but on macOS and
-            // Windows a later block follows, and without it the value here would
-            // be a discarded statement and the function would fall through to the
-            // wrong arm. Keeping it identical across all four blocks is what makes
-            // this correct on every target; the allow is scoped to this one block.
+            // `return` is NOT redundant, and clippy cannot see why: this file is
+            // a chain of `#[cfg]` blocks, and the three platform blocks all end
+            // in `return` so that each is independent of which one the compiler
+            // keeps. Deleting the Linux one reads as correct HERE (on a Linux
+            // build this block IS the tail expression) and breaks the macOS
+            // build — which is exactly what happened on the 3.5.0 tag: Linux
+            // compiled green, and `build (macos-arm)` failed with E0317 "`if` may
+            // be missing an `else`" pointing at the macOS block ABOVE, because
+            // removing this `return` changed the type the whole chain evaluates
+            // to. Do not "tidy" the other two either. The allow is scoped here.
             #[allow(clippy::needless_return)]
             return (
                 false,

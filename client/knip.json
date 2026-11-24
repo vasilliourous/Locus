@@ -14,7 +14,7 @@
     "duplicates",
     "cycles"
   ],
-  "ignoreBinaries": ["rustc", "cc"],
+  "ignoreBinaries": ["rustc", "cc", "rsvg-convert"],
   "ignoreDependencies": [
     "lint-staged",
     "foxts",
