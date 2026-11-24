@@ -2299,12 +2299,12 @@ jobs:
           # Prove the archive is the shape the plugin will accept, from the
           # artifact rather than from the step's exit status: a tar that captured
           # the wrong depth exits 0 and installs nothing.
-          if ! tar -tzf "$tarball" | head -1 | grep -q '^Chrysalis\.app/'; then
+          if ! tar -tzf "$tarball" | head -1 | grep -q '^Locus\.app/'; then
             echo "::error::$tarball does not start with Locus.app/ — the updater's skip(1) would miss it"
             tar -tzf "$tarball" | head -10 || true
             exit 1
           fi
-          if ! tar -tzf "$tarball" | grep -q '^Chrysalis\.app/Contents/MacOS/'; then
+          if ! tar -tzf "$tarball" | grep -q '^Locus\.app/Contents/MacOS/'; then
             echo "::error::$tarball is missing Locus.app/Contents/MacOS/ — not a runnable bundle"
             exit 1
           fi
@@ -2583,11 +2583,11 @@ jobs:
           listing="$(unzip -l "$out")"
           printf '%s\n' "$listing" | head -20 | sed 's/^/    /'
           bad=0
-          printf '%s' "$listing" | grep -q 'Chrysalis\.app/' || {
+          printf '%s' "$listing" | grep -q 'Locus\.app/' || {
             echo "::error::$out does not contain Locus.app/ — the bundle root is missing"
             bad=1
           }
-          printf '%s' "$listing" | grep -q 'Chrysalis\.app/Contents/MacOS/' || {
+          printf '%s' "$listing" | grep -q 'Locus\.app/Contents/MacOS/' || {
             echo "::error::$out does not contain Locus.app/Contents/MacOS/ — the executable is missing"
             bad=1
           }
