@@ -375,9 +375,9 @@ says, edit the rows under that screen's heading.
 | `backend:tray.globalMode` | Global Mode | client/src-tauri/src/core/tray/menu_def.rs:30 |
 | `backend:tray.directMode` | Direct Mode | client/src-tauri/src/core/tray/menu_def.rs:31 |
 | `backend:tray.outboundModes` | Outbound Modes | client/src-tauri/src/core/tray/menu_def.rs:32 |
-| `backend:tray.rule` | Rule | client/src-tauri/src/core/tray/mod.rs:905 |
-| `backend:tray.direct` | Direct | client/src-tauri/src/core/tray/mod.rs:904 |
-| `backend:tray.global` | Global | client/src-tauri/src/core/tray/mod.rs:903 |
+| `backend:tray.rule` | Rule | client/src-tauri/src/core/tray/mod.rs:909 |
+| `backend:tray.direct` | Direct | client/src-tauri/src/core/tray/mod.rs:908 |
+| `backend:tray.global` | Global | client/src-tauri/src/core/tray/mod.rs:907 |
 | `backend:tray.profiles` | Profiles | client/src-tauri/src/core/tray/menu_def.rs:33 |
 | `backend:tray.proxies` | Proxies | client/src-tauri/src/core/tray/menu_def.rs:34 |
 | `backend:tray.systemProxy` | System Proxy | client/src-tauri/src/core/tray/menu_def.rs:35 |
@@ -398,9 +398,9 @@ says, edit the rows under that screen's heading.
 | `backend:tray.vergeVersion` | Verge Version | client/src-tauri/src/core/tray/menu_def.rs:50 |
 | `backend:tray.more` | More | client/src-tauri/src/core/tray/menu_def.rs:51 |
 | `backend:tray.exit` | Exit | client/src-tauri/src/core/tray/menu_def.rs:52 |
-| `backend:tray.tooltip.systemProxy` | System Proxy | client/src-tauri/src/core/tray/mod.rs:487 |
-| `backend:tray.tooltip.tun` | TUN | client/src-tauri/src/core/tray/mod.rs:488 |
-| `backend:tray.tooltip.profile` | Profile | client/src-tauri/src/core/tray/mod.rs:489 |
+| `backend:tray.tooltip.systemProxy` | System Proxy | client/src-tauri/src/core/tray/mod.rs:491 |
+| `backend:tray.tooltip.tun` | TUN | client/src-tauri/src/core/tray/mod.rs:492 |
+| `backend:tray.tooltip.profile` | Profile | client/src-tauri/src/core/tray/mod.rs:493 |
 
 ## Deliberately not in the manifest
 

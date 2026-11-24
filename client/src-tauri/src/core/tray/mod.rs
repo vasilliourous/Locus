@@ -206,7 +206,10 @@ impl TrayState {
             // ladder step is chosen here (Tauri hands the host one bitmap).
             let scale = tray_scale_factor();
             let is_mono = verge.tray_icon.as_deref().unwrap_or("monochrome") == "monochrome";
-            if is_mono {
+            // Both branches yield the whole `(bool, Cow)`: a template is NOT a
+            // custom icon (first element `false`), and `tray_*_png` returns a
+            // `&'static [u8]` that has to be borrowed into a `Cow` here.
+            let bytes = if is_mono {
                 let safe = matches!(kind, IconKind::SafeMode);
                 tray_template_png(safe, scale)
             } else {
@@ -229,7 +232,8 @@ impl TrayState {
                     IconKind::Tun => tray_png(3, scale),
                     IconKind::SafeMode => tray_png(4, scale),
                 }
-            }
+            };
+            (false, Cow::Borrowed(bytes))
         }
 
         #[cfg(target_os = "linux")]
