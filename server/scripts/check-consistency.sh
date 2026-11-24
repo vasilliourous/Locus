@@ -7552,6 +7552,7 @@ if [ ! -f "$REGISTER" ]; then
     bad "  the deployed fleet. Restore it from git."
 else
     retain_report=$(cd "$REPO" && python3 - <<'PY'
+import os
 import re
 
 def read(path):
@@ -7743,6 +7744,71 @@ for path, pattern in NO_STALE_PROSE:
         print("BAD\t%s:%d names `%s`, which the rename moved." % (path, n, word))
         print("BAD\t  %s" % line[:110])
     print("BAD\t  A reader is being told to use an identifier that does not exist.")
+
+# ── The repository name is Locus, and it must never be written Chrysalis ──
+#
+# THE INVERSE OF EVERY ROW ABOVE, and the rename got it wrong. The product is
+# Chrysalis; the GitHub repository was never renamed and is still
+# `vasilliourous/Locus`. The 2026-11-23 pass applied `Locus -> Chrysalis` to the
+# repository path in operator documents and in the fetch service's unit template,
+# producing twelve commands that resolve a repository that does not exist:
+#
+#   gh secret set LOCUS_UPDATE_KEY --repo vasilliourous/Chrysalis      (SIGNING.md)
+#   git clone https://github.com/vasilliourous/Chrysalis.git           (SESSION.md)
+#   Environment=GITHUB_REPO=vasilliourous/Chrysalis                    (the template)
+#
+# `gh repo view vasilliourous/Chrysalis` answers "Could not resolve to a
+# Repository", so every one of these fails for an operator following the docs.
+#
+# WHY IT SURVIVED. §53's CHECKS only assert that a retained name is PRESENT where
+# it is required — a positive check reads nothing about a place the name was
+# wrongly replaced. The rows are exhaustive by construction, so a new spelling
+# introduced by a rename has no row to catch it. This is the missing direction,
+# and it is written as a tree-wide ban because the name is global: unlike the
+# per-file rows above, there is no file where `vasilliourous/Chrysalis` is right.
+#
+# The repository template's own `Documentation=` URL is included on purpose — it
+# is a link an operator clicks, and a 404 there is the same defect as a failing
+# command.
+BAD_REPO = "vasilliourous/Chrysalis"
+SCAN_SUFFIXES = (".md", ".sh", ".py", ".js", ".service", ".yml", ".json", ".toml", ".rs")
+bad_repo_hits = []
+for root, dirs, files in os.walk("."):
+    dirs[:] = [d for d in dirs if d not in
+               ("node_modules", ".git", "target", "dist", "legacy", "vendor",
+                "archive", "history", ".hubtmp")]
+    for fn in files:
+        if not fn.endswith(SCAN_SUFFIXES):
+            continue
+        # The checker is excluded: this paragraph HAS to name the bad string to
+        # explain it, so scanning itself would make the guard permanently red.
+        if fn == "check-consistency.sh":
+            continue
+        p = os.path.join(root, fn).replace(os.sep, "/")
+        # NOT `.lstrip("./")`. That strips CHARACTERS, not a prefix, so a dotfile
+        # like `.renovation-handover.md` becomes `renovation-handover.md`, the read
+        # below raises, and the whole §53 block dies — taking every check after it
+        # with it, silently, while the run still printed "All consistency checks
+        # passed" for the sections that had already run. Caught by planting the
+        # defect this check exists for and watching nothing happen.
+        if p.startswith("./"):
+            p = p[2:]
+        try:
+            body = open(p, encoding="utf-8", errors="replace").read()
+        except OSError:
+            continue
+        for n, line in enumerate(body.splitlines(), 1):
+            if BAD_REPO in line:
+                bad_repo_hits.append((p, n, line.strip()))
+if bad_repo_hits:
+    for p, n, line in bad_repo_hits[:6]:
+        print("BAD\t%s:%d names `%s`, which is not a repository." % (p, n, BAD_REPO))
+        print("BAD\t  %s" % line[:110])
+    print("BAD\t  The GitHub repository is still `vasilliourous/Locus` — the product")
+    print("BAD\t  was renamed, the remote was not. Every command here fails.")
+    print("BAD\t  See docs/reference/NAME-MIGRATION.md §3.7.")
+else:
+    print("OK\tno file names the non-existent repository `%s`" % BAD_REPO)
 
 # The anchor must appear on a LINE OF ITS OWN SECTION, not merely somewhere in the
 # prose. A plain `anchor in reg` was satisfied by a passing mention: the register

@@ -252,10 +252,10 @@ the message does not say *how* to fix it, which is a real cost when it fires.
 # From a checkout, with gh authenticated against the right account.
 # If .chrysalis-keys/ is empty, recover the key from the bundle first — the recovery
 # procedure is docs/operate/RELEASE-RECOVERY.md §2:
-gh secret set LOCUS_UPDATE_KEY --repo vasilliourous/Chrysalis < .chrysalis-keys/chrysalis_update.key
+gh secret set LOCUS_UPDATE_KEY --repo vasilliourous/Locus < .chrysalis-keys/chrysalis_update.key
 
 # Verify it exists (prints only names and dates, never values):
-gh secret list --repo vasilliourous/Chrysalis
+gh secret list --repo vasilliourous/Locus
 ```
 
 ### ⚠️ Secrets do NOT survive a repository move

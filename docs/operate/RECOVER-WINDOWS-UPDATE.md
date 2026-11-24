@@ -40,7 +40,7 @@ is doing its job; the hub is serving the wrong file. Full narrative in
 `v3.2.14` has the installer but no signature over it:
 
 ```console
-$ curl -s https://api.github.com/repos/vasilliourous/Chrysalis/releases/tags/v3.2.14 \
+$ curl -s https://api.github.com/repos/vasilliourous/Locus/releases/tags/v3.2.14 \
     | python3 -c "import json,sys; print([a['name'] for a in json.load(sys.stdin)['assets']])"
 … 'installer-Chrysalis_3.2.14_x64-setup.exe' …   # present
 …                                             # NO installer-*.sig
@@ -93,7 +93,7 @@ git push origin vX.Y.Z              # the tag triggers the build
 **This is the gate.** Do not publish until the signature is attached:
 
 ```sh
-gh release view vX.Y.Z --repo vasilliourous/Chrysalis --json assets \
+gh release view vX.Y.Z --repo vasilliourous/Locus --json assets \
   -q '.assets[].name' | sort
 ```
 
@@ -116,7 +116,7 @@ manifest.json
 Also confirm CI's manifest names the installer:
 
 ```sh
-curl -sL https://github.com/vasilliourous/Chrysalis/releases/download/vX.Y.Z/manifest.json \
+curl -sL https://github.com/vasilliourous/Locus/releases/download/vX.Y.Z/manifest.json \
   | python3 -c "import json,sys; print(json.load(sys.stdin)['platforms']['windows'])"
 # -> {'file': 'installer-Chrysalis_X.Y.Z_x64-setup.exe', 'sha256': '…', 'signature': '…'}
 ```

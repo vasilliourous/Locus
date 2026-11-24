@@ -1,6 +1,6 @@
 [Unit]
 Description=Chrysalis release fetch service (GitHub Release -> /var/www/updates)
-Documentation=https://github.com/vasilliourous/Chrysalis
+Documentation=https://github.com/vasilliourous/Locus
 After=network-online.target
 Wants=network-online.target
 
@@ -12,7 +12,16 @@ Environment=UPDATES_DIR=/var/www/updates
 Environment=FETCH_PORT=8091
 # The repo whose Releases are pulled. Public, so no token is required; set
 # GH_TOKEN in /etc/environment if it ever becomes private.
-Environment=GITHUB_REPO=vasilliourous/Chrysalis
+#
+# THIS MUST MATCH THE REMOTE'S ACTUAL NAME, which is `vasilliourous/Locus` — the
+# product is Chrysalis but the GitHub repository was not renamed, so a template
+# saying `Chrysalis` makes the fetcher resolve a repository that does not exist.
+# The 2026-11-23 rename rewrote this line and nothing caught it: the unit already
+# installed on the hub is `locus-fetch.service`, still carrying the correct value,
+# and `setup.sh` is skip-if-exists so it never re-rendered the file. The failure
+# would have appeared only on a fresh host, at the first release publish, as a
+# 404 from the GitHub API. NAME-MIGRATION.md §3.7 registers this name as retained.
+Environment=GITHUB_REPO=vasilliourous/Locus
 # One-shot trigger links expire after this many seconds.
 Environment=FETCH_LINK_TTL=900
 ExecStart=/usr/bin/python3 /root/server/scripts/fetch-release.py

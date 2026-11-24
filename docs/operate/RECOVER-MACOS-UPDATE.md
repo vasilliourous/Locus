@@ -46,7 +46,7 @@ extracts a tar of an `.app` bundle. Full narrative in
 bare binary:
 
 ```console
-$ curl -s https://api.github.com/repos/vasilliourous/Chrysalis/releases/tags/v3.2.26 \
+$ curl -s https://api.github.com/repos/vasilliourous/Locus/releases/tags/v3.2.26 \
     | python3 -c "import json,sys; print([a['name'] for a in json.load(sys.stdin)['assets']])"
 … 'locus-darwin-arm64' …        # present
 …                               # NO locus-darwin-arm64.app.tar.gz
@@ -118,7 +118,7 @@ git push origin vX.Y.Z              # the tag triggers the build
 attached:
 
 ```sh
-gh release view vX.Y.Z --repo vasilliourous/Chrysalis --json assets \
+gh release view vX.Y.Z --repo vasilliourous/Locus --json assets \
   -q '.assets[].name' | sort
 ```
 
@@ -145,7 +145,7 @@ manifest.json
 Also confirm CI's manifest names the tarballs:
 
 ```sh
-curl -sL https://github.com/vasilliourous/Chrysalis/releases/download/vX.Y.Z/manifest.json \
+curl -sL https://github.com/vasilliourous/Locus/releases/download/vX.Y.Z/manifest.json \
   | python3 -c "import json,sys; d=json.load(sys.stdin); print({k:v['file'] for k,v in d['platforms'].items()})"
 # -> {'macos_intel': 'locus-darwin-amd64.app.tar.gz', 'macos_arm': 'locus-darwin-arm64.app.tar.gz', …}
 ```

@@ -157,8 +157,8 @@ clone**, so a migrated repository starts without it:
 ```sh
 # If .chrysalis-keys/ is empty, recover the key from the bundle first:
 # see RELEASE-RECOVERY.md §2.
-gh secret set LOCUS_UPDATE_KEY --repo vasilliourous/Chrysalis < .chrysalis-keys/chrysalis_update.key
-gh secret list --repo vasilliourous/Chrysalis   # confirms it exists; never prints the value
+gh secret set LOCUS_UPDATE_KEY --repo vasilliourous/Locus < .chrysalis-keys/chrysalis_update.key
+gh secret list --repo vasilliourous/Locus   # confirms it exists; never prints the value
 ```
 
 Use the **same** key, not a new one — its public half is compiled into every
