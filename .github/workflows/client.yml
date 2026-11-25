@@ -2951,49 +2951,6 @@ jobs:
       # two cannot disagree: a pattern that stops matching fails here, in
       # seconds, naming the path — not 25 minutes into a four-platform build,
       # and not as a half-created release.
-      - name: Verify every file the release names exists
-        run: |
-          set -euo pipefail
-          python3 - <<'CHECK'
-          import glob, sys
-
-          lines = open(".github/workflows/client.yml", encoding="utf-8").read().splitlines()
-          try:
-              i = next(n for n, l in enumerate(lines) if l.strip() == "- name: Create the release")
-              j = next(n for n in range(i, len(lines)) if lines[n].strip() == "files: |")
-          except StopIteration:
-              sys.exit("::error::could not locate the release `files:` block in this workflow")
-
-          patterns, indent = [], None
-          for l in lines[j + 1:]:
-              if not l.strip():
-                  continue
-              cur = len(l) - len(l.lstrip())
-              if indent is None:
-                  indent = cur
-              if cur < indent:
-                  break
-              # A `#` line here is a comment, not a path. Without this the guard
-              # reports every explanatory line as missing and buries the real one.
-              if not l.strip().startswith("#"):
-                  patterns.append(l.strip())
-
-          missing = [p for p in patterns if not glob.glob(p)]
-          if missing:
-              for m in missing:
-                  print("::error::the release names %s, which no artifact produced" % m)
-              print("::error::release/ actually holds:")
-              for f in sorted(glob.glob("release/*")):
-                  print("    " + f)
-              sys.exit(1)
-          print("Every path in the release `files:` list resolves (%d)." % len(patterns))
-          CHECK
-
-      # ── The manifest the hub cross-checks against ──
-      #
-      # fetch-release.py and publish-release.sh both compare their hashes with
-      # this file, so a mismatch aborts a publish rather than serving bytes that
-      # do not match what CI built.
       - name: Build manifest.json
         run: |
           set -euo pipefail
@@ -3170,6 +3127,50 @@ jobs:
           # because nothing reads that field yet, but exactly the kind of latent
           # mismatch that becomes a bug the first time something does.
           VERSION: ${{ github.ref_name }}
+
+      - name: Verify every file the release names exists
+        run: |
+          set -euo pipefail
+          python3 - <<'CHECK'
+          import glob, sys
+
+          lines = open(".github/workflows/client.yml", encoding="utf-8").read().splitlines()
+          try:
+              i = next(n for n, l in enumerate(lines) if l.strip() == "- name: Create the release")
+              j = next(n for n in range(i, len(lines)) if lines[n].strip() == "files: |")
+          except StopIteration:
+              sys.exit("::error::could not locate the release `files:` block in this workflow")
+
+          patterns, indent = [], None
+          for l in lines[j + 1:]:
+              if not l.strip():
+                  continue
+              cur = len(l) - len(l.lstrip())
+              if indent is None:
+                  indent = cur
+              if cur < indent:
+                  break
+              # A `#` line here is a comment, not a path. Without this the guard
+              # reports every explanatory line as missing and buries the real one.
+              if not l.strip().startswith("#"):
+                  patterns.append(l.strip())
+
+          missing = [p for p in patterns if not glob.glob(p)]
+          if missing:
+              for m in missing:
+                  print("::error::the release names %s, which no artifact produced" % m)
+              print("::error::release/ actually holds:")
+              for f in sorted(glob.glob("release/*")):
+                  print("    " + f)
+              sys.exit(1)
+          print("Every path in the release `files:` list resolves (%d)." % len(patterns))
+          CHECK
+
+      # ── The manifest the hub cross-checks against ──
+      #
+      # fetch-release.py and publish-release.sh both compare their hashes with
+      # this file, so a mismatch aborts a publish rather than serving bytes that
+      # do not match what CI built.
 
       - name: Verify every artifact is signed
         run: |
