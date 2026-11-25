@@ -9,6 +9,15 @@
 #   ./scripts/print_codes.sh eco-codes.txt eco-cards.pdf
 #   cat codes.txt | ./scripts/print_codes.sh
 #
+# NOTE ON THE CARD TEXT: the cards do NOT print a `scheme://activate/<code>`
+# URI, and that is deliberate. The client registers **no** URL scheme
+# (`tauri.conf.json` has no `deep-link`/`schemes` block, and never has), so the
+# `myvpn://activate/...` line these cards used to carry could not activate
+# anything — a student who clicked it got nothing, on a card that is the only
+# thing they have. Activation is: type or paste the code into the app's first
+# screen (`chrysalis_activate`). If a scheme is ever registered, add the line
+# back *and* register the handler in the same change.
+#
 # Dependencies (any one):
 #   - enscript + ps2pdf (recommended, apt-get install enscript ghostscript)
 #   - pandoc + wkhtmltopdf (alternative)
@@ -17,7 +26,7 @@
 set -euo pipefail
 
 INPUT_FILE="${1:-}"
-OUTPUT_FILE="${2:-myvpn-cards.pdf}"
+OUTPUT_FILE="${2:-chrysalis-cards.pdf}"
 
 # ── Detect available tools ──
 HAVE_ENSCRIPT=0
@@ -33,10 +42,15 @@ usage() {
     echo ""
     echo "Arguments:"
     echo "  codes_file   File with one activation code per line"
-    echo "  output.pdf   Output PDF file (default: myvpn-cards.pdf)"
+    echo "  output.pdf   Output PDF file (default: chrysalis-cards.pdf)"
     echo ""
     echo "Piped input:"
-    echo "  cat codes.txt | $0  (requires -o or uses default output)"
+    echo "  cat codes.txt | $0            (writes chrysalis-cards.pdf)"
+    echo ""
+    echo "  There is NO -o flag: the second argument is the output file, and it is"
+    echo "  only read when the FIRST argument is an input file. Piping gives the"
+    echo "  default name, so rename afterwards if you need another."
+    echo "  (This usage text advertised -o for a long time; nothing parsed it.)"
     echo ""
     echo "Dependencies:"
     echo "  Recommended: enscript + ghostscript (apt-get install enscript ghostscript)"
@@ -80,11 +94,11 @@ echo "════════════════════════�
 # ── Method 1: enscript + ps2pdf (best quality) ──
 generate_enscript() {
     local tmp_ps
-    tmp_ps=$(mktemp /tmp/myvpn-cards-XXXXXX.ps)
+    tmp_ps=$(mktemp /tmp/chrysalis-cards-XXXXXX.ps)
 
     # Build enscript input with card formatting
     local tmp_txt
-    tmp_txt=$(mktemp /tmp/myvpn-cards-XXXXXX.txt)
+    tmp_txt=$(mktemp /tmp/chrysalis-cards-XXXXXX.txt)
 
     echo "" > "$tmp_txt"
     for code in "${CODES[@]}"; do
@@ -103,14 +117,12 @@ generate_enscript() {
 
 ╔══════════════════════════════════╗
 ║                                  ║
-║         M Y V P N                ║
+║        C H R Y S A L I S         ║
 ║         ${tier} TIER              ║
 ║                                  ║
 ║   ${code}   ║
 ║                                  ║
-║   myvpn://activate/${code}       ║
-║                                  ║
-║   Scratch to reveal              ║
+║   Enter it in the app            ║
 ║   One-time activation            ║
 ║                                  ║
 ╚══════════════════════════════════╝
@@ -140,20 +152,20 @@ CARD
 # ── Method 2: a2ps + ps2pdf ──
 generate_a2ps() {
     local tmp_ps
-    tmp_ps=$(mktemp /tmp/myvpn-cards-XXXXXX.ps)
+    tmp_ps=$(mktemp /tmp/chrysalis-cards-XXXXXX.ps)
 
     # Create a formatted input
     local tmp_txt
-    tmp_txt=$(mktemp /tmp/myvpn-cards-XXXXXX.txt)
+    tmp_txt=$(mktemp /tmp/chrysalis-cards-XXXXXX.txt)
 
     echo "" > "$tmp_txt"
     for code in "${CODES[@]}"; do
         echo "========================================" >> "$tmp_txt"
-        echo "  M Y V P N" >> "$tmp_txt"
+        echo "  C H R Y S A L I S" >> "$tmp_txt"
         echo "" >> "$tmp_txt"
         echo "  $code" >> "$tmp_txt"
         echo "" >> "$tmp_txt"
-        echo "  myvpn://activate/$code" >> "$tmp_txt"
+        echo "  Enter this code in the Chrysalis app" >> "$tmp_txt"
         echo "========================================" >> "$tmp_txt"
         echo "" >> "$tmp_txt"
     done
@@ -185,7 +197,7 @@ generate_text() {
     for code in "${CODES[@]}"; do
         echo "Card $i:" >> "$txt_output"
         echo "  Code: ${code}" >> "$txt_output"
-        echo "  URL:  myvpn://activate/${code}" >> "$txt_output"
+        echo "  Enter this code in the Chrysalis app" >> "$txt_output"
         echo "" >> "$txt_output"
         i=$((i + 1))
     done

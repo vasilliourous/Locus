@@ -160,7 +160,8 @@ interchangeable:
 | macOS 26 | x64 | `macos-26-intel` |
 
 A **bare label is the arm64 machine.** The Intel slice must ask for the `-intel`
-image; `macos-intel` still produces `locus-darwin-amd64`, by building natively on
+image; `macos-intel` still produces the `*darwin-amd64` slice (currently
+`chrysalis-darwin-amd64`, plus its `locus-` alias), by building natively on
 an Intel runner. Invented suffixes do not work — `macos-14-x64` (tried
 2026-11-07, run `42342311491`) is not an image name, so the jobs sat **queued with
 no runner** instead of failing fast.
@@ -260,16 +261,24 @@ reasoning applies to the two frontend gates added the same day:
 **What it produces**, because the hub's publish path resolves these by name and
 requires every one of them:
 
+**Two name sets are published, and both are current.** The `chrysalis-*` names
+below are what CI builds and the hub prefers; each `locus-*` file is a
+byte-identical copy staged by a `DEPRECATED ALIAS` step, so a build older than
+this release can still resolve the asset its own `contract.rs` names. They retire
+together — see [`NAME-MIGRATION.md`](../reference/NAME-MIGRATION.md) §3.1, and
+`UPDATE-SYSTEM.md` for how the hub chooses between them.
+
 | Asset | Notes |
 |---|---|
-| `locus-linux-amd64` — a DEPRECATED ALIAS, see [`../reference/NAME-MIGRATION.md`](../reference/NAME-MIGRATION.md) | raw executables, for the auto-updater |
-| `locus-windows-amd64.exe` | the raw PE, for the **retired portable client** only — no longer what a Windows client updates from |
-| `locus-darwin-amd64` | the *filename* says darwin while the *platform key* says `macos_intel` — a frozen asymmetry, not an oversight |
-| `locus-darwin-arm64` | |
-| **`.sig` for each of the four** | minisign signatures; without them no client can install the update |
-| `installer-Chrysalis_<v>_x64-setup.exe` | the Windows NSIS installer — **this is what a Windows client installs from itself** |
-| `installer-Chrysalis_<v>_x64-setup.exe.sig` | its own minisign signature; minisign signs exact bytes, so the raw binary's cannot substitute |
+| `chrysalis-linux-amd64` | raw ELF, for the auto-updater |
+| `chrysalis-windows-amd64.exe` | the raw PE — **not** what a Windows client updates from (see below) |
+| `chrysalis-darwin-amd64` / `chrysalis-darwin-arm64` | the raw Mach-O. The *filename* says darwin while the *platform key* says `macos_intel` — a frozen asymmetry, not an oversight |
+| `chrysalis-darwin-<arch>.app.tar.gz` | **the macOS updater payload.** The plugin extracts an `.app` from a gzip container, so the bare Mach-O above cannot update a macOS client |
+| **`.sig` for each of the eight** | minisign signatures; without them no client can install the update. minisign signs exact bytes, so one signature never covers two files |
+| `installer-Chrysalis_<v>_x64-setup.exe` (+ `.sig`) | the Windows NSIS installer — **this is what a Windows client installs from itself** |
+| `installer-Chrysalis_<v>_<arch>.zip` | the macOS **human** download, not an updater payload (see the macOS row below) |
 | `manifest.json` | version + per-platform filename, SHA-256 and signature |
+| the same twelve `locus-*` files | DEPRECATED ALIASES: identical bytes, kept so a pre-move client's `locus-*` resolves |
 
 > **Windows updates from the installer, not the raw binary.** A Windows client does
 > not run the payload it downloads — `tauri_plugin_updater` ShellExecutes it and
@@ -284,11 +293,11 @@ requires every one of them:
 **Signing is mandatory, not best-effort.** The Tauri updater verifies a minisign
 signature over every download and offers no bypass, so a release published
 without signatures is installable by nobody while looking perfectly healthy on
-the hub. The build fails loudly if `LOCUS_UPDATE_KEY` is absent. See
+the hub. The build fails loudly if no signing secret is present. See
 `client/docs/SIGNING.md`.
 
 **The secret is checked up front, in the cheap gate.** A missing
-`LOCUS_UPDATE_KEY` is detected in `verify`, before any of the four platform
+The signing secret is detected in `verify`, before any of the four platform
 builds start, so it costs seconds rather than four ~15-minute builds. Note that
 signing runs on **every push to `main`**, not only on tags — a branch preview also
 needs the key. Actions secrets live on the repository and do **not** come with a
@@ -599,7 +608,7 @@ The full removed pipeline (job graph, Wails build tags, artifact table, the
 | A skipped release job rendered as a green check | The release job is the *last* of three and depends on `build`; a skipped tag job cannot look like a completed release because nothing is uploaded |
 | Version asserted across six files plus committed binaries | Version is pinned to `client/package.json`, and the tag drives the release name |
 | A build that could publish a partial release | `manifest.json` generation fails on any missing binary **or signature**, and every artifact is checked for its `.sig` before the release is created |
-| Signing assumed rather than required | The build fails outright if `LOCUS_UPDATE_KEY` is unset, because an unsigned release is installable by nobody. The secret is presence-checked in `verify` before any platform build, so the failure costs seconds; and because there is no tag condition on `build`, it is caught on the first push after a repository move |
+| Signing assumed rather than required | The build fails outright if no signing secret is set, because an unsigned release is installable by nobody. The secret is presence-checked in `verify` before any platform build, so the failure costs seconds; and because there is no tag condition on `build`, it is caught on the first push after a repository move |
 | `--frozen-lockfile` drift (a package removed without regenerating the lockfile) | `verify` runs `pnpm install --frozen-lockfile` first, so the drift fails in seconds rather than at build time |
 
 ### The Windows-checkout trap

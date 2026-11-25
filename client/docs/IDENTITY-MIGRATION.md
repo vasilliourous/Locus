@@ -31,15 +31,19 @@ holding something up.
 
 `client/src-tauri/src/utils/dirs.rs`:
 
-| | Before | After |
-|---|---|---|
-| release | `io.github.clash-verge-rev.clash-verge-rev` | `com.locus.client` |
-| dev (`verge-dev`) | `io.github.clash-verge-rev.clash-verge-rev.dev` | `com.locus.client.dev` |
-| `BACKUP_DIR` | `clash-verge-rev-backup[-dev]` | `locus-backup[-dev]` |
+| | Upstream | 2026-11-25 (current) | Adopted from |
+|---|---|---|---|
+| release | `io.github.clash-verge-rev.clash-verge-rev` | `com.chrysalis.client` | ← `com.locus.client` ← upstream |
+| dev (`verge-dev`) | `io.github.clash-verge-rev.clash-verge-rev.dev` | `com.chrysalis.client.dev` | ← `com.locus.client.dev` ← `com.locus.client` ← upstream |
+| `BACKUP_DIR` | `clash-verge-rev-backup[-dev]` | `locus-backup[-dev]` — **NOT moved, see below** | — |
 
-Both values are **still spelled `locus` on purpose** — they are identity, not
-branding. See [`../../docs/reference/NAME-MIGRATION.md`](../../docs/reference/NAME-MIGRATION.md)
-for why, and §5 below for the section that records the 2026-11-23 product rename.
+`APP_ID` moved on 2026-11-25, and `LEGACY_APP_IDS` now lists **both** previous
+roots, newest first, so one launch adopts either. `BACKUP_DIR` did **not** move
+and is not the same kind of name: it is the collection name in **WebDAV paths**,
+so it names a directory on a server this product does not control. Renaming it
+would not migrate anything — it would point at an empty collection and make every
+already-uploaded backup invisible. See
+[`../../docs/reference/NAME-MIGRATION.md`](../../docs/reference/NAME-MIGRATION.md) §3.2.
 
 **Why this is not a cosmetic rename.** `app_home_dir()` joins this onto the
 platform data directory, and **43 call sites** resolve through it:
@@ -165,31 +169,40 @@ Check both sides before editing.
 
 ---
 
-## 5. The 2026-11-23 product rename (Locus → Chrysalis)
+## 5. The product rename, in two steps
 
-The product name moved from **Locus** to **Chrysalis**. That was a *naming*
-change, and this file's subject — *identity* — deliberately did not move with it.
+**2026-11-23 — the name moved; the identity did not.**
 
-**What changed:** `productName`, `publisher`, the crate and npm package names, the
-`src-tauri/src/locus/` module tree (`→ chrysalis/`), the 15 IPC commands, the
-`locus_*` config fields, `CHRYSALIS_COLORS`, the runtime file names the app
-creates (`chrysalis-backup`, `chrysalis.yaml`), and all user-facing copy.
+**What changed:** `productName` (later; see the 11-25 step), `publisher`, the crate
+and npm package names, the `src-tauri/src/locus/` module tree (→ `chrysalis/`), the
+15 IPC commands, the `locus_*` config fields, `CHRYSALIS_COLORS`, and every
+user-facing string.
 
-**What did not, and why** — each is an identity with the fleet hanging off it:
+**2026-11-25 — the identity and the artefact filenames moved too.**
+
+This is the step that makes the earlier "no data migration was needed" claim out
+of date, and it is recorded here because this file owns the identity question:
+
+| Moved | How it stayed safe |
+|---|---|
+| `APP_ID` → `com.chrysalis.client` | `LEGACY_APP_IDS` carries the old value and `migrate_legacy_app_data_dir` renames the root on first launch, **before** the Windows owner repair, the singleton lock and the logger — all three resolve paths through it. The ordering is pinned by a test. |
+| artefact filenames → `chrysalis-*` | CI publishes **both** name sets and the hub resolves both, so a release either side of the move installs. See `NAME-MIGRATION.md` §3.1. |
+
+**What still has not moved, and why** — each is a contract with something this
+repository cannot migrate:
 
 | Retained | Because |
 |---|---|
-| `APP_ID` = `com.locus.client` | the app-data root (§2). Renaming it rotates the directory the activation code, device fingerprint and Windows service token live in |
-| the minisign **key** and `LOCUS_UPDATE_KEY` | installed clients only accept updates signed by the key compiled into them |
-| artefact file names (`locus-linux-amd64`, …) | resolved from the GitHub Release by the hub; see `NAME-MIGRATION.md` |
+| the minisign **key**, and `LOCUS_UPDATE_KEY` as an Actions secret name | installed clients only accept updates signed by the key compiled into them, and Actions secrets are write-only: a renamed *reference* to a not-yet-created secret yields an empty key. The workflow reads both names, so the operator can create the new one in any order. |
+| `locus-backup` (`BACKUP_DIR`) | a **remote** WebDAV collection name — see §2. Renaming it orphans every uploaded backup. |
+| `LOCUS_UPDATE_KEY_B64` inside the bundle | the key name lives inside committed ciphertext; changing it needs a re-encrypt, which both scripts now support as an either-of. |
+| `vasilliourous/Locus` (the remote) | a hosting decision; every reader takes `GITHUB_REPO`. |
+| `locusvpn.jadedns.uk` (the landing host) | still the serving name; see `CLAIMS.md` A29/A30. |
 
-**Consequence, stated so nobody re-opens it:** an installed Chrysalis keeps the
-same data directory, the same update identity and the same signing key as the
-Locus build it replaces. That is why this rename needed no data-root adoption and
-no key rotation — and why `LEGACY_APP_IDS` above still holds only the upstream
-Clash Verge Rev identities, not `com.locus.client`.
-
----
+**Consequence, stated so nobody re-opens it:** an install from before 2026-11-25
+**keeps its data** — the old root is renamed into the new one on first launch. It
+does not keep anything keyed to the identifier *string*, because nothing was: the
+updater is handed a URL by the hub and verifies against the compiled-in pubkey.
 
 ## 6. Related
 

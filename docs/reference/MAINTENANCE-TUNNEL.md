@@ -95,8 +95,8 @@ on the idle interval. Do not expect the drop itself to wake maintenance.
 
 The plan's `server` comes from the hub as a **hostname**. Once the session has seen
 a transport failure, `tier.rs::dial_server` substitutes the hub's compiled address
-for the name; both the plan proxy and `chrysalis_uot` take it, since they share one
-builder.
+for the name; both the plan proxy and the UoT proxy (`UOT_PROXY_NAME`,
+`Chrysalis-UoT`) take it, since they share one builder.
 
 Chaining via `dialer-proxy` was rejected for two independent reasons: it severs
 the plan's TCP when the maintenance engine stops at TUN-up (a tunnel that dies the

@@ -86,9 +86,30 @@ PRE_FIX = {
     "locus-darwin-arm64", "locus-darwin-arm64.sig",
     "manifest.json",
 }
-FIXED = set(PRE_FIX) | {
+# The same release WITH the packaged payload, under the PRE-MOVE names. This is
+# the second generation the hub must still serve: it exercises the alias branch,
+# where the current `chrysalis-*` name is absent and the `locus-*` tarball is
+# what the release actually carries.
+FIXED_LEGACY_NAMES = set(PRE_FIX) | {
     "locus-darwin-amd64.app.tar.gz", "locus-darwin-amd64.app.tar.gz.sig",
     "locus-darwin-arm64.app.tar.gz", "locus-darwin-arm64.app.tar.gz.sig",
+}
+# The Windows installer is version-bearing, so the 3.2.28 fixture must carry
+# 3.2.28's own installer rather than inheriting 3.2.26's from PRE_FIX.
+FIXED_LEGACY_NAMES |= {"installer-Locus_3.2.28_x64-setup.exe"}
+FIXED_LEGACY_NAMES.discard("installer-Locus_3.2.26_x64-setup.exe")
+# The release CI produces from 2026-11-25 onward: current names only. Both name
+# sets ship in the same release in reality (see the release workflow's
+# DEPRECATED ALIAS entries), but the resolver must work when handed either.
+POST_MOVE = {
+    "chrysalis-linux-amd64", "chrysalis-linux-amd64.sig",
+    "chrysalis-windows-amd64.exe", "chrysalis-windows-amd64.exe.sig",
+    "installer-Chrysalis_3.6.0_x64-setup.exe", "installer-Chrysalis_3.6.0_x64-setup.exe.sig",
+    "chrysalis-darwin-amd64", "chrysalis-darwin-amd64.sig",
+    "chrysalis-darwin-arm64", "chrysalis-darwin-arm64.sig",
+    "chrysalis-darwin-amd64.app.tar.gz", "chrysalis-darwin-amd64.app.tar.gz.sig",
+    "chrysalis-darwin-arm64.app.tar.gz", "chrysalis-darwin-arm64.app.tar.gz.sig",
+    "manifest.json",
 }
 
 
@@ -98,15 +119,28 @@ def resolved_for(version, assets):
 
 # 1. A release that HAS the tarball resolves macOS to it. This is the happy
 #    path, and asserting it keeps the refusal below from being "refuse always".
-r = resolved_for("3.2.28", FIXED)
-check("macos_intel resolves to the .app.tar.gz when present",
+#    Run against BOTH name generations, because the hub must serve both while a
+#    parked fleet resolves the old spelling.
+r = resolved_for("3.2.28", FIXED_LEGACY_NAMES)
+check("macos_intel resolves to the pre-move .app.tar.gz when present",
       r.get("macos_intel") == "locus-darwin-amd64.app.tar.gz")
-check("macos_arm resolves to the .app.tar.gz when present",
+check("macos_arm resolves to the pre-move .app.tar.gz when present",
       r.get("macos_arm") == "locus-darwin-arm64.app.tar.gz")
-check("linux still resolves to the bare ELF",
+check("linux still resolves to the pre-move ELF when only it is present",
       r.get("linux") == "locus-linux-amd64")
-check("windows resolves to the NSIS installer",
+check("windows resolves to the pre-move NSIS installer",
       r.get("windows") == "installer-Locus_3.2.28_x64-setup.exe")
+
+# 1b. The CURRENT names, which are what CI publishes now.
+r2 = resolved_for("3.6.0", POST_MOVE)
+check("macos_intel resolves to the current .app.tar.gz",
+      r2.get("macos_intel") == "chrysalis-darwin-amd64.app.tar.gz")
+check("macos_arm resolves to the current .app.tar.gz",
+      r2.get("macos_arm") == "chrysalis-darwin-arm64.app.tar.gz")
+check("linux resolves to the current ELF",
+      r2.get("linux") == "chrysalis-linux-amd64")
+check("windows resolves to the current NSIS installer",
+      r2.get("windows") == "installer-Chrysalis_3.6.0_x64-setup.exe")
 
 # 2. A release with ONLY the bare Mach-O is REFUSED — not downgraded. This is
 #    the exact defect that reached the live hub as v3.2.26.
@@ -131,8 +165,10 @@ except SystemExit as exc:
 #    cross-check and other callers rely on this; a refusal here would break
 #    callers that only want to know what the hub PREFERS.
 p = {k: n for k, n, _ in fr.resolve_platform_names("3.2.26")}
-check("preferred names (no available=) are the .app.tar.gz forms",
-      p.get("macos_arm") == "locus-darwin-arm64.app.tar.gz")
+check("preferred names (no available=) are the current .app.tar.gz forms",
+      p.get("macos_arm") == "chrysalis-darwin-arm64.app.tar.gz")
+check("preferred Windows installer is the current name",
+      p.get("windows") == "installer-Chrysalis_3.2.26_x64-setup.exe")
 
 print("  %d assertion(s) passed" % passed)
 sys.exit(0 if failed == 0 else 1)

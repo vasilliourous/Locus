@@ -14,7 +14,7 @@ repair is the expensive one:
 | Symptom | You have lost | Go to |
 |---|---|---|
 | `.chrysalis-keys/` is empty and you need to sign | nothing — an empty cache is the normal state | §2 — refill it |
-| CI fails at signing with *"LOCUS_UPDATE_KEY is not set"* | the **Actions secret**, but the key file exists | §3 — re-set |
+| CI fails at signing with *"No signing secret is set"* | the **Actions secret**, but the key file exists | §3 — re-set |
 | Clients download an update and refuse it: *"created with a different key"* | nothing — they are on an **old key** | §4 — reinstall |
 | §2 cannot produce a key the fleet trusts | the **key itself** | §5 — rotate, the last resort |
 
@@ -35,7 +35,7 @@ It must exist in **three** places. The 2026-10-16 loss had only the first:
 
 | Copy | Where | Can it be read back? |
 |---|---|---|
-| CI secret | GitHub Actions `LOCUS_UPDATE_KEY` | **No** — Actions secrets are write-only, by design. No API, `gh` command or UI action returns the value. |
+| CI secret | GitHub Actions `CHRYSALIS_UPDATE_KEY` (alias `LOCUS_UPDATE_KEY`) | **No** — Actions secrets are write-only, by design. No API, `gh` command or UI action returns the value. |
 | Offline | `~/.chrysalis-secrets/chrysalis_update.key` (outside the repo), plus a password-manager copy | Yes |
 | Encrypted, in-repo | `LOCUS_UPDATE_KEY_B64` in `server/secrets.env.age` | Yes, with the bundle passphrase |
 
@@ -111,11 +111,11 @@ deliberate, fleet-breaking rotation — changes which key the clients trust.
 
 ## 3. The Actions secret is missing — re-set it from a key you can read
 
-CI fails before signing with `LOCUS_UPDATE_KEY is not set`. Note this also fails
+CI fails before signing with `No signing secret is set`. Note this also fails
 **branch** builds: signing is not tag-gated.
 
 ```sh
-gh secret set LOCUS_UPDATE_KEY --repo <owner>/<repo> < .chrysalis-keys/chrysalis_update.key
+gh secret set CHRYSALIS_UPDATE_KEY --repo <owner>/<repo> < .chrysalis-keys/chrysalis_update.key
 gh secret list  --repo <owner>/<repo>     # prints names and dates, never values
 ```
 
@@ -145,9 +145,15 @@ is a manual **uninstall + reinstall** of the current build, per device.
 
 What the rotation deliberately preserved, and why it matters here:
 
-- **The app identity is unchanged** (`com.locus.client` — a DEPRECATED ALIAS retained so the fielded app keeps updating and keeps its data root; see [`../reference/NAME-MIGRATION.md`](../reference/NAME-MIGRATION.md)). A reinstall is an update
-  of the same app, not a migration to a new one, so no codes, storage or settings
-  are orphaned by identity.
+- **The app identity was unchanged *by that rotation*** — it was `com.locus.client`
+  then. A reinstall was an update of the same app, not a migration to a new one, so
+  no codes, storage or settings were orphaned by identity.
+  > **Superseded for identity, on purpose, on 2026-11-25.** The identity is now
+  > `com.chrysalis.client`, and `com.locus.client` is an *adoption* target rather
+  > than the live root: `migrate_legacy_app_data_dir` renames it on first launch.
+  > The consequence for *this* page has not changed — a reinstall still keeps the
+  > data, because the adoption runs before anything reads the root. See
+  > [`../reference/NAME-MIGRATION.md`](../reference/NAME-MIGRATION.md) §3.2.
 - **The version ladder is continuous** across the rotation (`3.2.30` → `3.3.0`).
   A reinstalled client can therefore auto-update to later releases normally.
   Resetting the ladder would have made *every future release* a manual install —

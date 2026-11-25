@@ -23,9 +23,16 @@ buys you.
 ## 1. Check out, and clear the environment
 
 ```sh
-git clone https://github.com/vasilliourous/Locus.git && cd Chrysalis
+git clone https://github.com/vasilliourous/Locus.git
+cd Locus                # the clone names the directory after the remote, not the product
 direnv allow            # or: set -a; . ./.envrc; set +a
 ```
+
+The `cd` names the **directory the clone creates**, which is the remote's own
+name. It read `cd Chrysalis` until 2026-11-25, and that command fails on a fresh
+clone with `No such file or directory` — the product is Chrysalis, the GitHub
+repository is still `Locus` (`NAME-MIGRATION.md` §3.7), and the two are different
+facts. If the remote is renamed, this line moves in the same commit.
 
 `.envrc` unsets `LD_LIBRARY_PATH` and `LD_PRELOAD`. This is not tidiness: a shell
 that inherited a webkit2gtk **4.0** toolchain from somewhere makes `cargo test`
@@ -199,7 +206,8 @@ another person or another machine.
 
 > **Two secrets are deliberately *not* in the bundle**, and both are Actions-only:
 > `GITHUB_TOKEN` (provided by Actions itself) and the repository secret
-> `LOCUS_UPDATE_KEY`, which is a **copy** of the bundled key for CI to sign with.
+> `CHRYSALIS_UPDATE_KEY` (or its `LOCUS_UPDATE_KEY` alias), which is a **copy**
+> of the bundled key for CI to sign with.
 > Actions secrets are write-only, so that copy can never be read back — the bundle
 > is the only recoverable one. If a repo is copied or recreated, the Actions
 > secret must be re-set from an extracted key

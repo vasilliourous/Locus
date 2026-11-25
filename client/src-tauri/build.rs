@@ -1,27 +1,24 @@
-// ── THE ONE CARGO DEPENDENCY THIS CRATE NEEDS THAT NOTHING ELSE TOUCHES ──
+// ── `tauri-build` IS USED, AND THE LINT THAT SAYS OTHERWISE IS SILENCED IN cargo.toml ──
 //
-// `tauri_build` is called from exactly one place — the `cfg(not(clippy))` arm at
-// the bottom of `main` — and only under `--features clippy` does that arm compile
-// away. Cargo's `unused_dependencies` lint is a *manifest* lint: it is emitted per
-// crate, it is not a rustc lint, and there is no way to declare one of these names
-// conditional on a feature. So the dependency is genuinely used, while the lint
-// cannot see the call that uses it. That is what this line is for.
+// `tauri_build::try_build` is called from the `cfg(not(feature = "clippy"))` arm at
+// the bottom of `main`. Under `--features clippy` that arm compiles away, so cargo
+// reports the `[build-dependencies]` entry as unused — in that build only.
 //
-// OUTSIDE `cfg(feature = "clippy")`, DELIBERATELY. In the clippy build the lint no
-// longer fires and this allowance is dead weight; that is the correct trade. An
-// allowance that only exists in the configuration that needs it is an allowance
-// that silently stops applying when the configuration moves — which is exactly
-// how this warning went unaddressed.
+// THIS FILE CANNOT SILENCE IT. `#![allow(unused_crate_dependencies)]` lived here
+// until 2026-11-25 and did nothing: that is a *rustc* lint with a similar name,
+// while the warning is cargo's **manifest** lint, emitted before the build script
+// is compiled. Verified by deleting the attribute and watching the warning fire
+// unchanged. The working suppression is `[workspace.lints.cargo]` in
+// `../Cargo.toml`, where cargo can see it.
 //
-// This is not cosmetic. `cargo clippy ... -D warnings` cannot catch
-// `cargo::unused_dependencies` — that is a rustc flag and the warning is cargo's,
-// so the gate reports **exit 0** while printing the warning (audit F-21). The
-// consequence is not the line itself: it is that `Cargo.toml` had acquired a
-// dependency nothing would ever have told us was dead. `scripts/check-rust-deps.sh`
-// is the gate for that class; if it reports this dependency as dead, the
-// `cfg(not(feature = "clippy"))` arm below has been deleted and this line is now
-// hiding a real finding.
-#![allow(unused_crate_dependencies)]
+// Why that is not hiding a real finding: `cargo clippy ... -D warnings` is a rustc
+// flag and cannot fail on this class at all (it printed the warning and exited 0
+// for months — audit F-21). The gate that CAN fail on it is
+// `scripts/check-rust-deps.sh`, which runs `cargo check --all-targets` WITHOUT
+// `--features clippy` — in that configuration the call is present, the dependency
+// is used, and a genuinely dead dependency anywhere in the workspace fails the
+// build. If that script ever reports `tauri-build` as dead, the
+// `cfg(not(feature = "clippy"))` arm below has been deleted.
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Expose the target triple as a compile-time constant so code that must name a

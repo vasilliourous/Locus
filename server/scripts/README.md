@@ -1,5 +1,12 @@
 # `server/scripts/` — index
 
+```
+audience:    operator
+status:      live
+authoritative-for: which script to run for a deploy, a publish, a recovery, and what each touches on the live hub
+verified-against: this directory, docs/operate/OPS.md
+```
+
 Every script here runs against the **live hub** unless it says otherwise. There is
 no sandbox: the single VPS is production, and it holds real activation codes. Read
 `docs/operate/OPS.md` before running anything for the first time.

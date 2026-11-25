@@ -86,24 +86,38 @@ Two traps in the layout itself:
 
 ---
 
-## 3. Naming rule — read before "tidying up" a `myvpn` string
+## 3. Naming rule — read before "tidying up" a legacy name
 
-The product is **Chrysalis**. Two classes of legacy `myvpn` name survive **on
-purpose**, because they exist on deployed machines:
+The product is **Chrysalis**, and this repository has carried **three** names:
+`myvpn` → `Locus` → `Chrysalis`. What survives is decided by one question — *is it
+on a deployed machine, or in software already in someone's hands?* — and the
+complete, per-name answer is [`reference/NAME-MIGRATION.md`](reference/NAME-MIGRATION.md).
+This section is the rule, not the list.
+
+**Names on deployed machines survive, and are renamed only during a redeploy.**
 
 1. **Live server paths and unit names** — `/usr/local/bin/myvpn-backup.sh`,
-   `myvpn-tc-apply.sh`, `/etc/myvpn/tc`, `/var/log/myvpn-*.log`. Renaming them in
-   the repo desynchronises the definition from the running system, so a fresh
-   `setup.sh` would install a file the existing units do not call. **Rename only
-   as part of a redeploy, never as a drive-by.**
-2. **The client backup directory** `.myvpn-backups/` — on every activated machine's
-   disk. Renaming it orphans existing rollback copies.
+   `myvpn-tc-apply.sh`, `/etc/myvpn/tc`, `/var/log/myvpn-*.log`,
+   `/var/log/myvpn-smoke-test.log`. Renaming one in the repo desynchronises the
+   definition from the running system, so a fresh `setup.sh` would install a file
+   the existing units do not call. **Rename only as part of a redeploy, never as a
+   drive-by** — and when you do, the old unit must keep working for one release.
+2. **Names compiled into a client already installed** — the app identity before
+   2026-11-25, the signing key, the artefact filenames a parked build resolves.
+   These are `NAME-MIGRATION.md` §3's subject; each has a stated retirement
+   condition rather than a tidy-up date.
 
-Everything else — user-visible strings, hook headers, log banners, document text,
-the Windows executable's product name — is **Chrysalis** and should be fixed on
-sight.
+**Names that are ours alone are Chrysalis, and are fixed on sight** — user-visible
+strings, hook headers, log banners, document text, printed material, the Windows
+executable's product name.
 
-No live file carries the old name any more.
+> **This section previously said the client backup directory was
+> `.myvpn-backups/`.** That was never true in this tree and is not true now: the
+> constant is `BACKUP_DIR` in `utils/dirs.rs`, currently `locus-backup`, and it is
+> **not** on the local disk — it is the collection name in WebDAV paths, i.e. on a
+> server the product does not control. That is why it did **not** move with the
+> 2026-11-25 identity change: renaming it would point at an empty collection and
+> make every uploaded backup invisible. See `NAME-MIGRATION.md` §3.2.
 
 ### The hub's old hostname is a third class, and for the same reason
 

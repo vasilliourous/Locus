@@ -92,86 +92,141 @@ record cannot disappear while the aliases are still in the tree:
 This is deliberately a table with no rows rather than a sentence: a sentence
 would say the same thing and could not be updated in place.
 
-### 3.1 Artefact file names
+### 3.1 Artefact file names — **moved on 2026-11-25, with the alias still served**
 
-| Retained | Where | Why | Retires when |
+The filenames were the one part of the 2026-11-23 rename that was *held*, because
+moving them alone breaks publishing silently. On 2026-11-25 they were moved as a
+**coordinated artefact migration**: CI now publishes both name sets, the hub
+resolves both, and one release carries the change.
+
+| Now current | Where | Why it is a contract | Retires when |
 |---|---|---|---|
-| `locus-linux-amd64`<br>`locus-windows-amd64.exe`<br>`locus-darwin-amd64`<br>`locus-darwin-arm64` | `client/src-tauri/src/chrysalis/contract.rs` (`artifact_for`); `server/scripts/fetch-release.py`; `server/scripts/publish-release.sh`; `.github/workflows/client.yml` | The hub resolves these exact names out of the GitHub Release, and three scripts assert the literals. Renaming one side alone breaks publishing for that platform — and the break is silent, because the file simply is not found. | A release publishes **both** name sets, the hub resolves both, and no build older than that release can still be offered an update. Then drop the `locus-*` rows. |
+| `chrysalis-linux-amd64`<br>`chrysalis-windows-amd64.exe`<br>`chrysalis-darwin-amd64`<br>`chrysalis-darwin-arm64` | `client/src-tauri/src/chrysalis/contract.rs` (`artifact_for`); `server/scripts/fetch-release.py` (`NEW_PLATFORMS`); `server/scripts/publish-release.sh` (`PLATFORMS`); `.github/workflows/client.yml` | What CI builds and the hub prefers. The hub resolves these out of the GitHub Release, so a rename on one side alone makes the file "not found" — silently. | Never: this is the current name. It moves only in a future artefact migration of the same shape. |
+
+| Deprecated alias, still served | Where | Why it cannot be deleted yet | Retires when |
+|---|---|---|---|
+| `locus-linux-amd64`<br>`locus-windows-amd64.exe`<br>`locus-darwin-amd64`<br>`locus-darwin-arm64` | `server/scripts/fetch-release.py` (`LEGACY_PLATFORMS`); `server/scripts/publish-release.sh` (`WINDOWS_INSTALLER_LEGACY`); `.github/workflows/client.yml` (the DEPRECATED ALIAS staging steps) | Every build older than this release resolves these exact names. Deleting them makes a parked fleet unable to fetch the update that would move it, and the failure is `file not found` — no error on the client, no signal on the hub. | No build older than the first `chrysalis-*` release can still be offered an update. Then drop `LEGACY_PLATFORMS`, the legacy installer template, both CI staging steps, and these rows — together. `check-consistency.sh` §1c/§1e and `contract-snapshot.py` (`legacy_artifacts`) refuse a half-removal, which is the state that is actually dangerous. |
+| `installer-Locus_<v>_x64-setup.exe`<br>`installer-Locus_<v>_<arch>.zip` | `server/scripts/fetch-release.py` (`LEGACY_INSTALLER_NAME_TEMPLATE`, `LEGACY_MACOS_ZIP_TEMPLATE`); `server/console/src/views/Releases.vue` | The Windows installer and the macOS human download, under the pre-move `productName`. The installer name is derived from `productName`, so these are **filenames** — see below — and they follow it. | With the artefact rows above. The zip is a human download and is not in any update slot; §1c keeps it that way. |
 
 The `macos_*`-key / `darwin-*`-filename asymmetry inside these names is a
 **separate** frozen fact, unrelated to the rename. Do not "tidy" it either.
 
-| Retained | Where | Why | Retires when |
+| Now current | Where | Why it is a contract | Retires when |
 |---|---|---|---|
-| `productName: "Locus"` | `client/src-tauri/tauri.conf.json`, `client/src-tauri/tauri.macos.conf.json` | Tauri derives the bundle filenames from `productName`, and the installer name is one of them: `productName` → `<productName>_<v>_x64-setup.exe` → CI prefixes it to `installer-<productName>_<v>_x64-setup.exe`. So this single string decides whether the file the hub fetches exists. The mapping above renames `productName`, and applying it renamed the **artifacts** while `fetch-release.py`, `publish-release.sh` and `check-consistency.sh` §1e kept resolving `installer-Locus_*` — the `locus-*` rows above were held, this one was not. The result was a release that built and signed correctly, 21 assets, and a hub fetch that refused it because `installer-Chrysalis_<v>_x64-setup.exe` is not a name anything resolves. **The product is Chrysalis everywhere a person sees it** (`identifier` is `com.locus.client` for the same class of reason); this is a filename, not branding. | Same as the `locus-*` rows: both name sets published, hub resolves both, no build older than that release can be offered an update. Then rename all five sides together. |
+| `productName: "Chrysalis"` | `client/src-tauri/tauri.conf.json`, `client/src-tauri/tauri.macos.conf.json` | Tauri derives the bundle filenames from `productName`: `productName` → `<productName>_<v>_x64-setup.exe` → CI prefixes it to `installer-<productName>_<v>_x64-setup.exe`, and it names `<productName>.app` inside the `.dmg` and the `.app.tar.gz`. So this one string decides whether the files the hub fetches exist. It moved on 2026-11-25 **with** every resolver; the v3.5.0 failure it caused is recorded in `FIXES.md`, and is why §1e now asserts *agreement between* `productName` and the template rather than a literal. | Never: it is the product name, and it is *supposed* to be Chrysalis. |
+
+**`productName` changing is why 20 `.app` literals had to change too.** They were
+hardcoded `Locus.app` in the macOS packaging steps; each now reads `APP_NAME` from
+`tauri.conf.json`, so the next move needs no edit in the workflow. That is the
+lesson, not the patch: a value that derives a filename must be *read*, never
+restated.
 
 §1e of `check-consistency.sh` pins `productName` against the installer name the
-hub resolves, so this one cannot be "tidied" in isolation again.
+hub resolves, and asserts BOTH installer templates exist, so this cannot be
+"tidied" in isolation again.
 
-### 3.2 Update identity
+### 3.2 Update identity — **moved on 2026-11-25, with a data-root adoption**
 
-| Retained | Where | Why | Retires when |
+The identity moved, and it moved **for a reason that made it safe**: this value is
+*read*, never compiled into anything that outlives the install. The reason it was
+originally held was mistaken in one half and right in the other, and both halves
+are recorded here because the next person will ask.
+
+**The `updater identity` half of the old reasoning was wrong.** §3.2 previously said
+`com.locus.client` could not move because "a manifest keyed `com.locus.client` is
+ignored by a differently-keyed build, with no error". That is true of a **static**
+`latest.json` consumed by the plugin's own endpoint resolution. This client does
+not use one: `update/install.rs` replaces the endpoint list wholesale
+(`.endpoints(vec![url])`) with the URL the **hub** supplies, and the hub's
+`/api/update` response contains no identifier field at all (grep: 0 occurrences in
+`update.pb.js`). Verification is against the compiled-in **minisign pubkey**, which
+the identifier does not name. So the identifier was never the update contract.
+
+**The data-root half was right, and it is the whole reason `LEGACY_APP_IDS` is not
+optional.** That reasoning follows the two tables.
+
+| Now current | Where | Why it is a contract | Retires when |
 |---|---|---|---|
-| `com.locus.client`<br>`com.locus.client.dev` | `client/src-tauri/tauri.conf.json` (`identifier`); `client/src-tauri/Cargo.toml`; `client/src-tauri/src/utils/dirs.rs` (`APP_ID`) | One value, two jobs. It is the **updater identity** — a manifest keyed `com.locus.client` is ignored by a differently-keyed build, with no error. And it is the **app-data root**: the activation code, device fingerprint and tier live under it, and on Windows the owner SID of that directory is how the privileged service recognises the app. | A deliberate identity release: `LEGACY_APP_IDS` (the existing adoption path) proves it can be done, and the updater-key mechanism proves how a fleet is moved. It is not part of a rename. |
-| `locus-backup`, `locus-backup-dev` | `client/src-tauri/src/utils/dirs.rs` (`BACKUP_DIR`) | Backup directory names inside that same data root. Same lifetime as the root. | With the data root. |
+| `com.chrysalis.client`<br>`com.chrysalis.client.dev` | `client/src-tauri/tauri.conf.json` and the three `tauri.*.conf.json` overrides (`identifier`); `client/src-tauri/Cargo.toml` (`[package.metadata.bundle]`); `client/src-tauri/src/utils/dirs.rs` (`APP_ID`) | The **app-data root**: the activation code, device fingerprint and tier live under it, and on Windows the owner SID of that directory is how the privileged Service recognises the app (`core::owner_identity` reads the *resolved root's* owner, not the identifier string). | Never: it is the current identity. |
 
-**The consequence worth stating plainly:** because the identity did not move, an
-installed Chrysalis **keeps its data and keeps receiving updates** from the
-release it was on. That is why this rename needed no data migration and no key
-rotation.
-
-### 3.3 Signing
-
-| Retained | Where | Why | Retires when |
+| Deprecated alias, still adopted | Where | Why it cannot be dropped | Retires when |
 |---|---|---|---|
-| `LOCUS_UPDATE_KEY` | `.github/workflows/client.yml` (×23) | A GitHub Actions secret. Actions secrets are write-only: renaming the *reference* yields an empty key and every signed build fails, which is a documented trap in `AGENTS.md`. | The operator re-creates it under the new name from the bundle (§3.4), then renames the reference in one commit. |
-| `LOCUS_UPDATE_KEY_B64` | inside `server/secrets.env.age` (ciphertext); `server/scripts/chrysalis-key-extract.sh`; `.chrysalis-keys/README.md` | A **key name inside the committed encrypted bundle**. Changing it means re-encrypting the bundle, which re-keys the project — not needed to rename a spelling. | With a deliberate bundle re-encrypt. |
+| `com.locus.client`<br>`com.locus.client.dev` | `client/src-tauri/src/utils/dirs.rs` (`LEGACY_APP_IDS`) | Every install before 2026-11-25 keeps its activation code, device fingerprint and tier under this root. `migrate_legacy_app_data_dir` renames it on first launch, so dropping the entry makes those installs start from an **empty** root — they re-activate, and on Windows the Service stops recognising the app until the new root is repaired. Nothing errors; it simply starts empty. | A release where no installed machine still has data under the old root. Not verifiable from the repository — this is a fleet observation, so it retires on evidence, not on a date. |
 
-**Neither is a sign of a stale migration.** They are the aliases the fleet's
-update path depends on.
+| Retained | Where | Why it cannot move | Retires when |
+|---|---|---|---|
+| `locus-backup`, `locus-backup-dev` | `client/src-tauri/src/utils/dirs.rs` (`BACKUP_DIR`) | **A different kind of name from `APP_ID`.** It is the collection name used in **WebDAV paths** (`core::backup` builds `{BACKUP_DIR}/{file}`), so it names a directory on a server this product does not control. Renaming it does not migrate anything: it points at a collection that does not exist, `mkcol` creates an empty one, and every backup a user already uploaded becomes invisible while remaining in their storage — indistinguishable from data loss. It also appears in no user-facing string. | A deliberate backup-location migration that moves every user's remote files. Not a rename. |
 
-**Two scripts read these names, and both must keep reading the OLD spelling of
-the bundle key.** `chrysalis-key-extract.sh` extracts it and
-`secrets-encrypt.sh` requires it to be present before it will encrypt:
+**The consequence worth stating plainly:** an install from before 2026-11-25
+**keeps its data** — the old root is renamed into the new one on first launch,
+before anything else touches it. What it does *not* keep, and never did, is
+anything keyed to the identifier string itself; nothing was.
 
-| Script | Reads | Accepts the new name too? |
+### 3.3 Signing — **the Actions secret stays, the bundle key is either-of**
+
+Two different names, two different lifetimes. They are recorded together because
+they are always confused, and confusing them is how a release ships unsigned.
+
+| Now current | Where | Why it is a contract | Retires when |
+|---|---|---|---|
+| `CHRYSALIS_UPDATE_KEY` | `.github/workflows/client.yml` (secrets reference) | A GitHub Actions secret. Actions secrets are **write-only**: renaming the *reference* to a secret that does not exist yields an empty string, and every signed build then fails with nothing pointing at the name. | Never under a rename — this is the name to converge on. |
+| `CHRYSALIS_UPDATE_KEY_B64` | inside `server/secrets.env.age`; `server/scripts/chrysalis-key-extract.sh`; `server/scripts/secrets-encrypt.sh` | A key name **inside the committed ciphertext**. It cannot be changed by editing a file: the bundle must be re-encrypted with `secrets-encrypt.sh` and the passphrase. | When the bundle is next re-encrypted, which is the only thing that can change it. |
+
+| Deprecated alias, still read | Where | Why it cannot be dropped | Retires when |
+|---|---|---|---|
+| `LOCUS_UPDATE_KEY` | `.github/workflows/client.yml` (both the `env:` mapping and the shell fallback) | The secret itself may still be under this name on any repository that builds — including forks and fresh copies, where it must be re-created by hand. The workflow reads **both** and resolves to one variable, so neither ordering of "create the new secret" vs "land this commit" can produce an empty key. | `gh secret list` shows `CHRYSALIS_UPDATE_KEY` on every repository that builds. Then delete the alias half of the `env:` mapping. |
+| `LOCUS_UPDATE_KEY_B64` | inside the committed bundle; both scripts accept it | Every bundle written before 2026-11-25 carries this spelling, and the bundle is the key's only durable copy. | The next deliberate bundle re-encrypt (see below). |
+
+**How the two scripts handle the pair now.** Both *read* both names; neither
+*requires* one spelling:
+
+| Script | Order | What it does with the pair |
 |---|---|---|
-| `server/scripts/chrysalis-key-extract.sh` | `LOCUS_UPDATE_KEY_B64` | Yes — tries `LOCUS_…` first, then `CHRYSALIS_…` |
-| `server/scripts/secrets-encrypt.sh` | `LOCUS_UPDATE_KEY_B64` (required-var list) | Yes — `CHRYSALIS_UPDATE_KEY_B64` in the plaintext satisfies the form check, because the check is a search for either spelling. The required-var row itself keeps the old name because that is the name the committed bundle actually has. |
+| `server/scripts/chrysalis-key-extract.sh` | `CHRYSALIS_…` first, then `LOCUS_…` | Reports **which** it found. A host still on the alias gets a warning naming the re-encrypt, because otherwise the alias is load-bearing forever and nobody knows. |
+| `server/scripts/secrets-encrypt.sh` | either-of, above the `REQUIRED_VARS` loop | Requires exactly **one**, and **refuses both**: the last definition wins in a shell, so a shadowed key would otherwise encrypt cleanly and be wrong. |
 
-Both halves are pinned by §53: the extractor's literal, and the `REQUIRED_VARS`
-block of the encryptor (scoped to the block, not the file — see that guard's
-comment for why the first attempt at it passed against the bug it was written
-to catch).
+`REQUIRED_VARS` no longer lists either spelling — listing one would refuse every
+bundle of the other generation, which is the defect this whole section exists to
+prevent. §53 asserts the either-of property instead of a literal: both names
+readable, ambiguity refused, and neither back in `REQUIRED_VARS`.
 
-Neither script is covered by a test, because both need the real passphrase and
+**Neither script is covered by a test**, because both need the real passphrase and
 the real ciphertext. What §53 can do is refuse a rename that would make them
 wrong, which is the class the migration actually produced.
 
-The rename **broke both** during this migration: an over-eager
-`CHRYSALIS_UPDATE_KEY_B64` substitution left the extractor failing with *"the
-bundle has no CHRYSALIS_UPDATE_KEY_B64"*, and the encrypt-side required-var list
-would have refused every re-encrypt. Both were found by running the scripts
-against the real bundle, not by reading them — the extractor's failure is a
-silent one that only appears at signing time. That is why this row exists **and**
-why the scripts carry a comment naming this page.
+The rename **broke both once already**: an over-eager `CHRYSALIS_UPDATE_KEY_B64`
+substitution left the extractor failing with *"the bundle has no
+CHRYSALIS_UPDATE_KEY_B64"*, and the encrypt-side required-var list would have
+refused every re-encrypt. Both were found by running the scripts against the real
+bundle, not by reading them — the extractor's failure is a silent one that only
+appears at signing time.
 
-Verified against the committed bundle (`CLAIMS.md` A25, dated there): decryption
-succeeds and reports 12 variables, and the extracted key's ID is
-`4DA9B48F39251CEF`, which is the value compiled into the client. The key ID is a
-fact about the ciphertext, so it belongs in `CLAIMS.md` with its date rather than
-in this sentence; this page states only what the scripts *read*.
+**What is NOT verified here:** that the committed bundle still decrypts, and that
+its key ID still matches the pubkey compiled into the client, are facts about the
+ciphertext. They live in [`CLAIMS.md`](../operate/CLAIMS.md) as dated world claims
+(A25), never as a sentence on this page.
 
-### 3.4 The bootstrap header (a matched pair)
+### 3.4 The bootstrap header (a matched pair, **asymmetric during the window**)
 
-| Retained | Where | Why | Retires when |
+| Now current | Where | Why it is a contract | Retires when |
 |---|---|---|---|
-| `X-Locus-Bootstrap` / `x-locus-bootstrap` | `server/modules/09-activation-tunnel.sh` (sets it); `server/pb_hooks/activation.pb.js`, `code_lookup.pb.js` (read it) | The path filter stamps a per-client digest so tunnelled clients are rate-limited per device rather than per loopback address. If one side changes and the other does not, the header is simply absent and **every tunnelled client shares one bucket** — no error, just a silent collapse of the rate limit. Note the hub runs its *own* copy from `/root/server/` (`hooks-sync.sh`), so a repo change is inert until redeployed. | Both halves deployed together, accepting both header spellings for one release, then the old one dropped. |
+| `X-Chrysalis-Bootstrap` / `x-chrysalis-bootstrap` | `server/modules/09-activation-tunnel.sh` (`IDENTITY_HEADER`, sets it); `server/pb_hooks/activation.pb.js`, `code_lookup.pb.js` (read it) | The path filter stamps a per-client digest so tunnelled clients are rate-limited per device rather than per loopback address. If the writer and a reader disagree, the header is simply ABSENT and **every tunnelled client shares one bucket** — no error, just a silent collapse of the rate limit. | Never: this is the current spelling. |
 
-**Status: renamed in the repository.** All three sites read `X-Chrysalis-Bootstrap`
-now, which is safe *in this tree*; the deployed hub must be redeployed before a
-client that sends the new header is in the field, or activation through the
-tunnel degrades as described above.
+| Deprecated alias, **still accepted by both readers** | Where | Why it cannot be dropped yet | Retires when |
+|---|---|---|---|
+| `x-locus-bootstrap`<br>`X-Locus-Bootstrap`<br>`x-chrysalis-bootstrap`<br>`X-Chrysalis-Bootstrap` | `server/pb_hooks/activation.pb.js`, `code_lookup.pb.js` (all four are matched, in that call order, current first) | The hub runs its **own** copy of the hooks from `/root/server/` (`hooks-sync.sh`), and clients in the field were built before 2026-11-23. A deployed hub and a deployed client can be on opposite sides of the rename for a release cycle. Header lookup is case-sensitive in the map goja hands the hook, so both cases of both spellings are listed rather than relying on a normalisation. | Both halves are deployed **and** no client in the field sends the old spelling. Then remove the two `x-locus`/`X-Locus` arms and their §53 rows together. |
+
+**The pair is not symmetric, and treating it as if it were was a bug.** The path
+filter only ever *writes* the header, so it carries the current spelling and
+nothing else. The hooks only ever *read* it, so during a deploy window they accept
+**both**. A guard that demanded the old spelling be absent from the hooks would
+have forced exactly the deployment window that collapses every student into one
+rate-limit bucket — which is why §53 now asserts the two sides differently: the
+writer sends the current name, the readers still contain the old one.
+
+**Status: renamed in the repository, dual-accept in the hooks.** Nothing here
+proves the deployed hub has been redeployed — a repo fix is inert until the piece
+that runs it is redeployed, and `hooks-sync.sh` is what compares them.
 
 ### 3.5 Secrets environment variables
 
@@ -234,8 +289,15 @@ Not exhaustive — the point is the *classes*, because each had its own hazard:
 - **`LOCUS_COLORS`/`locusTheme`/`LOCUS_LIGHT`**, the mihomo proxy/group/UoT names
   (`Chrysalis`, `Chrysalis Auto`, `Chrysalis-UoT` — which must still differ from
   each other), the `chrysalis://` event names, the tray id, the UA string.
-- **`locus.yaml` → `chrysalis.yaml`** as the tier profile file, and
-  `locus-backup`/`chrysalis-backup` as the *directory the app creates*.
+- **`locus.yaml` → `chrysalis.yaml`** as the tier profile file
+  (`TIER_PROFILE_FILE` in `chrysalis/apply.rs`, which is LOCAL: it is written into
+  `app_profiles_dir()` on this machine).
+- ~~`locus-backup` → `chrysalis-backup`~~ **NOT moved, and §3.2 says why.** This
+  line claimed the rename moved `BACKUP_DIR`; it did not, because that constant is
+  the collection name in **WebDAV paths** — a directory on a server this product
+  does not control. Renaming it would point at an empty collection and make every
+  uploaded backup invisible. The earlier claim here was the kind of error a
+  "what the rename touched" list invites: it recorded an *intention* as a fact.
 - **~500 user-facing strings** across 13 locales, applied through
   `PROSE.md`/`apply-prose.mjs` rather than by hand.
 - **The landing page**, copy and hostname.

@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
-  "identifier": "com.locus.client",
-  "productName": "Locus",
+  "identifier": "com.chrysalis.client",
+  "productName": "Chrysalis",
   "bundle": {
     "targets": ["app", "dmg"],
     "macOS": {

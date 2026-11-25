@@ -98,11 +98,27 @@ LINK_TTL_SECONDS = int(os.environ.get("FETCH_LINK_TTL", "900"))  # 15 minutes
 # The name carries `<version>` because Tauri names the bundle with it. It is
 # filled per publish by `installer_name()`, below.
 #
-# DEPRECATED ALIAS: the `Locus_` infix here is the FILENAME Tauri produces from
-# `productName`, and it is what CI publishes and this fetcher resolves. It is
-# paired by literal with `publish-release.sh` and `check-consistency.sh` §1e.
-# See docs/reference/NAME-MIGRATION.md.
-INSTALLER_NAME_TEMPLATE = "installer-Locus_%s_x64-setup.exe"
+# This is the CURRENT name: `productName` is `Chrysalis`, so Tauri emits
+# `installer-Chrysalis_<v>_x64-setup.exe` and CI advertises that name in
+# `manifest.json`. It was `Locus` until 2026-11-25; `LEGACY_INSTALLER_NAME_TEMPLATE`
+# below resolves the old spelling for any release built before the move.
+#
+# Paired by literal with `publish-release.sh` and `check-consistency.sh` §1e.
+# See docs/reference/NAME-MIGRATION.md §3.1.
+INSTALLER_NAME_TEMPLATE = "installer-Chrysalis_%s_x64-setup.exe"
+
+# DEPRECATED ALIAS — the same installer name under the pre-move `productName`.
+#
+# This is NOT dead code and must not be "tidied" away. It resolves a release
+# built before the filenames moved, and those builds are still what the hub is
+# offering a parked fleet today: dropping the fallback makes every pre-move
+# release un-fetchable, which reads to the operator as "the release is missing
+# its Windows installer" at publish time, after a full four-platform build.
+#
+# It retires with the `locus-*` artefact rows in NAME-MIGRATION.md §3.1: when no
+# build older than this release can still be offered an update. `check-consistency.sh`
+# §1e asserts BOTH templates exist, so the pair cannot be half-removed.
+LEGACY_INSTALLER_NAME_TEMPLATE = "installer-Locus_%s_x64-setup.exe"
 
 
 def installer_name(version):
@@ -113,6 +129,18 @@ def installer_name(version):
     builds the same one in `.github/workflows/client.yml`.
     """
     return INSTALLER_NAME_TEMPLATE % version
+
+
+def installer_names(version):
+    """Every name the Windows installer may carry for `version` — current first.
+
+    A tuple, not a bare string, because two things read it and they want different
+    answers: the *publish* path must resolve the name CI actually produced (current
+    template, no guessing), while the *fetch* path must accept a release built before
+    the move. `resolve_platform_names(available=…)` picks the one the release
+    actually carries; `installer_name()` stays the single preferred spelling.
+    """
+    return (INSTALLER_NAME_TEMPLATE % version, LEGACY_INSTALLER_NAME_TEMPLATE % version)
 
 
 ## What each platform's UPDATER PAYLOAD is called, on the GitHub Release.
@@ -141,12 +169,30 @@ def installer_name(version):
 ## `resolve_platform_names` below falls back to the bare name when the tarball
 ## is absent from a release, so publishing a version built before this fix
 ## degrades rather than failing outright.
-## DEPRECATED ALIAS: these four names are the artefact filenames CI publishes and
-## the hub resolves out of the GitHub Release. They keep the `locus-` prefix
-## deliberately - renaming them is an ARTEFACT migration (publish both name sets,
-## resolve both, then drop the old one), not a rename. See
-## docs/reference/NAME-MIGRATION.md. Do not "finish" this file.
+## The artefact filenames CI publishes and the hub resolves out of the GitHub
+## Release.
+##
+## TWO NAME SETS, AND BOTH ARE LIVE. The `chrysalis-*` names are what CI publishes
+## from 2026-11-25 onward; the `locus-*` names are what every release before that
+## carries, and what a parked fleet's updater still resolves. `resolve_platform_names`
+## prefers the current name and falls back to the other when `available` says the
+## release only carries the old one — so the same hub serves both generations and
+## neither is "missing".
+##
+## The pair retires together: once no build older than the first `chrysalis-*`
+## release can still be offered an update, drop every `locus-*` row here and in
+## NAME-MIGRATION.md §3.1. `check-consistency.sh` §1c pins the macOS `.app.tar.gz`
+## shape in both sets, so the pair cannot be half-removed either.
 NEW_PLATFORMS = [
+    ("linux", "chrysalis-linux-amd64", "download_linux"),
+    ("windows", None, "download_windows"),  # resolved by installer_name()
+    ("macos_intel", "chrysalis-darwin-amd64.app.tar.gz", "download_macos_intel"),
+    ("macos_arm", "chrysalis-darwin-arm64.app.tar.gz", "download_macos_arm"),
+]
+
+## The pre-move artefact names, resolved when a release carries ONLY these.
+## DEPRECATED ALIAS — see the block comment above and NAME-MIGRATION.md §3.1.
+LEGACY_PLATFORMS = [
     ("linux", "locus-linux-amd64", "download_linux"),
     ("windows", None, "download_windows"),  # resolved by installer_name()
     ("macos_intel", "locus-darwin-amd64.app.tar.gz", "download_macos_intel"),
@@ -187,7 +233,10 @@ MANIFEST_NAME = "manifest.json"
 ## definitions to drift. This list is only for artifacts no client fetches.
 ##
 ## `%s` is the version; `%s` the arch. Filled by `installer_zip_names()`.
-MACOS_ZIP_TEMPLATE = "installer-Locus_%s_%s.zip"
+MACOS_ZIP_TEMPLATE = "installer-Chrysalis_%s_%s.zip"
+# DEPRECATED ALIAS — the pre-move macOS human-download zip name. Same lifetime as
+# the `installer-Locus_*` Windows template above; see NAME-MIGRATION.md §3.1.
+LEGACY_MACOS_ZIP_TEMPLATE = "installer-Locus_%s_%s.zip"
 MACOS_ZIP_ARCHES = ("amd64", "arm64")
 
 
@@ -200,6 +249,20 @@ def installer_zip_names(version):
     hub's fetcher drifted apart on a filename and no check compared them.
     """
     return [MACOS_ZIP_TEMPLATE % (version, arch) for arch in MACOS_ZIP_ARCHES]
+
+
+def all_installer_zip_names(version):
+    """Every macOS zip name, current first, for a release that may carry either set.
+
+    Same shape as `installer_names()`: the publish path takes the first entry, the
+    fetch/verify path accepts any of them, so a release built before the move is
+    still resolvable as a human download instead of reading as "missing".
+    """
+    return [
+        template % (version, arch)
+        for template in (MACOS_ZIP_TEMPLATE, LEGACY_MACOS_ZIP_TEMPLATE)
+        for arch in MACOS_ZIP_ARCHES
+    ]
 
 
 ## manifest.json is a few hundred bytes and is NOT a binary, so it must not be
@@ -266,23 +329,50 @@ def resolve_platform_names(version, available=None):
     names = []
     for key, name, column in PLATFORMS:
         if name is None:
-            resolved = installer_name(version)
+            # Windows: the installer, under either name set.
+            _current, _legacy = installer_names(version)
+            if available is not None and _current not in available and _legacy in available:
+                resolved = _legacy
+            else:
+                resolved = _current
         elif available is not None and name not in available:
-            legacy = LEGACY_MACOS_NAMES.get(key)
-            if legacy and legacy in available:
-                raise FetchError(
-                    "the v%s release has no %s but carries the pre-fix bare "
-                    "binary %s. A bare Mach-O in a macOS update slot is "
-                    "downloadable and uninstallable — `tauri_plugin_updater` "
-                    "extracts a tar of an `.app` bundle on macOS, so a student "
-                    "would pay for ~48 MB and install nothing. Refusing to "
-                    "publish rather than degrade to an artifact no macOS client "
-                    "can install. Cut a new release from a build whose CI ran "
-                    "the `Package the macOS updater payload` step."
-                    % (version, name, legacy),
-                    400,
-                )
-            resolved = name
+            # The current name is absent. Before refusing, try the other name set:
+            # a release built before the artefact move carries `locus-*`, and it is
+            # a perfectly good update. Refusing it would strand the parked fleet on
+            # the release that carries this very change.
+            #
+            # ASSIGNED AS `other`, NEVER AS `legacy`. `legacy` is the pre-fix BARE
+            # MACH-O below, and `resolved = legacy` is the exact line §24 refuses
+            # because it hands a macOS client an uninstallable payload.
+            #
+            # The shape check is macOS-only, because only there is the shape
+            # load-bearing: on macOS the alias must end `.app.tar.gz` (the plugin
+            # extracts an `.app` from a gzip container, so a bare Mach-O is
+            # downloadable and uninstallable), while the Linux alias is the plain
+            # ELF, which is exactly right there. A tarball-shaped check applied to
+            # both would refuse the Linux alias for being correct.
+            other = dict((k, n) for k, n, _c in LEGACY_PLATFORMS).get(key)
+            _shape_ok = bool(other) and (
+                key not in ("macos_intel", "macos_arm") or other.endswith(".app.tar.gz")
+            )
+            if _shape_ok and other in available:
+                resolved = other
+            else:
+                legacy = LEGACY_MACOS_NAMES.get(key)
+                if legacy and legacy in available:
+                    raise FetchError(
+                        "the v%s release has no %s but carries the pre-fix bare "
+                        "binary %s. A bare Mach-O in a macOS update slot is "
+                        "downloadable and uninstallable — `tauri_plugin_updater` "
+                        "extracts a tar of an `.app` bundle on macOS, so a student "
+                        "would pay for ~48 MB and install nothing. Refusing to "
+                        "publish rather than degrade to an artifact no macOS client "
+                        "can install. Cut a new release from a build whose CI ran "
+                        "the `Package the macOS updater payload` step."
+                        % (version, name, legacy),
+                        400,
+                    )
+                resolved = name
         else:
             resolved = name
         names.append((key, resolved, column))

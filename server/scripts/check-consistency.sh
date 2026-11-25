@@ -121,12 +121,36 @@ fi
 # publish-release.sh writes the same update_config row from the CLI path, so it
 # must agree. Two writers with two opinions is how the row and the manifest came
 # to disagree in the first place.
-if grep -qE 'WINDOWS_INSTALLER="installer-Locus_\$\{VERSION\}_x64-setup\.exe"' "$SCRIPTS/publish-release.sh" 2>/dev/null; then
+if grep -qE 'WINDOWS_INSTALLER="installer-Chrysalis_\$\{VERSION\}_x64-setup\.exe"' "$SCRIPTS/publish-release.sh" 2>/dev/null; then
     ok "publish-release.sh resolves the Windows installer by name"
 else
     bad "publish-release.sh does not resolve the Windows installer by name"
     bad "  the CLI publish path would write download_windows pointing at the raw binary"
 fi
+
+# ── §1e: BOTH installer templates exist, in both writers ──
+#
+# The pair is the fleet contract from NAME-MIGRATION.md §3.1: the current name is
+# what CI builds, the legacy name is what a pre-move release carries. Keeping both
+# means the hub can serve either generation; dropping the legacy one makes every
+# parked release un-fetchable; dropping the current one means the release CI just
+# built cannot be published at all. Asserted as a PAIR so neither half can be
+# "tidied" on its own — that is the failure this whole section exists for.
+for _pair in "fetch-release.py:INSTALLER_NAME_TEMPLATE:Chrysalis" \
+             "fetch-release.py:LEGACY_INSTALLER_NAME_TEMPLATE:Locus" \
+             "publish-release.sh:WINDOWS_INSTALLER:Chrysalis" \
+             "publish-release.sh:WINDOWS_INSTALLER_LEGACY:Locus"; do
+    _file="${_pair%%:*}"; _rest="${_pair#*:}"; _var="${_rest%%:*}"; _want="${_rest#*:}"
+    if grep -qE "${_var}.*installer-${_want}_" "$SCRIPTS/$_file" 2>/dev/null; then
+        ok "$_file names the ${_want} installer template ($_var)"
+    else
+        bad "$_file has no ${_want} installer template ($_var)"
+        bad "  fetch-release.py and publish-release.sh must each know BOTH name sets:"
+        bad "  Chrysalis is what CI builds now, Locus is what a pre-move release carries."
+        bad "  Half the pair = a release that either cannot publish or cannot be fetched."
+        bad "  See docs/reference/NAME-MIGRATION.md §3.1."
+    fi
+done
 
 if grep -qE '"windows:chrysalis-windows-amd64\.exe:update_windows"' "$SCRIPTS/publish-release.sh" 2>/dev/null; then
     bad "publish-release.sh still publishes the raw Windows binary as the update"
@@ -155,17 +179,31 @@ except Exception:
     print("")
 PY
 )"
+#
+# AS OF 2026-11-25 THIS ASSERTS AGREEMENT, NOT A LITERAL. The previous version
+# hardcoded `Locus` as the only acceptable answer, which meant the guard's own
+# correctness depended on nobody ever completing the rename — the guard would have
+# gone red on the commit that finished the job it documents. What matters is that
+# `productName` equals the name the *current* template embeds, whichever spelling
+# that is; the pair check above guarantees the legacy spelling also resolves.
 if [ -z "$_installer_product" ]; then
     bad "could not read productName from client/src-tauri/tauri.conf.json"
-elif [ "$_installer_product" = "Locus" ]; then
-    ok "productName (Locus) matches the installer name the hub resolves"
 else
-    bad "productName is '${_installer_product}' but the hub resolves 'installer-Locus_<v>_x64-setup.exe'"
-    bad "  Tauri names the bundle from productName, so the release publishes"
-    bad "  'installer-${_installer_product}_<v>_x64-setup.exe' and fetch-release.py"
-    bad "  refuses the release as missing the Windows installer — at publish time,"
-    bad "  after a full four-platform build"
-    bad "  see docs/reference/NAME-MIGRATION.md §3.1"
+    _tpl_product="$(grep -oE 'INSTALLER_NAME_TEMPLATE = "installer-[A-Za-z]+_' "$SCRIPTS/fetch-release.py" 2>/dev/null \
+        | head -1 | sed -E 's/.*installer-([A-Za-z]+)_/\1/')"
+    if [ -z "$_tpl_product" ]; then
+        bad "could not read the product name out of INSTALLER_NAME_TEMPLATE in fetch-release.py"
+    elif [ "$_installer_product" = "$_tpl_product" ]; then
+        ok "productName (${_installer_product}) matches the installer name the hub resolves"
+    else
+        bad "productName is '${_installer_product}' but the hub resolves 'installer-${_tpl_product}_<v>_x64-setup.exe'"
+        bad "  Tauri names the bundle from productName, so the release publishes"
+        bad "  'installer-${_installer_product}_<v>_x64-setup.exe' and fetch-release.py"
+        bad "  resolves 'installer-${_tpl_product}_<v>_x64-setup.exe' instead: the fetch"
+        bad "  reports the release as missing its Windows installer — at publish time,"
+        bad "  after a full four-platform build, which is how v3.5.0 failed."
+        bad "  see docs/reference/NAME-MIGRATION.md §3.1"
+    fi
 fi
 
 # Rust: the constants, and the artifact mapping for each.
@@ -291,12 +329,20 @@ echo "1c. macOS human download — one name, three sites, and never an update pa
 # the first time it ran, before it had checked anything at all.
 WORKFLOW="$REPO/.github/workflows/client.yml"
 
-# The template must exist, in exactly one place per side.
-if grep -qE '^MACOS_ZIP_TEMPLATE *= *"installer-Locus_%s_%s\.zip"' "$SCRIPTS/fetch-release.py" 2>/dev/null; then
-    ok "fetch-release.py defines the macOS zip template once"
+# The template must exist, in exactly one place per side, and there must be TWO:
+# the current `productName` and the pre-move one. Both are asserted, so neither
+# can be dropped alone — see the §1e pair check and NAME-MIGRATION.md §3.1.
+if grep -qE '^MACOS_ZIP_TEMPLATE *= *"installer-Chrysalis_%s_%s\.zip"' "$SCRIPTS/fetch-release.py" 2>/dev/null; then
+    ok "fetch-release.py defines the current macOS zip template once"
 else
     bad "fetch-release.py has no single MACOS_ZIP_TEMPLATE definition"
-    bad '  expected: MACOS_ZIP_TEMPLATE = "installer-Locus_%s_%s.zip"'
+    bad '  expected: MACOS_ZIP_TEMPLATE = "installer-Chrysalis_%s_%s.zip"'
+fi
+if grep -qE '^LEGACY_MACOS_ZIP_TEMPLATE *= *"installer-Locus_%s_%s\.zip"' "$SCRIPTS/fetch-release.py" 2>/dev/null; then
+    ok "fetch-release.py still resolves the pre-move macOS zip name"
+else
+    bad "fetch-release.py has no LEGACY_MACOS_ZIP_TEMPLATE — a release built before"
+    bad "  the move would read as missing its macOS download instead of resolving it"
 fi
 
 # The arch suffixes are a contract too: CI writes `_amd64`/`_arm64`, and the hub
@@ -313,10 +359,17 @@ done
 # CI must produce both, and the release job must assert them present. The
 # assertion is what stops a build job that silently stopped packaging from
 # publishing a release with no macOS download at all.
-if grep -qE 'Locus_\$\{ver\}_\$\{arch\}\.zip|Locus_\$\{ver\}_' "$WORKFLOW" 2>/dev/null; then
-    ok "CI builds the macOS zip under the versioned name"
+# AS OF 2026-11-25 THIS ASSERTS THE DERIVATION, NOT A LITERAL. The old form
+# required the string `Locus_${ver}_${arch}.zip`, which meant the guard's
+# correctness depended on the product never being renamed — and when the zip
+# literal was updated to the new name it went red on a CORRECT tree while
+# passing on the tree that shipped the v3.5.0 defect. What must be true is that
+# the build job writes a versioned, arch-bearing zip whose product infix is
+# READ FROM THE CONFIG; §1f is what refuses a stale literal.
+if grep -qE 'out="installer/\$\{APP_NAME%?\.?a?p?p?\}_\$\{ver\}_\$\{arch\}\.zip"|out=.*\$\{ver\}_\$\{arch\}\.zip' "$WORKFLOW" 2>/dev/null; then
+    ok "CI builds the macOS zip under the versioned name, product infix from config"
 else
-    bad "no CI step builds 'Locus_<v>_<arch>.zip'"
+    bad "no CI step builds a '<productName>_<v>_<arch>.zip' macOS download"
     bad "  the macOS packaging step is what makes the bypassable Gatekeeper path exist"
     bad "  the infix is productName, which is 'Locus' — see NAME-MIGRATION.md §3.1"
 fi
@@ -370,6 +423,123 @@ if grep -q 'refusing to publish: the manifest names a .zip' "$WORKFLOW" 2>/dev/n
 else
     bad "the manifest step does not guard against a .zip platform entry"
 fi
+echo
+echo "1g-bis. The client's artifact map agrees with the names the hub serves"
+# ─────────────────────────────────────────────────────────────
+# 1g-bis. `artifact_for` (client) vs `NEW_PLATFORMS` (hub).
+#
+# The two sides silently disagreed until 2026-11-25: the client named the bare
+# `chrysalis-darwin-*` Mach-O for macOS while the hub served the `.app.tar.gz`.
+# A bare Mach-O is downloadable, verifiable and UNINSTALLABLE — `install.rs`
+# refuses it, and §24 refuses to publish it — so a future caller of
+# `artifact_for` would have built a URL for a file no client can apply.
+#
+# It was invisible because `artifact_for` has no production caller: the client is
+# handed `update_url` by the hub. That is what makes it a *latent* trap rather
+# than a live bug, and the reason it is still checked — the next person to use it
+# will not know that.
+# `|| true`: the python below exits non-zero on its own sentinel paths (NORUST /
+# NOHUB), and this script runs under `set -u` with an errexit-sensitive style —
+# an assignment that fails must still leave a defined variable for the `case`.
+_ch_check=$(cd "$REPO" && python3 - <<'PY3'
+import re
+def read(p):
+    try:
+        return open(p, encoding="utf-8", errors="replace").read()
+    except OSError:
+        return ""
+contract = read("client/src-tauri/src/chrysalis/contract.rs")
+rust = dict(re.findall(r'b"([a-z_]+)" => Some\("([^"]+)"\)', contract))
+if len(rust) != 4:
+    print("NORUST"); raise SystemExit
+fetch_src = read("server/scripts/fetch-release.py")
+block = re.search(r"^NEW_PLATFORMS = \[(.*?)^\]", fetch_src, re.S | re.M)
+if not block:
+    print("NOHUB"); raise SystemExit
+hub = dict(re.findall(r'\("([a-z_]+)",\s*"([^"]+)"', block.group(1)))
+if not hub:
+    print("NOHUB"); raise SystemExit
+bad = ["%s: client=%s hub=%s" % (k, rust.get(k), v) for k, v in hub.items() if rust.get(k) != v]
+print("OK" if not bad else "DIFFER " + " | ".join(bad))
+PY3
+) || _ch_check="PYFAILED"
+case "$_ch_check" in
+    OK)     ok "contract.rs artifact_for matches NEW_PLATFORMS in fetch-release.py on every platform" ;;
+    NORUST) bad "1g-bis: could not read the four artifact_for arms from contract.rs" ;;
+    NOHUB)  bad "1g-bis: could not read NEW_PLATFORMS from fetch-release.py" ;;
+    PYFAILED) bad "1g-bis: the comparison could not run (python3 failed)" ;;
+    *)      bad "contract.rs and the hub disagree about an artifact name:"
+            printf '%s\n' "${_ch_check#DIFFER }" | tr '|' '\n' | sed 's/^ */         /'
+            bad "  a name only one side knows is a URL no client can fetch, or a payload"
+            bad "  the plugin refuses; see the macOS case in NAME-MIGRATION.md §3.1" ;;
+esac
+
+echo
+echo "1f. No workflow shell pattern restates a productName-derived filename"
+# ─────────────────────────────────────────────────────────────
+# 1f. NO WORKFLOW SHELL PATTERN RESTATES A `productName`-DERIVED FILENAME.
+#
+# WHY THIS EXISTS: the SAME defect shipped twice, a week apart, and both times it
+# was a shell glob thousands of lines away from the config string it depended on.
+#
+#   v3.5.0  the macOS zip assertion globbed `installer-Locus_*` while
+#           `productName` said `Chrysalis` -> "expected two macOS download zips,
+#           found 0", after all four platforms had built and signed.
+#   2026-11   the Windows-sign step globbed `installer/Locus_*_x64-setup.exe`
+#           while its OWN COMMENT above said the file is `Chrysalis_*` with no
+#           prefix -> matched nothing, exit 1 with a message naming a third
+#           spelling.
+#
+# Both were invisible to every other guard because each side was internally
+# consistent. `productName` derives FOUR filenames (the installer, the `.app`,
+# the macOS zip, and the `.dmg`), so a literal for any of them in the workflow is
+# a stale copy waiting to happen.
+#
+# THE CHECK: in the workflow, a quoted shell token that names a product-derived
+# filename must not contain a product word that disagrees with `productName`.
+# Derived-from-config uses (`${PRODUCT}_`, `${APP_NAME}`, `${mac_zip_prefix}`)
+# contain no product word at all and pass automatically — which is the point:
+# the fix is to read the value, and this guard only fires on the restating.
+_wn_product="$(python3 - "$REPO/client/src-tauri/tauri.conf.json" <<'PY2' 2>/dev/null || true
+import json, sys
+try:
+    print(json.load(open(sys.argv[1])).get("productName") or "")
+except Exception:
+    print("")
+PY2
+)"
+if [ -z "$_wn_product" ]; then
+    bad "1f: could not read productName, so the workflow filename patterns cannot be checked"
+else
+    # Every product word this project has used for the derived filenames. A new
+    # one is added here when the product is renamed; the check is "no OTHER word".
+    _wn_known="Locus Chrysalis"
+    _wn_bad=""
+    for _wn_word in $_wn_known; do
+        [ "$_wn_word" = "$_wn_product" ] && continue
+        # A product word attached to a derived filename: `Locus_<x>_x64-setup`,
+        # `Locus.app`, `installer-Locus_`, `Locus_<x>_<arch>.zip`.
+        if grep -qE "(^|[^A-Za-z])${_wn_word}(_|\\.app)" "$WORKFLOW" 2>/dev/null; then
+            _wn_line=$(grep -nE "(^|[^A-Za-z])$_wn_word(_|\\.app)" "$WORKFLOW" | grep -vE '^[0-9]+:[[:space:]]*#' | head -1)
+            if [ -n "$_wn_line" ]; then
+                _wn_bad="$_wn_word"
+            fi
+        fi
+    done
+    if [ -n "$_wn_bad" ]; then
+        bad "the workflow names a '${_wn_bad}' filename while productName is '${_wn_product}'"
+        printf '%s\n' "$_wn_line" | sed 's/^/         /'
+        bad "  productName derives the installer, .app, zip and dmg names; restating one"
+        bad "  in a shell pattern is the v3.5.0 defect. Read it from the config instead:"
+        # Deliberately NOT a copy-pasteable command in a double-quoted string:
+        # the nested quotes need escaping, and the escaped form stopped bash from
+        # parsing this whole 8,000-line script. Name the shape instead.
+        bad "  pattern: read productName from client/src-tauri/tauri.conf.json via python3 -c"
+    else
+        ok "no workflow shell pattern restates a '${_wn_bad:-other}' product filename (productName is '${_wn_product}')"
+    fi
+fi
+
 # ─────────────────────────────────────────────────────────────
 echo
 echo "2. Frozen wire names"
@@ -1453,6 +1623,126 @@ def landing_domain_legacy():
         return None
     return m.group(1)
 
+def updater_artifacts():
+    """The updater artefact names, current and pre-move, from the two sides.
+
+    Recomputed from the files that DECIDE them rather than from a copy: the Rust
+    constants for the current names, and the hub resolver's own `LEGACY_PLATFORMS`
+    for the aliases. The `.app.tar.gz` shape is asserted inside those sources by
+    §24, so this only has to agree about the spelling.
+
+    The Windows installer is version-bearing, so it is recorded with
+    `<v>` where the version goes — the recorded fact is the TEMPLATE, not a
+    release. Matching on a literal version would fail on every bump, which is a
+    check that is wrong about the wrong thing.
+    """
+    contract = read("client/src-tauri/src/chrysalis/contract.rs")
+    current = dict(re.findall(r'b"([a-z_]+)" => Some\("(chrysalis-[^"]+)"\)', contract))
+    if len(current) != 4:
+        return None
+    fetch_src = read("server/scripts/fetch-release.py")
+    legacy_block = re.search(r"^LEGACY_PLATFORMS = \[(.*?)^\]", fetch_src, re.S | re.M)
+    legacy = dict(re.findall(r'\("([a-z_]+)",\s*"([^"]+)"', legacy_block.group(1))) if legacy_block else {}
+    # Windows is resolved through the template, not a literal, on both sides.
+    tmpl = re.search(r'^INSTALLER_NAME_TEMPLATE = "([^"]+)"', fetch_src, re.M)
+    tmpl_legacy = re.search(r'^LEGACY_INSTALLER_NAME_TEMPLATE = "([^"]+)"', fetch_src, re.M)
+    if not tmpl or not tmpl_legacy:
+        return None
+    # The WINDOWS UPDATE PAYLOAD IS THE INSTALLER, not the bare binary: that is the
+    # distinction the whole §1a block exists for. So the recorded `windows` fact is
+    # the installer template on both sides, and it is NOT read from `artifact_for`
+    # — `artifact_for` returns the raw `chrysalis-windows-amd64.exe`, which is
+    # correct for the *artifact mapping* and wrong for the *update slot*. Recording
+    # the raw name here would make this fact agree with the client constant and
+    # disagree with what the hub serves.
+    current["windows"] = tmpl.group(1).replace("%s", "<v>")
+    legacy["windows"] = tmpl_legacy.group(1).replace("%s", "<v>")
+    return {
+        "current": {
+            "windows": current["windows"],
+            "linux": current["linux"],
+            "macos_intel": current["macos_intel"],
+            "macos_arm": current["macos_arm"],
+        },
+        "legacy": {
+            "windows": legacy.get("windows", ""),
+            "linux": legacy.get("linux", ""),
+            "macos_intel": legacy.get("macos_intel", ""),
+            "macos_arm": legacy.get("macos_arm", ""),
+        },
+    }
+
+def contract_matches_hub():
+    """`artifact_for` in the client vs the names the hub actually serves.
+
+    THIS PAIR SILENTLY DISAGREED UNTIL 2026-11-25. `contract.rs` returned the bare
+    `chrysalis-darwin-*` Mach-O for the macOS slots while `fetch-release.py`'s
+    `NEW_PLATFORMS` served the `.app.tar.gz` — and a bare Mach-O is exactly what
+    `install.rs` refuses, because the plugin extracts a `.app` from a gzip
+    container. Neither side was "wrong" in isolation, which is the same shape as
+    the `uot_port` / `download_<platform>` bugs this script exists for.
+
+    Windows is the ONE intentional difference and it is asserted as such:
+    `artifact_for` names the raw PE artifact (what the `windows-*` build produces),
+    while the update SLOT carries the NSIS installer. Comparing them would be
+    comparing an artifact to an update payload; the distinction is the whole of
+    §1a.
+
+    Returns True when every platform agrees, or a list of the disagreements.
+    """
+    contract = read("client/src-tauri/src/chrysalis/contract.rs")
+    rust = dict(re.findall(r'b"([a-z_]+)" => Some\("([^"]+)"\)', contract))
+    if len(rust) != 4:
+        return None
+    fetch_src = read("server/scripts/fetch-release.py")
+    block = re.search(r"^NEW_PLATFORMS = \[(.*?)^\]", fetch_src, re.S | re.M)
+    if not block:
+        return None
+    hub = dict(re.findall(r'\("([a-z_]+)",\s*"([^"]+)"', block.group(1)))
+    if not hub:
+        return None
+    disagree = [k for k, v in hub.items() if rust.get(k) != v]
+    return True if not disagree else disagree
+
+def client_identity():
+    """The app identity and its adoption candidates, from `dirs.rs`.
+
+    Both halves matter and for different reasons: `value` is where new installs
+    write, and `legacy` is the ONLY thing that lets current installs find their
+    activation code. A recomputer that returned only the current value would
+    report OK on a tree whose migration list had been emptied.
+    """
+    src = read("client/src-tauri/src/utils/dirs.rs")
+    # The release arm only: the dev arm is a `cfg(feature = "verge-dev")` sibling
+    # and taking the first match would silently be either one.
+    m = re.search(r'#\[cfg\(not\(feature = "verge-dev"\)\)\]\s*pub static APP_ID: &str = "([^"]+)"', src)
+    if not m:
+        return None
+    value = m.group(1)
+    block = re.search(r'#\[cfg\(not\(feature = "verge-dev"\)\)\]\s*const LEGACY_APP_IDS: &\[&str\] = &\[(.*?)\];', src, re.S)
+    if not block:
+        return None
+    legacy = re.findall(r'"([^"]+)"', block.group(1))
+    return {"current": value, "legacy": legacy}
+
+def client_product_name():
+    """`productName` and the pre-move one, from the two config files.
+
+    The legacy value is not a constant anywhere — it is the historical spelling,
+    recorded here so the pair is visible next to the current one. If the current
+    name ever equals it again, this returns None rather than a pass.
+    """
+    try:
+        with open("client/src-tauri/tauri.conf.json", encoding="utf-8") as fh:
+            current = json.load(fh).get("productName")
+    except Exception:
+        return None
+    if current == "Locus":
+        # The move has been undone, or never happened: there is no legacy pair to
+        # record, so this is not recomputable rather than "agrees".
+        return None
+    return {"current": current, "legacy": "Locus"}
+
 def landing_docroot():
     """The landing page document root, from deploy_site()'s own target.
 
@@ -1664,6 +1954,14 @@ CHECKERS = {
     "site.download_path":    landing_download_path,
     "activation_tunnel.bootstrap_port": lambda: activation_tunnel_port("bootstrap"),
     "activation_tunnel.filter_port":    lambda: activation_tunnel_port("filter"),
+    # The identity move: BOTH the current value and the adoption list. A checker
+    # that returned only the value would pass on a tree whose migration had been
+    # emptied, which is the failure that loses every install's activation code.
+    "client.identity":      client_identity,
+    "client.product_name":  client_product_name,
+    # `artifacts.updater` is one entry with two halves (current + legacy), so it is
+    # compared as a pair rather than as a flat value.
+    "artifacts.updater":    updater_artifacts,
 }
 
 for path, entry in sorted(facts.items()):
@@ -2453,11 +2751,20 @@ echo "18. The Windows installer is signed, under the name the release job prefix
 # (AGENTS.md, "assert the agreement").
 wf_installer="$WORKFLOW"
 if [ -f "$wf_installer" ]; then
-    # Scoped to `installer/Locus_*` deliberately. Several steps iterate
-    # `installer/*` now (the macOS .dmg repack does), and a bare `head -1` would
-    # grab whichever comes first in the file — so this check would silently stop
-    # testing the step it exists for, which is the failure mode it is about.
-    sign_glob="$(grep -oE 'for f in installer/Locus_[^;]+' "$wf_installer" | head -1 || true)"
+    # Scoped to a glob that names an `installer/` entry deliberately. Several
+    # steps iterate `installer/*` now (the macOS .dmg repack does), and a bare
+    # `head -1` would grab whichever comes first in the file — so this check would
+    # silently stop testing the step it exists for, which is the failure mode it
+    # is about.
+    #
+    # THE PRODUCT WORD IS NO LONGER PART OF THE PATTERN, and that is the fix for a
+    # real defect. This used to require `installer/Locus_*`, which meant it
+    # passed on the tree where the step globbed a product name that no build
+    # produced (so the step matched nothing and exited 1) and would have gone red
+    # on the corrected tree. What the step must do is glob for the STAGED
+    # INSTALLER, whichever spelling productName currently produces — §1f is what
+    # refuses a stale literal.
+    sign_glob="$(grep -oE 'for f in "?installer/[^;]+_x64-setup\.exe' "$wf_installer" | head -1 || true)"
     prefix_src="$(grep -oE 'cp "\$f" "release/installer-\$base"' "$wf_installer" | head -1 || true)"
     # The `if:` line follows the step name, but a comment block may sit between
     # them (the file explains WHY at the point of contact). Scan forward from the
@@ -2486,11 +2793,29 @@ PY
         bad "  if that step was removed, the Windows installer ships unsigned and no"
         bad "  Windows client can install the update (RECOVER-WINDOWS-UPDATE.md)"
     else
-        # The glob must NOT carry the `installer-` prefix: it runs before the rename.
-        # Its INFIX is productName, so it tracks tauri.conf.json like §1e does.
+        # The glob must NOT carry the `installer-` prefix: it runs before the
+        # rename, so a prefixed pattern can never match.
+        #
+        # THE INFIX IS CHECKED AS "NOT A STALE PRODUCT WORD" rather than as a
+        # literal. It is `productName`, and §1e already pins that string against
+        # the installer the hub resolves; requiring `Locus_` here made this check
+        # pass on the tree where the glob matched nothing and fail on the fix.
         case "$sign_glob" in
-            *installer/Locus_*)
-                ok "the sign step globs the pre-prefix name (installer/Locus_*)"
+            *"installer/"*Locus_*|*"installer/"*Chrysalis_*)
+                # A literal product word: correct only if it is the CURRENT one.
+                _sg_word="$(printf '%s' "$sign_glob" | grep -oE 'Locus_|Chrysalis_' | head -1)"
+                if [ "$_sg_word" = "${_wn_product:-Locus}_" ]; then
+                    ok "the sign step globs the pre-prefix name (installer/${_sg_word}*)"
+                else
+                    bad "the sign step globs '${sign_glob#for f in }' in the BUILD job"
+                    bad "  the 'installer-' prefix is added later by the release job, so this"
+                    bad "  can never match and the step exits 1 after a full four-platform build"
+                    bad "  the infix is productName, which is '${_wn_product}' — see NAME-MIGRATION.md §3.1"
+                fi
+                ;;
+            *installer/*)
+                # Derived from the config (`installer/${PRODUCT}_…`): cannot go stale.
+                ok "the sign step globs the pre-prefix name from productName (${sign_glob#for f in })"
                 ;;
             *)
                 bad "the sign step globs '${sign_glob#for f in }' in the BUILD job"
@@ -2535,19 +2860,32 @@ fi
 # A glob that matches nothing is invisible: it does not trip `set -u`, the loop
 # body never runs, and the step exits 0. So the prefix is asserted here rather
 # than trusted.
-if grep -q 'for f in release/locus-\*; do' "$WORKFLOW" 2>/dev/null; then
-    ok "the signature check globs the real updater prefix (release/locus-*)"
+# SINCE 2026-11-25 THE STEP MUST GLOB BOTH SETS. The original lesson stands —
+# a glob naming the wrong prefix matches nothing and the step passes having
+# verified nothing — but the fix is no longer "the prefix is locus-*": CI now
+# publishes `chrysalis-*` as primary and `locus-*` as the alias, so a glob for
+# either alone leaves the other unverified. The one that would go unchecked is
+# whichever the glob omits, which today is the set the hub PREFERS.
+#
+# So this asserts the union, not a literal: both prefixes must appear in the same
+# loop, and the current one must be the one whose emptiness is FATAL (the aliases
+# are a migration artifact, so their absence is a warning rather than a failure).
+if grep -qE 'for f in release/chrysalis-\* release/locus-\*; do' "$WORKFLOW" 2>/dev/null; then
+    ok "the signature check globs both name sets (chrysalis-* and locus-*)"
+elif grep -qE 'for f in release/(locus|chrysalis)-\*; do' "$WORKFLOW" 2>/dev/null; then
+    bad "the \"Verify every artifact is signed\" step globs only ONE name set"
+    bad "  CI publishes chrysalis-* as primary and locus-* as the alias; a glob for"
+    bad "  one prefix leaves the other's signatures unchecked while the step passes"
 else
-    bad "the \"Verify every artifact is signed\" step does not glob release/locus-*"
-    bad "  the updater payloads are named locus-* (a frozen contract with"
-    bad "  fetch-release.py); a glob naming any other prefix matches nothing, so"
-    bad "  the step passes without verifying a single artifact"
+    bad "the \"Verify every artifact is signed\" step does not glob the updater payloads"
+    bad "  the payloads are chrysalis-* (current) and locus-* (deprecated alias); a"
+    bad "  glob naming neither matches nothing, so the step verifies nothing"
 fi
 
-if grep -q 'no updater payload matched release/locus-\*' "$WORKFLOW" 2>/dev/null; then
-    ok "the signature check asserts its glob matched something"
+if grep -q 'no updater payload matched release/chrysalis-\*' "$WORKFLOW" 2>/dev/null; then
+    ok "the signature check asserts the CURRENT set's glob matched something"
 else
-    bad "the signature check does not assert that its glob matched anything"
+    bad "the signature check does not assert that its current-name glob matched anything"
     bad "  an empty glob exits 0; without this, 'nothing to check' is"
     bad "  indistinguishable from 'everything checked and passed'"
 fi
@@ -4647,6 +4985,26 @@ def indexed_scope():
             if rel in INDEX_EXEMPT:
                 continue
             out.append(rel)
+    # `scripts/` and `server/scripts/`, added 2026-11-25 for the same reason the
+    # two walks above exist. BOTH are third top-level trees holding live,
+    # authoritative documents — `server/scripts/README.md` is the index of every
+    # command that can reach the production hub, and `scripts/README.md` documents
+    # the code printers — and BOTH sat outside every walk, so either could be
+    # orphaned from `docs/README.md` with nothing failing.
+    #
+    # This is the third time the same scope hole was found (root `*.md` 2026-11-22,
+    # `client/src-tauri/**` 2026-11-23, now these). The lesson recorded then holds:
+    # an exemption list is safe, a scope that stops at a fixed depth is not.
+    for tree in ('scripts', 'server/scripts'):
+        for dirpath, dirs, files in os.walk(tree):
+            dirs[:] = [d for d in dirs if d not in ('node_modules', '__pycache__')]
+            for fn in sorted(files):
+                if not fn.endswith('.md'):
+                    continue
+                rel = os.path.join(dirpath, fn).replace(os.sep, '/')
+                if rel in INDEX_EXEMPT:
+                    continue
+                out.append(rel)
     return out
 
 def front_matter(path):
@@ -7683,17 +8041,33 @@ def read(path):
 # class and not the instances, so every row that repeats a file exists on purpose.
 CHECKS = [
     # ── Retained spellings: the `locus` form must survive ──
-    ("com.locus.client",         "client/src-tauri/tauri.conf.json",          "com.locus.client"),
+    # The identifier moved on 2026-11-25. What must still hold is the part that
+    # makes the move survivable: the OLD value is still a migration candidate in
+    # `dirs.rs` (`LEGACY_APP_IDS`), because every install before that date keeps
+    # its activation code, device fingerprint and tier under it. The config files
+    # now carry the current value, so they are asserted separately below.
     ("com.locus.client",         "client/src-tauri/src/utils/dirs.rs",        "com.locus.client"),
     ("com.locus.client.dev",     "client/src-tauri/src/utils/dirs.rs",        "com.locus.client.dev"),
+    ("com.chrysalis.client",     "client/src-tauri/tauri.conf.json",          "com.chrysalis.client"),
+    ("com.chrysalis.client",     "client/src-tauri/src/utils/dirs.rs",        "com.chrysalis.client"),
     ("locus-backup",             "client/src-tauri/src/utils/dirs.rs",        "locus-backup"),
-    ("locus-linux-amd64",        "client/src-tauri/src/chrysalis/contract.rs", "locus-linux-amd64"),
-    ("locus-linux-amd64",        "server/scripts/fetch-release.py",           "locus-linux-amd64"),
-    ("locus-linux-amd64",        "server/scripts/publish-release.sh",         "locus-linux-amd64"),
-    ("locus-linux-amd64",        "server/scripts/verify-release.sh",          "locus-linux-amd64"),
-    ("locus-linux-amd64",        "server/templates/Caddyfile",                "locus-linux-amd64"),
-    ("locus-linux-amd64",        "server/modules/05-caddy.sh",                "locus-linux-amd64"),
-    ("locus-linux-amd64",        "server/console/src/views/Releases.vue",     "locus-linux-amd64"),
+    # ── The artefact names moved on 2026-11-25: BOTH spellings are live ──
+    #
+    # Each file below must name the CURRENT (`chrysalis-*`) spelling, because that
+    # is what CI now builds and what the hub prefers. `contract.rs` is the one
+    # exception: it names the current spelling only, and its doc comment states
+    # that nothing resolves a URL through it — so it has no legacy twin by design.
+    #
+    # The legacy spellings are asserted separately, as a class, by the
+    # `LEGACY_PLATFORMS` block check further down and by contract-snapshot.py's
+    # `legacy_artifacts`, rather than as per-file rows: a row per file per name
+    # generation is 8 rows that all say the same thing, and the pair check states
+    # the property (both resolve) once instead of eight times.
+    ("chrysalis-linux-amd64",     "client/src-tauri/src/chrysalis/contract.rs", "chrysalis-linux-amd64"),
+    ("chrysalis-linux-amd64",     "server/scripts/fetch-release.py",           "chrysalis-linux-amd64"),
+    ("chrysalis-linux-amd64",     "server/scripts/publish-release.sh",         "chrysalis-linux-amd64"),
+    ("chrysalis-linux-amd64",     "server/scripts/verify-release.sh",          "chrysalis-linux-amd64"),
+    ("chrysalis-linux-amd64",     "server/console/src/views/Releases.vue",     "chrysalis-linux-amd64"),
     ("LOCUS_UPDATE_KEY_B64",     "server/scripts/chrysalis-key-extract.sh",   "LOCUS_UPDATE_KEY_B64"),
     # The encrypt-side FORM CHECK, not just a doc: a required-var list naming the
     # wrong spelling refuses every re-encrypt with "LOCUS_UPDATE_KEY_B64(absent)".
@@ -7707,9 +8081,23 @@ CHECKS = [
     ("vasilliourous/Locus",      "server/scripts/fetch-release.py",           "vasilliourous/Locus"),
 
     # ── Retired spellings: the `chrysalis` form must be what is READ/WRITTEN ──
+    #
+    # The bootstrap header is an ASYMMETRIC pair, and asserting it symmetrically
+    # was wrong. The path filter (09-activation-tunnel.sh) only ever SETS the
+    # header, so it names the current spelling and nothing else. The hooks only
+    # ever READ it, so during a deploy window they accept BOTH — a deployed hub
+    # and a deployed client can be on opposite sides of the rename, and if the
+    # reader accepts only one spelling the header is silently absent and every
+    # tunnelled client collapses into one rate-limit bucket.
+    #
+    # So: the writer must send the current name, and each reader must still contain
+    # the old one. The last two rows are the `X-Locus-Bootstrap` rows re-expressed
+    # as what they actually need to be.
     ("X-Locus-Bootstrap",        "server/modules/09-activation-tunnel.sh",    "X-Chrysalis-Bootstrap"),
-    ("X-Locus-Bootstrap",        "server/pb_hooks/activation.pb.js",          "x-chrysalis-bootstrap"),
-    ("X-Locus-Bootstrap",        "server/pb_hooks/code_lookup.pb.js",         "x-chrysalis-bootstrap"),
+    ("x-locus-bootstrap",        "server/pb_hooks/activation.pb.js",          "x-locus-bootstrap"),
+    ("x-locus-bootstrap",        "server/pb_hooks/code_lookup.pb.js",         "x-locus-bootstrap"),
+    ("x-chrysalis-bootstrap",    "server/pb_hooks/activation.pb.js",          "x-chrysalis-bootstrap"),
+    ("x-chrysalis-bootstrap",    "server/pb_hooks/code_lookup.pb.js",         "x-chrysalis-bootstrap"),
     ("/etc/locus/",              "server/modules/09-activation-tunnel.sh",    "/etc/chrysalis/"),
     ("locus-fetch.service",      "server/modules/05-caddy.sh",                "chrysalis-fetch.service"),
     # The ssh alias. The probe tries the NEW alias; the bare host is the fallback
@@ -7762,15 +8150,39 @@ for anchor, path, literal in CHECKS:
         print("BAD\t%s is missing - the retained name it holds cannot be checked" % path)
         continue
     if literal == "REQUIRED_VARS":
+        # THE ORIGINAL FORM OF THIS CHECK IS NO LONGER THE RIGHT ONE, and the
+        # reason is the defect it was written for. It asserted that
+        # `REQUIRED_VARS` lists the literal `LOCUS_UPDATE_KEY_B64`, because a
+        # bundle of that era carries that spelling and a re-encrypt would have
+        # failed the form check with `LOCUS_UPDATE_KEY_B64(absent)`.
+        #
+        # On 2026-11-25 the entry left `REQUIRED_VARS` and became an EITHER-OF
+        # check just above the loop, for the reason the old row could not express:
+        # the name lives INSIDE the committed ciphertext, so a bundle written
+        # before the move carries one spelling and one re-encrypted after it
+        # carries the other. Demanding either literal refuses half of all bundles.
+        #
+        # So the assertion moves to what must now be true, and it is stated as a
+        # property rather than a spelling: the script must (a) still locate its
+        # form check, (b) accept BOTH names, and (c) refuse the ambiguous case —
+        # both present — because "last definition wins" is how a shadowed key
+        # ships silently. Each half is asserted separately so deleting either one
+        # fails, which is the failure mode the old row existed to prevent.
         block = required_vars_block(body)
         if block is None:
             print("BAD\t%s has no REQUIRED_VARS list - the encrypt form check cannot be located" % path)
-        elif "LOCUS_UPDATE_KEY_B64" not in block:
-            print("BAD\t%s REQUIRED_VARS no longer lists LOCUS_UPDATE_KEY_B64." % path)
-            print("BAD\t  The bundle's key keeps the old spelling; a re-encrypt would")
-            print("BAD\t  fail the form check with 'LOCUS_UPDATE_KEY_B64(absent)'.")
+        elif "LOCUS_UPDATE_KEY_B64" in block:
+            print("BAD\t%s lists LOCUS_UPDATE_KEY_B64 in REQUIRED_VARS again." % path)
+            print("BAD\t  The key name is either-of (bundle-dependent), so a required")
+            print("BAD\t  literal refuses every bundle of the other generation.")
+        elif "CHRYSALIS_UPDATE_KEY_B64" not in body or "LOCUS_UPDATE_KEY_B64" not in body:
+            print("BAD\t%s does not accept BOTH signing-key spellings." % path)
+            print("BAD\t  Each bundle carries exactly one, so both must be readable.")
+        elif "ambiguous" not in body:
+            print("BAD\t%s does not refuse a bundle carrying BOTH spellings." % path)
+            print("BAD\t  The last definition wins, so a shadowed key would ship.")
         else:
-            print("OK\t%s - REQUIRED_VARS lists `LOCUS_UPDATE_KEY_B64`" % path)
+            print("OK\t%s - either-of signing-key check present (both spellings, ambiguity refused)" % path)
         continue
     if literal not in body:
         print("BAD\t%s no longer contains `%s`." % (path, literal))
@@ -7842,6 +8254,130 @@ for path, pattern in NO_STALE_PROSE:
         print("BAD\t%s:%d names `%s`, which the rename moved." % (path, n, word))
         print("BAD\t  %s" % line[:110])
     print("BAD\t  A reader is being told to use an identifier that does not exist.")
+
+# ── No live document names an IPC command the client no longer registers ──
+#
+# WHY THIS EXISTS: `docs/reference/STILL-OPEN.md` told a future reader to "trace
+# what happens after `locus_recognise` returns". There was no such command: device
+# recognition was removed from both sides, and `cmd/chrysalis.rs` says so where it
+# stood ("`chrysalis_recognise`, `resolve_identity`, `RecognitionResult` —
+# REMOVED"). The entry survived every rename pass because §53's per-file rows are
+# POSITIVE — they assert a retained name is still present where it is required —
+# and a name that was *deleted* rather than *renamed* has no row to fail.
+#
+# The consequence is not cosmetic. An instruction to trace a function that does not
+# exist cannot be followed, cannot be marked done, and quietly teaches a reader to
+# distrust every other instruction on the page. This is the same class as
+# "`locus` in a command that no longer resolves" (the repository check below), with
+# a different subject.
+#
+# WHAT IT CHECKS: a live document that names a command must name a registered one.
+# The subject is restricted, deliberately, to names the document marks as a COMMAND
+# — `chrysalis_*`, `locus_*`, or a bare backticked name that is ALSO registered — so
+# that a config field (`theme_mode`), a wire name (`uot_port`) or a Rust attribute
+# (`deny_unknown_fields`) is never mistaken for one. The first draft of this guard
+# did not restrict the subject and reported eleven BAD lines across `AGENTS.md` and
+# `COLOURS.md`, every one of them a field or an attribute: a guard that cries wolf
+# on correct prose is a guard somebody switches off, which is worse than absent.
+#
+# The `locus_*` arm is the one that catches the original defect class: a command
+# that was *removed* leaves its old spelling in the prose, and the old spelling is
+# exactly what the register keeps a row for.
+#
+# KNOWN LIMIT, stated rather than hidden: a command that was removed from the source
+# AND is spelled under its NEW prefix (`chrysalis_recognise`) is indistinguishable
+# from an unregistered field by name alone. That residual class is covered by the
+# `cmd::`-registration scan in §34, which asserts every `chrysalis_*` name the client
+# registers is one the docs may use — the two guards are complements, not duplicates.
+import re as _re_ipc
+
+_lib_path = "client/src-tauri/src/lib.rs"
+try:
+    _lib = open(_lib_path, encoding="utf-8", errors="replace").read()
+except OSError:
+    _lib = ""
+# The handler body only — a name mentioned in a comment above the macro is not a
+# registration, and taking the whole file would let a comment satisfy the check.
+_m = _re_ipc.search(r"generate_handler!\[(.*?)\n\s*\]", _lib, _re_ipc.S)
+_handler_body = _m.group(1) if _m else ""
+_registered = set(_re_ipc.findall(r"(?:^|::)([a-z_][a-z0-9_]*)\s*,", _handler_body, _re_ipc.M))
+# A few IPC names are registered from inside the host plugin, not this macro.
+_registered |= {"get_system_info", "get_app_uptime", "export_diagnostic_info"}
+
+# THE CONFIG FIELDS. `chrysalis_` prefixes BOTH the IPC commands and the persisted
+# `IVerge` fields, so prefix alone cannot tell a reader's "call this" from a
+# document's "this setting exists". Every field is declared in `config/verge.rs` as
+# `pub <name>:`; parsing those declarations is what separates the two, instead of
+# the ad-hoc exception list that the first draft would have needed and that would
+# have grown one line per new field until it allowed everything.
+try:
+    _verge = open("client/src-tauri/src/config/verge.rs", encoding="utf-8", errors="replace").read()
+except OSError:
+    _verge = ""
+_fields = set(_re_ipc.findall(r"^\s*pub\s+([a-z_][a-z0-9_]*)\s*:", _verge, _re_ipc.M))
+
+_id_shaped = _re_ipc.compile(r"`((?:chrysalis|locus)_[a-z0-9_]+)`")
+# TWO documents have old IPC names as their SUBJECT, and naming them is the point:
+# `NAME-MIGRATION.md` is the register of what moved, and `FIXES.md` is an append-only
+# defect log where "the cause was `locus_connect`" is a true record of a past state
+# rather than an instruction to a reader. An exemption list is safe here — unlike a
+# scope that stops at a fixed depth, it fails closed: a NEW document is scanned. Both
+# are live, so §28 already keeps them from being silently deleted.
+#
+# `STILL-OPEN.md` is NOT exempt: it is instructions to a successor, and an
+# unnameable target there is exactly the defect this guard was written for.
+_IPC_EXEMPT_DOCS = {
+    "docs/reference/NAME-MIGRATION.md",
+    "docs/reference/FIXES.md",
+}
+_live_docs = []
+for _r, _d, _fs in os.walk("."):
+    _d[:] = [x for x in _d if x not in
+             ("node_modules", ".git", "target", "dist", "legacy", "vendor",
+              "archive", "history", ".hubtmp")]
+    for _f in _fs:
+        if not _f.endswith(".md"):
+            continue
+        _p = os.path.join(_r, _f).replace(os.sep, "/")
+        if _p.startswith("./"):
+            _p = _p[2:]
+        if _p in _IPC_EXEMPT_DOCS:
+            continue
+        _live_docs.append(_p)
+
+_dead_ipc = []
+for _p in _live_docs:
+    try:
+        _body = open(_p, encoding="utf-8", errors="replace").read()
+    except OSError:
+        continue
+    for _n, _line in enumerate(_body.splitlines(), 1):
+        # A cross-reference to another document's section, e.g. `operate/page`.
+        if _re_ipc.search(r"\.(md|sh|toml|json|rs|ts)\b", _line):
+            continue
+        # A HISTORICAL ALIAS, marked by the prose itself. `FIXES.md` and this doc set
+        # record the previous spelling on purpose (`chrysalis_suspended` (then
+        # `locus_suspended)`), and a defect log that says a name was always the new
+        # one is a false record. The marker is required to be IN THE SAME LINE as the
+        # old name, so it cannot be applied in bulk to a whole page — the first
+        # instance of this defect (`STILL-OPEN.md`'s `locus_recognise`, which named a
+        # command that had been *removed* rather than renamed and was marked
+        # "(then …)" nowhere) is correctly still a BAD line.
+        if "then `" in _line or "(then " in _line:
+            continue
+        for _cand in set(_id_shaped.findall(_line)):
+            if _cand in _registered or _cand in _fields:
+                continue
+            _dead_ipc.append((_p, _n, _cand, _line.strip()))
+
+if _dead_ipc:
+    for _p, _n, _cand, _line in _dead_ipc[:6]:
+        print("BAD\t%s:%d names `%s`, which no IPC handler registers." % (_p, _n, _cand))
+        print("BAD\t  %s" % _line[:110])
+    print("BAD\t  A reader is being told to call or trace a command that does not exist.")
+else:
+    print("OK\tno live document names an IPC command absent from `generate_handlers!` (scanned %d documents against %d registrations)"
+          % (len(_live_docs), len(_registered)))
 
 # ── The repository name is Locus, and it must never be written Chrysalis ──
 #

@@ -1,5 +1,12 @@
 # Chrysalis Scripts
 
+```
+audience:    operator, builder
+status:      live
+authoritative-for: the repo-root utility scripts — code generation, card printing, and the dead-dependency gate
+verified-against: scripts/, docs/operate/RELEASING.md
+```
+
 Utility scripts for Chrysalis code generation, printing, and operations.
 
 ## Files
@@ -57,8 +64,9 @@ EXPIRY_DAYS=30 PB_TOKEN=$(grep PB_TOKEN /root/.pb_admin_creds | cut -d= -f2)
 # Generate PDF from codes file
 ./scripts/print_codes.sh free-codes.txt free-cards.pdf
 
-# Pipe codes directly
-cat free-codes.txt | ./scripts/print_codes.sh -o free-cards.pdf
+# Pipe codes directly (writes chrysalis-cards.pdf — there is no -o flag;
+# the output name is only settable when an input FILE is the first argument)
+cat free-codes.txt | ./scripts/print_codes.sh
 ```
 
 ## Code Format

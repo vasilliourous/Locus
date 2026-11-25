@@ -51,13 +51,19 @@ interface Release {
   installers?: Record<string, FetchArtifact | undefined>
 }
 
-// The filenames the client's updater looks for. If these do not match, updates
-// silently never apply, so the page names them explicitly.
+// The platform keys, and the asset name each one's updater payload carries.
+//
+// `filename` is a DISPLAY HINT, not the contract: the hub is the authority on
+// what a release actually holds (`platforms[key].url`), and the page renders the
+// served basename where it has one. It reads `chrysalis-*` because that is what
+// CI publishes from 2026-11-25; the `locus-*` twin is still published and is
+// still what a parked client resolves, which is why the read-out below prefers
+// the served name over this guess rather than asserting it.
 const EXPECTED: { key: string; filename: string; label: string }[] = [
-  { key: 'linux', filename: 'locus-linux-amd64', label: 'Linux (amd64)' },  // DEPRECATED ALIAS: artefact name, see docs/reference/NAME-MIGRATION.md
-  { key: 'windows', filename: 'locus-windows-amd64.exe', label: 'Windows (amd64)' },
-  { key: 'macos_intel', filename: 'locus-darwin-amd64', label: 'macOS (Intel)' },
-  { key: 'macos_arm', filename: 'locus-darwin-arm64', label: 'macOS (Apple Silicon)' },
+  { key: 'linux', filename: 'chrysalis-linux-amd64', label: 'Linux (amd64)' },
+  { key: 'windows', filename: 'chrysalis-windows-amd64.exe', label: 'Windows (amd64)' },
+  { key: 'macos_intel', filename: 'chrysalis-darwin-amd64', label: 'macOS (Intel)' },
+  { key: 'macos_arm', filename: 'chrysalis-darwin-arm64', label: 'macOS (Apple Silicon)' },
 ]
 
 const release = ref<Release | null>(null)
@@ -252,15 +258,31 @@ const publishedCount = computed(
 )
 const allPublished = computed(() => publishedCount.value === EXPECTED.length)
 
+// The basename of a served URL, so the table shows the asset the hub actually
+// holds rather than the name this page expects. Across the `locus-*` →
+// `chrysalis-*` move those differ for releases on either side of it, and the
+// whole point of the column is to reveal a mismatch, not to hide it behind a
+// constant. Returns '' for a missing URL so the caller can fall back.
+const lastSegment = (url?: string): string => {
+  if (!url) return ''
+  const clean = url.split('?')[0].split('#')[0]
+  return clean.substring(clean.lastIndexOf('/') + 1)
+}
+
 // ── The macOS human download ──
 //
-// Mirrors `installer_zip_names()` in fetch-release.py: two architectures, named
-// `installer-Locus_<version>_<arch>.zip`. This is a CONTRACT with the hub and
-// with CI, and it is the one place the console names a non-updater asset — if
-// the template changes there, this must change with it. Deliberately NOT added
-// to EXPECTED above: that array drives the "all four platforms published"
+// Mirrors `MACOS_ZIP_TEMPLATE` in fetch-release.py: two architectures, named
+// `installer-Chrysalis_<version>_<arch>.zip`. This is a CONTRACT with the hub
+// and with CI, and it is the one place the console names a non-updater asset —
+// if the template changes there, this must change with it. Deliberately NOT
+// added to EXPECTED above: that array drives the "all four platforms published"
 // warning and the offer guard, and a missing human download must never be able
 // to block offering an update.
+//
+// The pre-move `installer-Locus_*` name is still LINKED below when the release
+// carries it instead (`filenameLegacy`), because a release published either side
+// of the move is a valid thing to hand a student. The label is the current name;
+// the link prefers whatever the hub reports it actually has.
 //
 // The read-out prefers the last FETCH RESULT (which carries the hub's own
 // verified size/hash/format) and falls back to the published release row, so a
@@ -273,12 +295,22 @@ const MAC_ARCHES = [
 const macDownloads = computed(() => {
   const v = (release.value?.version || version.value).trim().replace(/^v/, '')
   if (!v) return []
-  return MAC_ARCHES.map((a) => ({
-    key: a.key,
-    label: a.label,
-    filename: `installer-Locus_${v}_${a.arch}.zip`,
-    art: fetched.value?.[a.key] ?? release.value?.installers?.[a.key] ?? undefined,
-  }))
+  return MAC_ARCHES.map((a) => {
+    const current = `installer-Chrysalis_${v}_${a.arch}.zip`
+    // DEPRECATED ALIAS — resolved by the hub for a release built before the
+    // move. See docs/reference/NAME-MIGRATION.md §3.1.
+    const legacy = `installer-Locus_${v}_${a.arch}.zip`
+    const art = fetched.value?.[a.key] ?? release.value?.installers?.[a.key] ?? undefined
+    return {
+      key: a.key,
+      label: a.label,
+      filename: current,
+      // What the hub actually holds, when it says: prefer it over the guess.
+      href: art?.url || undefined,
+      art,
+      legacy,
+    }
+  })
 })
 
 onMounted(() => {
@@ -310,7 +342,7 @@ onMounted(() => {
         <tbody>
           <tr v-for="e in EXPECTED" :key="e.key">
             <td>{{ e.label }}</td>
-            <td class="mono">{{ e.filename }}</td>
+            <td class="mono">{{ lastSegment(release?.platforms?.[e.key]?.url) || e.filename }}</td>
             <td class="mono">
               {{ release.platforms[e.key]?.sha256 ? release.platforms[e.key].sha256.slice(0, 16) + '…' : '— not published —' }}
             </td>

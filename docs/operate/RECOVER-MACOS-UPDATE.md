@@ -30,7 +30,7 @@ extracts a tar of an `.app` bundle. Full narrative in
 >
 > | # | What | Blocked on |
 > |---|---|---|
-> | 1 | A release carries `chrysalis-darwin-<arch>.app.tar.gz` **and its `.sig`** | CI + `LOCUS_UPDATE_KEY` |
+> | 1 | A release carries `chrysalis-darwin-<arch>.app.tar.gz` **and its `.sig`** | CI + the signing secret |
 > | 2 | The **host's** `fetch-release.py` resolves the tarball | a deploy (`hooks-sync.sh --fetch-service`) |
 > | 3 | `update_config` is re-published | console → Fetch & publish |
 >
@@ -122,23 +122,28 @@ gh release view vX.Y.Z --repo vasilliourous/Locus --json assets \
   -q '.assets[].name' | sort
 ```
 
-Required, and the tarball lines are the ones easy to be missing:
+Required, and the tarball lines are the ones easy to be missing.
+
+**A release from 2026-11-25 onward carries `chrysalis-*`, and a release before it
+carries `locus-*`.** Both are valid inputs; check whichever the release has, and
+do not conclude "missing" from the other spelling. Each `locus-*` file is a
+byte-identical twin of its `chrysalis-*` one, published for builds in the field.
 
 ```text
 installer-Chrysalis_X.Y.Z_x64-setup.exe
 installer-Chrysalis_X.Y.Z_x64-setup.exe.sig
-locus-darwin-amd64
-locus-darwin-amd64.sig
-locus-darwin-amd64.app.tar.gz        ← REQUIRED
-locus-darwin-amd64.app.tar.gz.sig    ← REQUIRED
-locus-darwin-arm64
-locus-darwin-arm64.sig
-locus-darwin-arm64.app.tar.gz        ← REQUIRED
-locus-darwin-arm64.app.tar.gz.sig    ← REQUIRED
-locus-linux-amd64
-locus-linux-amd64.sig
-locus-windows-amd64.exe
-locus-windows-amd64.exe.sig
+chrysalis-darwin-amd64
+chrysalis-darwin-amd64.sig
+chrysalis-darwin-amd64.app.tar.gz        ← REQUIRED
+chrysalis-darwin-amd64.app.tar.gz.sig    ← REQUIRED
+chrysalis-darwin-arm64
+chrysalis-darwin-arm64.sig
+chrysalis-darwin-arm64.app.tar.gz        ← REQUIRED
+chrysalis-darwin-arm64.app.tar.gz.sig    ← REQUIRED
+chrysalis-linux-amd64
+chrysalis-linux-amd64.sig
+chrysalis-windows-amd64.exe
+chrysalis-windows-amd64.exe.sig
 manifest.json
 ```
 
@@ -147,7 +152,7 @@ Also confirm CI's manifest names the tarballs:
 ```sh
 curl -sL https://github.com/vasilliourous/Locus/releases/download/vX.Y.Z/manifest.json \
   | python3 -c "import json,sys; d=json.load(sys.stdin); print({k:v['file'] for k,v in d['platforms'].items()})"
-# -> {'macos_intel': 'locus-darwin-amd64.app.tar.gz', 'macos_arm': 'locus-darwin-arm64.app.tar.gz', …}
+# -> {'macos_intel': 'chrysalis-darwin-amd64.app.tar.gz', 'macos_arm': 'chrysalis-darwin-arm64.app.tar.gz', …}
 ```
 
 ---

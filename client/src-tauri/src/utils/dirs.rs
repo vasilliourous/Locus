@@ -13,20 +13,48 @@ use tauri::Manager as _;
 /// owner SID of this directory plus the token file inside it are the
 /// credentials the Service checks. See `core::owner_identity`.
 ///
-/// **DEPRECATED ALIAS — `com.locus.client` is retained on purpose.** The value
-/// is an identity, not a label: the fielded client keeps its activation code,
-/// device fingerprint and tier under this directory, and on Windows the
-/// privileged Service authenticates the app by this directory's owner SID. A
-/// rename here is an identity release with a data-root migration (the
-/// [`LEGACY_APP_IDS`] path exists for exactly that), not part of the branding
-/// change. See docs/reference/NAME-MIGRATION.md.
+/// **MOVED FROM `com.locus.client` ON 2026-11-25, and the move is safe for one
+/// specific reason: this value is *read*, never compiled into anything that
+/// outlives the install.** The update path does not depend on it — the updater is
+/// handed a URL by the hub and verifies the bytes against the compiled-in
+/// minisign pubkey, neither of which names the identifier (`/api/update` emits no
+/// identifier field at all). What it DOES decide is where the activation code,
+/// device fingerprint and tier live, which is why the previous value had to stay
+/// adoptable: [`LEGACY_APP_IDS`] carries it, and
+/// [`migrate_legacy_app_data_dir`] renames the old root on first launch.
+///
+/// **Ordering is load-bearing.** The adoption runs in `lib::run` *before* the
+/// Windows owner repair, the singleton lock and the logger, because all three
+/// resolve paths through this root. See the comment there.
 #[cfg(not(feature = "verge-dev"))]
-pub static APP_ID: &str = "com.locus.client";
+pub static APP_ID: &str = "com.chrysalis.client";
+/// **DEPRECATED ALIAS — `locus-backup` is retained on purpose, and it is NOT the
+/// same kind of name as [`APP_ID`].**
+///
+/// [`APP_ID`] is a directory *this app* creates and reads on the local disk, so
+/// [`migrate_legacy_app_data_dir`] renames it on first launch and the move is
+/// invisible. This constant is not that: it is the remote collection name used in
+/// WebDAV paths (`{BACKUP_DIR}/{file}` in `core::backup`), so it names a directory
+/// on a **server this product does not control**.
+///
+/// Renaming it would not migrate anything — it would point at a collection that
+/// does not exist, so `mkcol` creates an empty one and every backup a user has
+/// already uploaded becomes invisible to the app while remaining in their
+/// storage. That is indistinguishable from data loss, and there is no migration
+/// path short of enumerating and moving every user's remote files.
+///
+/// It appears in no user-facing string — the product is `Chrysalis` everywhere a
+/// person sees it — so a rename buys nothing but the risk above. Retires when a
+/// deliberate backup-location migration ships, with the remote move as part of
+/// it, never before.
 #[cfg(not(feature = "verge-dev"))]
 pub static BACKUP_DIR: &str = "locus-backup";
 
 #[cfg(feature = "verge-dev")]
-pub static APP_ID: &str = "com.locus.client.dev";
+pub static APP_ID: &str = "com.chrysalis.client.dev";
+/// The dev channel keeps its own remote collection so a dev build cannot write
+/// into a release user's backup directory. Same retention reason as the release
+/// value above.
 #[cfg(feature = "verge-dev")]
 pub static BACKUP_DIR: &str = "locus-backup-dev";
 
@@ -37,8 +65,17 @@ pub static BACKUP_DIR: &str = "locus-backup-dev";
 /// literals: nothing writes them any more, and they must not be "tidied" into
 /// the current [`APP_ID`], because then the migration would have nothing to
 /// look for.
+///
+/// **ORDER MATTERS, and the newest first is not a style choice.** The loop in
+/// [`adopt_legacy_app_data_dir`] takes the FIRST id that exists, so
+/// `com.locus.client` (the fleet's data root until 2026-11-25) must be checked
+/// before the Clash Verge Rev one it was itself adopted from. Reversing these
+/// would make a machine that never adopted the upstream directory — which is
+/// most of them — adopt the wrong one if both are present.
 #[cfg(not(feature = "verge-dev"))]
 const LEGACY_APP_IDS: &[&str] = &[
+    // The identity this product shipped under until the 2026-11-25 move.
+    "com.locus.client",
     // The upstream Clash Verge Rev identity the fork was copied from.
     "io.github.clash-verge-rev.clash-verge-rev",
 ];
@@ -46,6 +83,8 @@ const LEGACY_APP_IDS: &[&str] = &[
 /// Development builds live beside the release ones rather than sharing a root.
 #[cfg(feature = "verge-dev")]
 const LEGACY_APP_IDS: &[&str] = &[
+    "com.locus.client.dev",
+    "com.locus.client",
     "io.github.clash-verge-rev.clash-verge-rev.dev",
     "io.github.clash-verge-rev.clash-verge-rev",
 ];
@@ -549,6 +588,70 @@ mod app_data_migration_tests {
             !LEGACY_APP_IDS.contains(&APP_ID),
             "the current identity must not be a migration candidate — it would match a root \
              this build just created"
+        );
+    }
+
+    /// **THE 2026-11-25 IDENTITY MOVE, PINNED.**
+    ///
+    /// `APP_ID` moved from `com.locus.client`, and every installed machine has its
+    /// activation code, device fingerprint and tier under the old root. This test
+    /// asserts the two things that make the move survivable, in the order that
+    /// makes it survivable:
+    ///
+    ///   1. the old id IS a candidate — delete it and every existing install
+    ///      starts from an empty profile set and has to re-activate;
+    ///   2. it is checked BEFORE the upstream Clash Verge Rev id — the loop takes
+    ///      the first existing candidate, and a machine that was never copied from
+    ///      upstream (most of them) has no upstream directory, while a machine that
+    ///      HAS one must still prefer its own data.
+    ///
+    /// A test rather than a comment because the failure mode is silent: nothing
+    /// errors, the app simply starts empty and the user re-enters their code.
+    #[test]
+    fn the_pre_move_identity_is_a_candidate_and_precedes_upstream() {
+        let moved_from = if cfg!(feature = "verge-dev") {
+            "com.locus.client.dev"
+        } else {
+            "com.locus.client"
+        };
+        let moved_from_idx = LEGACY_APP_IDS.iter().position(|id| *id == moved_from);
+        assert!(
+            moved_from_idx.is_some(),
+            "`{moved_from}` must stay a migration candidate: it is the data root every \
+             install before 2026-11-25 writes its activation code, device fingerprint and \
+             tier into. Without it those installs start from an empty root."
+        );
+
+        let upstream = if cfg!(feature = "verge-dev") {
+            "io.github.clash-verge-rev.clash-verge-rev.dev"
+        } else {
+            "io.github.clash-verge-rev.clash-verge-rev"
+        };
+        if let Some(upstream_idx) = LEGACY_APP_IDS.iter().position(|id| *id == upstream) {
+            assert!(
+                moved_from_idx.expect("asserted above") < upstream_idx,
+                "the pre-move identity must be tried BEFORE {upstream}: the adoption loop \
+                 takes the first candidate that exists, and preferring the upstream \
+                 directory would hand an install someone else's old profile set. \
+                 Actual order: {LEGACY_APP_IDS:?}"
+            );
+        }
+    }
+
+    /// The release identity and the dev identity must not be reachable from each
+    /// other's candidate list, or a dev build would adopt a release data root (or
+    /// the reverse) and two installations would fight over one directory.
+    #[test]
+    fn the_other_channels_identity_is_not_a_candidate() {
+        let other = if cfg!(feature = "verge-dev") {
+            "com.chrysalis.client"
+        } else {
+            "com.chrysalis.client.dev"
+        };
+        assert!(
+            !LEGACY_APP_IDS.contains(&other),
+            "`{other}` belongs to the other channel and must never be adopted — the two \
+             roots are deliberately separate"
         );
     }
 

@@ -46,6 +46,9 @@ find its owner here first.
 | Fact / topic | Canonical home |
 |---|---|
 | Derived facts — version, domain, console path, platform list | [`state.toml`](state.toml) |
+| The app identity and the roots it adopts (`APP_ID`, `LEGACY_APP_IDS`) | [`state.toml`](state.toml) `[client.identity]` — the pair is one fact on purpose, so an emptied adoption list cannot pass |
+| `productName`, which derives the bundle and installer filenames | [`state.toml`](state.toml) `[client.product_name]` |
+| The updater artefact names, current **and** deprecated | [`state.toml`](state.toml) `[artifacts.updater]`; which names are contracts and when each retires is [`reference/NAME-MIGRATION.md`](reference/NAME-MIGRATION.md) §3 |
 | World claims — hub up, data live, CI ran, preview current | [`operate/CLAIMS.md`](operate/CLAIMS.md) §5 |
 | How to write any fact at all | [`operate/CLAIMS.md`](operate/CLAIMS.md) |
 | The map of the documents themselves | [`README.md`](README.md) |

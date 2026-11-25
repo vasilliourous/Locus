@@ -367,9 +367,9 @@ says, edit the rows under that screen's heading.
 | `backend:launchGuard.moveFailed` | Failed to move the application. Move it manually in Finder and try again. | client/src-tauri/src/utils/macos_launch_guard.rs:250 |
 | `backend:launchGuard.replaceFailed` | Unable to replace the existing application safely: {error} | client/src-tauri/src/utils/macos_launch_guard.rs:257 |
 | `backend:launchGuard.relaunchFailed` | The application was copied, but it could not be relaunched automatically. Open it manually from Applications. | client/src-tauri/src/utils/macos_launch_guard.rs:275 |
-| `backend:launchGuard.cancel` | Cancel | client/src-tauri/src/utils/macos_launch_guard.rs:336 |
-| `backend:launchGuard.move` | Move | client/src-tauri/src/utils/macos_launch_guard.rs:337 |
-| `backend:launchGuard.ok` | OK | client/src-tauri/src/utils/macos_launch_guard.rs:355 |
+| `backend:launchGuard.cancel` | Cancel | client/src-tauri/src/utils/macos_launch_guard.rs:342 |
+| `backend:launchGuard.move` | Move | client/src-tauri/src/utils/macos_launch_guard.rs:343 |
+| `backend:launchGuard.ok` | OK | client/src-tauri/src/utils/macos_launch_guard.rs:361 |
 | `backend:tray.dashboard` | Dashboard | client/src-tauri/src/core/tray/menu_def.rs:28 |
 | `backend:tray.ruleMode` | Rule Mode | client/src-tauri/src/core/tray/menu_def.rs:29 |
 | `backend:tray.globalMode` | Global Mode | client/src-tauri/src/core/tray/menu_def.rs:30 |

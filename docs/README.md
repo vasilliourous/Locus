@@ -49,7 +49,7 @@ bulk-delete `codes` or `code_events`; revoke with Suspend, move with Unbind.*
 | [`STATE.md`](STATE.md) | live | **Where a fact goes.** The two claim classes and the ownership map — one canonical home per topic. Not a fact table. |
 | [`state.toml`](state.toml) | data | The derived facts (version, domain, console path, platform list) as **data**, each with a `source` and `provenance`. Guard-enforced by §9. |
 | [`operate/CLAIMS.md`](operate/CLAIMS.md) | live | **Read before writing any fact.** The two claim classes, the decision procedure, and the dated register of world claims (§5). |
-| [`CONTEXT.md`](CONTEXT.md) | live | **Orientation in one page:** the product, the glossary, the repo layout, the `myvpn` naming rule, the pitfalls index. |
+| [`CONTEXT.md`](CONTEXT.md) | live | **Orientation in one page:** the product, the glossary, the repo layout, the legacy-name rule (`myvpn`/`Locus` names that stay), the pitfalls index. |
 | [`reference/STILL-OPEN.md`](reference/STILL-OPEN.md) | live | What is unfinished or unvalidated, and what was deliberately left alone. |
 
 ## Operate the hub — `docs/operate/`
@@ -167,6 +167,16 @@ that the client keeps in a machine store —
 | [`client/docs/UPDATE-ARCHITECTURE.md`](../client/docs/UPDATE-ARCHITECTURE.md) | design-record | Why the updater is hub-mediated, and how it differs from Tauri's. Implemented, with two documented corrections. |
 | [`client/docs/ARCHITECTURE.md`](../client/docs/ARCHITECTURE.md) | design-record | The pre-port rework plan: what to cut from upstream, where Chrysalis logic goes, and the old client's bugs not to re-earn. |
 | [`client/docs/RESTRUCTURE.md`](../client/docs/RESTRUCTURE.md) | design-record | The repo layout after the 2026-09 separation, and the paths that do not exist. |
+
+## The repo-root script tree — `scripts/`
+
+`server/scripts/` is indexed under **Operate** above, where it belongs — those are
+the commands that touch the live hub, and the direction that matters. This tree is
+different: nothing in `scripts/` reaches the server.
+
+| Document | `status` | What it is |
+|---|---|---|
+| [`scripts/README.md`](../scripts/README.md) | live | Activation-code generation, card printing, and `check-rust-deps.sh` (the dead-dependency gate that `-D warnings` structurally cannot see). |
 
 ## Archived and historical
 

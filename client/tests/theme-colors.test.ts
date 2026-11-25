@@ -494,9 +494,10 @@ describe('the mark is legible on the surfaces it is drawn on', () => {
     const stops = readGlyph()
     // Guard the guard: an empty list would make the loop below pass vacuously,
     // which is exactly the "check that cannot fail" this file exists to avoid.
-    expect(stops.length, 'glyph.svg declares no gradient stops').toBeGreaterThan(
-      0,
-    )
+    expect(
+      stops.length,
+      'glyph.svg declares no gradient stops',
+    ).toBeGreaterThan(0)
     for (const stop of stops) {
       expect(
         contrast(stop, palette.background),

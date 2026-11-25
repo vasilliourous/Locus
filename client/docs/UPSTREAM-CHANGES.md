@@ -208,7 +208,7 @@ The document is valid YAML and every unit test passed; only running the real eng
 |---|---|
 | `uot_port` (hub) ↔ `server_port_uot` (client) | The hub passes the tier config through verbatim; deployed clients read `uot_port`. Tolerance lives on the client side |
 | `download_<platform>` (record) → `update_<platform>` (heartbeat) | Historical, and now load-bearing: deployed clients read `update_linux` |
-| platform key `macos_intel` ↔ filename `locus-darwin-amd64` | CI produces `darwin-*`; the hub resolves by that exact name |
+| platform key `macos_intel` ↔ filename `<product>-darwin-amd64.app.tar.gz` | CI produces `darwin-*`; the hub resolves by that exact name. The product infix is `productName`, so it moved with the 2026-11-25 rename — the *asymmetry* (macos key, darwin file) did not |
 
 ### The `204` on `/api/update`
 
@@ -242,9 +242,9 @@ still sent, but only as a rate-limit and support key. Full design:
 
 | | Upstream | Chrysalis |
 |---|---|---|
-| App id | `io.github.clash-verge-rev.clash-verge-rev` | `com.locus.client` |
+| App id | `io.github.clash-verge-rev.clash-verge-rev` | `com.chrysalis.client` (adopts `com.locus.client`, then upstream's) |
 | Data dir | upstream's | migrated on first launch (see below) |
-| Product name | Clash Verge | Chrysalis |
+| Product name | Clash Verge | Chrysalis (`productName`, which derives the bundle and installer filenames) |
 | Version | 2.5.5 (inherited) | its own 3.x line, not Verge's — current value in `../../docs/state.toml` `[client.version]` |
 
 **The data-dir migration is real user state**, not a rename: `APP_ID` is the app data
@@ -253,6 +253,18 @@ owner SID plus a token file inside it). `utils::dirs::migrate_legacy_app_data_di
 renames the old directory on first launch, and the rule is deliberately conservative:
 only when the new root does not exist, rename (never copy), and report failure
 non-fatally. Full detail in `IDENTITY-MIGRATION.md`.
+
+**The id moved twice, and `LEGACY_APP_IDS` carries both predecessors in order.**
+`io.github.clash-verge-rev` → `com.locus.client` (the fork's own identity) →
+`com.chrysalis.client` (2026-11-25). The adoption loop takes the FIRST candidate
+that exists, so the list is newest-first and a test pins that ordering — a machine
+that was never copied from upstream has no upstream directory, while a machine that
+*was* must still prefer its own data over someone else's old profile set.
+
+**The update path does not depend on the id.** The updater is handed a URL by the
+hub and verifies the bytes against the compiled-in minisign pubkey; `/api/update`
+emits no identifier field. That is what made the second move safe without a key
+rotation — the data root was the only thing hanging off it.
 
 **Version drift is guarded by a test.** `tests/version_consistency.rs` reads
 `Cargo.toml`, `package.json` and `tauri.conf.json` from disk and asserts they agree.

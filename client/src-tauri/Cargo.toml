@@ -34,7 +34,7 @@ perf-harness = ["dep:tauri-plugin-wdio-webdriver"]
 # by the id it was built with, and its activation code lives under this directory.
 # Renaming it is an identity release, not a rename. See
 # docs/reference/NAME-MIGRATION.md.
-identifier = "com.locus.client"
+identifier = "com.chrysalis.client"
 
 [build-dependencies]
 tauri-build = { version = "2.6.3", features = [] }

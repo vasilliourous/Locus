@@ -91,7 +91,6 @@ STRIKE_PASS
 BUDGET_PASS
 PB_ADMIN_EMAIL
 PB_ADMIN_PASS
-LOCUS_UPDATE_KEY_B64
 VPS_PW
 "
 # BUDGET_PASS joined the required list on 2026-11-12: Budget is a SOLD plan
@@ -100,16 +99,42 @@ VPS_PW
 # got its own entry for — a key absent from the bundle becomes a surprise on the
 # VPS, not at this prompt.
 #
-# LOCUS_UPDATE_KEY_B64 carries the old product word on purpose: it is a key name
-# inside the committed ciphertext, and renaming it would mean re-encrypting the
-# bundle for a spelling. A bundle re-encrypted under the new name is accepted too
-# — see ALIASES below. See docs/reference/NAME-MIGRATION.md.
+# THE SIGNING KEY IS AN EITHER-OF, NOT A REQUIRED NAME. It left the list above
+# on 2026-11-25 because the name is a key INSIDE the committed ciphertext: a
+# bundle written before that date carries `LOCUS_UPDATE_KEY_B64`, one re-encrypted
+# after it carries `CHRYSALIS_UPDATE_KEY_B64`, and demanding one spelling would
+# refuse every bundle of the other generation. The check below requires exactly
+# one of them, and requires that they are not BOTH present — two definitions is
+# the silent-shadowing case this script already rejects elsewhere.
+# See docs/reference/NAME-MIGRATION.md §3.3.
 #
 # STEALTH_PASS stays OPTIONAL (retired tier) but must still be a real value if
 # present, so an upgraded host does not fork. ACTIVATION_TUNNEL_KEY is reported
 # separately below because its absence is survivable-but-wrong, not fatal.
 
 missing=""
+
+# ── The signing-key entry: exactly ONE of the two names ──
+#
+# A bundle carries the key under one spelling or the other, never both. Absent
+# from both is fatal (the extractor would have nothing to read); present under
+# both is fatal too, because the LAST definition wins and which one that is
+# depends on file order — a silent shadowing the duplicate check further down
+# would catch only by accident, since the names differ.
+_update_key_found=""
+for _name in CHRYSALIS_UPDATE_KEY_B64 LOCUS_UPDATE_KEY_B64; do
+    if grep -qE "^${_name}=" "$IN_FILE" 2>/dev/null; then
+        _update_key_found="${_update_key_found} ${_name}"
+    fi
+done
+# Trim the leading space for the count.
+_update_key_count=$(printf '%s' "$_update_key_found" | wc -w | tr -d ' ')
+case "$_update_key_count" in
+    1) : ;;
+    0) missing="${missing} CHRYSALIS_UPDATE_KEY_B64(absent — or the LOCUS_UPDATE_KEY_B64 alias)" ;;
+    *) missing="${missing} UPDATE_KEY(ambiguous: both CHRYSALIS_UPDATE_KEY_B64 and LOCUS_UPDATE_KEY_B64 present)" ;;
+esac
+
 for var in $REQUIRED_VARS; do
     line="$(grep -E "^${var}=" "$IN_FILE" 2>/dev/null | tail -n1 || true)"
     if [ -z "$line" ]; then

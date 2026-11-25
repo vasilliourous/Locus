@@ -120,17 +120,33 @@ chmod 600 "$TMP_ENV"
   Check the passphrase. Nothing was written."
 
 # ── Pull the key out, without ever echoing it ──
-# The bundle's key is still named LOCUS_UPDATE_KEY_B64. That is a DEPRECATED
-# ALIAS held on purpose: the value is a key inside a committed age ciphertext,
-# and renaming it would mean re-encrypting the bundle for a spelling. Both names
-# are accepted so the script keeps working across a future re-encrypt.
-# See docs/reference/NAME-MIGRATION.md.
-key_b64=$(
-    { grep -m1 '^LOCUS_UPDATE_KEY_B64=' "$TMP_ENV" || grep -m1 '^CHRYSALIS_UPDATE_KEY_B64=' "$TMP_ENV"; } \
-        | cut -d= -f2- || true
+#
+# TWO NAMES, CURRENT FIRST. `CHRYSALIS_UPDATE_KEY_B64` is the name this project
+# wants; `LOCUS_UPDATE_KEY_B64` is what every bundle written before 2026-11-25
+# actually contains. The order flipped on 2026-11-25 and the alias is kept,
+# deliberately, because the value lives inside a committed age ciphertext:
+# renaming the ENTRY means re-encrypting the bundle, which is an operator action
+# with the passphrase (`secrets-encrypt.sh`), not a commit.
+#
+# Both spellings are therefore accepted, and which one is found is reported
+# below rather than assumed — a host running on the alias should say so, or the
+# re-encrypt that retires it never happens. See NAME-MIGRATION.md §3.3.
+key_line=$(
+    { grep -m1 '^CHRYSALIS_UPDATE_KEY_B64=' "$TMP_ENV" || grep -m1 '^LOCUS_UPDATE_KEY_B64=' "$TMP_ENV"; } \
+        || true
 )
+case "$key_line" in
+    CHRYSALIS_UPDATE_KEY_B64=*) BUNDLE_KEY_NAME="CHRYSALIS_UPDATE_KEY_B64" ;;
+    LOCUS_UPDATE_KEY_B64=*)
+        BUNDLE_KEY_NAME="LOCUS_UPDATE_KEY_B64 (DEPRECATED ALIAS — re-encrypt to migrate)"
+        warn "the bundle still stores the key as LOCUS_UPDATE_KEY_B64. It works; to retire" \
+             "the alias, run: bash server/scripts/secrets-encrypt.sh (after editing the plaintext)."
+        ;;
+    *) BUNDLE_KEY_NAME="" ;;
+esac
+key_b64=$(printf '%s' "$key_line" | cut -d= -f2- || true)
 if [ -z "$key_b64" ]; then
-    fail "server/secrets.env.age has no LOCUS_UPDATE_KEY_B64 (or CHRYSALIS_UPDATE_KEY_B64).
+    fail "server/secrets.env.age has no CHRYSALIS_UPDATE_KEY_B64 (or the LOCUS_UPDATE_KEY_B64 alias).
   The bundle is the key's only durable copy — restore it before signing.
   See docs/operate/RELEASE-RECOVERY.md §2."
 fi
@@ -140,7 +156,7 @@ chmod 600 "$TMP_KEY"
 # shellcheck disable=SC2064
 trap 'rm -f "$TMP_ENV" "$TMP_KEY"' EXIT
 printf '%s' "$key_b64" | base64 -d > "$TMP_KEY" 2>/dev/null \
-    || fail "LOCUS_UPDATE_KEY_B64 is not valid base64 — the bundle entry is corrupt"
+    || fail "$BUNDLE_KEY_NAME is not valid base64 — the bundle entry is corrupt"
 
 # ── Verification 1: is this a minisign secret key at all? ──
 #
@@ -150,7 +166,7 @@ printf '%s' "$key_b64" | base64 -d > "$TMP_KEY" 2>/dev/null \
 # newline folded into it — which would otherwise surface only at signing time.
 head -c 18 "$TMP_KEY" | grep -q 'untrusted comment:' \
     || fail "the extracted bytes are not a minisign secret key (missing 'untrusted comment:').
-  LOCUS_UPDATE_KEY_B64 in the bundle may be truncated or wrapped."
+  $BUNDLE_KEY_NAME in the bundle may be truncated or wrapped."
 
 # ── Verification 2: does the PUBLIC half match what the client trusts? ──
 #

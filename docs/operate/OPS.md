@@ -539,10 +539,12 @@ Tiers → edit → Save. Clients pick it up on their next heartbeat (≤5 min).
    with all four raw binaries attached. The console **fetches from GitHub**; it
    never asks you to pick a file.
 2. Releases → enter the version (e.g. `2.2.1`) → **Fetch & publish**.
-   The hub downloads `locus-linux-amd64`, the Windows installer
-   `installer-Chrysalis_<version>_x64-setup.exe`, `locus-darwin-amd64`,
-   `locus-darwin-arm64` and `manifest.json` **from the
-   GitHub Release tagged `v2.2.1` itself**, verifies each file's format against
+   The hub downloads `chrysalis-linux-amd64`, the Windows installer
+   `installer-Chrysalis_<version>_x64-setup.exe`,
+   `chrysalis-darwin-amd64.app.tar.gz`, `chrysalis-darwin-arm64.app.tar.gz` and
+   `manifest.json` **from the GitHub Release tagged `v2.2.1` itself** (for a
+   release published before 2026-11-25 it fetches the `locus-*` equivalents,
+   which it still resolves), verifies each file's format against
    the platform slot it belongs in (a Windows `.exe` in the Linux slot is
    refused; a raw PE in the Windows slot is refused too — the slot needs an
    installer) and records the hashes it computed. It also checks each filename

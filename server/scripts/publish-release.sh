@@ -132,13 +132,17 @@ done
 # script did not follow, so the hub served the raw binary and every Windows
 # client refused it. The name carries the version because Tauri names the bundle
 # with it — kept in step with `installer_name()` in fetch-release.py.
-WINDOWS_INSTALLER="installer-Locus_${VERSION}_x64-setup.exe"
+WINDOWS_INSTALLER="installer-Chrysalis_${VERSION}_x64-setup.exe"
+# DEPRECATED ALIAS — the pre-move `productName`. Resolved only when the release
+# carries this name instead, which it does for anything built before 2026-11-25.
+# Same lifetime as the `locus-*` rows below; NAME-MIGRATION.md §3.1.
+WINDOWS_INSTALLER_LEGACY="installer-Locus_${VERSION}_x64-setup.exe"
 
 PLATFORMS=(
-    "linux:locus-linux-amd64:update_linux"
+    "linux:chrysalis-linux-amd64:update_linux"
     "windows:${WINDOWS_INSTALLER}:update_windows"
-    "macos_intel:locus-darwin-amd64.app.tar.gz:update_macos_intel"
-    "macos_arm:locus-darwin-arm64.app.tar.gz:update_macos_arm"
+    "macos_intel:chrysalis-darwin-amd64.app.tar.gz:update_macos_intel"
+    "macos_arm:chrysalis-darwin-arm64.app.tar.gz:update_macos_arm"
 )
 
 log()  { printf '\033[0;32m[publish]\033[0m %s\n' "$*"; }
@@ -325,20 +329,27 @@ fi
 MANIFEST="${RELEASE_DIR}/manifest.json"
 if [ -f "$MANIFEST" ]; then
     log "Cross-checking against manifest.json…"
-    python3 - "$MANIFEST" "$RELEASE_DIR" "$WINDOWS_INSTALLER" "${HAVE_KEYS[@]}" <<'PY' || fail "manifest cross-check FAILED — refusing to publish"
+    python3 - "$MANIFEST" "$RELEASE_DIR" "${WINDOWS_INSTALLER},${WINDOWS_INSTALLER_LEGACY}" "${HAVE_KEYS[@]}" <<'PY' || fail "manifest cross-check FAILED — refusing to publish"
 import base64, hashlib, json, os, sys
 manifest_path, rel_dir = sys.argv[1], sys.argv[2]
-win_installer = sys.argv[3]
+# Every Windows installer name this release may legitimately carry: the current
+# `productName` first, then the pre-move one. The cross-check asks "does the
+# manifest name the file we are about to advertise", so it must accept the
+# spelling the build actually produced. Collapsing this back to one literal is
+# the bug that made a pre-move release un-publishable, and the one that made a
+# post-move release fetch the wrong asset — the pair is what prevents both.
+win_installers = sys.argv[3].split(",")
+win_installer = win_installers[0]
 keys = sys.argv[4:]
 m = json.load(open(manifest_path))
 plats = m.get("platforms", {})
-# What this script will actually advertise, per platform. The Windows entry is
-# the installer, NOT the raw `locus-windows-amd64.exe` — see the note above
-# PLATFORMS. Kept in step with fetch-release.py's `resolve_platform_names`.
-ours = {"linux": "locus-linux-amd64",
-        "windows": win_installer,
-        "macos_intel": "locus-darwin-amd64.app.tar.gz",
-        "macos_arm": "locus-darwin-arm64.app.tar.gz"}
+# What this script will actually advertise, per platform. Each entry is a SET of
+# acceptable names — current and deprecated — and the manifest must name one of
+# them. Kept in step with fetch-release.py's `resolve_platform_names`.
+ours = {"linux": {"chrysalis-linux-amd64", "locus-linux-amd64"},
+        "windows": set(win_installers),
+        "macos_intel": {"chrysalis-darwin-amd64.app.tar.gz", "locus-darwin-amd64.app.tar.gz"},
+        "macos_arm": {"chrysalis-darwin-arm64.app.tar.gz", "locus-darwin-arm64.app.tar.gz"}}
 bad = 0
 for k in keys:
     entry = plats.get(k)
@@ -351,8 +362,8 @@ for k in keys:
     # CI's manifest said `installer-Locus_<v>_x64-setup.exe`, both were checked
     # and both "passed", and the hub shipped the raw binary anyway. Comparing the
     # filename is the only way the two halves can be caught disagreeing.
-    if entry.get("file") != ours.get(k):
-        print(f"  {k}: NAME MISMATCH manifest={entry.get('file')!r} we would serve={ours.get(k)!r}")
+    if entry.get("file") not in ours.get(k, set()):
+        print(f"  {k}: NAME MISMATCH manifest={entry.get('file')!r} we would serve one of={sorted(ours.get(k, ()))!r}")
         bad += 1
         continue
     p = os.path.join(rel_dir, entry["file"])
@@ -440,16 +451,26 @@ if [ -z "$PB_TOKEN" ]; then
 fi
 
 # Build the record. Only advertise platforms we actually uploaded.
-python3 - "$PB_API" "$PB_TOKEN" "$VERSION" "$ROLLOUT_PERCENT" "$RELEASE_DIR" "$WINDOWS_INSTALLER" "${HAVE_KEYS[@]}" <<'PY' || fail "update_config update failed" 3
+python3 - "$PB_API" "$PB_TOKEN" "$VERSION" "$ROLLOUT_PERCENT" "$RELEASE_DIR" "${WINDOWS_INSTALLER},${WINDOWS_INSTALLER_LEGACY}" "${HAVE_KEYS[@]}" <<'PY' || fail "update_config update failed" 3
 import base64, hashlib, json, os, subprocess, sys
 api, token, version, rollout, rel_dir = sys.argv[1], sys.argv[2], sys.argv[3], int(sys.argv[4]), sys.argv[5]
-win_installer = sys.argv[6]
+win_installers = sys.argv[6].split(",")
 keys = sys.argv[7:]
 
-FILES = {"linux": "locus-linux-amd64",
-         "windows": win_installer,
-         "macos_intel": "locus-darwin-amd64.app.tar.gz",
-         "macos_arm": "locus-darwin-arm64.app.tar.gz"}
+# EACH VALUE IS THE FILE THAT IS ACTUALLY ON DISK, chosen from the current name
+# set first and the pre-move set second. Writing a literal here is how the row
+# and the manifest came to disagree before; writing the *resolved* name means the
+# row cannot name a file this release does not carry.
+def pick(candidates):
+    for name in candidates:
+        if os.path.isfile(os.path.join(rel_dir, name)):
+            return name
+    return candidates[0]
+
+FILES = {"linux": pick(["chrysalis-linux-amd64", "locus-linux-amd64"]),
+         "windows": pick(win_installers),
+         "macos_intel": pick(["chrysalis-darwin-amd64.app.tar.gz", "locus-darwin-amd64.app.tar.gz"]),
+         "macos_arm": pick(["chrysalis-darwin-arm64.app.tar.gz", "locus-darwin-arm64.app.tar.gz"])}
 
 def req(method, path, data=None):
     cmd = ["curl", "-s", "-X", method, api + path,
@@ -490,12 +511,6 @@ for key in keys:
     h = hashlib.sha256(open(os.path.join(rel_dir, fname), "rb").read()).hexdigest()
     body["sha256_" + key] = h
 
-    # The minisign signature CI produced alongside the binary. REQUIRED: the
-    # Tauri updater verifies a signature mandatorily and has no bypass, so a row
-    # without one is not installable by any client. /api/update refuses to
-    # advertise such a row rather than letting clients download and then fail
-    # verification — but the right place to catch it is here, at publish time.
-    #
     # The minisign signature CI produced alongside the binary. REQUIRED: the
     # Tauri updater verifies a signature mandatorily and has no bypass, so a row
     # without one is not installable by any client. /api/update refuses to

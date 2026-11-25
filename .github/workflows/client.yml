@@ -286,16 +286,36 @@ jobs:
       - name: Check the signing key is configured
         working-directory: .
         env:
+          # DEPRECATED ALIAS — BOTH secret names are read, current first.
+          #
+          # Actions secrets are write-only: renaming a REFERENCE to a secret
+          # that has not been created yields an empty string, and every signed
+          # build then fails with no hint that the name is the problem. So the
+          # reference moves only when both names are readable — this line, which
+          # works whether the operator has created `CHRYSALIS_UPDATE_KEY` yet or
+          # not. Retire the `secrets.LOCUS_UPDATE_KEY` half once
+          # `gh secret list` shows the new name on every repository that builds
+          # (docs/operate/RELEASING.md §the signing secret).
+          CHRYSALIS_UPDATE_KEY: ${{ secrets.CHRYSALIS_UPDATE_KEY }}
           LOCUS_UPDATE_KEY: ${{ secrets.LOCUS_UPDATE_KEY }}
         run: |
           set -euo pipefail
-          if [ -z "${LOCUS_UPDATE_KEY:-}" ]; then
-            echo "::error::LOCUS_UPDATE_KEY is not set, so every build job would fail at signing."
-            echo "::error::Set it with: gh secret set LOCUS_UPDATE_KEY --repo ${GITHUB_REPOSITORY:-<owner>/<repo>} < .chrysalis-keys/chrysalis_update.key"
+          # CURRENT NAME FIRST, then the pre-move alias. One variable downstream,
+          # so a signing step cannot accidentally read only one of the two.
+          KEY_VALUE="${CHRYSALIS_UPDATE_KEY:-${LOCUS_UPDATE_KEY:-}}"
+          KEY_NAME="CHRYSALIS_UPDATE_KEY"
+          if [ -z "$KEY_VALUE" ] && [ -n "${LOCUS_UPDATE_KEY:-}" ]; then
+            KEY_VALUE="$LOCUS_UPDATE_KEY"
+            KEY_NAME="LOCUS_UPDATE_KEY (DEPRECATED ALIAS — rename it; see RELEASING.md)"
+            echo "::warning::Signing with the pre-move secret name. Create CHRYSALIS_UPDATE_KEY and drop the alias."
+          fi
+          if [ -z "$KEY_VALUE" ]; then
+            echo "::error::No signing secret is set, so every build job would fail at signing."
+            echo "::error::Set it with: gh secret set CHRYSALIS_UPDATE_KEY --repo ${GITHUB_REPOSITORY:-<owner>/<repo>} < .chrysalis-keys/chrysalis_update.key"
             echo "::error::Secrets do not survive a repository copy. See client/docs/SIGNING.md §4a."
             exit 1
           fi
-          echo "LOCUS_UPDATE_KEY is present (value not printed; length ${#LOCUS_UPDATE_KEY} bytes)"
+          echo "$KEY_NAME is present (value not printed; length ${#KEY_VALUE} bytes)"
 
       # ── Preflight: can this repository actually CLAIM each matrix runner? ──
       #
@@ -670,6 +690,25 @@ jobs:
       - name: Lint
         run: pnpm run lint
 
+      # ── Formatting, which no job checked ──
+      #
+      # WHY THIS EXISTS: `pnpm format:check` (`biome format .`) is in
+      # `package.json`, is named in `client/AGENTS.md` as a gate, and was run by
+      # NOTHING in this workflow. On 2026-11-25 two tracked files on `main`
+      # failed it — `scripts/generate-icons.mjs` (three call sites the formatter
+      # would re-wrap) and `tests/theme-colors.test.ts` — and no run had ever
+      # said so. A gate a human is told to run and CI never runs is a gate that
+      # decays at the rate of the fastest editor, and the decay is invisible
+      # because it reads exactly like a clean tree.
+      #
+      # It is scoped to `client/` by the job's `working-directory`, so it cannot
+      # wander into the workspace root's own formatting. `format:check` does NOT
+      # write (`biome format .` without `--write`), so it fails rather than
+      # fixing in CI — a formatter that silently rewrites in a gate makes the
+      # next push disagree with the run that passed.
+      - name: Formatting
+        run: pnpm run format:check
+
       # ── The frontend test suite ──
       #
       # WHY THIS EXISTS: the frontend suite existed in `client/src/**/*.test.ts`
@@ -853,11 +892,11 @@ jobs:
           - os: ubuntu-24.04
             label: linux
             triple: x86_64-unknown-linux-gnu
-            artifact: locus-linux-amd64
+            artifact: chrysalis-linux-amd64
           - os: windows-2022
             label: windows
             triple: x86_64-pc-windows-msvc
-            artifact: locus-windows-amd64.exe
+            artifact: chrysalis-windows-amd64.exe
           # ── ONE LABEL PER ARCHITECTURE. THE `-intel` SUFFIX IS LOAD-BEARING ──
           #
           # A BARE macOS LABEL IS ARM64. `macos-15` / `macos-26` resolve to the
@@ -916,11 +955,11 @@ jobs:
           - os: macos-15-intel
             label: macos-intel
             triple: x86_64-apple-darwin
-            artifact: locus-darwin-amd64
+            artifact: chrysalis-darwin-amd64
           - os: macos-15
             label: macos-arm
             triple: aarch64-apple-darwin
-            artifact: locus-darwin-arm64
+            artifact: chrysalis-darwin-arm64
     steps:
       - uses: actions/checkout@v4
 
@@ -1785,6 +1824,23 @@ jobs:
           mkdir -p artifacts
           cp "$src" "artifacts/${{ matrix.artifact }}"
           chmod +x "artifacts/${{ matrix.artifact }}"
+          # DEPRECATED ALIAS — publish the pre-move name beside the new one.
+          #
+          # Every build older than this release resolves `locus-<platform>` out of
+          # the GitHub Release, and so does any hub row written before the move.
+          # Publishing only `chrysalis-*` makes those releases un-fetchable, which
+          # the operator sees as "the release is missing its assets" at publish
+          # time — after four platforms have built and signed. Both names carry
+          # BYTE-IDENTICAL content, so one signature verifies both (minisign signs
+          # bytes, not filenames).
+          #
+          # This retires with the `locus-*` rows in NAME-MIGRATION.md §3.1.
+          legacy="${matrix.artifact/chrysalis-/locus-}"
+          if [ "$legacy" != "${{ matrix.artifact }}" ]; then
+            cp "$src" "artifacts/$legacy"
+            chmod +x "artifacts/$legacy"
+            echo "staged deprecated alias $legacy"
+          fi
 
       - name: Stage the raw updater artifact (windows)
         if: matrix.label == 'windows'
@@ -1806,6 +1862,12 @@ jobs:
           echo "staging $src"
           mkdir -p artifacts
           cp "$src" "artifacts/${{ matrix.artifact }}"
+          # DEPRECATED ALIAS — see the unix step above for why both names ship.
+          legacy="${matrix.artifact/chrysalis-/locus-}"
+          if [ "$legacy" != "${{ matrix.artifact }}" ]; then
+            cp "$src" "artifacts/$legacy"
+            echo "staged deprecated alias $legacy"
+          fi
 
       # ── Sign ──
       #
@@ -1946,14 +2008,28 @@ jobs:
           # The private half of the key whose public half is compiled into the
           # app (tauri.conf.json -> plugins.updater.pubkey). See
           # client/docs/SIGNING.md for custody and rotation.
+          # DEPRECATED ALIAS — BOTH secret names are read, current first.
+          #
+          # Actions secrets are write-only: renaming a REFERENCE to a secret
+          # that has not been created yields an empty string, and every signed
+          # build then fails with no hint that the name is the problem. So the
+          # reference moves only when both names are readable — this line, which
+          # works whether the operator has created `CHRYSALIS_UPDATE_KEY` yet or
+          # not. Retire the `secrets.LOCUS_UPDATE_KEY` half once
+          # `gh secret list` shows the new name on every repository that builds
+          # (docs/operate/RELEASING.md §the signing secret).
+          CHRYSALIS_UPDATE_KEY: ${{ secrets.CHRYSALIS_UPDATE_KEY }}
           LOCUS_UPDATE_KEY: ${{ secrets.LOCUS_UPDATE_KEY }}
         run: |
           set -euo pipefail
-          if [ -z "${LOCUS_UPDATE_KEY:-}" ]; then
-            echo "::error::LOCUS_UPDATE_KEY is not set. A release without signatures cannot be installed by any client — see client/docs/SIGNING.md."
+          # Current name first, pre-move alias second — see the note on the env
+          # block above. Everything downstream reads `$SIGNING_KEY`.
+          SIGNING_KEY="${CHRYSALIS_UPDATE_KEY:-${LOCUS_UPDATE_KEY:-}}"
+          if [ -z "$SIGNING_KEY" ]; then
+            echo "::error::No signing secret is set. A release without signatures cannot be installed by any client — see client/docs/SIGNING.md."
             exit 1
           fi
-          printf '%s' "$LOCUS_UPDATE_KEY" > "$RUNNER_TEMP/chrysalis.key"
+          printf '%s' "$SIGNING_KEY" > "$RUNNER_TEMP/chrysalis.key"
           chmod 600 "$RUNNER_TEMP/chrysalis.key"
 
           # Run minisign through Git Bash directly, and give it WINDOWS paths
@@ -1984,6 +2060,23 @@ jobs:
           else
             "$RUNNER_TEMP/minisign/minisign" -S -s "$KEY" -m "$ART" -x "$SIG" \
               -t "Chrysalis ${{ matrix.label }}"
+          fi
+
+          # THE ALIAS BINARY NEEDS ITS OWN `.sig` FILE, even though the signature
+          # is byte-identical. minisign signs the CONTENT, so one signature covers
+          # both names of the same bytes — but the upload step publishes
+          # `<name>.sig` as a separate ASSET, and a client fetching
+          # `locus-linux-amd64.sig` finds a 404 unless a file exists under that
+          # name. Copying it is enough precisely because the bytes are identical;
+          # re-signing would produce the same signature with a different comment.
+          #
+          # Without this, a pre-move client resolved the deprecated `locus-*`
+          # binary and then failed to find its signature — which the updater treats
+          # as an uninstallable release, not as a missing file.
+          legacy="$(printf '%s' "${{ matrix.artifact }}" | sed 's/^chrysalis-/locus-/')"
+          if [ "$legacy" != "${{ matrix.artifact }}" ] && [ -f "artifacts/$legacy" ]; then
+            cp "artifacts/${{ matrix.artifact }}.sig" "artifacts/$legacy.sig"
+            echo "Copied the signature to the deprecated alias: $legacy.sig"
           fi
 
           rm -f "$RUNNER_TEMP/chrysalis.key"
@@ -2140,6 +2233,10 @@ jobs:
           mkdir -p "$mount" "$stage"
 
           echo "Signing the app inside $dmg"
+          # `productName` derives `<productName>.app`; read it, never hardcode it.
+          # A literal here stops existing the day the config changes, which is
+          # what made the 2026-11-23 and 2026-11-25 renames break macOS packaging.
+          APP_NAME="$(python3 -c 'import json; print(json.load(open("src-tauri/tauri.conf.json"))["productName"])').app"
           hdiutil attach "$dmg" -nobrowse -noverify -readonly -mountpoint "$mount"
 
           # Copy the CONTENTS out (dotfiles and the /Applications symlink
@@ -2151,9 +2248,9 @@ jobs:
           }
           hdiutil detach "$mount"
 
-          app="$stage/Locus.app"
+          app="$stage/$APP_NAME"
           if [ ! -d "$app" ]; then
-            echo "::error::no Locus.app in $dmg"
+            echo "::error::no $APP_NAME in $dmg"
             ls -la "$stage" || true
             exit 1
           fi
@@ -2196,20 +2293,24 @@ jobs:
           # artifact — not the step's exit status — is what is checked.
           verify="$work/verify"
           mkdir -p "$verify"
+          # `productName` derives `<productName>.app`; read it, never hardcode it.
+          # A literal here stops existing the day the config changes, which is
+          # what made the 2026-11-23 and 2026-11-25 renames break macOS packaging.
+          APP_NAME="$(python3 -c 'import json; print(json.load(open("src-tauri/tauri.conf.json"))["productName"])').app"
           hdiutil attach "$dmg" -nobrowse -noverify -readonly -mountpoint "$verify"
           ok=0
-          if [ -d "$verify/Locus.app" ] && codesign --verify --deep --strict "$verify/Locus.app" 2>/dev/null; then
+          if [ -d "$verify/$APP_NAME" ] && codesign --verify --deep --strict "$verify/$APP_NAME" 2>/dev/null; then
             ok=1
           fi
           hdiutil detach "$verify"
 
           if [ "$ok" -ne 1 ]; then
-            echo "::error::$dmg does not contain a validly ad-hoc-signed Locus.app"
+            echo "::error::$dmg does not contain a validly ad-hoc-signed $APP_NAME"
             ls -la "$verify" || true
             exit 1
           fi
 
-          echo "Verified: $dmg carries a signed Locus.app (ad-hoc, no Developer ID)"
+          echo "Verified: $dmg carries a signed $APP_NAME (ad-hoc, no Developer ID)"
 
       # ── Package the macOS updater payload as a .app.tar.gz ──
       #
@@ -2254,6 +2355,17 @@ jobs:
         shell: bash
         env:
           # The same key the artifact signing step uses; see client/docs/SIGNING.md.
+          # DEPRECATED ALIAS — BOTH secret names are read, current first.
+          #
+          # Actions secrets are write-only: renaming a REFERENCE to a secret
+          # that has not been created yields an empty string, and every signed
+          # build then fails with no hint that the name is the problem. So the
+          # reference moves only when both names are readable — this line, which
+          # works whether the operator has created `CHRYSALIS_UPDATE_KEY` yet or
+          # not. Retire the `secrets.LOCUS_UPDATE_KEY` half once
+          # `gh secret list` shows the new name on every repository that builds
+          # (docs/operate/RELEASING.md §the signing secret).
+          CHRYSALIS_UPDATE_KEY: ${{ secrets.CHRYSALIS_UPDATE_KEY }}
           LOCUS_UPDATE_KEY: ${{ secrets.LOCUS_UPDATE_KEY }}
         run: |
           set -euo pipefail
@@ -2275,10 +2387,14 @@ jobs:
           work="$(mktemp -d)"
           mount="$work/mnt"
           mkdir -p "$mount"
+          # `productName` derives `<productName>.app`; read it, never hardcode it.
+          # A literal here stops existing the day the config changes, which is
+          # what made the 2026-11-23 and 2026-11-25 renames break macOS packaging.
+          APP_NAME="$(python3 -c 'import json; print(json.load(open("src-tauri/tauri.conf.json"))["productName"])').app"
           hdiutil attach "$dmg" -nobrowse -noverify -readonly -mountpoint "$mount"
-          cp -R "$mount/Locus.app" "$work/" || {
+          cp -R "$mount/$APP_NAME" "$work/" || {
             hdiutil detach "$mount" || true
-            echo "::error::no Locus.app inside $dmg"
+            echo "::error::no $APP_NAME inside $dmg"
             exit 1
           }
           hdiutil detach "$mount"
@@ -2292,20 +2408,20 @@ jobs:
           # `tar` from the parent so entries begin `Locus.app/`, which is what
           # the plugin's `skip(1)` expects. `--no-xattrs` keeps resource forks
           # out; `gzip -9` because a 100 MB app is a student's download.
-          ( cd "$work" && tar --no-xattrs -czf - Locus.app ) > "$tarball"
+          ( cd "$work" && tar --no-xattrs -czf - "$APP_NAME" ) > "$tarball"
 
           # ── Read it back ──
           #
           # Prove the archive is the shape the plugin will accept, from the
           # artifact rather than from the step's exit status: a tar that captured
           # the wrong depth exits 0 and installs nothing.
-          if ! tar -tzf "$tarball" | head -1 | grep -q '^Locus\.app/'; then
-            echo "::error::$tarball does not start with Locus.app/ — the updater's skip(1) would miss it"
+          if ! tar -tzf "$tarball" | head -1 | grep -qF "$APP_NAME/"; then
+            echo "::error::$tarball does not start with $APP_NAME/ — the updater's skip(1) would miss it"
             tar -tzf "$tarball" | head -10 || true
             exit 1
           fi
-          if ! tar -tzf "$tarball" | grep -q '^Locus\.app/Contents/MacOS/'; then
-            echo "::error::$tarball is missing Locus.app/Contents/MacOS/ — not a runnable bundle"
+          if ! tar -tzf "$tarball" | grep -qF "$APP_NAME/Contents/MacOS/"; then
+            echo "::error::$tarball is missing $APP_NAME/Contents/MacOS/ — not a runnable bundle"
             exit 1
           fi
 
@@ -2343,10 +2459,13 @@ jobs:
           # cleans up is the kind of cross-step coupling that works until someone
           # reorders the steps.
           KEY="$RUNNER_TEMP/chrysalis-tarball.key"
-          printf '%s' "${LOCUS_UPDATE_KEY:-}" > "$KEY"
+          # Current secret name first, pre-move alias second — the same resolution
+          # the earlier signing step uses, repeated here because that step's key
+          # file is deleted by the time this runs.
+          printf '%s' "${CHRYSALIS_UPDATE_KEY:-${LOCUS_UPDATE_KEY:-}}" > "$KEY"
           chmod 600 "$KEY"
           if [ ! -s "$KEY" ]; then
-            echo "::error::LOCUS_UPDATE_KEY is not set, so the macOS updater payload cannot be signed (see client/docs/SIGNING.md)."
+            echo "::error::No signing secret is set (CHRYSALIS_UPDATE_KEY, or the LOCUS_UPDATE_KEY alias), so the macOS updater payload cannot be signed (see client/docs/SIGNING.md)."
             exit 1
           fi
           "$RUNNER_TEMP/minisign/minisign" -S -s "$KEY" -m "$tarball" \
@@ -2359,6 +2478,19 @@ jobs:
           fi
           echo "Signed $(basename "$tarball"):"
           cat "$tarball.sig"
+
+          # DEPRECATED ALIAS — the tarball's signature under the pre-move name.
+          #
+          # This is a SEPARATE step from "Sign the artifact" because the tarball
+          # does not exist until this one packages the bundle, so the alias copy
+          # there would run before the file it copies. minisign signs CONTENT, so
+          # the signature is identical for the byte-identical alias — copying it is
+          # exactly right, and re-signing would only change the comment line.
+          tarball_legacy="$(printf '%s' "$tarball" | sed 's#/chrysalis-#/locus-#')"
+          if [ "$tarball_legacy" != "$tarball" ] && [ -f "$tarball_legacy" ]; then
+            cp "$tarball.sig" "$tarball_legacy.sig"
+            echo "Copied the signature to the deprecated alias: $(basename "$tarball_legacy").sig"
+          fi
 
       # ── Upload the updater payload ──
       #
@@ -2388,7 +2520,21 @@ jobs:
             client/artifacts/${{ matrix.artifact }}.sig
             client/artifacts/${{ matrix.artifact }}.app.tar.gz
             client/artifacts/${{ matrix.artifact }}.app.tar.gz.sig
+          # THE DEPRECATED ALIASES ARE A SEPARATE, OPTIONAL UPLOAD.
+          #
+          # They cannot go in the block above: `if-no-files-found: error` would
+          # fail the Windows job, which has no macOS tarball, and vice versa. This
+          # second action uploads whatever alias files the stage steps created and
+          # tolerates their absence (`ignore`), because the alias set is a
+          # migration artifact rather than a build output.
           if-no-files-found: error
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: update-alias-${{ matrix.label }}
+          path: |
+            client/artifacts/locus-*
+          if-no-files-found: ignore
 
       # ── Sign the Windows installer ──
       #
@@ -2434,14 +2580,27 @@ jobs:
         if: matrix.label == 'windows'
         shell: bash
         env:
+          # DEPRECATED ALIAS — BOTH secret names are read, current first.
+          #
+          # Actions secrets are write-only: renaming a REFERENCE to a secret
+          # that has not been created yields an empty string, and every signed
+          # build then fails with no hint that the name is the problem. So the
+          # reference moves only when both names are readable — this line, which
+          # works whether the operator has created `CHRYSALIS_UPDATE_KEY` yet or
+          # not. Retire the `secrets.LOCUS_UPDATE_KEY` half once
+          # `gh secret list` shows the new name on every repository that builds
+          # (docs/operate/RELEASING.md §the signing secret).
+          CHRYSALIS_UPDATE_KEY: ${{ secrets.CHRYSALIS_UPDATE_KEY }}
           LOCUS_UPDATE_KEY: ${{ secrets.LOCUS_UPDATE_KEY }}
         run: |
           set -euo pipefail
-          if [ -z "${LOCUS_UPDATE_KEY:-}" ]; then
-            echo "::error::LOCUS_UPDATE_KEY is not set. An unsigned installer cannot be installed by any client — see client/docs/SIGNING.md."
+          # Current name first, pre-move alias second (see the note on the env block).
+          SIGNING_KEY="${CHRYSALIS_UPDATE_KEY:-${LOCUS_UPDATE_KEY:-}}"
+          if [ -z "$SIGNING_KEY" ]; then
+            echo "::error::No signing secret is set. An unsigned installer cannot be installed by any client — see client/docs/SIGNING.md."
             exit 1
           fi
-          printf '%s' "$LOCUS_UPDATE_KEY" > "$RUNNER_TEMP/chrysalis.key"
+          printf '%s' "$SIGNING_KEY" > "$RUNNER_TEMP/chrysalis.key"
           chmod 600 "$RUNNER_TEMP/chrysalis.key"
 
           # EXACTLY ONE NSIS setup, found by a glob.
@@ -2460,8 +2619,22 @@ jobs:
           # in step: minisign signs exact bytes and the `.sig` is a sibling
           # filename, so a rename applied to one but not the other would produce
           # a signature that verifies nothing.
+          # THE GLOB READS `productName`, it does not restate it.
+          #
+          # This was a live defect in a comment and a literal that disagreed:
+          # the comment above says the file is `Chrysalis_*_x64-setup.exe` with no
+          # prefix (true — that is what Tauri's bundler writes and what the
+          # staging step copies into `installer/`), while the glob below said
+          # `installer/Locus_*_x64-setup.exe` (a prefix nothing adds at this
+          # point, and a product name that stopped being current on 2026-11-25).
+          # It matched nothing, so the step would exit 1 with "no
+          # Chrysalis_*_x64-setup.exe to sign" on `productName: Chrysalis`.
+          #
+          # That is the v3.5.0 failure shape exactly: a shell pattern three
+          # thousand lines from the config it depends on. Read it, never restate it.
+          PRODUCT="$(python3 -c 'import json; print(json.load(open("client/src-tauri/tauri.conf.json"))["productName"])')"
           setup=""
-          for f in installer/Locus_*_x64-setup.exe; do
+          for f in "installer/${PRODUCT}_"*_x64-setup.exe; do
             [ -f "$f" ] || continue
             if [ -n "$setup" ]; then
               echo "::error::more than one NSIS installer staged: '$setup' and '$f'"
@@ -2470,7 +2643,7 @@ jobs:
             setup="$f"
           done
           if [ -z "$setup" ]; then
-            echo "::error::no Chrysalis_*_x64-setup.exe to sign in installer/"
+            echo "::error::no ${PRODUCT}_*_x64-setup.exe to sign in installer/"
             ls -la installer/ || true
             exit 1
           fi
@@ -2540,11 +2713,15 @@ jobs:
           work="$(mktemp -d)"
           mount="$work/mnt"
           mkdir -p "$mount"
+          # `productName` derives `<productName>.app`; read it, never hardcode it.
+          # A literal here stops existing the day the config changes, which is
+          # what made the 2026-11-23 and 2026-11-25 renames break macOS packaging.
+          APP_NAME="$(python3 -c 'import json; print(json.load(open("src-tauri/tauri.conf.json"))["productName"])').app"
           hdiutil attach "$dmg" -nobrowse -noverify -readonly -mountpoint "$mount"
-          app_src="$mount/Locus.app"
+          app_src="$mount/$APP_NAME"
           if [ ! -d "$app_src" ]; then
             hdiutil detach "$mount" || true
-            echo "::error::no Locus.app inside $dmg"
+            echo "::error::no $APP_NAME inside $dmg"
             exit 1
           fi
 
@@ -2560,7 +2737,13 @@ jobs:
           esac
 
           ver="$(node -p "require('./package.json').version")"
-          out="installer/Locus_${ver}_${arch}.zip"
+          # The zip carries `productName` too — it is a FILENAME, so it follows the
+          # same string as the installer and the `.app`. It was a `Locus_` literal
+          # while `productName` said `Chrysalis`, so the file landed under a name
+          # `fetch-release.py`'s `MACOS_ZIP_TEMPLATE` (installer-Chrysalis_…) and
+          # the release job's zip assertion both refused — after both macOS slices
+          # had built and signed.
+          out="installer/${APP_NAME%.app}_${ver}_${arch}.zip"
 
           # `--keepParent` so the archive contains `Locus.app/` rather than the
           # bundle's CONTENTS at the archive root. Without it, extracting gives
@@ -2583,12 +2766,12 @@ jobs:
           listing="$(unzip -l "$out")"
           printf '%s\n' "$listing" | head -20 | sed 's/^/    /'
           bad=0
-          printf '%s' "$listing" | grep -q 'Locus\.app/' || {
-            echo "::error::$out does not contain Locus.app/ — the bundle root is missing"
+          printf '%s' "$listing" | grep -qF "$APP_NAME/" || {
+            echo "::error::$out does not contain $APP_NAME/ — the bundle root is missing"
             bad=1
           }
-          printf '%s' "$listing" | grep -q 'Locus\.app/Contents/MacOS/' || {
-            echo "::error::$out does not contain Locus.app/Contents/MacOS/ — the executable is missing"
+          printf '%s' "$listing" | grep -qF "$APP_NAME/Contents/MacOS/" || {
+            echo "::error::$out does not contain $APP_NAME/Contents/MacOS/ — the executable is missing"
             bad=1
           }
           [ "$bad" -eq 0 ] || exit 1
@@ -2602,8 +2785,8 @@ jobs:
           extract="$work/extract"
           mkdir -p "$extract"
           ditto -x -k "$out" "$extract"
-          codesign --verify --deep --strict "$extract/Locus.app"
-          echo "Verified: $out extracts to a validly signed Locus.app"
+          codesign --verify --deep --strict "$extract/$APP_NAME"
+          echo "Verified: $out extracts to a validly signed $APP_NAME"
 
           ls -la installer/
       - uses: actions/upload-artifact@v4
@@ -2625,6 +2808,12 @@ jobs:
 
       - uses: actions/download-artifact@v4
         with:
+          # `update-*` deliberately also matches `update-alias-<label>`, the
+          # second upload in each build job that carries the deprecated `locus-*`
+          # binaries and their `.sig` files. If either name changes, this pattern
+          # stops collecting one of the two sets and the release silently loses
+          # its pre-move assets — the failure shape this whole migration exists to
+          # avoid. Both uploads are named after this glob on purpose.
           pattern: update-*
           # download-artifact does NOT flatten by default, and the release job
           # previously assumed it did — producing a release whose assets were in
@@ -2808,10 +2997,10 @@ jobs:
           # cross-check refuses to publish when the two disagree — which is what
           # makes this a single decision rather than two that can drift.
           platforms = {
-              "linux": "locus-linux-amd64",
+              "linux": "chrysalis-linux-amd64",
               "windows": windows_installer(),
-              "macos_intel": "locus-darwin-amd64.app.tar.gz",
-              "macos_arm": "locus-darwin-arm64.app.tar.gz",
+              "macos_intel": "chrysalis-darwin-amd64.app.tar.gz",
+              "macos_arm": "chrysalis-darwin-arm64.app.tar.gz",
           }
 
           # GUARD: the macOS entries must be the packaged bundle. A bare Mach-O
@@ -2873,8 +3062,13 @@ jobs:
               # installer" step above (minisign signs exact bytes, so the raw
               # binary's signature cannot stand in for the installer's).
               #
-              # `locus-*` covers the raw updater payloads; the `installer-` entry
-              # is the one non-`locus-` name that is genuinely an updater payload.
+              # A CURRENT name must be signed (`chrysalis-*` covers the raw
+              # updater payloads and the macOS tarball), and so must the Windows
+              # installer, which is the one updater payload not named for the
+              # product. The `locus-*` aliases are tolerated unsigned here because
+              # the release-level "Verify every artifact is signed" step already
+              # fails on a missing alias signature — duplicating that rule in the
+              # manifest builder would turn one defect into two error messages.
               sig_path = path + ".sig"
               entry = {"file": filename, "sha256": digest}
               if os.path.isfile(sig_path):
@@ -2918,22 +3112,44 @@ jobs:
           # matched something. An empty glob with `set -u` still exits 0, which
           # is the "a check that cannot fire reads exactly like one that passed"
           # failure — so the count is checked rather than assumed.
-          checked=0
-          for f in release/locus-*; do
+          # BOTH NAME SETS ARE VERIFIED, and each is counted separately.
+          #
+          # This looped over `release/locus-*` alone, which was correct while that
+          # was the only set published. Since 2026-11-25 CI publishes
+          # `chrysalis-*` as the primary names AND the `locus-*` aliases, so a
+          # glob for one set leaves the other's signatures unchecked — and the set
+          # that would go unverified is the one the hub now PREFERS. That is the
+          # same class as the original bug this step was written for: a glob that
+          # matches a subset and reports success.
+          checked_current=0
+          checked_legacy=0
+          for f in release/chrysalis-* release/locus-*; do
             [ -f "$f" ] || continue
             case "$f" in
               *.sig) continue ;;
             esac
-            checked=$((checked + 1))
+            case "$(basename "$f")" in
+              chrysalis-*) checked_current=$((checked_current + 1)) ;;
+              locus-*)     checked_legacy=$((checked_legacy + 1)) ;;
+            esac
             if [ ! -f "$f.sig" ]; then
               echo "::error::no signature for $(basename "$f")"
               missing=1
             fi
           done
-          if [ "$checked" -eq 0 ]; then
-            echo "::error::no updater payload matched release/locus-* — the staging step or its names changed, so nothing was verified"
+          if [ "$checked_current" -eq 0 ]; then
+            echo "::error::no updater payload matched release/chrysalis-* — the staging step or its names changed, so nothing was verified"
             ls -la release/ || true
             missing=1
+          fi
+          # The aliases are a migration artifact, so their absence is NOT fatal —
+          # but their presence without a signature is, and that is what the loop
+          # above catches. Reported so a release that silently stopped publishing
+          # them is visible rather than merely not-failed.
+          if [ "$checked_legacy" -eq 0 ]; then
+            echo "::warning::no release/locus-* aliases present; a build older than this release can no longer resolve its assets"
+          else
+            echo "Verified $checked_current current + $checked_legacy deprecated payloads"
           fi
           # The Windows installer is an updater payload too (the hub serves it to
           # a client that executes it), so it must carry its own signature. This
@@ -2995,7 +3211,31 @@ jobs:
           #
           # The bare macOS binaries are still uploaded as assets: they are
           # harmless, and pre-3.2.27 hub rows referenced them.
+          # THE `locus-*` ENTRIES ARE DEPRECATED ALIASES AND ARE REQUIRED.
+          #
+          # Each is the byte-identical twin of the `chrysalis-*` file above it,
+          # staged by "Stage the raw updater artifact" and published under both
+          # names so a build older than this release can still resolve the asset
+          # its own `contract.rs` names. Dropping them strands every parked
+          # client on the last release that carried the old spelling — silently,
+          # because the fetch simply finds no file.
+          #
+          # They retire together with the `locus-*` rows in NAME-MIGRATION.md
+          # §3.1, once no build older than the first `chrysalis-*` release can
+          # still be offered an update. §1c/§1e refuse a half-removal.
           files: |
+            release/chrysalis-linux-amd64
+            release/chrysalis-linux-amd64.sig
+            release/chrysalis-windows-amd64.exe
+            release/chrysalis-windows-amd64.exe.sig
+            release/chrysalis-darwin-amd64
+            release/chrysalis-darwin-amd64.sig
+            release/chrysalis-darwin-arm64
+            release/chrysalis-darwin-arm64.sig
+            release/chrysalis-darwin-amd64.app.tar.gz
+            release/chrysalis-darwin-amd64.app.tar.gz.sig
+            release/chrysalis-darwin-arm64.app.tar.gz
+            release/chrysalis-darwin-arm64.app.tar.gz.sig
             release/locus-linux-amd64
             release/locus-linux-amd64.sig
             release/locus-windows-amd64.exe

@@ -150,6 +150,38 @@ reading taken against the current tree.
 
 ---
 
+## The 2026-11-25 name move shipped in the repo, and three things did not travel with it
+
+**Added 2026-11-25.** The artefact filenames, the app identity, the signing-secret
+name and the bundle key entry all moved in the tree. **None of that reaches a
+deployed system by being committed**, and each item below is an action the
+repository cannot perform. Listed here so the next person does not read a green
+`check-consistency.sh` as "the move is live".
+
+| What | Why the repo is not enough | How to close it |
+|---|---|---|
+| **The hub's hooks** | the hub runs its **own copy** from `/root/server/`. The bootstrap header is accepted under both spellings *in this tree*; a deployed hub that predates it reads only `x-locus-bootstrap`, so a new client's header is absent and **every tunnelled client shares one rate-limit bucket** — no error, just a silent loss of the protection | `bash server/scripts/hooks-sync.sh` to diff, then deploy; verify two devices on one network do **not** share a bucket |
+| **The hub's release fetcher** | `fetch-release.py` ALSO runs from `/root/server/scripts/`, as its own copy, and it is the only thing that can publish a release. The dual-name resolver (`LEGACY_PLATFORMS`, the legacy installer/zip templates) is inert on the hub until this is deployed — so the hub would refuse a `chrysalis-*` release as missing its assets. It has its own sync path, separate from the hooks | `bash server/scripts/hooks-sync.sh --fetch-service --dry-run`, then without `--dry-run`. **Both sync steps are required**; doing only the hooks leaves the fetcher on the old resolver |
+| **The signing secret** | Actions secrets are write-only and per-repository. The workflow reads **both** `CHRYSALIS_UPDATE_KEY` and `LOCUS_UPDATE_KEY`, so nothing is broken either way — but the alias never retires until someone creates the new name | `gh secret set CHRYSALIS_UPDATE_KEY …`, then `gh secret list`; remove the alias half of the `env:` mapping in a later commit |
+| **The bundle key entry** | the key name lives inside the committed age ciphertext. Both scripts accept either spelling, so both generations work — but `LOCUS_UPDATE_KEY_B64` only disappears on a re-encrypt | `secrets-encrypt.sh` with the passphrase, after editing the plaintext; the extractor warns while a host is still on the alias |
+
+**Also not closed by this change, on purpose:**
+
+- **The GitHub remote is still `vasilliourous/Locus`.** Every reader takes
+  `GITHUB_REPO`, and `verify-release.sh` gained that override in this change (it
+  was the one hardcoded place). A rename needs no code change — only the defaults,
+  in one commit afterwards.
+- **The landing page still serves as `locusvpn.jadedns.uk`.** `chrysalisvpn` now
+  resolves (see `../operate/CLAIMS.md` A30) but the page has not been re-rendered
+  or re-checked on that host.
+- **No build was produced or verified.** Everything here is `cargo test --lib`
+  (741 passed), `clippy -D warnings`, `fmt --check`, the frontend suite, and
+  `check-consistency.sh`. **No release was cut and no platform packaging step ran**
+  — the macOS packaging edits (`APP_NAME` read from config) and the Windows
+  installer rename are verified only by the guards that read the same strings.
+
+---
+
 ## The suspension fix — every gap needs the same two things: a code and a deployed hub
 
 **Added 2026-11-22.** Four defects fixed; **none of it has been run end to end.**
@@ -1645,8 +1677,18 @@ Recording these so they are not re-investigated:
   was to finish the feature: the state was never rendered, **and** nothing re-read
   the status after a successful recognition, so a returning student waited up to
   `ENTITLEMENT_POLL_MS` on a screen telling them their device was registered. The
-  second half was not lint-visible — trace what happens after `locus_recognise`
+  second half was not lint-visible — trace what happens after the recognition IPC
   returns, do not trust the linter to find it.
+
+  > **The procedure above is no longer followable, and that is the instruction.**
+  > Device recognition was removed from both sides: there is no recognition IPC to
+  > trace. `cmd/chrysalis.rs` records the removal where it stood (*"`chrysalis_recognise`,
+  > `resolve_identity`, `RecognitionResult` — REMOVED"*), and it was removed rather
+  > than renamed, so the command this entry names (the old spelling, since removed
+  > under both) has no target to trace. What replaced the wait it described is the
+  > persisted credential in `crate::chrysalis::credential` (a reinstall keeps its
+  > access because the activation code is stored machine-scoped). The lesson
+  > survives the mechanism; the trace target does not.
 - **`shadowsocks-eco` WARN lines** — `decrypt length failed` from AWS-range IPs.
   Internet scanners probing open ports; they cannot complete the AEAD handshake.
   Benign, and the volume is low.
@@ -1686,7 +1728,7 @@ frontend builds are green in this checkout; none of it has been run end to end.
   `is_signed_out()` was called from nowhere.
 - The update poll's cadence, its first-check offset, and that a stop resolves
   immediately rather than waiting out the hour (`chrysalis::update::poll::tests`).
-- That `locus_update_status` refuses to offer the running version, and that a spent
+- That `chrysalis_update_status` refuses to offer the running version, and that a spent
   offer is cleared — by construction plus `gen-ts-contract.py`, which caught the
   missing TypeScript field and the fixture that predated it.
 

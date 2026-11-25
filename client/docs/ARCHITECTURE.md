@@ -89,11 +89,21 @@ Counts and paths verified against the tree in `client/`.
 **Upstream identity removed already** (`client/` state as of this document): package
 name `chrysalis-client`, Cargo package `chrysalis`, license `GPL-3.0-only` (the forked
 upstream terms, as the root `LICENSE` carve-out states), bundle id
-`com.locus.client` (a DEPRECATED ALIAS — see
-[`../../docs/reference/NAME-MIGRATION.md`](../../docs/reference/NAME-MIGRATION.md)), product name
-`Chrysalis`, deep-link scheme `locus`, UA fallback
-`chrysalis-client`, upstream CI and git hooks deleted. The Tauri updater plugin block was
-**removed from `tauri.conf.json`** — see §5.
+`com.chrysalis.client` (moved 2026-11-25; `com.locus.client` is still the *adoption*
+target for an existing data root — see
+[`../../docs/reference/NAME-MIGRATION.md`](../../docs/reference/NAME-MIGRATION.md) §3.2),
+product name `Chrysalis`, UA fallback `chrysalis-client`, upstream CI and git hooks
+deleted. The Tauri updater plugin block was **removed from `tauri.conf.json`** — see §5.
+
+**Two things this paragraph used to claim that are not true, corrected here:**
+
+- It named a deep-link scheme `locus`. There is **no** `deep-link`/`schemes` block in
+  `tauri.conf.json` — the client registers no URL scheme at all. A document naming a
+  configuration key that does not exist sends a reader to grep for something absent,
+  and then to wonder which of the two is wrong.
+- It called `com.locus.client` a deprecated alias. It is now an **adoption** target:
+  nothing writes it, but a first launch under the new identity renames that root into
+  `com.chrysalis.client` so an existing install keeps its activation code.
 
 ---
 

@@ -31,7 +31,21 @@ The Chrysalis server needs several credentials to run:
 | `ACTIVATION_TUNNEL_KEY` | The pre-activation activation tunnel's Shadowsocks password (port 8453). **Shipped compiled into the client**, so treat it as public: what bounds it is the forwarder's allowlist and rate limit, not secrecy. Set once and never rotate — rotating it strands every deployed client, and the heartbeat that could deliver a replacement is the call this tunnel exists to make possible. On the box it is written twice by `setup_key`, both mode `0600`: `/etc/chrysalis/activation-tunnel.key` (the copy an operator reads to compile into a release) and `/etc/chrysalis/activation-tunnel.key.env` (an `EnvironmentFile` for the path filter, which keys each client's rate-limit identity with it — see [`../reference/ACTIVATION-TUNNEL.md`](../reference/ACTIVATION-TUNNEL.md) §3.2). See §3.3 there. |
 
 The bundle also carries one **non-credential** on the same terms: a base64 copy of
-the update signing key (`LOCUS_UPDATE_KEY_B64`, added 2026-10-16 — see the FAQ).
+the update signing key, added 2026-10-16 — see the FAQ. Its **entry name is
+either-of**: `CHRYSALIS_UPDATE_KEY_B64` is the name to use, and
+`LOCUS_UPDATE_KEY_B64` is what every bundle written before 2026-11-25 contains.
+
+> **The signing key is the ONE entry that is not a fixed name in
+> `REQUIRED_VARS`.** Every row above is a literal in that list, because a bundle
+> missing any of them cannot deploy. The signing key is different: the name lives
+> *inside the committed ciphertext*, so a bundle carries one spelling or the
+> other depending on when it was encrypted, and demanding either literal refuses
+> half of all bundles. `secrets-encrypt.sh` therefore checks it **above** the
+> loop: exactly one of the two must be present, and **both at once is refused** —
+> a shell keeps the last definition, so a shadowed key would encrypt cleanly and
+> be wrong. `chrysalis-key-extract.sh` reads both, current first, and warns while
+> a bundle still uses the alias. See
+> [`../reference/NAME-MIGRATION.md`](../reference/NAME-MIGRATION.md) §3.3.
 
 > **`ACTIVATION_TUNNEL_KEY` is now present in the committed bundle** (added
 > 2026-11-04, base64 of 32 random bytes), so a deploy takes
@@ -162,7 +176,8 @@ anything you cannot regenerate. Every secret lives in `server/secrets.env.age`.
 | `.secrets.env` | A plaintext working copy during an edit | **Should not exist.** The flow is decrypt → edit → re-encrypt → `shred -u` |
 
 The update-signing key is stored in the bundle as `LOCUS_UPDATE_KEY_B64`
-(and as the `LOCUS_UPDATE_KEY` Actions secret for CI, which is write-only and
+(and as the `CHRYSALIS_UPDATE_KEY` Actions secret for CI — alias
+`LOCUS_UPDATE_KEY` — which is write-only and
 therefore not a backup). `.chrysalis-keys/` is emptied after each signing session
 precisely so that nobody mistakes it for the key's home — the 2026-10-16 loss was
 that mistake, and it cost the fleet a manual reinstall. The extraction command and
@@ -479,7 +494,7 @@ manager.
 **It does — since the 2026-10-16 rotation.** Read why it did not before, because
 the reason is the whole lesson.
 
-The update signing key (`LOCUS_UPDATE_KEY`, `client/docs/SIGNING.md`) used to
+The update signing key (`CHRYSALIS_UPDATE_KEY`, `client/docs/SIGNING.md`) used to
 live *only* in the GitHub Actions secret store. Actions secrets are write-only —
 no API, `gh` command or UI action returns the value — and no offline copy was
 ever made, so there was nothing on any machine to encrypt. When the key was

@@ -121,6 +121,31 @@ windows-sys = { version = "0.61.2", features = [
 ] }
 # *********************************
 
+# ── The CARGO manifest lints, which the clippy table below cannot reach ──
+#
+# `unused_dependencies` is emitted by cargo, per crate, and `cargo clippy ...
+# -D warnings` is a *rustc* flag — so this class reports **exit 0** while
+# printing the warning. `scripts/check-rust-deps.sh` promotes it to an error for
+# every workspace member (`RUSTFLAGS`/manifest diagnostics), and this block makes
+# the one member that cannot pass that check state its exception where cargo can
+# actually see it.
+#
+# Why `chrysalis` needs the exception and how it is kept honest:
+#   * `tauri-build` is a `[build-dependencies]` entry. `build.rs` calls
+#     `tauri_build::try_build` inside `#[cfg(not(feature = "clippy"))]`, so under
+#     the `clippy` feature the call compiles away and cargo reports the dependency
+#     unused — for that build only.
+#   * `#![allow(unused_crate_dependencies)]` at the top of `build.rs` does NOT
+#     silence it: that is a *rustc* lint of a similar name, not cargo's manifest
+#     lint. It was there until 2026-11-25 and had no effect (verified by removing
+#     it: the warning still fired).
+#   * The guard against hiding a real finding is `check-rust-deps.sh`, which runs
+#     `cargo check --all-targets` — WITHOUT `--features clippy` — and fails if
+#     anything is genuinely dead. So this allowance covers one configuration and
+#     leaves the gate that matters fully armed.
+[workspace.lints.cargo]
+unused_dependencies = "allow"
+
 [workspace.lints.clippy]
 # fallible_impl_from = "deny" // 过于激进，暂时不开启
 # implicit_clone = "deny" // 可能会造成额外开销，暂时不开启

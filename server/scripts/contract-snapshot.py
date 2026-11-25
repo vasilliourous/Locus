@@ -58,6 +58,9 @@ TIER_RS = REPO / "client" / "src-tauri" / "src" / "chrysalis" / "tier.rs"
 CMD_RS = REPO / "client" / "src-tauri" / "src" / "cmd" / "chrysalis.rs"
 CHRYSALIS_RS = REPO / "client" / "src-tauri" / "src" / "chrysalis"
 LIB_RS = REPO / "client" / "src-tauri" / "src" / "lib.rs"
+# The hub's own artefact resolver. Its `LEGACY_PLATFORMS` is the authority on
+# which pre-move names the hub still serves — see the legacy_artifacts block.
+FETCH_RELEASE_PY = REPO / "server" / "scripts" / "fetch-release.py"
 TS_SRC = REPO / "client" / "src"
 HOOKS = REPO / "server" / "pb_hooks"
 
@@ -224,6 +227,35 @@ def collect():
         if key in platforms:
             platforms[key]["artifact"] = artifact
 
+    # ── the DEPRECATED ALIAS artefact names, from the hub's own resolver ──
+    #
+    # `platforms[*]["artifact"]` holds ONE name per platform, which cannot express
+    # "two names are live at once" — the state a rename is in for as long as a
+    # parked fleet resolves the old spelling. Without this, the lock would say
+    # `locus-*` is gone on the same day the hub started serving it, and the next
+    # reader would take the lock's silence as permission to delete the alias.
+    #
+    # The source is `LEGACY_PLATFORMS` in fetch-release.py — the hub's resolver —
+    # rather than the Rust, because it is the hub that must keep resolving both.
+    # Recorded as data, so `--check` notices the alias disappearing.
+    fetch_src = read(FETCH_RELEASE_PY) or ""
+    _legacy_block = ""
+    _m = re.search(r"^LEGACY_PLATFORMS = \[(.*?)^\]", fetch_src, re.S | re.M)
+    if _m:
+        _legacy_block = _m.group(1)
+    for key, name in re.findall(r'\("([a-z_]+)",\s*"([^"]+)"', _legacy_block):
+        if key in platforms:
+            platforms[key].setdefault("legacy_artifacts", []).append(name)
+    # The Windows entry in `LEGACY_PLATFORMS` is `None` (it resolves through the
+    # installer template, not a literal), so the loop above cannot see it. Read the
+    # legacy installer template directly, or the lock would record three of four
+    # aliases and read as if Windows had no pre-move name to keep serving.
+    _win = re.search(r'^LEGACY_INSTALLER_NAME_TEMPLATE = "([^"]+)"', fetch_src, re.M)
+    if _win and "windows" in platforms:
+        platforms["windows"].setdefault("legacy_artifacts", []).append(
+            _win.group(1).replace("%s", "<version>")
+        )
+
     # ── proxy names and the loop trap ──
     tier = read(TIER_RS) or ""
     proxy_names = {}
@@ -298,6 +330,12 @@ def diff(lock, current):
     Both directions are reported; only breaks fail.
     """
     breaks, additions = [], []
+
+    # The hub's resolver, read once: it is the authority on which deprecated
+    # artefact aliases the hub still serves. Read here rather than passed in so
+    # the alias-survival check below cannot be satisfied by stale `current` data
+    # (the extraction reads the Rust, and the aliases live in the Python).
+    fetch_tree_text = read(FETCH_RELEASE_PY) or ""
 
     # structs and their fields
     for sname, fields in lock.get("structs", {}).items():
@@ -380,6 +418,36 @@ def diff(lock, current):
                 "platform %r artifact changed %r -> %r"
                 % (pkey, pdata.get("artifact"), curp.get("artifact"))
             )
+        # THE DEPRECATED ALIASES MUST STILL RESOLVE.
+        #
+        # A rename is a two-sided state for as long as a parked fleet resolves the
+        # old spelling: the hub serves both, CI publishes both, and the lock records
+        # both. This asserts the recorded alias is still present in the tree, so
+        # deleting `LEGACY_PLATFORMS` (or the legacy installer template) fails here
+        # rather than silently making every pre-move release un-fetchable — the
+        # exact silent-no-update failure the whole lock exists to prevent.
+        #
+        # Retiring an alias is a deliberate act: drop it from the lock AND from the
+        # resolver in the same commit, which is what `--write` producing a diff is
+        # for. §1e and §1c then refuse the half-removal.
+        for alias in pdata.get("legacy_artifacts", []) or []:
+            # A literal alias (`locus-linux-amd64`) is checked verbatim. A template
+            # (`installer-Locus_<version>_x64-setup.exe`) is checked by its PRODUCT
+            # TOKEN, `installer-Locus_`, because the version is filled at runtime
+            # and never appears in the source. Matching the whole template string
+            # would fail on every release, which is a guard that always fires and
+            # therefore reports nothing.
+            if "<version>" in alias:
+                needle = alias.split("<version>")[0]
+            else:
+                needle = alias
+            if needle not in fetch_tree_text:
+                breaks.append(
+                    "platform %r lost its deprecated alias %r — the hub no longer "
+                    "resolves it, so a release built before the move cannot be "
+                    "fetched (NAME-MIGRATION.md §3.1)"
+                    % (pkey, alias)
+                )
     for pkey in current["platforms"]:
         if pkey not in lock.get("platforms", {}):
             additions.append("platform %r is new" % pkey)

@@ -72,4 +72,5 @@ One clause each; the file that owns it has the story.
 - **Run `check-consistency.sh` with `bash`.** Under `sh`/`dash` it aborts with
   "Bad substitution" and prints false `BAD` lines.
 - **Secrets do not travel with a repo copy.** A fresh clone has zero Actions
-  secrets and every signed build fails until `LOCUS_UPDATE_KEY` (a DEPRECATED ALIAS name) is set.
+  secrets and every signed build fails until `CHRYSALIS_UPDATE_KEY` (or its
+  `LOCUS_UPDATE_KEY` alias) is set.

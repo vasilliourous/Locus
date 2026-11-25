@@ -92,8 +92,8 @@ negative cases are recorded here.
 | **Public key (as configured)** | `dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXkgNERBOUI0OEYzOTI1MUNFRgpSV1R2SENVNWo3U3BUY1p3VnpKbjg1MkpVZEw0dnVMUEJWRC91RXBjTU1ibmx6dWxZeENKZjZoRgo=` |
 | **Underlying minisign key** | `RWTvHCU5j7SpTcZwVzJn852JUdL4vuLPBVD/uEpcMMbnlzulYxCJf6hF` |
 | **Where it lives** | `client/src-tauri/tauri.conf.json` → `plugins.updater.pubkey` |
-| **Secret key** | `LOCUS_UPDATE_KEY_B64` in `server/secrets.env.age` — the durable copy. `.chrysalis-keys/chrysalis_update.key` is a per-session cache extracted from it. |
-| **Where it must go** | GitHub Actions secret `LOCUS_UPDATE_KEY`, **and** an offline copy you control, **and** a passphrase-encrypted backup inside `server/secrets.env.age` |
+| **Secret key** | The `*_UPDATE_KEY_B64` entry in `server/secrets.env.age` — the durable copy. `.chrysalis-keys/chrysalis_update.key` is a per-session cache extracted from it. The entry is `CHRYSALIS_UPDATE_KEY_B64`, or `LOCUS_UPDATE_KEY_B64` in any bundle encrypted before 2026-11-25; both scripts accept either. |
+| **Where it must go** | GitHub Actions secret `CHRYSALIS_UPDATE_KEY` (or its `LOCUS_UPDATE_KEY` alias), **and** an offline copy you control, **and** a passphrase-encrypted backup inside `server/secrets.env.age` |
 | Key ID | `4DA9B48F39251CEF` (shown in the `.pub` comment line) |
 
 The three-way custody in the last row is not decoration. The reason this rotation
@@ -153,7 +153,7 @@ git check-ignore -v .chrysalis-keys/chrysalis_update.key
 
 `.chrysalis-keys/chrysalis_update.key` is **not kept between sessions** and an empty
 `.chrysalis-keys/` is the normal state after a clone. The durable copy is
-`LOCUS_UPDATE_KEY_B64` in `server/secrets.env.age`. To sign anything locally:
+the `*_UPDATE_KEY_B64` entry in `server/secrets.env.age`. To sign anything locally:
 
 ```sh
 export LOCUS_SECRETS_PASSPHRASE_FILE=decryptionkeyforsecretsdeleteafteruse.txt
@@ -215,7 +215,7 @@ Then, **before shipping anything**:
    **base64 of the whole `.pub` file** — *not* its second line. See §3: the bare
    key line fails at the plugin's `base64_to_string` step. Derive it:
    `base64 -w0 .chrysalis-keys/chrysalis_update.pub`.
-2. Put the whole `chrysalis_update.key` file into the `LOCUS_UPDATE_KEY` GitHub
+2. Put the whole `chrysalis_update.key` file into the `CHRYSALIS_UPDATE_KEY` GitHub
    secret — see §4a for the exact command.
 3. Put an offline copy somewhere you control: a password manager, and ideally a
    second location. **This is the copy whose absence caused the 2026-10-16
@@ -237,7 +237,7 @@ Then, **before shipping anything**:
 
 ## 4a. Installing the secret on GitHub — and why a migrated repo loses it
 
-**CI reads the key from the repository's Actions secret `LOCUS_UPDATE_KEY`.**
+**CI reads the key from the repository's Actions secret `CHRYSALIS_UPDATE_KEY`, falling back to `LOCUS_UPDATE_KEY`.**
 If it is absent the signing step fails with:
 
 ```text
@@ -252,7 +252,7 @@ the message does not say *how* to fix it, which is a real cost when it fires.
 # From a checkout, with gh authenticated against the right account.
 # If .chrysalis-keys/ is empty, recover the key from the bundle first — the recovery
 # procedure is docs/operate/RELEASE-RECOVERY.md §2:
-gh secret set LOCUS_UPDATE_KEY --repo vasilliourous/Locus < .chrysalis-keys/chrysalis_update.key
+gh secret set CHRYSALIS_UPDATE_KEY --repo vasilliourous/Locus < .chrysalis-keys/chrysalis_update.key
 
 # Verify it exists (prints only names and dates, never values):
 gh secret list --repo vasilliourous/Locus
@@ -270,7 +270,7 @@ are stored against the **repository**, and **none** of the following carry them:
 | Creating a new repository from this one | **No** |
 | Transferring ownership | **Yes** — same repository, new owner |
 
-So after a copy or a fresh repo, `LOCUS_UPDATE_KEY` must be re-set by hand
+So after a copy or a fresh repo, the signing secret must be re-set by hand
 **before the first `v*` tag**, or the tag fails at signing. The key file is not in
 git — and `.chrysalis-keys/` is deliberately emptied every session, so a copy of the
 tree carries neither the key nor a stale copy of it. The durable sources are the
@@ -304,7 +304,7 @@ recovery manifest at `~/.chrysalis-secrets/RECOVERY-MANIFEST.md`.
 rotation changed the order of operations: generate locally *first*, encrypt a
 backup into the bundle, then set the Actions secret. That ordering is what makes
 the loss of an Actions secret survivable, and skipping step 4 recreates the
-2026-10-16 failure exactly. The bundle entry is `LOCUS_UPDATE_KEY_B64`, base64 of
+2026-10-16 failure exactly. The bundle entry is `*_UPDATE_KEY_B64`, base64 of
 the whole key file; recovering it is
 [`../../docs/operate/RELEASE-RECOVERY.md`](../../docs/operate/RELEASE-RECOVERY.md) §2.
 
@@ -348,9 +348,12 @@ The rotation below is not hypothetical. The old key (`64D65025E2E479FD`) was
 lost, and the sequence actually executed was:
 
 - Every client built before the rotation trusts only the **old** public key, so
-  none of them can auto-update any more. The app identity is unchanged
-  (`com.locus.client`), so the fix is a **manual uninstall + reinstall** of the
-  new build for each affected device — not a new app.
+  none of them can auto-update any more. The app identity was unchanged *by that
+  rotation* (it was `com.locus.client`), so the fix was a **manual uninstall +
+  reinstall** of the new build for each affected device — not a new app.
+  *(The identity has since moved to `com.chrysalis.client`, 2026-11-25, with a
+  data-root adoption; that does not change this remedy. See
+  `../../docs/reference/NAME-MIGRATION.md` §3.2.)*
 - The version ladder is deliberately **continuous across the rotation** (the
   rotation itself shipped as `3.3.0`, following the `3.2.30` that preceded it).
   A reinstall onto the new key therefore lands in the middle of the same ladder,
@@ -391,7 +394,7 @@ verifying its own output.
 
 ```
 CI build  →  four raw binaries + the Windows NSIS installer + manifest.json
-          →  sign EACH raw binary with minisign       ← LOCUS_UPDATE_KEY
+          →  sign EACH raw binary with minisign       ← the signing secret
           →  sign the Windows INSTALLER separately
           →  attach binaries, installers and .sig files to the GitHub Release
                                                     ↓

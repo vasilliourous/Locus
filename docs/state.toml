@@ -224,6 +224,94 @@ value      = ["linux", "windows", "macos_intel", "macos_arm"]
 source     = "client/src-tauri/src/chrysalis/contract.rs; server/pb_hooks/*.pb.js"
 provenance = "derived"
 
+[client.identity]
+# The application identity, which is BOTH the app-data root and (on Windows) how
+# the privileged Service recognises the app, by the directory's owner SID.
+#
+# A move here is not like the others in this file: an installed client keeps its
+# activation code, device fingerprint and tier under the OLD directory, so the value
+# may only move together with an adoption path for the old one. `legacy` is that
+# path -- `LEGACY_APP_IDS` in `utils/dirs.rs`, read by
+# `migrate_legacy_app_data_dir`, which renames the old root before anything else
+# touches it. Nothing about the update path depends on this value: the updater is
+# handed a URL by the hub and verifies against the compiled-in minisign pubkey.
+#
+# `legacy` is not optional, and it is ordered newest-first because the adoption loop
+# takes the FIRST candidate that exists. `check-consistency.sh` §53 asserts both
+# entries; the ordering is pinned by a Rust test
+# (`the_pre_move_identity_is_a_candidate_and_precedes_upstream`).
+#
+# `legacy` is INSIDE `value` on purpose: the §9 checker compares `value` as one
+# structural unit, so a checker that verified only the current id could not see an
+# emptied adoption list. Nesting it makes the migration list part of the fact.
+source     = "client/src-tauri/src/utils/dirs.rs (APP_ID, LEGACY_APP_IDS); client/src-tauri/tauri.conf.json (identifier)"
+provenance = "derived"
+
+[client.identity.value]
+current    = "com.chrysalis.client"
+legacy     = ["com.locus.client", "io.github.clash-verge-rev.clash-verge-rev"]
+
+[client.product_name]
+# `productName` derives bundle and installer filenames, so it is a frozen wire name
+# rather than branding: `<productName>_<v>_x64-setup.exe`, the `installer-<productName>_`
+# prefix, and `<productName>.app` inside the dmg and the `.app.tar.gz`. It moved on
+# 2026-11-25 together with every resolver, including the CI globs, which now READ it
+# from this config rather than restating it. Enforced by check-consistency.sh §1e.
+source     = "client/src-tauri/tauri.conf.json; client/src-tauri/tauri.macos.conf.json"
+provenance = "derived"
+
+[client.product_name.value]
+current    = "Chrysalis"
+legacy     = "Locus"
+
+[artifacts.updater]
+# The updater artefact filenames per platform, current name first.
+#
+# BOTH SETS ARE LIVE while a parked fleet resolves the old spelling: CI publishes
+# both, the hub resolves both (`LEGACY_PLATFORMS` in fetch-release.py), and
+# `docs/reference/contract.lock.json` records the pair as `legacy_artifacts`, so
+# deleting an alias fails `contract-snapshot.py --check`.
+#
+# The `macos_*`-key / `darwin-*`-filename asymmetry is a SEPARATE frozen fact.
+#
+# A sub-table rather than an inline table: TOML forbids a newline inside
+# `{ ... }`, and one line long enough for all ten names is unreadable in review.
+#
+# Both halves are inside `value` so the §9 checker compares the PAIR: a current
+# name without its alias is the dangerous state, and a checker that saw only one
+# half would report OK on it.
+source     = "client/src-tauri/src/chrysalis/contract.rs; server/scripts/fetch-release.py (PLATFORMS, LEGACY_PLATFORMS); .github/workflows/client.yml"
+provenance = "derived"
+
+#
+# The macOS values are the `.app.tar.gz` UPDATER PAYLOADS, not the
+# `installer-*_<arch>.zip` human download: the zip lives in `MACOS_ZIP_TEMPLATE`
+# and must never reach an update slot (§1c). The two are different assets with
+# different jobs, and recording the zip here would make this fact describe the
+# download page instead of the update path.
+#
+# BOTH GENERATIONS ARE THE SAME SHAPE, and that is deliberate. An earlier
+# recording of this fact noted an "asymmetry" — current bare `chrysalis-darwin-*`
+# from `artifact_for`, legacy `.app.tar.gz` from the hub — and treated it as real.
+# It was not: `contract.rs` was simply never updated when the macOS packaging step
+# landed, so it named a bare Mach-O that `tauri_plugin_updater` cannot install
+# (it extracts a `.app` from a gzip container; a bare binary downloads, verifies
+# and then fails). Both sides now say `.app.tar.gz`, which is what
+# `install.rs`'s `is_installer_payload` and the plugin's macOS extract path
+# require. This note stays because the reader who finds it is the person who
+# would otherwise re-introduce the bare name.
+[artifacts.updater.value.current]
+linux       = "chrysalis-linux-amd64"
+windows     = "installer-Chrysalis_<v>_x64-setup.exe"
+macos_intel = "chrysalis-darwin-amd64.app.tar.gz"
+macos_arm   = "chrysalis-darwin-arm64.app.tar.gz"
+
+[artifacts.updater.value.legacy]
+linux       = "locus-linux-amd64"
+windows     = "installer-Locus_<v>_x64-setup.exe"
+macos_intel = "locus-darwin-amd64.app.tar.gz"
+macos_arm   = "locus-darwin-arm64.app.tar.gz"
+
 [tiers.free]
 # The free tier's endpoint, recomputable from the tree — a CLASS B fact, so it
 # does not belong in a sentence in docs/business/04-tiers.md.

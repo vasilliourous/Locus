@@ -527,22 +527,38 @@ pub const PLATFORM_MACOS_ARM: &str = "macos_arm";
 /// release fetcher resolves these exact names from the GitHub Release, so
 /// "tidying" one side to match the other breaks publishing for that platform.
 ///
-/// **DEPRECATED ALIAS — the return values keep the `locus-` prefix on purpose.**
-/// The product is Chrysalis, but these four filenames are the names that CI
-/// publishes and the hub resolves out of the GitHub Release. Renaming them is an
-/// artifact migration: both names must be published for a release, and the hub
-/// must resolve both, before the `locus-*` set can be dropped. Nothing in this
-/// repository may rename one side alone. See docs/reference/NAME-MIGRATION.md.
+/// **These are the CURRENT names, and they moved on 2026-11-25.** The product has
+/// been Chrysalis since 2026-11-23 but the artefacts kept the `locus-` prefix
+/// until the filenames were moved as a coordinated release: CI publishes both
+/// name sets and the hub resolves both, so a release on either side of the move
+/// works. See docs/reference/NAME-MIGRATION.md §3.1, which owns when the
+/// `locus-*` set retires.
+///
+/// **Nothing in the client resolves a URL through this.** The updater is handed
+/// `update_url` by the hub, so the name arrives over the wire; these constants
+/// exist so the mapping is stated once (and tested) rather than so a client can
+/// build a URL — which is why there is no dual-name resolver here to go stale.
 ///
 /// Returns `None` on an unsupported platform rather than guessing, so a caller
 /// cannot accidentally fetch another platform's binary.
 #[must_use]
 pub const fn artifact_for(platform: &str) -> Option<&'static str> {
     match platform.as_bytes() {
-        b"linux" => Some("locus-linux-amd64"),
-        b"windows" => Some("locus-windows-amd64.exe"),
-        b"macos_intel" => Some("locus-darwin-amd64"),
-        b"macos_arm" => Some("locus-darwin-arm64"),
+        b"linux" => Some("chrysalis-linux-amd64"),
+        // The Windows update payload is the NSIS INSTALLER, not this raw PE — see
+        // the doc comment. This returns the artifact name, not the update-slot name.
+        b"windows" => Some("chrysalis-windows-amd64.exe"),
+        // macOS returns the `.app.tar.gz` UPDATER PAYLOAD, not the bare Mach-O.
+        //
+        // It returned the bare binary until 2026-11-25, and that was the defect
+        // `install.rs` refuses at runtime (`is_installer_payload`, and the macOS
+        // arm of the plugin's extract path): `tauri_plugin_updater` is handed a
+        // gzip container and extracts a `.app` from it, so a bare Mach-O is
+        // downloadable, verifiable and uninstallable. The constants and the hub's
+        // `NEW_PLATFORMS` disagreed about this, which is worse than either being
+        // wrong on its own — a reader could find the answer they wanted.
+        b"macos_intel" => Some("chrysalis-darwin-amd64.app.tar.gz"),
+        b"macos_arm" => Some("chrysalis-darwin-arm64.app.tar.gz"),
         _ => None,
     }
 }
@@ -710,15 +726,26 @@ mod tests {
         assert!(!cfg.uot_enabled(false));
     }
 
-    /// The platform key ↔ filename asymmetry is a contract with the publish
-    /// pipeline, not an oversight. Pinning it here means a "tidy-up" fails the
-    /// build instead of breaking releases for one platform.
+    /// The platform key ↔ filename asymmetry (`macos_*` key, `darwin-*` file) is a
+    /// contract with the publish pipeline, not an oversight. Pinning it here means
+    /// a "tidy-up" fails the build instead of breaking releases for one platform.
+    ///
+    /// The macOS values are the `.app.tar.gz` payloads, and this test is also where
+    /// that is pinned: they were bare Mach-O names until 2026-11-25, which no
+    /// client can install. §1g-bis in `check-consistency.sh` compares these against
+    /// the hub's `NEW_PLATFORMS`, because the two disagreed while both were green.
     #[test]
     fn artifact_names_keep_the_macos_darwin_asymmetry() {
-        assert_eq!(artifact_for(PLATFORM_LINUX), Some("locus-linux-amd64"));
-        assert_eq!(artifact_for(PLATFORM_WINDOWS), Some("locus-windows-amd64.exe"));
-        assert_eq!(artifact_for(PLATFORM_MACOS_INTEL), Some("locus-darwin-amd64"));
-        assert_eq!(artifact_for(PLATFORM_MACOS_ARM), Some("locus-darwin-arm64"));
+        assert_eq!(artifact_for(PLATFORM_LINUX), Some("chrysalis-linux-amd64"));
+        assert_eq!(artifact_for(PLATFORM_WINDOWS), Some("chrysalis-windows-amd64.exe"));
+        assert_eq!(
+            artifact_for(PLATFORM_MACOS_INTEL),
+            Some("chrysalis-darwin-amd64.app.tar.gz")
+        );
+        assert_eq!(
+            artifact_for(PLATFORM_MACOS_ARM),
+            Some("chrysalis-darwin-arm64.app.tar.gz")
+        );
     }
 
     /// An unknown platform must not silently resolve to another platform's

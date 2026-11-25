@@ -487,7 +487,11 @@ const renderAppIcon = (size, { ground, inset }) => {
     '</g>',
     '</svg>',
   )
-  return encodePng(size, size, rasterise(svg.join(''), size, `app-${size}`).data)
+  return encodePng(
+    size,
+    size,
+    rasterise(svg.join(''), size, `app-${size}`).data,
+  )
 }
 
 const hexToRgb = (hex) => [
@@ -508,8 +512,15 @@ const hexToRgb = (hex) => [
  * already small, and the upstream assets are drawn to the edge of their box.
  */
 const renderTrayStatus = (size, status) => {
-  const source = readFileSync(path.join(trayStatusDir, `status_${status}.svg`), 'utf8')
-  return encodePng(size, size, rasterise(source, size, `tray-${status}-${size}`).data)
+  const source = readFileSync(
+    path.join(trayStatusDir, `status_${status}.svg`),
+    'utf8',
+  )
+  return encodePng(
+    size,
+    size,
+    rasterise(source, size, `tray-${status}-${size}`).data,
+  )
 }
 
 /**
@@ -526,7 +537,10 @@ const renderTrayStatus = (size, status) => {
  * gradient, and leaving `url(#top)` in would render as black-to-transparent.
  */
 const renderTemplateGlyph = (size, status) => {
-  const source = readFileSync(path.join(trayStatusDir, `status_${status}.svg`), 'utf8')
+  const source = readFileSync(
+    path.join(trayStatusDir, `status_${status}.svg`),
+    'utf8',
+  )
   // The source's OWN viewBox, not an assumed one. `status_4` is a Material
   // Symbols glyph (`viewBox="100 -854 760 760"`) while states 1-3 are the mark
   // (`0 0 240 240`); hard-coding either renders the other off-canvas and produces
@@ -546,7 +560,11 @@ const renderTemplateGlyph = (size, status) => {
     body,
     '</svg>',
   ].join('')
-  return encodePng(size, size, rasterise(svg, size, `template-${status}-${size}`).data)
+  return encodePng(
+    size,
+    size,
+    rasterise(svg, size, `template-${status}-${size}`).data,
+  )
 }
 
 /* ────────────────────────────────────────────────────────────────────────────
@@ -649,7 +667,7 @@ const TILE_SIZES = {
 const insetFor = (size) => {
   if (size <= 20) return 0.98
   if (size <= 32) return 0.94
-  if (size <= 64) return 0.90
+  if (size <= 64) return 0.9
   return 0.848
 }
 
@@ -704,7 +722,10 @@ const buildAll = () => {
   //   tray-icon-safe-mono*    status_4  macOS template
   const trayIco = (status) =>
     buildIco(
-      TRAY_FRAMES.map((size) => ({ size, png: renderTrayStatus(size, status) })),
+      TRAY_FRAMES.map((size) => ({
+        size,
+        png: renderTrayStatus(size, status),
+      })),
     )
 
   /** `.png` at a scale factor, for the Linux and macOS tray hosts. */
@@ -736,10 +757,18 @@ const buildAll = () => {
       }
     }
     // macOS template: states 1 and 4 only, matching upstream's macos/ directory.
-    for (const [stem, status] of [['tray-icon-mono', 1], ['tray-icon-safe-mono', 4]]) {
+    for (const [stem, status] of [
+      ['tray-icon-mono', 1],
+      ['tray-icon-safe-mono', 4],
+    ]) {
       for (const scale of [1, 2, 3, 4]) {
         const suffix = scale === 1 ? '' : `@${scale}x`
-        specs.set(`${stem}${suffix}.png`, { kind: 'png', status, scale, template: true })
+        specs.set(`${stem}${suffix}.png`, {
+          kind: 'png',
+          status,
+          scale,
+          template: true,
+        })
       }
     }
     return specs

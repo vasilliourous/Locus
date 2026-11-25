@@ -78,7 +78,7 @@ updater can install, and the two are not interchangeable:
 
 | Slot | Payload | Why that one |
 |---|---|---|
-| `linux` | `locus-linux-amd64` (ELF) | The plugin replaces the AppImage/installs the package directly. |
+| `linux` | `chrysalis-linux-amd64` (ELF) | The plugin replaces the AppImage/installs the package directly. The pre-move alias `locus-linux-amd64` is still published and still resolved, so a release either side of the move installs. |
 | `windows` | `installer-Chrysalis_<v>_x64-setup.exe` (NSIS) | The plugin ShellExecutes **any** PE as an installer, so the raw app would make a client re-execute itself (`FIXES.md`, 2026-09-30). |
 | `macos_intel` / `macos_arm` | `chrysalis-darwin-<arch>.app.tar.gz` | The plugin's macOS path is `GzDecoder` + `tar::Archive` over an `.app` bundle — **a bare Mach-O is not installable there**. |
 
@@ -96,6 +96,29 @@ updater can install, and the two are not interchangeable:
 > now raises `FetchError`. Degrading to an uninstallable payload is worse than
 > refusing: a refusal is visible at publish time, a broken row is not. See
 > `../reference/FIXES.md`, 2026-10-05, and `RECOVER-MACOS-UPDATE.md`.
+
+### Two name sets resolve, and that is the current contract
+
+The artefact filenames moved to `chrysalis-*` on 2026-11-25. The hub resolves
+**both** generations, so a release published either side of the move installs:
+
+| Layer | What it does |
+|---|---|
+| CI (`.github/workflows/client.yml`) | publishes both name sets; each `locus-*` file is a byte-identical copy of its `chrysalis-*` twin, staged by a `DEPRECATED ALIAS` step |
+| `fetch-release.py` (`PLATFORMS` + `LEGACY_PLATFORMS`) | prefers the current name, falls back to the pre-move one when the release carries only that |
+| `publish-release.sh` | writes the `update_config` row with the name **actually on disk**, not a literal |
+| `docs/reference/contract.lock.json` | records the pair as `legacy_artifacts`, so deleting an alias fails `contract-snapshot.py --check` |
+
+**The fallback is name-only, and the macOS shape is still enforced.** The pre-move
+macOS names are `.app.tar.gz` too (the tarball was appended to the old name set,
+not substituted for it), so falling back never serves the bare Mach-O the section
+above refuses — `resolve_platform_names` checks the shape on that branch, and a
+bare Mach-O found under the *pre-fix* name still raises.
+
+Retirement is one event, not four: when no build older than the first
+`chrysalis-*` release can still be offered an update, drop `LEGACY_PLATFORMS`, the
+legacy installer template, both CI staging steps and the register rows together.
+`check-consistency.sh` §1c/§1e and `contract-snapshot.py` refuse a half-removal.
 
 ### There is no rollout percentage
 

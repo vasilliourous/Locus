@@ -66,7 +66,21 @@ routerAdd("POST", "/api/code-lookup", function(e) {
         var bootstrapId = "";
         try {
             var allHeaders = $apis.requestInfo(e).headers || {};
-            var rawId = allHeaders["x-chrysalis-bootstrap"] || allHeaders["X-Chrysalis-Bootstrap"] || "";
+            // TWO SPELLINGS, CURRENT FIRST. The header is a MATCHED PAIR with the
+            // path-filter module (server/modules/09-activation-tunnel.sh, IDENTITY_HEADER)
+            // and with the client that sends it. It was renamed on 2026-11-23 and the
+            // hub runs its OWN copy from /root/server/, so a deployed hub and a
+            // deployed client can be on opposite sides of the rename for the length
+            // of a release cycle.
+            //
+            // If the two sides disagree and nobody accepts both, the header is simply
+            // ABSENT — no error, and every tunnelled client collapses into ONE shared
+            // rate-limit bucket, which is a silent loss of the protection rather than
+            // a visible failure. Accepting both spellings costs one `||` and removes
+            // the entire window. DEPRECATED ALIAS: drop the `x-locus-bootstrap` arm
+            // once no deployed client sends it (NAME-MIGRATION.md §3.4).
+            var rawId = allHeaders["x-chrysalis-bootstrap"] || allHeaders["X-Chrysalis-Bootstrap"]
+                || allHeaders["x-locus-bootstrap"] || allHeaders["X-Locus-Bootstrap"] || "";
             rawId = String(rawId).trim();
             if (rawId.length >= 16 && rawId.length <= 64) bootstrapId = rawId;
         } catch(ex) { bootstrapId = ""; }

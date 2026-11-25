@@ -95,20 +95,32 @@
   },
   "platforms": {
     "linux": {
-      "artifact": "locus-linux-amd64",
-      "key": "linux"
+      "artifact": "chrysalis-linux-amd64",
+      "key": "linux",
+      "legacy_artifacts": [
+        "locus-linux-amd64"
+      ]
     },
     "macos_arm": {
-      "artifact": "locus-darwin-arm64",
-      "key": "macos_arm"
+      "artifact": "chrysalis-darwin-arm64.app.tar.gz",
+      "key": "macos_arm",
+      "legacy_artifacts": [
+        "locus-darwin-arm64.app.tar.gz"
+      ]
     },
     "macos_intel": {
-      "artifact": "locus-darwin-amd64",
-      "key": "macos_intel"
+      "artifact": "chrysalis-darwin-amd64.app.tar.gz",
+      "key": "macos_intel",
+      "legacy_artifacts": [
+        "locus-darwin-amd64.app.tar.gz"
+      ]
     },
     "windows": {
-      "artifact": "locus-windows-amd64.exe",
-      "key": "windows"
+      "artifact": "chrysalis-windows-amd64.exe",
+      "key": "windows",
+      "legacy_artifacts": [
+        "installer-Locus_<version>_x64-setup.exe"
+      ]
     }
   },
   "proxy_names": {

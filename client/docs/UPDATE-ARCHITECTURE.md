@@ -124,10 +124,10 @@ pub const PLATFORMS: [&str; 4] = ["linux", "windows", "macos_intel", "macos_arm"
 
 | Platform identifier | Artifact filename |
 |---|---|
-| `linux` | `locus-linux-amd64` |
-| `windows` | `installer-Locus_<version>_x64-setup.exe` |
-| `macos_intel` | `locus-darwin-amd64` |
-| `macos_arm` | `locus-darwin-arm64` |
+| `linux` | `chrysalis-linux-amd64` (alias `locus-linux-amd64` still published) |
+| `windows` | `installer-Chrysalis_<version>_x64-setup.exe` (alias `installer-Locus_…` still published) |
+| `macos_intel` | `chrysalis-darwin-amd64` |
+| `macos_arm` | `chrysalis-darwin-arm64` |
 
 **Note the deliberate asymmetry:** the *platform key* says `macos_*`, the *filename*
 says `darwin-*`. A fork that "tidies" this to `macos-*` breaks the publish pipeline,

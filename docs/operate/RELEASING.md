@@ -149,17 +149,24 @@ re-rendered, and the fix is step 5.
 
 ### Before the *first* tag in a repository: set the signing secret
 
-CI signs every build, so `LOCUS_UPDATE_KEY` must exist as an Actions secret or
-step 2 fails (and so does every branch build — signing is not tag-gated).
-**Actions secrets are stored per-repository and are not carried by a copy or a
-clone**, so a migrated repository starts without it:
+CI signs every build, so a signing secret must exist or step 2 fails (and so does
+every branch build — signing is not tag-gated). **Actions secrets are stored
+per-repository and are not carried by a copy or a clone**, so a migrated
+repository starts without it:
 
 ```sh
 # If .chrysalis-keys/ is empty, recover the key from the bundle first:
 # see RELEASE-RECOVERY.md §2.
-gh secret set LOCUS_UPDATE_KEY --repo vasilliourous/Locus < .chrysalis-keys/chrysalis_update.key
+gh secret set CHRYSALIS_UPDATE_KEY --repo vasilliourous/Locus < .chrysalis-keys/chrysalis_update.key
 gh secret list --repo vasilliourous/Locus   # confirms it exists; never prints the value
 ```
+
+**`CHRYSALIS_UPDATE_KEY` is the name to use; `LOCUS_UPDATE_KEY` still works.** The
+workflow reads both and resolves them to one variable, so creating the new secret
+and landing this change cannot race each other into an empty key — which is the
+failure mode that makes this rename different from every other one, because a
+missing secret produces *unsigned builds*, not an error about a name. The alias
+retires when `gh secret list` shows the new name everywhere that builds.
 
 Use the **same** key, not a new one — its public half is compiled into every
 installed client, so a replacement key produces updates those clients all refuse.
@@ -167,7 +174,7 @@ Full detail, including which operations do and do not preserve secrets, is in
 `client/docs/SIGNING.md` §4a.
 
 > **The key is in three places since the 2026-10-16 rotation** — the Actions
-> secret, an offline copy, and `LOCUS_UPDATE_KEY_B64` inside
+> secret, an offline copy, and the signing key inside
 > `server/secrets.env.age`. Before that it existed only in the Actions store,
 > which is write-only, so when it was needed it could not be retrieved and no
 > release could be signed. 3.3.0 replaced it rather than recovering it.
@@ -225,6 +232,20 @@ lesson.
 and signed** — the platform behind the original defect report.
 
 ---
+
+> **This release moves names that live OUTSIDE the repository.** Before the tag,
+> read these three, because each one is an action the repo change cannot perform:
+>
+> | What | Why it needs you | Where |
+> |---|---|---|
+> | `CHRYSALIS_UPDATE_KEY` Actions secret | the workflow reads both names, so nothing breaks either way — but the alias retires only when you create the new one | `client/docs/SIGNING.md` §4a |
+> | `server/scripts/hooks-sync.sh` | the bootstrap header is accepted under both spellings **in this tree**; the hub runs its own copy, so a repo-only change is inert | `docs/reference/NAME-MIGRATION.md` §3.4 |
+> | `hooks-sync.sh --fetch-service` | **`fetch-release.py` runs from the hub as its own copy, and it is the only thing that can publish a release.** A hub on the old resolver cannot resolve a `chrysalis-*` release and refuses it as missing assets. **Deploy this BEFORE cutting the first tag under the new filenames** — this is the one ordering that can strand a release | `docs/operate/UPDATE-SYSTEM.md`, `NAME-MIGRATION.md` §3.1 |
+> | The bundle re-encrypt | the signing key is stored inside `server/secrets.env.age`; the alias `LOCUS_UPDATE_KEY_B64` retires only on a re-encrypt | `docs/reference/NAME-MIGRATION.md` §3.3 |
+>
+> The GitHub remote (`vasilliourous/Locus`) is **not** moved by this release. Every
+> reader of it takes `GITHUB_REPO`, so a rename needs no code change — only the
+> defaults in one commit afterwards.
 
 ## Publishing a build to the hub
 

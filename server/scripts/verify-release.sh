@@ -188,14 +188,22 @@ echo "4. Served bytes match the recorded hashes"
 if printf '%s' "$ROW" | grep -q '"found": false\|"error"'; then
     note "skipped — no usable row"
 else
-    for pair in "dl_linux:sha_linux:locus-linux-amd64" \
-                "dl_windows:sha_windows:installer-Locus_<v>_x64-setup.exe" \
-                "dl_macos_intel:sha_macos_intel:locus-darwin-amd64" \
-                "dl_macos_arm:sha_macos_arm:locus-darwin-arm64"; do
+    # The LABEL is descriptive only — the bytes checked are whatever the row's
+    # URL serves, so the name is derived from the URL rather than restated. That
+    # keeps this script correct across the artefact rename without an edit in
+    # two places (the label used to be the only stale part, which made a passing
+    # run look like it had verified the new names when it had not).
+    for pair in "dl_linux:sha_linux" \
+                "dl_windows:sha_windows" \
+                "dl_macos_intel:sha_macos_intel" \
+                "dl_macos_arm:sha_macos_arm"; do
         url_key="$(printf '%s' "$pair" | cut -d: -f1)"
         sha_key="$(printf '%s' "$pair" | cut -d: -f2)"
-        label="$(printf '%s' "$pair" | cut -d: -f3)"
         url="$(printf '%s' "$ROW" | python3 -c "import json,sys; print(json.load(sys.stdin).get('$url_key') or '')")"
+        # The asset name the row actually serves — the thing that must match the
+        # file the hub staged, whichever name generation it came from.
+        label="${url##*/}"
+        [ -n "$label" ] || label="$url_key"
         want="$(printf '%s' "$ROW" | python3 -c "import json,sys; print(json.load(sys.stdin).get('$sha_key') or '')")"
         [ -n "$url" ] || continue
 
@@ -217,7 +225,18 @@ fi
 # ── 5. Optional: the release exists on GitHub ──────────────────────────────
 echo
 echo "5. GitHub release"
-if curl -fsS -m 15 -o /dev/null "https://api.github.com/repos/vasilliourous/Locus/releases/tags/v${VERSION}" 2>/dev/null; then
+# THE REPOSITORY IS OVERRIDABLE, like every other reader of it.
+#
+# This was the ONE hardcoded `vasilliourous/Locus` in the tree that no
+# environment variable could reach: `fetch-release.py`, `publish-release.sh` and
+# the fetch service all take `GITHUB_REPO`, and this did not. That matters
+# because the remote is a hosting decision — it can be renamed, and a fork can
+# point at itself — and this step would then report "no GitHub Release ... CI may
+# not have finished" while the release existed the whole time. A verification
+# step that names the wrong repository fails in the direction that looks like a
+# real problem.
+VERIFY_REPO="${GITHUB_REPO:-vasilliourous/Locus}"
+if curl -fsS -m 15 -o /dev/null "https://api.github.com/repos/${VERIFY_REPO}/releases/tags/v${VERSION}" 2>/dev/null; then
     ok "GitHub Release v${VERSION} exists"
 else
     note "no GitHub Release for tag v${VERSION} (or no network) — CI may not have finished"
@@ -228,7 +247,12 @@ if [ -n "$LOCAL_DIR" ]; then
     echo
     echo "6. Local artifacts match what is served"
     [ -d "$LOCAL_DIR" ] || bad "local dir not found: ${LOCAL_DIR}"
-    for f in locus-linux-amd64 "installer-Locus_${VERSION}_x64-setup.exe" locus-darwin-amd64 locus-darwin-arm64; do
+    # Both name generations, each skipped when absent: a local directory staged
+    # from a release either side of the move is a valid input.
+    for f in chrysalis-linux-amd64 locus-linux-amd64 \
+             "installer-Chrysalis_${VERSION}_x64-setup.exe" "installer-Locus_${VERSION}_x64-setup.exe" \
+             chrysalis-darwin-amd64 locus-darwin-amd64 \
+             chrysalis-darwin-arm64 locus-darwin-arm64; do
         [ -f "${LOCAL_DIR}/${f}" ] || { note "${f} not present locally — skipped"; continue; }
         local_sha="$(sha256sum "${LOCAL_DIR}/${f}" | awk '{print $1}')"
         remote_sha="$(remote "sha256sum '${REMOTE_UPDATES}/${f}' 2>/dev/null | awk '{print \$1}'" 2>/dev/null || true)"

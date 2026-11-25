@@ -42,7 +42,7 @@ shipped it.
 | **Struct fields** | `client/src-tauri/src/chrysalis/contract.rs` | `device_fingerprint`, `server_config`, `uot_port`, `expires_at` |
 | **Enum wire values** | `LookupStatus` in the same file | `ok`, `unbound`, `already_used`, `suspended`, `expired`, `not_found` |
 | **Endpoints** | `routerAdd()` in `server/pb_hooks/*.js`, and the call sites in `chrysalis/` | `POST /api/activate`, `POST /api/heartbeat`, `GET /api/release` |
-| **Platform keys → artifact names** | `contract.rs` | `macos_arm` → `locus-darwin-arm64` |
+| **Platform keys → artifact names** | `contract.rs` | `macos_arm` → `chrysalis-darwin-arm64` (alias `locus-darwin-arm64` still published; `NAME-MIGRATION.md` §3.1) |
 | **Proxy and group names** | `client/src-tauri/src/chrysalis/tier.rs` | `Chrysalis` / `Chrysalis Auto` / `Chrysalis-UoT` |
 | **Hub URLs** | `contract.rs` | canonical and legacy hub hosts |
 | **IPC commands** | `cmd/chrysalis.rs`, `lib.rs`, `client/src/**` | `chrysalis_status`, `chrysalis_connect`, … |
