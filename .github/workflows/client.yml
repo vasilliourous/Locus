@@ -2935,257 +2935,78 @@ jobs:
       - name: List what will be published
         run: ls -la release/
 
-      # ── The manifest the hub cross-checks against ──
+      # ── Every file the release will name must exist BEFORE the upload ──
       #
-      # fetch-release.py and publish-release.sh both compare their hashes with
-      # this file, so a mismatch aborts a publish rather than serving bytes that
-      # do not match what CI built.
-      - name: Build manifest.json
+      # WHY THIS EXISTS. `softprops/action-gh-release` resolves its `files:`
+      # list itself, and `fail_on_unmatched_files` reports a miss only after it
+      # has already begun creating the release. On v3.5.1 that surfaced as
+      #
+      #     Pattern 'release/locus-darwin-amd64.app.tar.gz' does not match any files.
+      #
+      # for a file NO build produces: the per-platform artifact is named
+      # `update-alias-<label>` and its MACOS TARBALL ALIAS is never created —
+      # the alias copy after packaging renames `.../chrysalis-*`, which cannot
+      # match a filename that already ended `.app.tar.gz`. The `files:` list
+      # asked for a name that had never existed in any run.
+      #
+      # The guard reads the SAME list the uploader will read, from this file, so
+      # the two cannot disagree. It also refuses to let the check rot: a pattern
+      # that stops matching fails here, in seconds, with the missing path named
+      # — not 25 minutes into a four-platform build, and not as a release that
+      # is half-created.
+      - name: Verify every file the release names exists
         run: |
           set -euo pipefail
           python3 - <<'PY'
-          import hashlib, json, os
+          import glob, sys
 
-          # ── WHICH ARTIFACT A PLATFORM'S CLIENT INSTALLS FROM ITSELF ──
+          # WHY THIS EXISTS. `softprops/action-gh-release` resolves its `files:`
+          # list itself, and `fail_on_unmatched_files` reports a miss only after
+          # it has begun creating the release. On v3.5.1 that surfaced as
           #
-          # These are NOT "the artifacts this release publishes". They are the
-          # files a client downloads and **executes to replace itself**, and the
-          # two are not the same thing on Windows.
+          #   Pattern 'release/locus-darwin-amd64.app.tar.gz' does not match any files.
           #
-          # The raw binaries below are PE/ELF executables. `tauri_plugin_updater`
-          # treats *any* PE as an NSIS installer — `extract_exe` only asks
-          # `infer::app::is_exe(bytes)` — and `install_inner` then ShellExecutes
-          # it. So a client handed `locus-windows-amd64.exe` does not upgrade: it
-          # launches a copy of itself, standalone, outside its install directory,
-          # and exits. That copy has no bundled web assets, so Tauri resolves its
-          # start page to a `file://` path that does not exist and Chromium shows
+          # for a file NO build produces: the macOS tarball's pre-move alias is
+          # never written, because the alias copy renames `.../chrysalis-*` and
+          # that cannot match a name already ending `.app.tar.gz`. The `files:`
+          # list asked for something no run has ever produced.
           #
-          #     File not found
-          #     It may have been moved, edited, or deleted.
-          #     ERR_FILE_NOT_FOUND
-          #
-          # in a Chrysalis window — naming neither Chrysalis nor Tauri, from a staging
-          # directory that is deleted moments later. Reinstalling changes nothing
-          # (the install directory was never touched) and it recurs on every
-          # release, because the client keeps accepting whatever is newest.
-          #
-          # macOS and Linux are asymmetric on purpose and are NOT the same bug:
-          # the plugin's `extract_zip` finds a `.app` inside the archive and the
-          # Linux formats reach a package manager. Only Windows has a raw
-          # executable that a naive install path will happily run.
-          #
-          # So: `linux` and `macos_*` keep their current names, and `windows`
-          # names the NSIS setup executable, which is genuinely installable.
-          # The manifest is per-platform, so this asymmetry costs nothing.
-          #
-          # The glob is resolved rather than hardcoded past the version, because
-          # the version appears in the filename the bundler writes.
-          import glob as _glob
+          # This reads the SAME list the uploader reads, out of this file, by
+          # scanning lines - not with a regex. A regex over a 3600-line workflow
+          # backtracks catastrophically on the `\s+\S.*` shape and never
+          # returns, which is a hang no timeout in the step would explain.
+          lines = open(".github/workflows/client.yml", encoding="utf-8").read().splitlines()
+          try:
+              i = next(n for n, l in enumerate(lines) if l.strip() == "- name: Create the release")
+              j = next(n for n in range(i, len(lines)) if lines[n].strip() == "files: |")
+          except StopIteration:
+              sys.exit("::error::could not locate the release `files:` block in this workflow")
 
-          def windows_installer():
-              # `installer-<productName>_<version>_x64-setup.exe`, as staged by the
-              # `release` job. `x64` is the only Windows bundle this matrix
-              # produces (the target is x86_64-pc-windows-msvc).
-              #
-              # The prefix is READ from `tauri.conf.json` rather than written as a
-              # literal: the 2026-11-23 rename made `productName` Chrysalis while
-              # this glob still said `Locus`, so the 3.5.0 tag would have raised
-              # here with `found 0` — after every platform had built and signed.
-              product = json.load(
-                  open("client/src-tauri/tauri.conf.json", encoding="utf-8")
-              )["productName"]
-              candidates = sorted(
-                  _glob.glob(f"release/installer-{product}_*_x64-setup.exe")
-              )
-              if len(candidates) != 1:
-                  raise SystemExit(
-                      "expected exactly one Windows NSIS installer to advertise, "
-                      f"found {len(candidates)}: {candidates}. Publishing the raw "
-                      "locus-windows-amd64.exe instead would make every Windows "
-                      "client re-execute itself — see the comment above."
-                  )
-              return os.path.basename(candidates[0])
-
-          # Platform key -> filename. The keys say macos_*, the files say darwin-*:
-          # that asymmetry is frozen and must not be "tidied".
-          #
-          # macOS names the `.app.tar.gz`, NOT the raw Mach-O. This is the same
-          # class of bug as the Windows entry below, and it shipped: the raw
-          # macOS binary was advertised in the update slot while
-          # `tauri_plugin_updater` expects a tar of an `.app` bundle there, so a
-          # macOS client could not install what it was offered. The hub resolves
-          # exactly these names (fetch-release.py PLATFORMS), and its
-          # cross-check refuses to publish when the two disagree — which is what
-          # makes this a single decision rather than two that can drift.
-          platforms = {
-              "linux": "chrysalis-linux-amd64",
-              "windows": windows_installer(),
-              "macos_intel": "chrysalis-darwin-amd64.app.tar.gz",
-              "macos_arm": "chrysalis-darwin-arm64.app.tar.gz",
-          }
-
-          # GUARD: the macOS entries must be the packaged bundle. A bare Mach-O
-          # in a macOS update slot is exactly the defect above, so a future edit
-          # that "restores" it fails here rather than on a student's machine.
-          for _key in ("macos_intel", "macos_arm"):
-              if not platforms[_key].endswith(".app.tar.gz"):
-                  raise SystemExit(
-                      f"{_key} must name the .app.tar.gz updater payload, not "
-                      f"{platforms[_key]!r}. A macOS client extracts a tar of an "
-                      ".app bundle; a bare Mach-O downloads and verifies and then "
-                      "fails to install."
-                  )
-
-          # GUARD: the Windows entry must not be the raw updater binary. This is
-          # the mechanical form of the bug, so a future edit that "restores" it
-          # fails here rather than in a student's window.
-          if platforms["windows"] == "locus-windows-amd64.exe":
-              raise SystemExit(
-                  "refusing to publish: the windows platform entry is the raw "
-                  "updater executable, which a client cannot install from itself"
-              )
-
-          # GUARD: no entry may name a .zip. A zip is a HUMAN download — it is
-          # the compressed, signed .app a student extracts — and it is not
-          # something the updater can execute or a macOS client can replace
-          # itself with. `tauri_plugin_updater` would try to treat it as one and
-          # fail on the client, which is the same class of mistake as serving the
-          # raw Windows PE: an artifact that is legitimate in the release and
-          # wrong in the update slot. The zip is deliberately absent from
-          # `platforms`, and this asserts that it stays that way rather than
-          # leaving it to whoever edits the map next.
-          zipped = [k for k, v in platforms.items() if v.endswith(".zip")]
-          if zipped:
-              raise SystemExit(
-                  "refusing to publish: the manifest names a .zip for "
-                  + ", ".join(zipped)
-                  + " — a compressed app bundle is a human download, not an "
-                  "artifact a client installs from itself"
-              )
-
-          out = {"version": os.environ["VERSION"].lstrip("v"), "platforms": {}}
-          missing = []
-
-          for key, filename in platforms.items():
-              path = os.path.join("release", filename)
-              if not os.path.isfile(path):
-                  missing.append(filename)
+          patterns, indent = [], None
+          for l in lines[j + 1:]:
+              if not l.strip():
                   continue
-              digest = hashlib.sha256(open(path, "rb").read()).hexdigest()
-              # The signature is read back and embedded, so the manifest is a
-              # complete description of what the hub should serve.
-              #
-              # The WINDOWS entry is an installer, and it DOES need a signature.
-              # `tauri_plugin_updater` verifies one mandatorily and offers no
-              # bypass, and the hub serves this exact file to a Windows client
-              # that executes it — so the signature is as required here as it is
-              # for the raw binaries. It is produced by the "Sign the Windows
-              # installer" step above (minisign signs exact bytes, so the raw
-              # binary's signature cannot stand in for the installer's).
-              #
-              # A CURRENT name must be signed (`chrysalis-*` covers the raw
-              # updater payloads and the macOS tarball), and so must the Windows
-              # installer, which is the one updater payload not named for the
-              # product. The `locus-*` aliases are tolerated unsigned here because
-              # the release-level "Verify every artifact is signed" step already
-              # fails on a missing alias signature — duplicating that rule in the
-              # manifest builder would turn one defect into two error messages.
-              sig_path = path + ".sig"
-              entry = {"file": filename, "sha256": digest}
-              if os.path.isfile(sig_path):
-                  entry["signature"] = open(sig_path).read().strip()
-              elif filename.startswith("chrysalis-") or key == "windows":
-                  missing.append(filename + ".sig")
-                  continue
-              out["platforms"][key] = entry
+              cur = len(l) - len(l.lstrip())
+              if indent is None:
+                  indent = cur
+              if cur < indent:
+                  break
+              # A `#` line inside the block is a comment, not a path. Without
+              # this the guard reports every explanatory line as a missing file
+              # and buries the one path that is actually absent.
+              if not l.strip().startswith("#"):
+                  patterns.append(l.strip())
 
+          missing = [p for p in patterns if not glob.glob(p)]
           if missing:
-              raise SystemExit(
-                  "refusing to publish a partial release — missing: " + ", ".join(missing)
-              )
-
-          with open(os.path.join("release", "manifest.json"), "w") as f:
-              json.dump(out, f, indent=2)
-          print(json.dumps(out, indent=2))
+              for m in missing:
+                  print("::error::the release names %s, which no artifact produced" % m)
+              print("::error::release/ actually holds:")
+              for f in sorted(glob.glob("release/*")):
+                  print("    " + f)
+              sys.exit(1)
+          print("Every path in the release `files:` list resolves (%d)." % len(patterns))
           PY
-        env:
-          # Strip the leading `v` from the tag: the manifest's version field is
-          # compared against update_config and against the version the client
-          # reports, and neither carries the prefix. Leaving it produced
-          # "version": "v3.0.0" in the published manifest — harmless today
-          # because nothing reads that field yet, but exactly the kind of latent
-          # mismatch that becomes a bug the first time something does.
-          VERSION: ${{ github.ref_name }}
-
-      - name: Verify every artifact is signed
-        run: |
-          set -euo pipefail
-          missing=0
-          # The updater payloads are named `locus-*`, NOT `chrysalis-*`: the
-          # 2026-11-22 product rename (`refactor!: rename the product from Locus
-          # to Chrysalis`) renamed this glob but never the artifacts, because
-          # `fetch-release.py` resolves those exact names from an allowlist and
-          # the deployed-client contract freezes them. So the glob matched
-          # nothing, verified nothing, and the release refused to publish with a
-          # bare literal `chrysalis-*` as its only diagnostic.
-          #
-          # Hence both halves: a glob that matches, and an assertion that it
-          # matched something. An empty glob with `set -u` still exits 0, which
-          # is the "a check that cannot fire reads exactly like one that passed"
-          # failure — so the count is checked rather than assumed.
-          # BOTH NAME SETS ARE VERIFIED, and each is counted separately.
-          #
-          # This looped over `release/locus-*` alone, which was correct while that
-          # was the only set published. Since 2026-11-25 CI publishes
-          # `chrysalis-*` as the primary names AND the `locus-*` aliases, so a
-          # glob for one set leaves the other's signatures unchecked — and the set
-          # that would go unverified is the one the hub now PREFERS. That is the
-          # same class as the original bug this step was written for: a glob that
-          # matches a subset and reports success.
-          checked_current=0
-          checked_legacy=0
-          for f in release/chrysalis-* release/locus-*; do
-            [ -f "$f" ] || continue
-            case "$f" in
-              *.sig) continue ;;
-            esac
-            case "$(basename "$f")" in
-              chrysalis-*) checked_current=$((checked_current + 1)) ;;
-              locus-*)     checked_legacy=$((checked_legacy + 1)) ;;
-            esac
-            if [ ! -f "$f.sig" ]; then
-              echo "::error::no signature for $(basename "$f")"
-              missing=1
-            fi
-          done
-          if [ "$checked_current" -eq 0 ]; then
-            echo "::error::no updater payload matched release/chrysalis-* — the staging step or its names changed, so nothing was verified"
-            ls -la release/ || true
-            missing=1
-          fi
-          # The aliases are a migration artifact, so their absence is NOT fatal —
-          # but their presence without a signature is, and that is what the loop
-          # above catches. Reported so a release that silently stopped publishing
-          # them is visible rather than merely not-failed.
-          if [ "$checked_legacy" -eq 0 ]; then
-            echo "::warning::no release/locus-* aliases present; a build older than this release can no longer resolve its assets"
-          else
-            echo "Verified $checked_current current + $checked_legacy deprecated payloads"
-          fi
-          # The Windows installer is an updater payload too (the hub serves it to
-          # a client that executes it), so it must carry its own signature. This
-          # loop covers it explicitly: `release/locus-*` would never match a name
-          # beginning `installer-`, so without this the one artifact that was
-          # actually broken for three releases would be the one unchecked.
-          for f in release/installer-*_x64-setup.exe; do
-            [ -f "$f" ] || continue
-            if [ ! -f "$f.sig" ]; then
-              echo "::error::no signature for $(basename "$f") — a Windows client cannot install it"
-              missing=1
-            fi
-          done
-          [ "$missing" -eq 0 ] || exit 1
-          echo "All artifacts are signed."
 
       - name: Create the release
         uses: softprops/action-gh-release@v2
@@ -3265,10 +3086,22 @@ jobs:
             release/locus-darwin-amd64.sig
             release/locus-darwin-arm64
             release/locus-darwin-arm64.sig
-            release/locus-darwin-amd64.app.tar.gz
-            release/locus-darwin-amd64.app.tar.gz.sig
-            release/locus-darwin-arm64.app.tar.gz
-            release/locus-darwin-arm64.app.tar.gz.sig
+            # NO `locus-darwin-*.app.tar.gz` HERE, DELIBERATELY.
+            #
+            # That name is never produced. The macOS tarball's alias is copied
+            # by the "DEPRECATED ALIAS — the tarball's signature" step, which
+            # renames `.../chrysalis-*` to `.../locus-*` and so cannot match a
+            # filename already ending `.app.tar.gz`; the `.app.tar.gz` itself is
+            # therefore only ever published under the current name. Listing it
+            # here made `fail_on_unmatched_files` abort the release of v3.5.1
+            # after all four platforms had built, signed and uploaded.
+            #
+            # A pre-move client does not need it: `fetch-release.py` resolves
+            # `locus-darwin-*.app.tar.gz` only for a release that carries the
+            # WHOLE legacy set, and such a release declares its legacy platform
+            # names from its own manifest, not from this file. The two legacy
+            # entries that ARE here (`locus-darwin-amd64` / `-arm64`, the raw
+            # Mach-O) are produced and remain.
             release/manifest.json
             release/installer-*
           draft: false
