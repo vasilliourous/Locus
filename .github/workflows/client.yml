@@ -1835,7 +1835,12 @@ jobs:
           # bytes, not filenames).
           #
           # This retires with the `locus-*` rows in NAME-MIGRATION.md §3.1.
-          legacy="${matrix.artifact/chrysalis-/locus-}"
+          # `${{ }}` FIRST: a bare `${matrix.artifact/...}` is a *parameter
+          # expansion* to bash, and `/-` is not an operator it has — it aborts
+          # with "bad substitution" before any name is staged. The same mistake
+          # as the escaped `.app` patterns in f5f0a07, one layer down.
+          legacy="${{ matrix.artifact }}"
+          legacy="${legacy/chrysalis-/locus-}"
           if [ "$legacy" != "${{ matrix.artifact }}" ]; then
             cp "$src" "artifacts/$legacy"
             chmod +x "artifacts/$legacy"
@@ -1863,7 +1868,12 @@ jobs:
           mkdir -p artifacts
           cp "$src" "artifacts/${{ matrix.artifact }}"
           # DEPRECATED ALIAS — see the unix step above for why both names ship.
-          legacy="${matrix.artifact/chrysalis-/locus-}"
+          # `${{ }}` FIRST: a bare `${matrix.artifact/...}` is a *parameter
+          # expansion* to bash, and `/-` is not an operator it has — it aborts
+          # with "bad substitution" before any name is staged. The same mistake
+          # as the escaped `.app` patterns in f5f0a07, one layer down.
+          legacy="${{ matrix.artifact }}"
+          legacy="${legacy/chrysalis-/locus-}"
           if [ "$legacy" != "${{ matrix.artifact }}" ]; then
             cp "$src" "artifacts/$legacy"
             echo "staged deprecated alias $legacy"
