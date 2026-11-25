@@ -277,36 +277,49 @@ because a plan a student is paying for must never be invisible.
 Authority: `server/console/src/styles.css` `:root`, plus a handful of literal
 values in the same file that are not variables.
 
-The console is dark-only and is **not** yet recoloured to the Dawn palette: it
-still carries the neutral set below, because it is an operator surface served
-from the hub and its stylesheet is a separate build. This section records that
-honestly rather than claiming an agreement that does not exist.
+The console is dark-only and **now carries §2 directly**. It held a neutral set
+of its own until 2026-11-25, which this section recorded as *Open*; that set is
+gone. Every value below is a §2 role, mapped role-for-role rather than
+shade-for-shade, and no value was invented to fill a gap.
 
-| Variable | Value |
-|---|---|
-| `--bg` | `#141414` |
-| `--panel` | `#1C1C1C` |
-| `--panel-2` | `#222222` |
-| `--border` | `#3A3A3A` |
-| `--text` | `#E8E8E8` |
-| `--muted` | `#A0A0A0` |
-| `--accent` | `#C4C4C4` |
-| `--accent-dim` | `#4A4A4A` |
-| `--danger` | `#D6D6D6` |
-| `--warn` | `#C8C8C8` |
+| Variable | Value | §2 role |
+|---|---|---|
+| `--bg` | `#1A1B26` | `background` |
+| `--panel` | `#24283B` | `surface` |
+| `--panel-2` | `#2F3349` | `surfaceHover` |
+| `--border` | `#3B4261` | `border` |
+| `--text` | `#C0CAF5` | `textPrimary` |
+| `--muted` | `#9AA5CE` | `textSecondary` |
+| `--accent` | `#7AA2F7` | `accent` |
+| `--accent-hover` | `#9AB8FF` | `accentHover` |
+| `--accent-dim` | `#2F3349` | `surfaceHover`, as the active-nav fill |
+| `--danger` | `#F7768E` | `error` |
+| `--warn` | `#E0AF68` | `warning` |
+| `--success` | `#9ECE6A` | `success` |
+| `--info` | `#7DCFFF` | `info` |
 
-Non-variable literals in the same file, all neutral: the active nav label
-`#FFFFFF`, the primary button's label `#141414`, the danger button's border
-`var(--accent-dim)`, the three message backgrounds `#222222` (ok) /
-`#1C1C1C` (err) / `#262626` (warn) distinguished by their borders, and the four
-badge backgrounds `#222222` (available) / `#1C1C1C` (bound) / `#1C1C1C`
-(suspended) / `#262626` (expired). Modal and toast shadows are black at alpha,
-unchanged.
+The variable **names** are unchanged on purpose: this is an operator tool, the
+change was palette-only, and renaming would churn every rule for no reader. They
+are now labels for §2 roles, not a private palette.
 
-**Open:** the console reads as a second product beside the app. Recolouring it is
-a follow-up with its own change, gated on the console's build and deploy path
-(`docs/operate/DEPLOY.md`), and it must not be done by inventing values here — it
-implements `§2`.
+Status is carried by **colour**, not by a shade of grey. The neutral set told
+ok/err/warn apart by three backgrounds (`#222222` / `#1C1C1C` / `#262626`) with
+identical text, so a failure and a success read the same until you found the
+border. Messages and badges now use their semantic role for both tint and label:
+
+- messages — `ok` on `panel-2` with a `success` border, `err` on `panel` with
+  `danger`, `warn` on `panel-2` with `warning`
+- badges — `available` `success`, `bound` `accent`, `suspended` `danger`,
+  `expired` and `issued` `warning`, `signed-out` `info`
+
+Two on-fill literals remain and both are deliberate. The primary button's label
+is `var(--bg)` — `background` used as "ink on a filled control", which is 6.8:1
+on the accent and the same figure the neutral set had. §2 defines no separate
+on-accent role, and inventing one is what this section forbids. The active nav
+row keeps `textPrimary` on `--accent-dim` and marks itself with an inset
+`accent` bar rather than jumping to `#FFFFFF`, which on a coloured palette reads
+as a different typeface beside its neighbours. Modal and toast shadows stay
+black at alpha.
 
 Not colour, and not owned here: the console's routes, its auth, and the
 `/admin/` path.

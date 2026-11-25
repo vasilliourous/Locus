@@ -14,30 +14,26 @@
  * elsewhere would simply be blocked. The font stack is the client's own.
  */
 
+/*
+ * DARK ONLY. There is no `prefers-color-scheme` block and no light `:root`, on
+ * purpose: §5 of `COLOURS.md` says the page is dark-only "like the product. A
+ * light marketing page beside a permanently dark app would be two products."
+ *
+ * This file previously carried a light palette plus a dark override, both in
+ * grey — and it stayed that way through the rename, which changed the wordmark
+ * and left the colours. The result was a Chrysalis-named page in the old
+ * monochrome, i.e. the one surface the brand update did not reach.
+ */
 :root {
-  --bg: #ececec;
-  --surface: #f7f7f7;
-  --surface-hover: #e6e6e6;
-  --border: #c0c0c0;
-  --text: #151515;
-  --text-secondary: #565656;
-  --accent: #4C4C4C;
-  --accent-hover: #404040;
-  color-scheme: light;
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #141414;
-    --surface: #202020;
-    --surface-hover: #2a2a2a;
-    --border: #4a4a4a;
-    --text: #e8e8e8;
-    --text-secondary: #a6a6a6;
-    --accent: #D0D0D0;
-    --accent-hover: #e2e2e2;
-    color-scheme: dark;
-  }
+  --bg: #1A1B26;
+  --surface: #24283B;
+  --surface-hover: #2F3349;
+  --border: #3B4261;
+  --text: #C0CAF5;
+  --text-secondary: #9AA5CE;
+  --accent: #7AA2F7;
+  --accent-hover: #9AB8FF;
+  color-scheme: dark;
 }
 
 *,

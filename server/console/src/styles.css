@@ -1,18 +1,41 @@
 /* Chrysalis Console styling.
    Deliberately plain: this is an operations tool used in short bursts, so
-   clarity and quick scanning beat decoration. Palette: /COLOURS.md §7. */
+   clarity and quick scanning beat decoration. Palette: /COLOURS.md §7, which
+   implements §2 — the one palette. Nothing here is invented: every value below
+   is a §2 role, and §7 today reads "not yet recoloured … it implements §2",
+   which this change makes true rather than aspirational.
+
+   The console carried a neutral set until now, so it read as a second product
+   beside the app. The mapping is role-for-role, not shade-for-shade:
+
+     --bg         background      the window
+     --panel      surface         cards and panels, one step above the window
+     --panel-2    surfaceHover    the second step, for nav hover / table stripes
+     --border     border          dividers
+     --text       textPrimary     body
+     --muted      textSecondary   labels and hints
+     --accent     accent          primary action, active indicators
+     --accent-dim surfaceHover    the dimmed fill behind an active nav row
+     --danger     error           failures
+     --warn       warning         degradation
+
+   The names are kept as they were: this is an operator tool, the diff should be
+   palette only, and a rename would churn every rule below for no reader. */
 
 :root {
-  --bg: #141414;
-  --panel: #1c1c1c;
-  --panel-2: #222222;
-  --border: #3a3a3a;
-  --text: #e8e8e8;
-  --muted: #A0A0A0;
-  --accent: #C4C4C4;
-  --accent-dim: #4a4a4a;
-  --danger: #d6d6d6;
-  --warn: #c8c8c8;
+  --bg: #1A1B26;
+  --panel: #24283B;
+  --panel-2: #2F3349;
+  --border: #3B4261;
+  --text: #C0CAF5;
+  --muted: #9AA5CE;
+  --accent: #7AA2F7;
+  --accent-hover: #9AB8FF;
+  --accent-dim: #2F3349;
+  --danger: #F7768E;
+  --warn: #E0AF68;
+  --success: #9ECE6A;
+  --info: #7DCFFF;
   --radius: 8px;
   --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
 }
@@ -67,7 +90,14 @@ a { color: var(--accent); }
   width: 100%;
 }
 .nav-item:hover { background: var(--panel-2); }
-.nav-item.active { background: var(--accent-dim); color: #ffffff; font-weight: 600; }
+/* The active row is the accent at low strength: `--accent-dim` is the
+   `surfaceHover` step, so the label stays `textPrimary` rather than going pure
+   white. White on `#2F3349` is a 12:1 jump that reads as a different typeface
+   next to `#C0CAF5` neighbours; the accent bar is what marks the row. */
+.nav-item.active {
+  background: var(--accent-dim); color: var(--text); font-weight: 600;
+  box-shadow: inset 3px 0 0 var(--accent);
+}
 
 .main { flex: 1; padding: 22px 26px 60px; max-width: 1240px; }
 
@@ -130,7 +160,14 @@ button {
 }
 button:hover:not(:disabled) { border-color: var(--accent-dim); }
 button:disabled { opacity: .5; cursor: not-allowed; }
-button.primary { background: var(--accent); color: #141414; border-color: var(--accent); font-weight: 600; }
+/* Dark ink on the accent: 6.8:1, and the same figure the neutral set had, so the
+   button reads at the same weight it always did. `background` is §2's window
+   colour, used here as "the ink on a filled control" because §2 has no separate
+   on-accent role and inventing one is what §7 forbids. */
+button.primary {
+  background: var(--accent); color: var(--bg); border-color: var(--accent); font-weight: 600;
+}
+button.primary:hover:not(:disabled) { background: var(--accent-hover); border-color: var(--accent-hover); }
 button.danger { color: var(--danger); border-color: var(--accent-dim); }
 button.tiny { padding: 3px 8px; font-size: 12px; }
 
@@ -149,9 +186,14 @@ code, .mono { font-family: var(--mono); font-size: 12.5px; }
 
 /* ── Messages ── */
 .msg { padding: 10px 12px; border-radius: 6px; margin-bottom: 14px; font-size: 13px; }
-.msg.ok { background: #222222; border: 1px solid var(--accent-dim); }
-.msg.err { background: #1c1c1c; border: 1px solid #3a3a3a; }
-.msg.warn { background: #262626; border: 1px solid #4a4a4a; }
+/* Status is carried by COLOUR now, not by three shades of grey.
+   The neutral set distinguished ok/err/warn by background alone (#222222 /
+   #1c1c1c / #262626) and left the text the same colour in all three — which
+   meant a failure and a success were the same read until you found the border.
+   §2 has semantic roles, so each message uses its own. */
+.msg.ok { background: var(--panel-2); border: 1px solid var(--success); }
+.msg.err { background: var(--panel); border: 1px solid var(--danger); }
+.msg.warn { background: var(--panel-2); border: 1px solid var(--warn); }
 
 /* A deadline inside the renewal warning window (7 days). Warning-coloured
    rather than danger-coloured: a code near its end is normal, actionable
@@ -165,17 +207,21 @@ tr.dim { opacity: .55; }
   display: inline-block; padding: 1px 7px; border-radius: 10px;
   font-size: 11px; font-weight: 600; white-space: nowrap;
 }
-.badge.available { background: #222222; color: var(--accent); }
-.badge.bound { background: #1c1c1c; color: var(--text); }
-.badge.suspended { background: #1c1c1c; color: var(--danger); }
-.badge.expired { background: #262626; color: var(--warn); }
+/* The badge fills were three neutral greys chosen so a reader could tell the
+   states apart by shade. On a coloured palette a grey is no longer distinguishable
+   from another grey, so the tint is taken from the same role as the text: the
+   panel under the label, the label in the status colour. */
+.badge.available { background: var(--panel-2); color: var(--success); }
+.badge.bound { background: var(--panel); color: var(--accent); }
+.badge.suspended { background: var(--panel); color: var(--danger); }
+.badge.expired { background: var(--panel-2); color: var(--warn); }
 /* Issued once and released: free to hand out, but not new. Warn, not danger —
    re-issuing is a legitimate act, and an operator is entitled to do it knowing
    what it costs the previous holder. */
-.badge.issued { background: #262626; color: var(--warn); }
+.badge.issued { background: var(--panel-2); color: var(--warn); }
 /* A student signed out. Informational: moving to a new computer looks like this.
    The pattern an operator acts on is a COUNT, which is why the badge carries it. */
-.badge.signed-out { background: #1c1c1c; color: var(--muted); }
+.badge.signed-out { background: var(--panel); color: var(--info); }
 
 .muted { color: var(--muted); }
 .spacer { flex: 1; }
