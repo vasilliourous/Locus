@@ -3299,6 +3299,12 @@ jobs:
           # They retire together with the `locus-*` rows in NAME-MIGRATION.md
           # §3.1, once no build older than the first `chrysalis-*` release can
           # still be offered an update. §1c/§1e refuse a half-removal.
+          # NO `locus-darwin-*.app.tar.gz` HERE, DELIBERATELY. That name is
+          # never produced: the tarball's alias copy renames `.../chrysalis-*`
+          # and cannot match a filename already ending `.app.tar.gz`. Listing
+          # it made `fail_on_unmatched_files` abort v3.5.1's release after all
+          # four platforms had built, signed and uploaded. The two raw-Mach-O
+          # aliases above ARE produced and remain.
           files: |
             release/chrysalis-linux-amd64
             release/chrysalis-linux-amd64.sig
@@ -3320,12 +3326,6 @@ jobs:
             release/locus-darwin-amd64.sig
             release/locus-darwin-arm64
             release/locus-darwin-arm64.sig
-            # NO `locus-darwin-*.app.tar.gz` HERE, DELIBERATELY. That name is
-            # never produced: the tarball's alias copy renames `.../chrysalis-*`
-            # and cannot match a filename already ending `.app.tar.gz`. Listing
-            # it made `fail_on_unmatched_files` abort v3.5.1's release after all
-            # four platforms had built, signed and uploaded. The two raw-Mach-O
-            # aliases above ARE produced and remain.
             release/manifest.json
             release/installer-*
           draft: false
