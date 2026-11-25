@@ -401,7 +401,7 @@ What each step covers, and why:
 | console | `/var/www/admin/` | built, tarred, uploaded, extracted, and **served-verified** (`/admin/` must 200). |
 | site | `/var/www/site/` | the public landing page. Rendered from the release manifest's `platforms` map (so its four download URLs name the version the hub actually serves), tarred, uploaded, and **served-verified** — including that `/updates/` is NOT reachable on the landing host. |
 | staging | `/root/server/` | `setup.sh` deploys FROM here, not from the repo. Leaving it stale is how a re-run reverts hooks. |
-| chrysalis-fetch | restart | it runs FROM the staging copy, so a changed script has no effect until the process is recycled. |
+| chrysalis-fetch | restart | it runs FROM the staging copy, so a changed script has no effect until the process is recycled. **On a box provisioned before the rename the unit is still `locus-fetch`** — `05-caddy.sh` writes the new name but a routine deploy does not re-run it. Check `systemctl list-units | grep fetch` before assuming which one exists; starting a unit that is not there reports `not-found` and looks like a broken service when nothing is wrong. |
 | verify | — | health, `/api/update`, `/api/release`, heartbeat, hook-drift, and the landing page's four download links. |
 
 **SSH access.** Key auth is installed; nothing prompts. `~/.ssh/config` defines a
@@ -591,6 +591,8 @@ server/scripts/deploy-console.sh
 
 # Is the fetch service up? (only needed for releases)
 ssh $VPS "systemctl status chrysalis-fetch --no-pager && curl -s http://127.0.0.1:8091/health"
+# Older boxes: the unit is `locus-fetch` (renamed in the tree, not yet re-run).
+# ssh $VPS "systemctl status locus-fetch --no-pager && curl -s http://127.0.0.1:8091/health"
 
 # Admin API errors
 ssh $VPS "journalctl -u pocketbase -n 50 --no-pager | grep -i admin_console"

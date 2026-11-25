@@ -4344,6 +4344,36 @@ else
     ok "deploy-site.sh renders the same four slots the page carries"
 fi
 
+# The landing-host rewrite must run AFTER the rendered html is written to disk.
+#
+# This ordering is invisible in the output whenever the source page already names
+# LANDING_DOMAIN, which it did for the whole life of the script — so the bug that
+# the write sat last (`index.write_text(html)` *after* the re.sub loop) was
+# undetectable by reading a rendered page. It surfaced only when the Chrysalis
+# rename made the hardcoded host and the deployed host disagree, and the served
+# page then advertised a canonical URL, an og:image and a twitter:image all on a
+# hostname with no DNS. The symptom of a canonical pointing somewhere dead is
+# nothing at all — it is a hint to a crawler, not a request the page makes.
+#
+# Asserted on line order because that is the fact: the write must precede the
+# rewrite, and the guard must follow both.
+DS_WRITE=$(grep -n '^index\.write_text(html)$' "$REPO/server/scripts/deploy-site.sh" 2>/dev/null | head -1 | cut -d: -f1)
+DS_REWRITE=$(grep -n '^LANDING_URL = ' "$REPO/server/scripts/deploy-site.sh" 2>/dev/null | head -1 | cut -d: -f1)
+DS_GUARD=$(grep -n '^final = (pathlib\.Path(stage) / "index\.html")\.read_text()$' "$REPO/server/scripts/deploy-site.sh" 2>/dev/null | head -1 | cut -d: -f1)
+if [ -z "$DS_WRITE" ] || [ -z "$DS_REWRITE" ] || [ -z "$DS_GUARD" ]; then
+    bad "deploy-site.sh: cannot locate the html write, the landing-URL pattern or the guard"
+    bad "  write='${DS_WRITE:-<missing>}' rewrite='${DS_REWRITE:-<missing>}' guard='${DS_GUARD:-<missing>}'"
+    bad "  Renaming any of these without re-pointing this check removes the only"
+    bad "  thing that notices the rewrite being clobbered."
+elif [ "$DS_WRITE" -ge "$DS_REWRITE" ] || [ "$DS_GUARD" -le "$DS_REWRITE" ]; then
+    bad "deploy-site.sh writes html at line ${DS_WRITE}, rewrites hosts at ${DS_REWRITE}, guards at ${DS_GUARD}"
+    bad "  Required order: write < rewrite < guard. The write carries an in-memory"
+    bad "  copy taken before the rewrite, so writing it after silently discards the"
+    bad "  rewrite and the served page names whatever host the source hardcoded."
+else
+    ok "deploy-site.sh writes html (${DS_WRITE}) before rewriting hosts (${DS_REWRITE}), guard after (${DS_GUARD})"
+fi
+
 # The landing block must never serve the hub's surfaces. This is the property a
 # future "just add a handle" edit removes with no symptom on the page itself.
 #

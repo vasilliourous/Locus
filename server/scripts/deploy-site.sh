@@ -219,20 +219,49 @@ if sm.exists():
     sm.write_text(text)
     print("    sitemap lastmod -> %s" % lastmod)
 
-# The canonical link and the sitemap both name the landing host. Rendered rather
+# Write the rendered download URLs to disk BEFORE the landing-host rewrite
+# below. This ordering is the whole point: `html` is an in-memory copy read at
+# the top of this script, so writing it *after* the loop would overwrite the
+# canonical/og:url that loop just fixed — silently, because the file it clobbers
+# is the one it was told to rewrite. That is not hypothetical: the write sat last
+# from this script's first commit and the rewrite never once took effect. Nothing
+# noticed because the source happened to hardcode the same host the rewrite
+# produced, until the Chrysalis rename made the two disagree and the served page
+# advertised a canonical URL on a hostname with no DNS.
+index.write_text(html)
+
+# Every absolute URL in the page that addresses the landing host. Rendered rather
 # than hardcoded so that changing LANDING_DOMAIN changes every mention at once,
 # and check-consistency.sh still asserts the result matches the Caddyfile.
+#
+# THE URL MUST END AT `/`, NOT BE FOLLOWED BY A QUOTE. The previous pattern was
+# `https://host/(?=["<])` — trailing slash, then a quote — which matched the
+# canonical and og:url but silently skipped `og:image`/`twitter:image`, whose
+# paths end in `/icon.svg"`. Those two shipped naming the OLD host: a social
+# preview fetched an image from a hostname with no DNS, and nothing failed.
+# Matching `https://host` with an optional path is the shape that covers both.
+LANDING_URL = r"https://[A-Za-z0-9.\-]+(/[^\"'\s<>]*)?"
+
+# Hosts that are NOT the landing host and must survive untouched: the hub's
+# download URLs and the repository link in the footer (rewriting those points the
+# buttons at a host with no /updates/), plus `schema.org`, which is not a URL to
+# fetch at all — it is the value of the JSON-LD `@context` key, and it must be
+# spelled exactly `https://schema.org` or the structured data is ignored.
+KEEP_HOSTS = ("networkingguides.", "github.com", "githubusercontent.com", "schema.org")
+
+
+def _rewrite_url(m):
+    url = m.group(0)
+    if any(h in url for h in KEEP_HOSTS):
+        return url
+    return "https://%s%s" % (landing, m.group(1) or "/")
+
+
 for path in ("index.html", "sitemap.xml"):
     p = pathlib.Path(stage) / path
     if not p.exists():
         continue
-    text = p.read_text()
-    text = re.sub(
-        r"https://[A-Za-z0-9.\-]+/(?=[\"<])",
-        "https://%s/" % landing,
-        text,
-    )
-    p.write_text(text)
+    p.write_text(re.sub(LANDING_URL, _rewrite_url, p.read_text()))
 
 # robots.txt carries an absolute Sitemap: URL, which the same regex would miss
 # (it is followed by a newline, not a quote).
@@ -247,7 +276,36 @@ if rb.exists():
                rb.read_text())
     )
 
-index.write_text(html)
+# The rewrite above is only worth doing if it actually reached the file, and a
+# check that reads `html` cannot tell — that in-memory copy is exactly the stale
+# subject that hid this bug. Read the file back off disk, and enumerate EVERY
+# absolute host it still names rather than repeating the rewrite's own pattern:
+# a guard built from the same expression as the code under test agrees with it by
+# construction, which is how the missing og:image rewrite went unnoticed.
+final = (pathlib.Path(stage) / "index.html").read_text()
+if landing not in final:
+    raise SystemExit("index.html on disk never received the landing host %r — "
+                     "the rewrite was overwritten" % landing)
+named = {
+    re.match(r"https://([A-Za-z0-9.\-]+)", u).group(1)
+    for u in re.findall(r"https://[A-Za-z0-9.\-]+", final)
+}
+# Spelled out here rather than reusing KEEP_HOSTS on purpose. A guard that reads
+# the same constant as the code under test cannot catch the code under test
+# adding an entry to it — which is precisely how a stale host would slip through.
+ALLOWED_OTHER_HOSTS = ("networkingguides.duckdns.org",
+                       "networkingguides.jadedns.uk",
+                       "github.com",
+                       "schema.org")
+unexpected = sorted(h for h in named
+                    if h != landing and h not in ALLOWED_OTHER_HOSTS)
+if unexpected:
+    raise SystemExit(
+        "index.html names host(s) that are neither the landing host %r nor a "
+        "kept hub/repo host: %s\n"
+        "Every absolute URL in the served page must resolve. A hostname here "
+        "with no DNS is a dead canonical link, a broken social preview, or a "
+        "download button that 404s." % (landing, ", ".join(unexpected)))
 PY
 
 log "✓ Rendered download URLs for the manifest's version (see the list above)"
