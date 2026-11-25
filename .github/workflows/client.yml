@@ -2646,7 +2646,14 @@ jobs:
           #
           # That is the v3.5.0 failure shape exactly: a shell pattern three
           # thousand lines from the config it depends on. Read it, never restate it.
-          PRODUCT="$(python3 -c 'import json; print(json.load(open("client/src-tauri/tauri.conf.json"))["productName"])')"
+          #
+          # PATH NOTE: this job's `defaults.run.working-directory` is `client`,
+          # so the path here is relative to THAT, not the repo root. Written as
+          # `client/src-tauri/...` it resolved to `client/client/...` and threw
+          # FileNotFoundError before the loop below ever ran - green on nothing,
+          # failing on every Windows build. The `.app` steps read the same file
+          # from `client/`-relative paths for the same reason.
+          PRODUCT="$(python3 -c 'import json; print(json.load(open("src-tauri/tauri.conf.json"))["productName"])')"
           setup=""
           for f in "installer/${PRODUCT}_"*_x64-setup.exe; do
             [ -f "$f" ] || continue
