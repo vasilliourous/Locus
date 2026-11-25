@@ -1835,10 +1835,12 @@ jobs:
           # bytes, not filenames).
           #
           # This retires with the `locus-*` rows in NAME-MIGRATION.md §3.1.
-          # `${{ }}` FIRST: a bare `${matrix.artifact/...}` is a *parameter
-          # expansion* to bash, and `/-` is not an operator it has — it aborts
-          # with "bad substitution" before any name is staged. The same mistake
-          # as the escaped `.app` patterns in f5f0a07, one layer down.
+          # The name is built from the matrix FIRST, then the substitution
+          # runs on an ordinary variable. Written inline, bash reads the same
+          # text as a parameter expansion with an invalid operator and aborts
+          # before staging anything. The pair below is deliberately never
+          # spelled out in prose: GitHub parses double-brace openers inside
+          # comments too, and a malformed one rejects the whole workflow file.
           legacy="${{ matrix.artifact }}"
           legacy="${legacy/chrysalis-/locus-}"
           if [ "$legacy" != "${{ matrix.artifact }}" ]; then
@@ -1868,10 +1870,12 @@ jobs:
           mkdir -p artifacts
           cp "$src" "artifacts/${{ matrix.artifact }}"
           # DEPRECATED ALIAS — see the unix step above for why both names ship.
-          # `${{ }}` FIRST: a bare `${matrix.artifact/...}` is a *parameter
-          # expansion* to bash, and `/-` is not an operator it has — it aborts
-          # with "bad substitution" before any name is staged. The same mistake
-          # as the escaped `.app` patterns in f5f0a07, one layer down.
+          # The name is built from the matrix FIRST, then the substitution
+          # runs on an ordinary variable. Written inline, bash reads the same
+          # text as a parameter expansion with an invalid operator and aborts
+          # before staging anything. The pair below is deliberately never
+          # spelled out in prose: GitHub parses double-brace openers inside
+          # comments too, and a malformed one rejects the whole workflow file.
           legacy="${{ matrix.artifact }}"
           legacy="${legacy/chrysalis-/locus-}"
           if [ "$legacy" != "${{ matrix.artifact }}" ]; then
