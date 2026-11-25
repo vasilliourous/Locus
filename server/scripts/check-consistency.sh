@@ -4418,13 +4418,20 @@ if [ -f "$INSTALL_RS" ]; then
     #      why every one of them is now checked against a deliberate break.)
     release_files=$(sed -n '/^ *files: |$/,/^ *draft: false/p' "$WORKFLOW" \
         | sed -n '/^ *release\//p')
-    if printf '%s\n' "$release_files" | grep -q 'locus-darwin-.*\.app\.tar\.gz$'; then
+    #      EITHER SPELLING, because the tarball cannot be published under the
+    #      pre-move one: the alias step renames `.../chrysalis-*` to `.../locus-*`
+    #      and so cannot match a filename already ending `.app.tar.gz`, so no
+    #      `locus-darwin-*.app.tar.gz` has ever been produced. Requiring the
+    #      `locus-` spelling made this guard the cause of a broken release rather
+    #      than its detector: v3.5.1's `fail_on_unmatched_files` aborted on it
+    #      after every platform had built.
+    if printf '%s\n' "$release_files" | grep -qE '(locus|chrysalis)-darwin-.*\.app\.tar\.gz$'; then
         ok "the release publishes the macOS .app.tar.gz assets"
     else
         bad "the release's file list omits the macOS .app.tar.gz — the manifest would advertise files the release does not carry"
     fi
     #      And its signature, for the reason in (f2).
-    if printf '%s\n' "$release_files" | grep -q 'locus-darwin-.*\.app\.tar\.gz\.sig$'; then
+    if printf '%s\n' "$release_files" | grep -qE '(locus|chrysalis)-darwin-.*\.app\.tar\.gz\.sig$'; then
         ok "the release publishes the tarball signatures too"
     else
         bad "the release's file list omits the macOS tarball .sig — the updater verifies mandatorily and would refuse the download"
