@@ -220,13 +220,13 @@ update signal and a refreshed tier config.
   "status": "ok",
   "server_time": "2026-09-19T10:09:42.945Z",
   "tier": "free",
-  "update_available": "2.1.0",
-  "update_url": "https://networkingguides.jadedns.uk/updates/3.6.0/chrysalis-linux-amd64",
+  "update_available": "3.5.0",
+  "update_url": "https://networkingguides.jadedns.uk/updates/3.5.0/chrysalis-linux-amd64",
   "update_sha256": "abc123...",
-  "update_linux": "https://.../updates/3.6.0/chrysalis-linux-amd64",
+  "update_linux": "https://.../updates/3.5.0/chrysalis-linux-amd64",
   "update_windows": "https://.../updates/2.1.0/installer-Chrysalis_2.1.0_x64-setup.exe",
-  "update_macos_intel": "https://.../updates/3.6.0/chrysalis-darwin-amd64.app.tar.gz",
-  "update_macos_arm": "https://.../updates/3.6.0/chrysalis-darwin-arm64.app.tar.gz",
+  "update_macos_intel": "https://.../updates/3.5.0/chrysalis-darwin-amd64.app.tar.gz",
+  "update_macos_arm": "https://.../updates/3.5.0/chrysalis-darwin-arm64.app.tar.gz",
   "update_sha256_linux": "abc123...",
   "update_sha256_windows": "def456...",
   "update_sha256_macos_intel": "ghi789...",
@@ -638,10 +638,10 @@ served openly from `/updates/*`.
   "published": true,
   "version": "2.4.0",
   "platforms": {
-    "linux":       { "url": "https://<domain>/updates/3.6.0/chrysalis-linux-amd64",       "sha256": "abc123…", "signature": "…" },
+    "linux":       { "url": "https://<domain>/updates/3.5.0/chrysalis-linux-amd64",       "sha256": "abc123…", "signature": "…" },
     "windows":     { "url": "https://<domain>/updates/2.4.0/installer-Chrysalis_2.4.0_x64-setup.exe", "sha256": "def456…", "signature": "…" },
-    "macos_intel": { "url": "https://<domain>/updates/3.6.0/chrysalis-darwin-amd64.app.tar.gz",      "sha256": "ghi789…", "signature": "…" },
-    "macos_arm":   { "url": "https://<domain>/updates/3.6.0/chrysalis-darwin-arm64.app.tar.gz",      "sha256": "jkl012…", "signature": "…" }
+    "macos_intel": { "url": "https://<domain>/updates/3.5.0/chrysalis-darwin-amd64.app.tar.gz",      "sha256": "ghi789…", "signature": "…" },
+    "macos_arm":   { "url": "https://<domain>/updates/3.5.0/chrysalis-darwin-arm64.app.tar.gz",      "sha256": "jkl012…", "signature": "…" }
   }
 }
 ```
