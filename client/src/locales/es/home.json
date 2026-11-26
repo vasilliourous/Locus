@@ -119,21 +119,21 @@
       "freeDataThrottled": "{{used}} of {{total}} used — free data is spent for this month",
       "freeDataThrottledUpgrade": "Full is faster and unmetered. Ask the person who sold you your code about upgrading.",
       "activation": {
-        "title": "Enter your code",
-        "lede": "Your code is on the card you were sold.",
-        "submit": "Activate",
-        "backupRoute": "Using the Chrysalis backup route to reach the server.",
-        "alphabet": "The code is 15 characters and never contains 0, O, 1 or I.",
-        "codeLabel": "Activation code",
+        "title": "Introduce tu código",
+        "lede": "Tu código está en la tarjeta que compraste.",
+        "submit": "Activar",
+        "backupRoute": "Usando la ruta de respaldo de Chrysalis para llegar al servidor.",
+        "alphabet": "El código tiene 15 caracteres y nunca contiene 0, O, 1 ni I.",
+        "codeLabel": "Código de activación",
         "codePlaceholder": "RQ-XXXX-XXXX-XXXX-X"
       },
       "suspended": {
-        "lapsedTitle": "Your subscription has ended",
-        "suspendedTitle": "This device has been signed out",
-        "lapsedBody": "Your code has expired, so the connection was stopped. Renewing with whoever sold you the code restores access.",
-        "suspendedBody": "An operator has suspended this code, so the connection was stopped. Your code is still saved on this computer.",
-        "lapsedAction": "Contact whoever sold you the code to renew it.",
-        "suspendedAction": "Ask them to lift the suspension. You can connect again without re-entering your code or restarting the app."
+        "lapsedTitle": "Tu suscripción ha terminado",
+        "suspendedTitle": "Este dispositivo se ha desconectado",
+        "lapsedBody": "Tu código ha caducado, así que la conexión se detuvo. Renovar con quien te vendió el código restablece el acceso.",
+        "suspendedBody": "Un operador ha suspendido este código, así que la conexión se detuvo. Tu código sigue guardado en esta computadora.",
+        "lapsedAction": "Contacta con quien te vendió el código para renovarlo.",
+        "suspendedAction": "Pídele que levante la suspensión. Puedes volver a conectarte sin introducir tu código ni reiniciar la aplicación."
       }
     }
   }

@@ -119,21 +119,21 @@
       "freeDataThrottled": "{{used}} of {{total}} used — free data is spent for this month",
       "freeDataThrottledUpgrade": "Full is faster and unmetered. Ask the person who sold you your code about upgrading.",
       "activation": {
-        "title": "Enter your code",
-        "lede": "Your code is on the card you were sold.",
-        "submit": "Activate",
-        "backupRoute": "Using the Chrysalis backup route to reach the server.",
-        "alphabet": "The code is 15 characters and never contains 0, O, 1 or I.",
-        "codeLabel": "Activation code",
+        "title": "코드를 입력하세요",
+        "lede": "코드는 구매하신 카드에 있습니다.",
+        "submit": "활성화",
+        "backupRoute": "Chrysalis 백업 경로로 서버에 연결하는 중입니다.",
+        "alphabet": "코드는 15자이며 0, O, 1, I는 포함되지 않습니다.",
+        "codeLabel": "활성화 코드",
         "codePlaceholder": "RQ-XXXX-XXXX-XXXX-X"
       },
       "suspended": {
-        "lapsedTitle": "Your subscription has ended",
-        "suspendedTitle": "This device has been signed out",
-        "lapsedBody": "Your code has expired, so the connection was stopped. Renewing with whoever sold you the code restores access.",
-        "suspendedBody": "An operator has suspended this code, so the connection was stopped. Your code is still saved on this computer.",
-        "lapsedAction": "Contact whoever sold you the code to renew it.",
-        "suspendedAction": "Ask them to lift the suspension. You can connect again without re-entering your code or restarting the app."
+        "lapsedTitle": "구독이 종료되었습니다",
+        "suspendedTitle": "이 기기가 로그아웃되었습니다",
+        "lapsedBody": "코드가 만료되어 연결이 중단되었습니다. 코드를 판매한 사람과 갱신하면 다시 이용할 수 있습니다.",
+        "suspendedBody": "운영자가 이 코드를 정지하여 연결이 중단되었습니다. 코드는 이 컴퓨터에 그대로 저장되어 있습니다.",
+        "lapsedAction": "코드를 판매한 사람에게 연락하여 갱신하세요.",
+        "suspendedAction": "정지 해제를 요청하세요. 코드를 다시 입력하거나 앱을 재시작하지 않고도 다시 연결할 수 있습니다."
       }
     }
   }

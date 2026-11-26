@@ -119,21 +119,21 @@
       "freeDataThrottled": "{{used}} of {{total}} used — free data is spent for this month",
       "freeDataThrottledUpgrade": "Full is faster and unmetered. Ask the person who sold you your code about upgrading.",
       "activation": {
-        "title": "Enter your code",
-        "lede": "Your code is on the card you were sold.",
-        "submit": "Activate",
-        "backupRoute": "Using the Chrysalis backup route to reach the server.",
-        "alphabet": "The code is 15 characters and never contains 0, O, 1 or I.",
-        "codeLabel": "Activation code",
+        "title": "Введите ваш код",
+        "lede": "Ваш код указан на карточке, которую вы купили.",
+        "submit": "Активировать",
+        "backupRoute": "Используется резервный маршрут Chrysalis для доступа к серверу.",
+        "alphabet": "Код состоит из 15 символов и никогда не содержит 0, O, 1 или I.",
+        "codeLabel": "Код активации",
         "codePlaceholder": "RQ-XXXX-XXXX-XXXX-X"
       },
       "suspended": {
-        "lapsedTitle": "Your subscription has ended",
-        "suspendedTitle": "This device has been signed out",
-        "lapsedBody": "Your code has expired, so the connection was stopped. Renewing with whoever sold you the code restores access.",
-        "suspendedBody": "An operator has suspended this code, so the connection was stopped. Your code is still saved on this computer.",
-        "lapsedAction": "Contact whoever sold you the code to renew it.",
-        "suspendedAction": "Ask them to lift the suspension. You can connect again without re-entering your code or restarting the app."
+        "lapsedTitle": "Ваша подписка закончилась",
+        "suspendedTitle": "Это устройство вышло из аккаунта",
+        "lapsedBody": "Срок действия вашего кода истёк, поэтому соединение было остановлено. Продление у продавца кода восстановит доступ.",
+        "suspendedBody": "Оператор приостановил этот код, поэтому соединение было остановлено. Ваш код по-прежнему сохранён на этом компьютере.",
+        "lapsedAction": "Свяжитесь с продавцом кода, чтобы продлить его.",
+        "suspendedAction": "Попросите снять приостановку. Вы сможете подключиться снова, не вводя код заново и не перезапуская приложение."
       }
     }
   }

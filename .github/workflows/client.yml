@@ -2887,6 +2887,40 @@ jobs:
           fi
           echo "Staged $count installer asset(s)."
 
+          # ── THE RELEASE MUST BE ABLE TO SAY WHICH BUILD IT IS ──
+          #
+          # WHY THIS IS NOT A READ-BACK OF THE PUBLISHED ASSETS, WHICH IS WHAT WAS
+          # WANTED FIRST. Asking `releases/tags/<tag>` after the upload would be
+          # the honest check, and it cannot live here: `action-gh-release` is the
+          # step that creates the release, and this step runs before it. A step
+          # after it would need the `release` job to read the API back — worth
+          # doing, and not done, so it is stated as a gap rather than pretended
+          # away (docs/reference/STILL-OPEN.md).
+          #
+          # What CAN be asserted before the upload is about the STAGED set, and it
+          # is the half that fails silently today: a release whose asset set does
+          # not include a statement of which build it is. v3.5.1 was exactly that
+          # — 29 assets, none of them a manifest of the build — and no commit can
+          # retain the observation, because a re-run replaces the assets.
+          #
+          # `release_notes.md` is that statement: a file, not a tag name, so a
+          # build can be told from a build by its own contents.
+          if [ ! -f release_notes.md ]; then
+            echo "::error::release_notes.md was not staged. The release would carry"
+            echo "::error::  no asset that says which build it is beyond its tag name."
+            exit 1
+          fi
+          if ! grep -qx 'release/release_notes.md' \
+               <(sed -n '/^          files: |/,/^          draft:/p' \
+                   .github/workflows/client.yml | sed 's/^          //;s/^ *//'); then
+            echo "::error::release_notes.md is staged but is not listed in the release"
+            echo "::error::  \`files:\` block, so it will not be published. An asset that is"
+            echo "::error::  staged and not listed reads as published to everyone reading"
+            echo "::error::  this job, and as missing to everyone reading the release."
+            exit 1
+          fi
+          echo "release_notes.md is staged and listed."
+
           # ── The macOS download must be present, and named for a human ──
           #
           # Asserted by SHAPE rather than by an exact version, so a bump does not
@@ -2934,6 +2968,65 @@ jobs:
 
       - name: List what will be published
         run: ls -la release/
+
+      # ── The file that says which build this is ──
+      #
+      # A release's assets alone cannot answer "what was built": v3.5.1 published
+      # 29 assets and `manifest.json` (the updater's, hash + signature), which
+      # names a version and no source. Someone holding the installer and someone
+      # holding this release had no shared artefact to compare.
+      #
+      # It is generated from the checkout this job runs in, so it states the
+      # commit the release was BUILT FROM — which is the fact the tag does not
+      # carry. A tag can point at one commit while the assets come from another
+      # (exactly what happened to v3.5.1: `target_commitish: main`, uploaded from
+      # `52ec805`, tag on `86177a1`), and nothing in the release said so.
+      #
+      # Not `generate_release_notes`: that is GitHub's own diff summary, it is not
+      # an asset, and it cannot be downloaded by the thing needing to compare.
+      - name: Stage release_notes.md
+        run: |
+          set -euo pipefail
+          # 1. The version, from the file the build compiled — never the tag,
+          #    never a second source that could disagree with it.
+          version=$(grep -m1 '"version"' client/package.json \
+                    | sed 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/')
+          if [ -z "$version" ]; then
+            echo "::error::could not read the version from client/package.json"
+            exit 1
+          fi
+          # 2. The commit. `github.sha` is the ref the workflow ran for, and on a
+          #    tag push it is the TAG OBJECT — so dereference it, or the file
+          #    names a tag as a commit and is wrong for the one case it exists for.
+          commit=$(git rev-parse "${{ github.sha }}^{commit}")
+          short=$(git rev-parse --short "$commit")
+          branch=$(git rev-parse --abbrev-ref "${{ github.sha }}" 2>/dev/null || echo unknown)
+          # 3. The assets, as this job staged them.
+          {
+            echo "# Chrysalis ${version}"
+            echo
+            echo "| | |"
+            echo "|---|---|"
+            echo "| Version | \`${version}\` |"
+            echo "| Commit | \`${commit}\` |"
+            echo "| Ref | \`${{ github.ref_name }}\` (${{ github.ref_type }}) |"
+            echo "| Built | $(date -u +%Y-%m-%dT%H:%M:%SZ) |"
+            echo "| Workflow run | \`${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}\` |"
+            echo
+            echo "## Assets"
+            echo
+            for f in release/*; do
+              [ -f "$f" ] || continue
+              name=$(basename "$f")
+              # The two installer families are staged below; they are listed here
+              # too because this file is what a person reads to see what shipped.
+              echo "- \`${name}\` — $(wc -c < "$f") bytes"
+            done
+            echo
+            echo "Generated by \`${{ github.workflow }}\` from commit \`${short}\`."
+          } > release_notes.md
+          echo "Staged release_notes.md for ${version} at ${short}:"
+          cat release_notes.md
 
       # ── Every file the release will name must exist BEFORE the upload ──
       #
@@ -3328,6 +3421,11 @@ jobs:
             release/locus-darwin-arm64.sig
             release/manifest.json
             release/installer-*
+            # Which build this is, as a file rather than a tag name. The step
+            # "Prefix and stage the installers" REFUSES to continue if this is
+            # staged and not listed here, because an asset read by the job and
+            # missing from the release is the failure that made v3.5.1 ambiguous.
+            release/release_notes.md
           draft: false
           # Idempotent: re-running on the same tag replaces assets rather than
           # failing. A half-published release is worse than a re-run.

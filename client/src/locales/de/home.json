@@ -119,21 +119,21 @@
       "freeDataThrottled": "{{used}} of {{total}} used — free data is spent for this month",
       "freeDataThrottledUpgrade": "Full is faster and unmetered. Ask the person who sold you your code about upgrading.",
       "activation": {
-        "title": "Enter your code",
-        "lede": "Your code is on the card you were sold.",
-        "submit": "Activate",
-        "backupRoute": "Using the Chrysalis backup route to reach the server.",
-        "alphabet": "The code is 15 characters and never contains 0, O, 1 or I.",
-        "codeLabel": "Activation code",
+        "title": "Gib deinen Code ein",
+        "lede": "Dein Code steht auf der Karte, die du gekauft hast.",
+        "submit": "Aktivieren",
+        "backupRoute": "Die Chrysalis-Backup-Route wird verwendet, um den Server zu erreichen.",
+        "alphabet": "Der Code hat 15 Zeichen und enthält nie 0, O, 1 oder I.",
+        "codeLabel": "Aktivierungscode",
         "codePlaceholder": "RQ-XXXX-XXXX-XXXX-X"
       },
       "suspended": {
-        "lapsedTitle": "Your subscription has ended",
-        "suspendedTitle": "This device has been signed out",
-        "lapsedBody": "Your code has expired, so the connection was stopped. Renewing with whoever sold you the code restores access.",
-        "suspendedBody": "An operator has suspended this code, so the connection was stopped. Your code is still saved on this computer.",
-        "lapsedAction": "Contact whoever sold you the code to renew it.",
-        "suspendedAction": "Ask them to lift the suspension. You can connect again without re-entering your code or restarting the app."
+        "lapsedTitle": "Dein Abonnement ist abgelaufen",
+        "suspendedTitle": "Dieses Gerät wurde abgemeldet",
+        "lapsedBody": "Dein Code ist abgelaufen, daher wurde die Verbindung getrennt. Eine Verlängerung bei demjenigen, der dir den Code verkauft hat, stellt den Zugang wieder her.",
+        "suspendedBody": "Ein Betreiber hat diesen Code gesperrt, daher wurde die Verbindung getrennt. Dein Code ist weiterhin auf diesem Computer gespeichert.",
+        "lapsedAction": "Wende dich zum Verlängern an die Person, die dir den Code verkauft hat.",
+        "suspendedAction": "Bitte sie, die Sperre aufzuheben. Du kannst dich wieder verbinden, ohne den Code erneut einzugeben oder die App neu zu starten."
       }
     }
   }

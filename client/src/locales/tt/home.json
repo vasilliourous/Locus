@@ -119,21 +119,21 @@
       "freeDataThrottled": "{{used}} of {{total}} used — free data is spent for this month",
       "freeDataThrottledUpgrade": "Full is faster and unmetered. Ask the person who sold you your code about upgrading.",
       "activation": {
-        "title": "Enter your code",
-        "lede": "Your code is on the card you were sold.",
-        "submit": "Activate",
-        "backupRoute": "Using the Chrysalis backup route to reach the server.",
-        "alphabet": "The code is 15 characters and never contains 0, O, 1 or I.",
-        "codeLabel": "Activation code",
+        "title": "Кодыгызны кертегез",
+        "lede": "Кодыгыз сез сатып алган карточкада.",
+        "submit": "Активлаштыру",
+        "backupRoute": "Серверга җитү өчен Chrysalis резерв маршруты кулланыла.",
+        "alphabet": "Код 15 символдан тора һәм беркайчан да 0, O, 1 яки I булмый.",
+        "codeLabel": "Активлаштыру коды",
         "codePlaceholder": "RQ-XXXX-XXXX-XXXX-X"
       },
       "suspended": {
-        "lapsedTitle": "Your subscription has ended",
-        "suspendedTitle": "This device has been signed out",
-        "lapsedBody": "Your code has expired, so the connection was stopped. Renewing with whoever sold you the code restores access.",
-        "suspendedBody": "An operator has suspended this code, so the connection was stopped. Your code is still saved on this computer.",
-        "lapsedAction": "Contact whoever sold you the code to renew it.",
-        "suspendedAction": "Ask them to lift the suspension. You can connect again without re-entering your code or restarting the app."
+        "lapsedTitle": "Сезнең язылу тәмамланды",
+        "suspendedTitle": "Бу җайланмадан чыгу ясалды",
+        "lapsedBody": "Кодыгызның вакыты бетеп, тоташу туктатылды. Кодны сезгә саткан кеше белән яңарту керүне кире кайтара.",
+        "suspendedBody": "Оператор бу кодны туктатты, шуңа күрә тоташу туктатылды. Кодыгыз бу компьютерда сакланып тора.",
+        "lapsedAction": "Яңарту өчен кодны сезгә саткан кеше белән бәйләнешкә керегез.",
+        "suspendedAction": "Аннан туктатуны алырга сорагыз. Кодны кабат кертмичә яки кушымтаны яңадан эшләтмичә яңадан тоташа аласыз."
       }
     }
   }

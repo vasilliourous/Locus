@@ -119,21 +119,21 @@
       "freeDataThrottled": "{{used}} of {{total}} used — free data is spent for this month",
       "freeDataThrottledUpgrade": "Full is faster and unmetered. Ask the person who sold you your code about upgrading.",
       "activation": {
-        "title": "Enter your code",
-        "lede": "Your code is on the card you were sold.",
-        "submit": "Activate",
-        "backupRoute": "Using the Chrysalis backup route to reach the server.",
-        "alphabet": "The code is 15 characters and never contains 0, O, 1 or I.",
-        "codeLabel": "Activation code",
+        "title": "أدخل رمزك",
+        "lede": "رمزك موجود على البطاقة التي اشتريتها.",
+        "submit": "تفعيل",
+        "backupRoute": "جارٍ استخدام مسار Chrysalis الاحتياطي للوصول إلى الخادم.",
+        "alphabet": "يتكوّن الرمز من 15 حرفًا ولا يحتوي أبدًا على 0 أو O أو 1 أو I.",
+        "codeLabel": "رمز التفعيل",
         "codePlaceholder": "RQ-XXXX-XXXX-XXXX-X"
       },
       "suspended": {
-        "lapsedTitle": "Your subscription has ended",
-        "suspendedTitle": "This device has been signed out",
-        "lapsedBody": "Your code has expired, so the connection was stopped. Renewing with whoever sold you the code restores access.",
-        "suspendedBody": "An operator has suspended this code, so the connection was stopped. Your code is still saved on this computer.",
-        "lapsedAction": "Contact whoever sold you the code to renew it.",
-        "suspendedAction": "Ask them to lift the suspension. You can connect again without re-entering your code or restarting the app."
+        "lapsedTitle": "انتهى اشتراكك",
+        "suspendedTitle": "تم تسجيل خروج هذا الجهاز",
+        "lapsedBody": "انتهت صلاحية رمزك، لذلك أُوقف الاتصال. التجديد مع من باعك الرمز يعيد الوصول.",
+        "suspendedBody": "أوقف أحد المشغّلين هذا الرمز، لذلك أُوقف الاتصال. رمزك لا يزال محفوظًا على هذا الحاسوب.",
+        "lapsedAction": "تواصل مع من باعك الرمز لتجديده.",
+        "suspendedAction": "اطلب منه رفع الإيقاف. يمكنك الاتصال مجددًا دون إعادة إدخال رمزك أو إعادة تشغيل التطبيق."
       }
     }
   }

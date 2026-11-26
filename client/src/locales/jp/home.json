@@ -119,21 +119,21 @@
       "freeDataThrottled": "{{used}} of {{total}} used — free data is spent for this month",
       "freeDataThrottledUpgrade": "Full is faster and unmetered. Ask the person who sold you your code about upgrading.",
       "activation": {
-        "title": "Enter your code",
-        "lede": "Your code is on the card you were sold.",
-        "submit": "Activate",
-        "backupRoute": "Using the Chrysalis backup route to reach the server.",
-        "alphabet": "The code is 15 characters and never contains 0, O, 1 or I.",
-        "codeLabel": "Activation code",
+        "title": "コードを入力してください",
+        "lede": "コードは購入したカードに記載されています。",
+        "submit": "有効化",
+        "backupRoute": "Chrysalis のバックアップ経路でサーバーに接続しています。",
+        "alphabet": "コードは15文字で、0・O・1・I は含まれません。",
+        "codeLabel": "アクティベーションコード",
         "codePlaceholder": "RQ-XXXX-XXXX-XXXX-X"
       },
       "suspended": {
-        "lapsedTitle": "Your subscription has ended",
-        "suspendedTitle": "This device has been signed out",
-        "lapsedBody": "Your code has expired, so the connection was stopped. Renewing with whoever sold you the code restores access.",
-        "suspendedBody": "An operator has suspended this code, so the connection was stopped. Your code is still saved on this computer.",
-        "lapsedAction": "Contact whoever sold you the code to renew it.",
-        "suspendedAction": "Ask them to lift the suspension. You can connect again without re-entering your code or restarting the app."
+        "lapsedTitle": "サブスクリプションが終了しました",
+        "suspendedTitle": "このデバイスはサインアウトされました",
+        "lapsedBody": "コードの有効期限が切れたため、接続を停止しました。コードを販売した相手と更新すれば、再び利用できます。",
+        "suspendedBody": "運営者がこのコードを停止したため、接続を停止しました。コードはこのコンピューターに保存されたままです。",
+        "lapsedAction": "コードを販売した相手に連絡して更新してください。",
+        "suspendedAction": "停止の解除を依頼してください。コードの再入力やアプリの再起動なしで再接続できます。"
       }
     }
   }

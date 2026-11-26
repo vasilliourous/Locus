@@ -83,6 +83,35 @@ pnpm typecheck && pnpm test && pnpm lint && pnpm prose:check
 `pnpm prose:apply` prints every row it changed as a before/after pair. **Read that
 output.** It is the last point at which a mistake is cheap.
 
+### This is a step in cutting a release, and the gate enforces it
+
+A prose change is a **content change**, so in [`RELEASING.md`](RELEASING.md) the
+order is:
+
+```
+edit PROSE.md → prose:apply → prose → the gates → THEN the version bump
+```
+
+The bump is the last content change, so a reworded string and the version that
+carries it land in the same commit and the same tag.
+
+**`server/scripts/release-gate.sh` refuses to pass with prose out of order.** Step
+6 of that gate runs, before any tag exists:
+
+| It asserts | Against | Why it is a release concern |
+|---|---|---|
+| `prose:apply --dry-run` would write **nothing** | `client/` | PROSE.md was edited and never applied: the document changed and no student sees it. **This is the report "the PROSE.md changes are not in the build."** |
+| `prose-manifest.mjs --check` passes | `client/` | A bundle moved and PROSE.md was not regenerated — every `file:line` in it is now a lie. |
+| `tests/locale-parity.test.ts` passes | `client/` | A finished surface still reads as English in a non-English bundle. `prose:apply` writes `en` only (§5), and 24 bundles' worth of English is what shipped on 2026-11-25 with every other gate green. |
+
+It **skips** the third when `client/node_modules` is absent, and says so — a gate
+that fails on a missing toolchain is a gate people learn to ignore.
+
+What the gate cannot see, stated rather than implied: whether a translation is any
+good (§5), whether the row you applied was the one you meant, and whether the
+`prose:apply` you ran was committed — that last is the working-tree check in step
+2 of the same script, which refuses a dirty tree at tag time.
+
 ### Why step 4 is not optional
 
 `PROSE.md` is regenerated from the bundles, so after step 3 the file's Text column

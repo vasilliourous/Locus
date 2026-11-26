@@ -119,21 +119,21 @@
       "freeDataThrottled": "{{used}} of {{total}} used — free data is spent for this month",
       "freeDataThrottledUpgrade": "Full is faster and unmetered. Ask the person who sold you your code about upgrading.",
       "activation": {
-        "title": "Enter your code",
-        "lede": "Your code is on the card you were sold.",
-        "submit": "Activate",
-        "backupRoute": "Using the Chrysalis backup route to reach the server.",
-        "alphabet": "The code is 15 characters and never contains 0, O, 1 or I.",
-        "codeLabel": "Activation code",
+        "title": "输入您的代码",
+        "lede": "您的代码在购买时拿到的卡片上。",
+        "submit": "激活",
+        "backupRoute": "正在使用 Chrysalis 备用线路连接服务器。",
+        "alphabet": "代码为 15 个字符，绝不包含 0、O、1 或 I。",
+        "codeLabel": "激活码",
         "codePlaceholder": "RQ-XXXX-XXXX-XXXX-X"
       },
       "suspended": {
-        "lapsedTitle": "Your subscription has ended",
-        "suspendedTitle": "This device has been signed out",
-        "lapsedBody": "Your code has expired, so the connection was stopped. Renewing with whoever sold you the code restores access.",
-        "suspendedBody": "An operator has suspended this code, so the connection was stopped. Your code is still saved on this computer.",
-        "lapsedAction": "Contact whoever sold you the code to renew it.",
-        "suspendedAction": "Ask them to lift the suspension. You can connect again without re-entering your code or restarting the app."
+        "lapsedTitle": "您的订阅已结束",
+        "suspendedTitle": "此设备已注销登录",
+        "lapsedBody": "您的代码已过期，因此连接已停止。向出售代码给您的人续费即可恢复访问。",
+        "suspendedBody": "运营人员已暂停此代码，因此连接已停止。您的代码仍保存在这台电脑上。",
+        "lapsedAction": "请联系出售代码给您的人进行续费。",
+        "suspendedAction": "请对方解除暂停。您无需重新输入代码或重启应用即可再次连接。"
       }
     }
   }

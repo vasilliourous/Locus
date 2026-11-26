@@ -28,13 +28,13 @@ says, edit the rows under that screen's heading.
 
 | Key | Text | Code |
 |---|---|---|
-| `home.components.connection.activation.alphabet` | The code is 15 characters and never contains 0, O, 1 or I. | src/pages/activation.tsx:408 |
-| `home.components.connection.activation.backupRoute` | Using the Chrysalis backup route to reach the server. | src/pages/activation.tsx:267 |
-| `home.components.connection.activation.codeLabel` | Activation code | src/pages/activation.tsx:327 |
-| `home.components.connection.activation.codePlaceholder` | RQ-XXXX-XXXX-XXXX-X | src/pages/activation.tsx:325 |
-| `home.components.connection.activation.lede` | Your code is on the card you were sold. | src/pages/activation.tsx:306 |
-| `home.components.connection.activation.submit` | Activate | src/pages/activation.tsx:399 |
-| `home.components.connection.activation.title` | Enter your code | src/pages/activation.tsx:252 |
+| `home.components.connection.activation.alphabet` | The code is 15 characters and never contains 0, O, 1 or I. | src/pages/activation.tsx:410 |
+| `home.components.connection.activation.backupRoute` | Using the Chrysalis backup route to reach the server. | src/pages/activation.tsx:269 |
+| `home.components.connection.activation.codeLabel` | Activation code | src/pages/activation.tsx:329 |
+| `home.components.connection.activation.codePlaceholder` | RQ-XXXX-XXXX-XXXX-X | src/pages/activation.tsx:327 |
+| `home.components.connection.activation.lede` | Your code is on the card you were sold. | src/pages/activation.tsx:308 |
+| `home.components.connection.activation.submit` | Activate | src/pages/activation.tsx:401 |
+| `home.components.connection.activation.title` | Enter your code | src/pages/activation.tsx:254 |
 
 ## Suspension screen
 
@@ -191,12 +191,12 @@ says, edit the rows under that screen's heading.
 
 | Key | Text | Code |
 |---|---|---|
-| `layout.components.navigation.menu.collapseNavBar` | Collapse navigation bar | src/components/layout/layout-sidebar.tsx:212 |
-| `layout.components.navigation.menu.expandNavBar` | Expand navigation bar | src/components/layout/layout-sidebar.tsx:211 |
-| `layout.components.navigation.menu.lock` | Lock menu order | src/components/layout/layout-sidebar.tsx:219 |
-| `layout.components.navigation.menu.reorderMode` | Menu reorder mode | src/components/layout/layout-sidebar.tsx:178 |
-| `layout.components.navigation.menu.restoreDefaultOrder` | Restore default order | src/components/layout/layout-sidebar.tsx:227 |
-| `layout.components.navigation.menu.unlock` | Unlock menu order | src/components/layout/layout-sidebar.tsx:220 |
+| `layout.components.navigation.menu.collapseNavBar` | Collapse navigation bar | src/components/layout/layout-sidebar.tsx:217 |
+| `layout.components.navigation.menu.expandNavBar` | Expand navigation bar | src/components/layout/layout-sidebar.tsx:216 |
+| `layout.components.navigation.menu.lock` | Lock menu order | src/components/layout/layout-sidebar.tsx:224 |
+| `layout.components.navigation.menu.reorderMode` | Menu reorder mode | src/components/layout/layout-sidebar.tsx:183 |
+| `layout.components.navigation.menu.restoreDefaultOrder` | Restore default order | src/components/layout/layout-sidebar.tsx:232 |
+| `layout.components.navigation.menu.unlock` | Unlock menu order | src/components/layout/layout-sidebar.tsx:225 |
 | `layout.components.navigation.tabs.home` | Home | src/pages/_navigation-meta.ts:18 |
 | `layout.components.navigation.tabs.settings` | Settings | src/pages/_navigation-meta.ts:22 |
 

@@ -59,37 +59,50 @@ verified-against: client/scripts/release-version.mjs, server/scripts/publish-rel
 > **Step 0 — run the gate.** `server/scripts/release-gate.sh --tag vX.Y.Z` checks
 > every version site listed in `[client.version_sites]`
 > ([`../state.toml`](../state.toml)), the working tree, push state, the tag itself, the
-> contract (§37–§39) and that the signing key matches the pubkey in
-> `tauri.conf.json`. It exits non-zero with the reason. It is the enforcement of
+> contract (§37–§39), that the signing key matches the pubkey in
+> `tauri.conf.json`, and — step 6 — that no user-facing wording is left waiting
+> to be applied (`prose:apply --dry-run` clean, `prose:check` current, no
+> finished surface still English). It exits non-zero with the reason. It is the enforcement of
 > the order below; the order itself is prose and prose has been skipped before.
 > What it cannot check is stated in its header — chiefly that the hub will accept
 > the publish, and that the landing page is current (that is `verify-release.sh`,
 > after publishing).
 
 ```
-1. Bump every version site, from client/:
+1. APPLY ANY PENDING PROSE FIRST — before the bump, so the wording and the
+   version that carries it are the same commit:
+       cd client && pnpm prose:apply && pnpm prose && pnpm test
+   "Pending" is whatever `pnpm prose:apply --dry-run` still wants to write.
+   A reworded string is a content change: `prose:apply` is the only thing that
+   writes PROSE.md's wording back over the bundles, then `pnpm prose`
+   regenerates the manifest so its `file:line` column stays true.
+   `release-gate.sh` step 6 refuses to pass with either left undone, and also
+   refuses a surface that is listed as finished while still reading as English
+   in a non-English bundle (client/TODO-I18N.md). Procedure and what it does
+   not reach: PROSE.md, §2 and §5.
+2. Bump every version site, from client/:
        pnpm release-version X.Y.Z
-2. Commit, then GATE, then tag and push both:
+3. Commit, then GATE, then tag and push both:
        git add -A && git commit -m "chore(release): X.Y.Z"
        server/scripts/release-gate.sh --tag vX.Y.Z    # must pass
        git tag -a vX.Y.Z -m "Chrysalis client vX.Y.Z"
        git push origin main && git push origin vX.Y.Z
      → the TAG triggers CI to build + sign all four platforms and create the
        GitHub Release. Pushing main alone does not.
-3. Fetch:  console Releases → "Fetch & publish",  or
+4. Fetch:  console Releases → "Fetch & publish",  or
            POST /api/admin/fetch-release {"version":"X.Y.Z"}
      → the hub pulls from GitHub, verifies format + SHA-256 + signature
-4. Publish: writes update_config. The console does 3 and 4 in one button.
-5. RE-RENDER THE LANDING PAGE — this is a real step, not a nicety:
+5. Publish: writes update_config. The console does 4 and 5 in one button.
+6. RE-RENDER THE LANDING PAGE — this is a real step, not a nicety:
        server/scripts/deploy.sh --site
      → re-renders the four download buttons from the new manifest and uploads it
 ```
 
-> **Step 5 is the one people skip, and skipping it is silent.** The public page's
+> **Step 6 is the one people skip, and skipping it is silent.** The public page's
 > four download URLs are *rendered from the release manifest* by
 > `deploy-site.sh` — they are not hand-written, precisely so a version cannot be
 > baked into `index.html`. But that means the page only moves when the renderer
-> RUNS, and nothing in steps 1–4 does that: CI builds artifacts, the hub serves
+> RUNS, and nothing in steps 1–5 does that: CI builds artifacts, the hub serves
 > them, and the landing page goes on advertising the previous version's files.
 >
 > Nothing fails. The page is not broken — it is offering last release's binaries,
@@ -117,7 +130,7 @@ server/scripts/verify-release.sh <version>
 
 Everything under `/updates/<version>/` must name `<version>`. A page naming an
 older version is not an error state the repo can see — it is a page nobody
-re-rendered, and the fix is step 5.
+re-rendered, and the fix is step 6.
 
 > **CI does not bump versions — it labels the release from the tag name.**
 > `github.ref_name` supplies the release title and the manifest's `version`

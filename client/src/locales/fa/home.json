@@ -119,21 +119,21 @@
       "freeDataThrottled": "{{used}} of {{total}} used — free data is spent for this month",
       "freeDataThrottledUpgrade": "Full is faster and unmetered. Ask the person who sold you your code about upgrading.",
       "activation": {
-        "title": "Enter your code",
-        "lede": "Your code is on the card you were sold.",
-        "submit": "Activate",
-        "backupRoute": "Using the Chrysalis backup route to reach the server.",
-        "alphabet": "The code is 15 characters and never contains 0, O, 1 or I.",
-        "codeLabel": "Activation code",
+        "title": "کد خود را وارد کنید",
+        "lede": "کد شما روی کارتی است که خریده‌اید.",
+        "submit": "فعال‌سازی",
+        "backupRoute": "استفاده از مسیر پشتیبان Chrysalis برای رسیدن به سرور.",
+        "alphabet": "کد ۱۵ نویسه است و هرگز شامل 0، O، 1 یا I نمی‌شود.",
+        "codeLabel": "کد فعال‌سازی",
         "codePlaceholder": "RQ-XXXX-XXXX-XXXX-X"
       },
       "suspended": {
-        "lapsedTitle": "Your subscription has ended",
-        "suspendedTitle": "This device has been signed out",
-        "lapsedBody": "Your code has expired, so the connection was stopped. Renewing with whoever sold you the code restores access.",
-        "suspendedBody": "An operator has suspended this code, so the connection was stopped. Your code is still saved on this computer.",
-        "lapsedAction": "Contact whoever sold you the code to renew it.",
-        "suspendedAction": "Ask them to lift the suspension. You can connect again without re-entering your code or restarting the app."
+        "lapsedTitle": "اشتراک شما به پایان رسیده است",
+        "suspendedTitle": "این دستگاه از حساب خارج شده است",
+        "lapsedBody": "کد شما منقضی شده است، بنابراین اتصال قطع شد. تمدید با کسی که کد را به شما فروخته دسترسی را برمی‌گرداند.",
+        "suspendedBody": "یکی از اپراتورها این کد را معلق کرده است، بنابراین اتصال قطع شد. کد شما همچنان روی این رایانه ذخیره است.",
+        "lapsedAction": "برای تمدید با کسی که کد را به شما فروخته تماس بگیرید.",
+        "suspendedAction": "از او بخواهید تعلیق را بردارد. می‌توانید بدون وارد کردن دوباره کد یا راه‌اندازی مجدد برنامه دوباره وصل شوید."
       }
     }
   }

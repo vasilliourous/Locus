@@ -8,9 +8,13 @@
 #
 #   * a tag pushed on a commit whose version files still said the old version —
 #     CI caught it, but only after the tag existed and a run had started;
-#   * the landing page left advertising the previous release, because step 5
-#     ("re-render the page") is a manual step that nothing enforces and whose
-#     omission is silent: every button still downloads a real, older file;
+#   * the landing page left advertising the previous release, because
+#     "re-render the page" (RELEASING.md step 6) is a manual step that nothing
+#     enforces and whose omission is silent: every button still downloads a
+#     real, older file;
+#   * a written wording change that was never applied to the bundles, because
+#     `prose:apply` is manual too and its omission is equally silent — the
+#     document changes, and no student's screen does;
 #   * a release published with the previous release's legacy update_url, so a
 #     client falling back to those fields downloaded the wrong binary.
 #
@@ -25,7 +29,9 @@
 #   3. a tag that already exists, or a version that is not ahead of the last one
 #   4. the build contract not passing (check-consistency.sh, including §37–§39)
 #   5. the signing key missing or not matching the public key in tauri.conf.json
-#   6. a release whose artifacts are not reproducible from this tree (see §5)
+#   6. user-facing prose that was never applied, a stale PROSE.md, or a surface
+#      that still reads as English in a non-English bundle (see step 6)
+#   7. a release whose artifacts are not reproducible from this tree (see §5)
 #
 # WHAT IT CANNOT CHECK — stated because a green run is not a guarantee:
 #   * whether the hub will accept the publish (needs the live host)
@@ -231,7 +237,75 @@ else
 fi
 echo
 
-echo "6. The build inputs are pinned and present"
+echo "6. The user-facing prose is applied and the manifest is current"
+# THREE facts, and each one alone is a release that lies to a student:
+#
+#   (a) PROSE.md was edited and never applied. `prose:apply` is the ONLY thing
+#       that writes a rewording from PROSE.md back over the bundles, and it is a
+#       hand step. An edit that skipped it changed the document and nothing a
+#       student meets — which is the report "the PROSE.md changes are not in the
+#       build".
+#   (b) a bundle was edited and PROSE.md was not regenerated, so every
+#       "where is this string" answer in it is wrong.
+#   (c) a finished surface still reads as English in a non-English bundle.
+#       `prose:apply` writes `en` only; on 2026-11-25 the activation gate and the
+#       suspension screen shipped as English text in all thirteen bundles and
+#       every gate was green. `tests/locale-parity.test.ts` now fails on that,
+#       and this step names it here instead of letting it surface as a red
+#       `verify` after the tag already exists.
+#
+# The order is RELEASING.md's: edit PROSE.md → `pnpm prose:apply` → `pnpm prose`
+# → commit, all BEFORE the version bump, so the bump is the last content change.
+if [ ! -f client/PROSE.md ]; then
+    fail "client/PROSE.md is missing — the prose check cannot run"
+else
+    dry=$(cd client && node scripts/apply-prose.mjs --dry-run 2>&1)
+    if printf '%s' "$dry" | grep -q 'would apply 0 change(s)'; then
+        pass "PROSE.md holds no unapplied edit (prose:apply would write nothing)"
+    else
+        fail "PROSE.md has wording that was never applied to the bundles:"
+        printf '%s\n' "$dry" | grep -E 'would apply|NOT applied| -> ' | head -8 | sed 's/^/         /'
+        fail "  run: cd client && pnpm prose:apply && pnpm prose, then commit."
+    fi
+
+    # (b) The manifest is a pure function of the tree, so this is a string
+    # comparison and cannot be satisfied by anything but the real output.
+    if (cd client && node scripts/prose-manifest.mjs --check >/dev/null 2>&1); then
+        pass "PROSE.md is current with the bundles (prose:check)"
+    else
+        fail "PROSE.md is stale — regenerate it: cd client && pnpm prose"
+    fi
+
+    # (c) The translation guard. Skips when the suite's toolchain is absent,
+    # because a gate that fails on a missing toolchain teaches people to ignore
+    # the gate.
+    if [ -x client/node_modules/.bin/vitest ]; then
+        # NO_COLOR, because the summary line is "Tests <colour-escape>87 passed"
+        # and a pattern anchored on 'Tests +[0-9]+ passed' cannot see through it.
+        # Without this the grep never matched, so this branch reported "a surface
+        # listed as finished still reads as English" with no failing names — it
+        # did that with the guard green. A check that cannot pass reads exactly
+        # like one that failed; see CLAIMS.md rule 3.
+        lp=$(cd client && NO_COLOR=1 FORCE_COLOR=0 ./node_modules/.bin/vitest run tests/locale-parity.test.ts 2>&1)
+        if printf '%s' "$lp" | sed -e 's/\x1b\[[0-9;]*m//g' | grep -qE 'Tests +[0-9]+ passed'; then
+            pass "no finished surface ships in English (locale-parity)"
+        else
+            fail "a surface listed as finished still reads as English:"
+            # NAMES ONLY. The assertion message is long enough that four of them
+            # bury the NO lines under colour escapes; the test itself prints the
+            # full text on a run.
+            printf '%s\n' "$lp" | grep -oE 'FAIL .*(activation|suspended|[a-z]+): [a-z]+/[a-z]+\.json' \
+                | head -6 | sed 's/^/         /'
+            fail "  translate it, or move it out of TODO-I18N.md and"
+            fail "  FINISHED_SURFACES together — see client/TODO-I18N.md."
+        fi
+    else
+        warn "client/node_modules is absent — skipped the translation guard"
+    fi
+fi
+echo
+
+echo "7. The build inputs are pinned and present"
 if python3 server/scripts/sidecar-lock.py --check >/tmp/rg-sidecar.$$ 2>&1; then
     pass "every downloaded build input matches its pinned sha256"
 else

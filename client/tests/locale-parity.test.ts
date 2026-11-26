@@ -61,6 +61,27 @@ const load = (locale: string, file: string): Set<string> =>
     ),
   )
 
+const read = (locale: string, file: string): Json =>
+  JSON.parse(readFileSync(path.join(LOCALES, locale, file), 'utf8')) as Json
+
+/** `path → value` for every string leaf. The key side of `flatten` discards the
+ * value, which is what the parity check needs and this one does not. */
+const leaves = (node: Json, prefix = ''): Map<string, string> => {
+  const out = new Map<string, string>()
+  if (node !== null && typeof node === 'object' && !Array.isArray(node)) {
+    for (const [key, value] of Object.entries(node)) {
+      for (const [k, v] of leaves(
+        value as Json,
+        prefix ? `${prefix}.${key}` : key,
+      ))
+        out.set(k, v)
+    }
+  } else {
+    out.set(prefix, String(node))
+  }
+  return out
+}
+
 const sourceFiles = readdirSync(path.join(LOCALES, SOURCE))
   .filter((f) => f.endsWith('.json'))
   .sort()
@@ -90,6 +111,114 @@ describe('locale key parity', () => {
             `renders in two languages and nothing else fails.`,
         ).toEqual([])
       })
+    }
+  }
+})
+
+/**
+ * A whole screen must not ship in English in twelve languages.
+ *
+ * # The defect this catches, which the parity check above cannot
+ *
+ * On 2026-11-25 the activation gate and the suspension screen landed in all
+ * thirteen bundles at once — as **English text in every one of them**. `zh` had
+ * `"Enter your code"`; so did `ru`. The parity check above is green over that
+ * by design (it compares KEYS), and `pnpm i18n:check` cannot see it either: it
+ * reports a key present in `en` and absent elsewhere as `missing`, and a value
+ * *identical* to English is indistinguishable from a fallback copy by any
+ * tool — the exact gap `docs/operate/PROSE.md` §5 names and does not close.
+ *
+ * So this is that gap, closed for the one surface where it was total. The
+ * subject list is by handout: `TODO-I18N.md` is where a translator takes a
+ * screen, and a screen is **finished** only when its row leaves that list with
+ * the twelve bundles updated. The earlier version of this guard had parity for
+ * the activation screen while the screen itself was 13/13 English.
+ *
+ * # Why `en` only, and why it is not over-fitted
+ *
+ * `supportEmail` is identical to English in every bundle on purpose (`§41`:
+ * the address exists once, in `en`, and is duplicated by `i18n:format`), so an
+ * address-like value is skipped rather than asserted. Nothing else here is a
+ * style choice: a translated screen with English left in it is the defect.
+ */
+const HANDOUT = path.resolve(__dirname, '../TODO-I18N.md')
+
+/** Surfaces the handout says are finished. Each maps to the keys it owns. */
+const FINISHED_SURFACES: Record<string, (key: string) => boolean> = {
+  activation: (k) => k.startsWith('components.connection.activation.'),
+  suspended: (k) => k.startsWith('components.connection.suspended.'),
+}
+
+/**
+ * Keys that are a FORMAT, not a sentence: every bundle must carry the identical
+ * string, and `codePlaceholder` is the activation field's input mask
+ * (`RQ-XXXX-XXXX-XXXX-X`, `activation.tsx:327`) — the same letter-shape the
+ * `alphabet` line teaches, so translating it would teach a mask the code
+ * generator cannot emit. Exempt by key, and named here only where the string is a format
+ * nowhere: a new key added here has to be argued for, not inherited.
+ */
+const NOT_PROSE: ReadonlySet<string> = new Set([
+  'components.connection.activation.codePlaceholder',
+])
+
+const emailish = (value: string) => /@/.test(value) && !/\s/.test(value)
+
+describe('no finished surface ships in English', () => {
+  it('reads a handout with at least one finished surface in it', () => {
+    // A guard whose subject list became empty — the file deleted, every row
+    // struck out — would pass silently. Assert the subject before asserting
+    // anything about it.
+    const text = readFileSync(HANDOUT, 'utf8')
+    expect(Object.keys(FINISHED_SURFACES).length).toBeGreaterThan(0)
+    for (const name of Object.keys(FINISHED_SURFACES)) {
+      expect(text, `${name} is not named in TODO-I18N.md`).toContain(name)
+    }
+  })
+
+  it('every NOT_PROSE key is a format, and a surface still owns prose do', () => {
+    // The exemption list above is the one place this guard can be made green
+    // dishonestly. Assert its subject: every key named is real English prose
+    // text, and the finished surfaces still contribute keys that are NOT
+    // exempt — so a bundle cannot pass this file by exempting the whole screen.
+    const english = leaves(read(SOURCE, 'home.json'))
+    for (const key of NOT_PROSE) {
+      expect(english.has(key), `${key} is not an en key`).toBe(true)
+    }
+    const owned = [...english.keys()].filter((k) =>
+      Object.values(FINISHED_SURFACES).some((owns) => owns(k) && !NOT_PROSE.has(k)),
+    )
+    expect(owned.length, 'no finished surface has any prose left to assert').toBeGreaterThan(0)
+  })
+
+  for (const [surface, owns] of Object.entries(FINISHED_SURFACES)) {
+    for (const file of sourceFiles) {
+      const english = leaves(read(SOURCE, file))
+      const subject = [...english.keys()].filter(owns)
+      if (subject.length === 0) continue
+
+      for (const locale of targetLocales) {
+        it(`${surface}: ${locale}/${file} is translated, not English`, () => {
+          const translated = leaves(read(locale, file))
+          const untranslated = subject.filter((key) => {
+            const value = english.get(key) as string
+            if (emailish(value) || NOT_PROSE.has(key)) return false
+            return translated.get(key) === value
+          })
+
+          expect(
+            untranslated,
+            `${locale}/${file} renders ${untranslated.length}/${subject.length} ` +
+              `of the \`${surface}\` surface in English (${untranslated
+                .slice(0, 4)
+                .join(', ')}${untranslated.length > 4 ? ', …' : ''}). ` +
+              `\`prose:apply\` writes \`en\` only, so a copy pass leaves this ` +
+              `screen English for every student on a non-English device and ` +
+              `nothing else fails. Translate it, or take the surface out of ` +
+              `\`TODO-I18N.md\` and out of \`FINISHED_SURFACES\` in the same ` +
+              `change — never one without the other.`,
+          ).toEqual([])
+        })
+      }
     }
   }
 })
