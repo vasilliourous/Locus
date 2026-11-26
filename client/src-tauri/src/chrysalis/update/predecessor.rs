@@ -214,7 +214,11 @@ mod windows {
         );
 
         for hive in HIVES {
-            let Ok(key) = winreg::RegKey::predef(hive_to_predef(hive)?).open_subkey(&subkey) else {
+            // `hive_to_predef` already yields a predefined key, so `predef` must
+            // NOT be called on it a second time: in winreg 0.56 `predef` takes a
+            // raw `HKEY`, so wrapping a `&RegKey` in it is E0308 "types differ in
+            // mutability". Windows-only, so no Linux gate ever saw it.
+            let Ok(key) = hive_to_predef(hive)?.open_subkey(&subkey) else {
                 // Absent in this hive is the normal case, not a failure: the
                 // template writes to exactly one of them.
                 continue;
@@ -230,7 +234,11 @@ mod windows {
                 .filter(|path| !path.is_empty());
 
             return Ok(Some(Observation::Installed {
-                identity,
+                // `identity` is a `&'static`, and `PredecessorIdentity` is Copy
+                // (`identity_table.rs`), so the value is copied rather than moved
+                // out of the borrow. Without the deref this is E0308, and it is
+                // Windows-only — every Linux gate compiles around it.
+                identity: *identity,
                 running: install_root
                     .as_deref()
                     .is_some_and(|root| process_running_under(root, identity.executable)),
@@ -241,10 +249,17 @@ mod windows {
         Ok(None)
     }
 
-    fn hive_to_predef(hive: &str) -> Result<winreg::HKEY, String> {
+    /// The predefined root for a hive name.
+    ///
+    /// winreg 0.56 exports these as CONSTANTS (`winreg::HKLM`, `winreg::HKCU`),
+    /// not as associated constants on `HKEY` — `HKEY` is a re-export of
+    /// `windows_sys`'s `HKEY`, a type alias for a raw pointer with no inherent
+    /// items, so `HKEY::LOCAL_MACHINE` is E0599. The names are used rather than
+    /// the `HKEY_*` aliases because they are the ones the crate documents.
+    fn hive_to_predef(hive: &str) -> Result<&'static winreg::RegKey, String> {
         match hive {
-            "HKLM" | "HKLM\\Software\\WOW6432Node" => Ok(winreg::HKEY::LOCAL_MACHINE),
-            "HKCU" => Ok(winreg::HKEY::CURRENT_USER),
+            "HKLM" | "HKLM\\Software\\WOW6432Node" => Ok(winreg::HKLM),
+            "HKCU" => Ok(winreg::HKCU),
             other => Err(format!("unhandled hive {other}")),
         }
     }
