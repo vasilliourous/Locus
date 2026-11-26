@@ -2940,21 +2940,13 @@ jobs:
           #
           # `release_notes.md` is that statement: a file, not a tag name, so a
           # build can be told from a build by its own contents.
-          if [ ! -f release_notes.md ]; then
-            echo "::error::release_notes.md was not staged. The release would carry"
-            echo "::error::  no asset that says which build it is beyond its tag name."
-            exit 1
-          fi
-          if ! grep -qx 'release/release_notes.md' \
-               <(sed -n '/^          files: |/,/^          draft:/p' \
-                   .github/workflows/client.yml | sed 's/^          //;s/^ *//'); then
-            echo "::error::release_notes.md is staged but is not listed in the release"
-            echo "::error::  \`files:\` block, so it will not be published. An asset that is"
-            echo "::error::  staged and not listed reads as published to everyone reading"
-            echo "::error::  this job, and as missing to everyone reading the release."
-            exit 1
-          fi
-          echo "release_notes.md is staged and listed."
+          # THE `release_notes.md` CHECKS ARE NOT HERE. They were, and they could
+          # never pass: "Stage release_notes.md" is a LATER step in this job, so
+          # the file does not exist yet at this point. v3.5.2's Release job
+          # failed on exactly that — all four platforms built, signed and
+          # uploaded, every installer staged, and the job then rejected its own
+          # not-yet-created file. They now live in that step, after the write.
+          # A check must run after the thing it checks for.
 
           # ── The macOS download must be present, and named for a human ──
           #
@@ -3062,6 +3054,35 @@ jobs:
           } > release_notes.md
           echo "Staged release_notes.md for ${version} at ${short}:"
           cat release_notes.md
+
+          # ── Assert the file now exists AND will actually be published ──
+          #
+          # These two checks belong HERE, after the write above. They were
+          # originally placed in "Prefix and stage the installers", a step that
+          # runs BEFORE this one, so `[ ! -f release_notes.md ]` was always true
+          # and the job aborted every time. v3.5.2 paid for that: four platforms
+          # built and signed, eight installers staged, and the Release job then
+          # failed on a file it had not created yet.
+          if [ ! -s release_notes.md ]; then
+            echo "::error::release_notes.md is missing or empty after staging."
+            echo "::error::  The release would carry no asset saying which build it is"
+            echo "::error::  beyond its tag name."
+            exit 1
+          fi
+          # The uploader only publishes what its `files:` block names, so a file
+          # staged but unlisted would read as published here and as missing on
+          # the release page. Read that block, from this file, rather than
+          # trusting a second literal three thousand lines away.
+          if ! sed -n '/^          files: |/,/^          draft:/p' \
+                 .github/workflows/client.yml | sed 's/^ *//' \
+               | grep -qx 'release/release_notes.md'; then
+            echo "::error::release_notes.md is staged but is not listed in the release"
+            echo "::error::  \`files:\` block, so it will not be published. An asset that is"
+            echo "::error::  staged and not listed reads as published to everyone reading"
+            echo "::error::  this job, and as missing to everyone reading the release."
+            exit 1
+          fi
+          echo "release_notes.md is staged and listed."
 
       # ── Every file the release will name must exist BEFORE the upload ──
       #
