@@ -209,9 +209,22 @@ jobs:
       # — `uot_port`, `download_<platform>`, the `unbound_at` columns, the
       # duplicated cipher. It also fails on a tracked path containing ':',
       # which breaks the WINDOWS checkout entirely while looking green here.
-      - name: Cross-language consistency check
-        working-directory: .
-        run: server/scripts/check-consistency.sh
+      # ── THIS STEP MOVED TO `build (linux)` ON 2026-11-26 ──
+      #
+      # It was here, and it failed every run with BAD "the predecessors binary
+      # produced no rows", which failed Verify, which failed all four builds and
+      # blocked `release` — so v3.5.2 built nothing. THIS JOB HAS NO RUST
+      # TOOLCHAIN, by design and by the paragraph at the end of the step list, so
+      # `check-consistency.sh`'s predecessor check (`cargo run --bin
+      # predecessors`, reading identity_table.rs through the compiler) could not
+      # compile; it swallowed stderr into `2>/dev/null` and printed its
+      # "did not run, or the table is empty" branch.
+      #
+      # This is audit F-21 a second time: a scan put in the job that cannot run
+      # it. The rule at the end of this list says the fix is to move the step,
+      # not to relax the comment — so the whole check now runs in `Build
+      # (linux)`, where the toolchain, the Linux headers and the sidecar already
+      # are, and this job is back to compiling no Rust.
 
       # Tag/version agreement. The comment that used to head this block began
       # with a stranded `#` line, left behind when an earlier step was moved.
@@ -1793,6 +1806,28 @@ jobs:
         if: matrix.label == 'linux'
         working-directory: .
         run: bash scripts/check-rust-deps.sh
+
+      # ── The cross-language consistency check ──
+      #
+      # MOVED HERE from `verify` on 2026-11-26, where it had no Rust toolchain and
+      # therefore could never run its predecessor section: `cargo run --bin
+      # predecessors` failed to compile, stderr went to /dev/null, and the check
+      # printed "the predecessors binary produced no rows". That single step failed
+      # Verify, which failed all four builds and blocked `release`, so v3.5.2
+      # published nothing. Audit F-21, a second time, in the same job.
+      #
+      # It lives AFTER the sidecar fetch and the `Build` step on purpose: the
+      # workspace is compiled by now, so `cargo run --bin predecessors` links
+      # against the existing `target/` instead of rebuilding 900 crates, and every
+      # compile-time input `tauri::generate_context!()` reads is already on disk.
+      #
+      # Linux-only, like its neighbours: one toolchain answers it once, and the
+      # check reads the tree rather than the platform. Skipping it elsewhere is
+      # not a hole — the tag cannot publish until this job is green.
+      - name: Cross-language consistency check
+        if: matrix.label == 'linux'
+        working-directory: .
+        run: bash server/scripts/check-consistency.sh
 
       # ── Stage the raw executable under the name the hub expects ──
       #

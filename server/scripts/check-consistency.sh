@@ -9034,11 +9034,29 @@ elif [ ! -f "$PRED_HOOK" ]; then
 else
     # The Rust table, as the compiler sees it. `cargo run` is quiet so a warning
     # from another crate cannot be mistaken for a row.
-    rust_rows=$(cd "$REPO/client" && cargo run --quiet --bin predecessors 2>/dev/null)
+    #
+    # stderr is KEPT, not discarded. It used to go to /dev/null, and that is why
+    # this check reported "the predecessors binary produced no rows" on every CI
+    # run when the truth was "no Rust toolchain in the job that ran it" — the one
+    # message a reader could act on was thrown away and the one that remained
+    # named the wrong cause. The tail is printed ONLY on failure, so a clean run
+    # stays quiet. See `.github/workflows/client.yml` (the step moved to
+    # `build (linux)` on 2026-11-26) and F-21, the same mistake in the same job.
+    rust_err=$(mktemp)
+    rust_rows=$(cd "$REPO/client" && cargo run --quiet --bin predecessors 2>"$rust_err")
     if [ -z "$rust_rows" ]; then
         bad "the predecessors binary produced no rows - it did not run, or the table is empty"
         bad "  (run: cd client && cargo run --bin predecessors)"
-    else
+        if [ -s "$rust_err" ]; then
+            bad "  cargo said:"
+            tail -20 "$rust_err" | sed 's/^/         /'
+        else
+            bad "  cargo said nothing at all - if this is CI, suspect a job with no"
+            bad "  Rust toolchain: it compiles nothing and reports that as empty output."
+        fi
+    fi
+    rm -f "$rust_err"
+    if [ -n "$rust_rows" ]; then
         nsis_rows=$(grep -cE '^!define MIGRATE_[0-9]+_APPID ' "$PRED_HOOK" || true)
         rust_count=$(printf '%s\n' "$rust_rows" | grep -c . || true)
         # Per-row drift must not be summarised away by a count that happens to
