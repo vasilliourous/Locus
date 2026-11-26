@@ -8083,8 +8083,6 @@ CHECKS = [
     # of this row passed against the very defect it exists to catch.
     ("LOCUS_UPDATE_KEY_B64",     "server/scripts/secrets-encrypt.sh",          "REQUIRED_VARS"),
     ("LOCUS_UPDATE_KEY",         ".github/workflows/client.yml",              "LOCUS_UPDATE_KEY"),
-    ("locusvpn.jadedns.uk",      "server/modules/05-caddy.sh",                "locusvpn.jadedns.uk"),
-    ("locusvpn.jadedns.uk",      "server/templates/Caddyfile",                "locusvpn.jadedns.uk"),
     ("vasilliourous/Locus",      "server/scripts/fetch-release.py",           "vasilliourous/Locus"),
 
     # ── Retired spellings: the `chrysalis` form must be what is READ/WRITTEN ──
@@ -8487,7 +8485,6 @@ for phrase, where in (
     ("com.locus.client.dev",       "3.2"),
     ("chrysalis_hub_override",     "3.8"),
     ("LOCUS_SECRETS_PASSPHRASE_FILE", "3.5"),
-    ("locusvpn.jadedns.uk",        "3.6"),
 ):
     if phrase not in reg:
         print("BAD\tregister %s does not document `%s`." % (where, phrase))

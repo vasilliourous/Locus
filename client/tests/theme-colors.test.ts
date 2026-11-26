@@ -518,3 +518,89 @@ describe('the mark is legible on the surfaces it is drawn on', () => {
     }
   })
 })
+
+describe('the wordmark says this product, not the previous one', () => {
+  /**
+   * The wordmark is the one mark a rename cannot reach on its own.
+   *
+   * Every other name in this tree is a string, and a string can be found by
+   * `grep` and replaced. `src/assets/image/logo.svg` is a drawing: it carried the
+   * previous product's five letters from the initial commit until somebody
+   * looked at the sidebar. Nothing in the build could notice — SVG renders
+   * whatever paths it contains, and a correctly-rendered wrong word compiles,
+   * type-checks and ships.
+   *
+   * So the file is asserted, not trusted. Two properties, and neither can be
+   * satisfied by the artwork it replaced:
+   *
+   *  1. **Its size.** A wordmark's bounding box is a fingerprint of a word: nine
+   *     glyphs have to be meaningfully wider than five. The original was 52.4
+   *     units of ink on a 54.41-unit box; the check below is a floor, not an
+   *     equality, so a re-cut with different bearings is free and a return to a
+   *     shorter word is not.
+   *  2. **Its grid.** `/COLOURS.md` §8 keeps the live band — cap top to baseline —
+   *     and `layout.scss` `.the-logo` reserves exactly a 27 px box for it. A
+   *     re-export that changes the `viewBox` height silently rescales the
+   *     wordmark inside that box, which is how this file regresses after a trip
+   *     through a design tool.
+   *
+   * What this CANNOT tell you: that the paths spell C-H-R-Y-S-A-L-I-S. Outlines
+   * carry no text, and no assertion short of a golden PNG — a fixture nobody
+   * re-baselines honestly — can read them. That part is verified by eye, once,
+   * and stated here so the coverage is not implied.
+   */
+  const readWordmark = () => {
+    const svg = readFileSync(
+      path.join(__dirname, '../src/assets/image/logo.svg'),
+      'utf8',
+    )
+    const viewBox = svg.match(/viewBox="([^"]+)"/)?.[1]
+    const coords = [...svg.matchAll(/(-?\d+\.\d+),(-?\d+\.\d+)/g)]
+    const xs = coords.map((m) => Number(m[1]))
+    const ys = coords.map((m) => Number(m[2]))
+    return {
+      svg,
+      viewBox: viewBox ? viewBox.split(/\s+/).map(Number) : null,
+      left: Math.min(...xs),
+      right: Math.max(...xs),
+      top: Math.min(...ys),
+      bottom: Math.max(...ys),
+      paths: (svg.match(/<path /g) ?? []).length,
+    }
+  }
+
+  it('is wide enough to be a nine-letter word', () => {
+    const wm = readWordmark()
+    // Guard the guard: with no coordinates every number below is `Infinity` and
+    // the assertion passes, which is the vacuous check this file exists to avoid.
+    expect(wm.paths, 'logo.svg declares no paths').toBeGreaterThan(0)
+    expect(Number.isFinite(wm.right), 'logo.svg declares no coordinates').toBe(
+      true,
+    )
+    const inkWidth = wm.right - wm.left
+    expect(
+      inkWidth,
+      `the wordmark's ink is ${inkWidth.toFixed(1)} units wide — too narrow for ` +
+        'CHRYSALIS, and suspiciously close to the five-letter word it replaced',
+    ).toBeGreaterThan(200)
+  })
+
+  it('is drawn on the 27-unit grid the sidebar reserves', () => {
+    const wm = readWordmark()
+    // `layout.scss` `.the-logo` gives the wordmark a 27 px box and
+    // `layout-sidebar.tsx` paints it with `primary.main`. Both are facts the
+    // artwork has to agree with, and neither is visible from the SVG alone.
+    expect(wm.viewBox, 'logo.svg has no viewBox').not.toBeNull()
+    expect(wm.viewBox?.[3]).toBe(27)
+    // Cap top at 16, baseline at 61 — the original's own numbers, kept because
+    // the 27 px box was sized for them. One unit of slack for round overshoot.
+    expect(wm.top).toBeGreaterThanOrEqual(15)
+    expect(wm.top).toBeLessThanOrEqual(17)
+    expect(wm.bottom).toBeGreaterThanOrEqual(61)
+    expect(wm.bottom).toBeLessThanOrEqual(62)
+    // Colour is inherited, never stated. A literal here would be a second home
+    // for colour, which `/COLOURS.md` §10 forbids.
+    expect(wm.svg).toMatch(/fill:\s*currentColor/)
+    expect(wm.svg).not.toMatch(/#[0-9a-fA-F]{3,8}\b/)
+  })
+})

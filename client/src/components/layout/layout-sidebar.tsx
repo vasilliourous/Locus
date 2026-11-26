@@ -129,7 +129,12 @@ export const LayoutSidebar = (props: LayoutSidebarProps) => {
           // as artwork, so the wrapper's colour passes through it untouched.
           //
           // The one thing this wordmark must not do is ignore the theme, which
-          // it did for its whole early life through a hardcoded `fill`. */}
+          // it did for its whole early life through a hardcoded `fill`.
+          //
+          // It also said the wrong word for that whole life: an SVG carries its
+          // own text, so a rename reached every string in this tree and this one
+          // drawing. It reads `CHRYSALIS` now — `/COLOURS.md` §8 records what was
+          // kept of the original's grid, and why. */}
       <div className="the-logo" data-tauri-drag-region="false">
         <div
           data-tauri-drag-region="true"

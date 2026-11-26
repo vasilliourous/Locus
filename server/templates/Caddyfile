@@ -188,11 +188,15 @@ ${DOMAIN} {
 # static file server and a strict CSP. See the long note in modules/05-caddy.sh
 # for the full reasoning.
 # ══════════════════════════════════════════════════════════════
-# Both landing names on ONE block. `chrysalisvpn` is the canonical name; the
-# `locusvpn` name is a DEPRECATED ALIAS kept serving until DNS is re-pointed —
-# it resolves today and the new name does not. See
-# docs/reference/NAME-MIGRATION.md.
-chrysalisvpn.jadedns.uk, locusvpn.jadedns.uk {
+# Landing page — the public, indexable page, served at the canonical name.
+#
+# `chrysalisvpn.jadedns.uk` is the ONLY landing hostname. The `locusvpn` alias
+# that shared this block until 2026-11-26 is RETIRED: the new name obtained its
+# certificate and answered 200 on the hub that day (see
+# docs/reference/NAME-MIGRATION.md §3.6). `05-caddy.sh` still honours
+# LANDING_DOMAIN_LEGACY if a host needs the old name, but its default is empty,
+# so a generated Caddyfile names one hostname — this one.
+chrysalisvpn.jadedns.uk {
     root * /var/www/site
     file_server
 

@@ -171,9 +171,11 @@ repository cannot perform. Listed here so the next person does not read a green
   `GITHUB_REPO`, and `verify-release.sh` gained that override in this change (it
   was the one hardcoded place). A rename needs no code change — only the defaults,
   in one commit afterwards.
-- **The landing page still serves as `locusvpn.jadedns.uk`.** `chrysalisvpn` now
-  resolves (see `../operate/CLAIMS.md` A30) but the page has not been re-rendered
-  or re-checked on that host.
+- ~~**The landing page still serves as `locusvpn.jadedns.uk`.**~~ **CLOSED
+  2026-11-26.** The hub obtained an ACME certificate for
+  `chrysalisvpn.jadedns.uk`, answered 200 on it, and the page was re-rendered and
+  redeployed for that host — `locusvpn` is retired and `LANDING_DOMAIN_LEGACY`
+  now defaults to empty. See `../operate/CLAIMS.md` A31.
 - **No build was produced or verified.** Everything here is `cargo test --lib`
   (741 passed), `clippy -D warnings`, `fmt --check`, the frontend suite, and
   `check-consistency.sh`. **No release was cut and no platform packaging step ran**

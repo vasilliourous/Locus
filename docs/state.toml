@@ -165,17 +165,21 @@ source     = "server/modules/05-caddy.sh (LANDING_DOMAIN default)"
 provenance = "derived"
 
 [site.domain_legacy]
-# The landing page's PREVIOUS name. Same shape and same reason as
-# `hub.domain_legacy`: it resolves today and the new name does not, so it must
-# keep serving or the page 404s between this rename and the DNS change.
+# The landing page's PREVIOUS name. **RETIRED on 2026-11-26 and now empty.**
 #
-# `05-caddy.sh` puts BOTH names on the one landing block; that is why this is a
-# derived fact and not a note. Set `LANDING_DOMAIN_LEGACY=""` to drop it, and only
-# once `chrysalisvpn.jadedns.uk` answers on the box.
+# It held `locusvpn.jadedns.uk` while `chrysalisvpn.jadedns.uk` had no working
+# certificate, so both names shared the landing block and the page never 404ed
+# between the rename and the DNS move. That condition is met: on 2026-11-26 the
+# hub obtained an ACME certificate for `chrysalisvpn.jadedns.uk` and answered 200
+# on it, measured on the box, while the old name returned no service.
 #
-# DEPRECATED ALIAS. See docs/reference/NAME-MIGRATION.md.
-value      = "locusvpn.jadedns.uk"
-source     = "server/modules/05-caddy.sh (LANDING_DOMAIN_LEGACY default); server/templates/Caddyfile (both names on one block)"
+# `05-caddy.sh` still accepts `LANDING_DOMAIN_LEGACY` for a host whose DNS has not
+# moved; its default is empty, so a generated Caddyfile names one hostname. An
+# empty value here is the derived form of "no alias is served".
+#
+# Retired alias. See docs/reference/NAME-MIGRATION.md §3.6.
+value      = ""
+source     = "server/modules/05-caddy.sh (LANDING_DOMAIN_LEGACY default, empty since 2026-11-26)"
 provenance = "derived"
 
 [site.document_root]

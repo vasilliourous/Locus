@@ -75,16 +75,21 @@ fi
 # entirely (see the guard around the block below).
 LANDING_DOMAIN="${LANDING_DOMAIN:-chrysalisvpn.jadedns.uk}"
 
-# ── The landing page's PREVIOUS name — served alongside, not redirected ──
+# ── The landing page's PREVIOUS name — retired 2026-11-26 ──
 #
-# Same reasoning as LEGACY_DOMAIN above, one level down: the old landing hostname
-# resolves today and the new one does not, so the *deployment* is not this
-# rename's to make. Caddy puts both names on one block, so the old name keeps
-# serving the page until the operator re-points DNS — and the certificate for the
-# new name exists. Set LANDING_DOMAIN_LEGACY="" once DNS has moved.
+# This was a DEPRECATED ALIAS (`${LANDING_DOMAIN_LEGACY-locusvpn.jadedns.uk}`)
+# kept serving alongside the new name until DNS moved. It has moved: on
+# 2026-11-26 `chrysalisvpn.jadedns.uk` obtained its ACME certificate and answered
+# 200 on the hub, so the alias is retired and the default is now empty.
 #
-# DEPRECATED ALIAS. See docs/reference/NAME-MIGRATION.md.
-LANDING_DOMAIN_LEGACY="${LANDING_DOMAIN_LEGACY-locusvpn.jadedns.uk}"
+# The variable is KEPT rather than deleted, so an operator whose DNS has not
+# moved (or a host still serving the old name) can set it explicitly:
+#   LANDING_DOMAIN_LEGACY=locusvpn.jadedns.uk server/modules/05-caddy.sh
+# An empty default means the landing block names exactly one hostname, which is
+# what `state.toml [site.domain_legacy]` now records.
+#
+# Retired alias. See docs/reference/NAME-MIGRATION.md §3.6.
+LANDING_DOMAIN_LEGACY="${LANDING_DOMAIN_LEGACY-}"
 
 # Both landing names, on ONE block. Empty old name collapses to the new one.
 if [ -n "${LANDING_DOMAIN_LEGACY}" ] && [ "${LANDING_DOMAIN_LEGACY}" != "${LANDING_DOMAIN}" ]; then

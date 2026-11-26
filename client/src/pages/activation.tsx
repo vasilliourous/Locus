@@ -234,9 +234,11 @@ const ActivationScreen = ({ onActivated }: Props) => {
       <Box
         sx={{ width: 420, maxWidth: 'calc(100vw - 48px)', textAlign: 'center' }}
       >
-        {/* Brand mark. There is no Chrysalis pictorial mark in the repo, so the mark
-            is the wordmark alone — deliberately, rather than substituting
-            another product's logo. See `/COLOURS.md` §8. */}
+        {/* Brand mark. The name is set as live text, not the `logo.svg` wordmark:
+            this screen is 420 px wide and the wordmark is drawn for a 27 px
+            sidebar slot, while live text can be selected, translated and read by
+            a screen reader. The pictorial mark is `glyph.svg`, which the window,
+            taskbar, dock and favicon all carry. See `/COLOURS.md` §8. */}
         <Typography
           variant="h4"
           sx={{ fontWeight: 700, letterSpacing: '-0.01em', mb: 0.5 }}
