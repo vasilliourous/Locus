@@ -30,6 +30,7 @@ pub mod apply;
 pub mod install;
 pub use install::InstallStage;
 pub mod poll;
+pub mod predecessor;
 pub mod relabel;
 pub mod signal;
 pub mod verify;

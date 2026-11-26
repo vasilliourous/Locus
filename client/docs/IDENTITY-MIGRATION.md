@@ -76,9 +76,19 @@ directory:
   *fails*, and that failure is reported — it is not degraded into a recursive
   copy, because a truncated profile set that the app then rewrites is worse than
   no migration at all.
-- **A failure is non-fatal.** The app starts with an empty data root and the user
-  re-activates; the legacy directory is left intact for a manual move. Refusing
-  to launch would be strictly worse.
+- **A failure is non-fatal for the LAUNCH, and fatal for the USER.** The app
+  starts with an empty data root; the legacy directory is left intact for a
+  manual move, and the adoption's `Err` is surfaced as its own install stage
+  (`InstallStage::AdoptionFailed`) rather than only logged, because on this
+  deployment "re-activate" means "the student's paid code is gone" — they
+  bought it somewhere else and the client cannot recover it. Refusing to launch
+  is still worse (a device that will not start cannot report its state), so the
+  launch proceeds and the state is made visible on the Account page.
+- **The orphan case has its own stage** (`InstallStage::AdoptedAside`). When the
+  update migration (see `UPDATE-INSTALL-MIGRATION.md`) has to move a legacy root
+  aside because the new root already exists, the data is safe but the *code* the
+  device is running on may be in the moved-aside root — so the app says so
+  instead of silently starting on a root the student did not expect.
 - **Candidates are listed newest-first** in `LEGACY_APP_IDS`, and the first that
   exists wins. Only one legacy root is expected per build flavour; the list
   exists so a future identity change does not require restructuring the call.

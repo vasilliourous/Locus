@@ -324,6 +324,22 @@ pub enum InstallStage {
     PayloadChecked,
     /// The minisign signature covers the bytes, checked before any hand-off.
     SignatureVerified,
+    /// A **previous identity of this product** was found installed, and the
+    /// hand-off was started with it named.
+    ///
+    /// Written *before* [`Self::Launched`], after the migration decision has been
+    /// made, so a device that comes back with this as its last stage was taken
+    /// down between the decision and the installer — which is the window in which
+    /// the predecessor's data could be moved or not, and the reason this is its
+    /// own stage rather than a log line.
+    PredecessorFound,
+    /// A previous identity was found **and is still running**, so the hand-off was
+    /// refused before the plugin could `process::exit(0)`.
+    ///
+    /// Needs attention: the update did not happen and the student's device is
+    /// unchanged, which is correct — but it is the state that produces "the update
+    /// did nothing" reports, so it must be visible rather than log-only.
+    PredecessorRunning,
     /// Handing over to the plugin, which may exit the process on Windows.
     Launched,
     /// Recorded by the **next launch**: the running executable is not the one the
@@ -366,6 +382,8 @@ impl InstallStage {
             Self::Downloaded => "downloaded",
             Self::PayloadChecked => "payload-checked",
             Self::SignatureVerified => "signature-verified",
+            Self::PredecessorFound => "predecessor-found",
+            Self::PredecessorRunning => "predecessor-running",
             Self::Launched => "launched",
             Self::Replaced => "replaced",
             Self::NotReplaced => "not-replaced",
@@ -399,6 +417,8 @@ impl InstallStage {
             "downloaded" => Some(Self::Downloaded),
             "payload-checked" => Some(Self::PayloadChecked),
             "signature-verified" => Some(Self::SignatureVerified),
+            "predecessor-found" => Some(Self::PredecessorFound),
+            "predecessor-running" => Some(Self::PredecessorRunning),
             "launched" => Some(Self::Launched),
             "replaced" => Some(Self::Replaced),
             "not-replaced" => Some(Self::NotReplaced),
@@ -423,6 +443,16 @@ impl InstallStage {
             Self::SignatureVerified => {
                 "the installer was never started, although the update passed every check — \
                  this is the case to report to support"
+            }
+            Self::PredecessorFound => {
+                "an older version of this app is installed on this device and the update was \
+                 handing over to the installer when it stopped — start the app once more to \
+                 finish, and report it to support if the older copy is still listed"
+            }
+            Self::PredecessorRunning => {
+                "an older version of this app was running, so the update did not start. Close \
+                 it and try again — if it is not in your taskbar, restart the device and update \
+                 once more"
             }
             // Not reachable through `interrupted_report`'s only caller, which
             // filters this out: the plugin was called, so the process exiting is
@@ -451,7 +481,12 @@ impl InstallStage {
     pub const fn needs_attention(self) -> bool {
         matches!(
             self,
-            Self::Downloaded | Self::PayloadChecked | Self::SignatureVerified | Self::NotReplaced
+            Self::Downloaded
+                | Self::PayloadChecked
+                | Self::SignatureVerified
+                | Self::PredecessorFound
+                | Self::PredecessorRunning
+                | Self::NotReplaced
         )
     }
 
@@ -770,6 +805,64 @@ impl ReadyInstall {
             "[chrysalis] update {version}: signature verifies against the compiled-in key"
         );
         InstallStage::SignatureVerified.record().await;
+
+        // ── A PREVIOUS IDENTITY OF THIS PRODUCT ──
+        //
+        // This is the last point at which anything can look. On Windows the
+        // plugin calls `ShellExecuteW` and then `process::exit(0)`
+        // (`tauri-plugin-updater` 2.11.0, `updater.rs:876`), so the installer
+        // takes over from a process that is already gone; the hook on the far
+        // side (`packages/windows/migrate-predecessor.nsh`) cannot report back.
+        //
+        // WHY THIS IS NOT A REFUSAL OF THE UPDATE
+        //
+        // An older identity being installed is not a reason to leave a student on
+        // an old build — the update is precisely how they get a build that can
+        // migrate. It IS a reason not to hand over while that older copy is
+        // RUNNING: the installer's own `CheckIfAppIsRunning` is keyed on the new
+        // product's executable name, so a live predecessor is invisible to it, and
+        // the result is an uninstaller racing a running application.
+        //
+        // Detection is `predecessor::observe()`, which returns `Unknown` rather
+        // than `Absent` when it could not look — and `Unknown` is logged and then
+        // treated as "nothing found" here **deliberately**: blocking an update on a
+        // failed probe would strand exactly the devices that most need it (FIXES
+        // #42's deadlock, one layer down). The asymmetry is stated so the next
+        // reader does not "fix" it into a refusal.
+        match super::predecessor::classify(super::predecessor::observe()) {
+            Ok(Some(predecessor)) => {
+                InstallStage::PredecessorFound.record().await;
+                logging!(
+                    info,
+                    Type::System,
+                    "[chrysalis] update {version}: found a previous identity installed — {}",
+                    predecessor.describe()
+                );
+                if predecessor.blocks_handover() {
+                    InstallStage::PredecessorRunning.record().await;
+                    logging!(
+                        warn,
+                        Type::System,
+                        "[chrysalis] update {version}: {} is RUNNING; refusing to hand over, \
+                         because the platform installer cannot see it and would race it",
+                        predecessor.identity.product_name
+                    );
+                    bail!(
+                        "{} is still running, so the update was not started. Close it and try \
+                         again — the installer cannot replace it while it is open.",
+                        predecessor.identity.product_name
+                    );
+                }
+            }
+            Ok(None) => {}
+            Err(why) => logging!(
+                debug,
+                Type::System,
+                "[chrysalis] update {version}: could not check for a previous installation \
+                 ({why}); continuing, because refusing an update on a failed probe would \
+                 strand the devices that need it most"
+            ),
+        }
 
         logging!(
             info,
@@ -1278,6 +1371,15 @@ mod tests {
             InstallStage::PayloadChecked,
             InstallStage::SignatureVerified,
             InstallStage::NotReplaced,
+            // Both predecessor states are faults, and for the same practical
+            // reason: each is a device that asked to update and did not, on a path
+            // whose far side is a `process::exit(0)` and therefore silent.
+            // `PredecessorRunning` is the recoverable half — the student closes
+            // the app and retries — and still must show, because "the update did
+            // nothing" with no sentence is the exact report this file exists to
+            // prevent.
+            InstallStage::PredecessorFound,
+            InstallStage::PredecessorRunning,
         ];
         for stage in faults {
             assert!(stage.needs_attention(), "{stage:?} must be reported");

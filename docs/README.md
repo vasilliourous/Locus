@@ -165,6 +165,7 @@ that the client keeps in a machine store —
 | [`client/docs/CONTRIBUTING_i18n.md`](../client/docs/CONTRIBUTING_i18n.md) | live | Adding or changing a translated string. |
 | [`client/docs/LOGIC-INVENTORY.md`](../client/docs/LOGIC-INVENTORY.md) | design-record | The module map — what each `chrysalis/` module owns. Partly a to-do: where it and the code disagree, the code wins. |
 | [`client/docs/UPDATE-ARCHITECTURE.md`](../client/docs/UPDATE-ARCHITECTURE.md) | design-record | Why the updater is hub-mediated, and how it differs from Tauri's. Implemented, with two documented corrections. |
+| [`client/docs/UPDATE-INSTALL-MIGRATION.md`](../client/docs/UPDATE-INSTALL-MIGRATION.md) | design-record | **Updating across an identity move.** Why no client-side change could have prevented the duplicate-application defect, what the bundler's own installer does, and the split between the client's detection and the Windows installer's migration. Guarded by §56. |
 | [`client/docs/ARCHITECTURE.md`](../client/docs/ARCHITECTURE.md) | design-record | The pre-port rework plan: what to cut from upstream, where Chrysalis logic goes, and the old client's bugs not to re-earn. |
 | [`client/docs/RESTRUCTURE.md`](../client/docs/RESTRUCTURE.md) | design-record | The repo layout after the 2026-09 separation, and the paths that do not exist. |
 

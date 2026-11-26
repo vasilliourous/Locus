@@ -73,7 +73,7 @@ pub static BACKUP_DIR: &str = "locus-backup-dev";
 /// would make a machine that never adopted the upstream directory — which is
 /// most of them — adopt the wrong one if both are present.
 #[cfg(not(feature = "verge-dev"))]
-const LEGACY_APP_IDS: &[&str] = &[
+pub(crate) const LEGACY_APP_IDS: &[&str] = &[
     // The identity this product shipped under until the 2026-11-25 move.
     "com.locus.client",
     // The upstream Clash Verge Rev identity the fork was copied from.
@@ -82,7 +82,7 @@ const LEGACY_APP_IDS: &[&str] = &[
 
 /// Development builds live beside the release ones rather than sharing a root.
 #[cfg(feature = "verge-dev")]
-const LEGACY_APP_IDS: &[&str] = &[
+pub(crate) const LEGACY_APP_IDS: &[&str] = &[
     "com.locus.client.dev",
     "com.locus.client",
     "io.github.clash-verge-rev.clash-verge-rev.dev",
@@ -102,6 +102,53 @@ pub fn app_home_dir() -> Result<PathBuf> {
         .ok_or_else(|| anyhow::anyhow!("Failed to get the app home directory"))
 }
 
+/// What the one-time adoption did, if anything.
+///
+/// A type rather than `Option<PathBuf>` because the two successes are **not**
+/// the same event, and collapsing them is how a student ends up on an empty
+/// profile set with nothing anywhere saying so:
+///
+/// - [`Self::Relocated`] — the old root became the current one. The activation
+///   code, device fingerprint and tier moved with it.
+/// - [`Self::AdoptedAside`] — a current root **already existed**, so the old one
+///   was moved to a sibling name instead of being merged or discarded. The data
+///   is safe and reachable, but the app is *not* running on it, which means the
+///   code it holds may not be the one this device will use. That distinction is
+///   the reason this enum exists: the previous `Option<PathBuf>` reported both
+///   as "adopted", and only the first is a success the user need not see.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DataRootAdoption {
+    /// The legacy root was renamed into the current one.
+    Relocated {
+        /// The path that moved.
+        from: PathBuf,
+    },
+    /// The current root already existed; the legacy root was renamed aside.
+    AdoptedAside {
+        /// The path that moved.
+        from: PathBuf,
+        /// Where it now lives.
+        to: PathBuf,
+    },
+}
+
+impl DataRootAdoption {
+    /// The path the adoption acted on, for a log line.
+    #[must_use]
+    pub fn describe(&self) -> String {
+        match self {
+            Self::Relocated { from } => from.display().to_string(),
+            Self::AdoptedAside { from, to } => format!("{} (moved aside to {})", from.display(), to.display()),
+        }
+    }
+
+    /// Whether this outcome means the app is NOT running on the adopted data.
+    #[must_use]
+    pub const fn is_side_adoption(&self) -> bool {
+        matches!(self, Self::AdoptedAside { .. })
+    }
+}
+
 /// Adopts a pre-Chrysalis data directory, once, on the first launch under the
 /// current identity.
 ///
@@ -115,9 +162,6 @@ pub fn app_home_dir() -> Result<PathBuf> {
 /// The rule is deliberately conservative, because the cost of being wrong is a
 /// half-copied config directory:
 ///
-///   * Runs only when the CURRENT root does not exist. An existing Chrysalis root is
-///     never touched, so this can run on every launch and is a no-op after the
-///     first one.
 ///   * Renames rather than copies. `rename` is atomic within a filesystem, so a
 ///     crash mid-migration cannot leave two half-populated roots. A rename
 ///     across filesystems fails, and that failure is reported rather than
@@ -126,9 +170,17 @@ pub fn app_home_dir() -> Result<PathBuf> {
 ///     one legacy root has ever existed per build flavour, so this is a
 ///     single-step migration; the list exists so a future identity change can be
 ///     added without restructuring the call.
+///   * **When the current root ALREADY exists, a non-empty legacy one is moved
+///     aside — never merged, never silently ignored.** This used to be an
+///     unconditional no-op, and that was a real hole rather than a tidiness
+///     matter: an update installs the new build, the new build starts once
+///     (creating an empty root), and from then on every launch finds a current
+///     root and stops looking — leaving the activation code in a directory the
+///     app no longer reads. Not a loss in the `fs` sense; one from the student's
+///     seat, which is the seat that counts.
 ///
-/// Returns the legacy path that was adopted, if any, so the caller can log it.
-pub fn migrate_legacy_app_data_dir() -> Result<Option<PathBuf>> {
+/// Returns what happened, so the caller can log it and surface the second case.
+pub fn migrate_legacy_app_data_dir() -> Result<Option<DataRootAdoption>> {
     let Some(data_root) = ::dirs::data_dir() else {
         return Ok(None);
     };
@@ -137,20 +189,47 @@ pub fn migrate_legacy_app_data_dir() -> Result<Option<PathBuf>> {
 
 /// The body of [`migrate_legacy_app_data_dir`], parameterised by root so it can
 /// be tested without reading or writing the real user data directory.
-fn adopt_legacy_app_data_dir(data_root: &Path, app_id: &str, legacy_ids: &[&str]) -> Result<Option<PathBuf>> {
+fn adopt_legacy_app_data_dir(data_root: &Path, app_id: &str, legacy_ids: &[&str]) -> Result<Option<DataRootAdoption>> {
     let current = data_root.join(app_id);
-    if current.exists() {
-        return Ok(None);
-    }
 
     for legacy_id in legacy_ids {
+        // A build flavour must never adopt a root with its own name: that is a
+        // self-rename, which `fs::rename` answers with success, so it would
+        // report a migration that moved nothing.
+        if *legacy_id == app_id {
+            continue;
+        }
+
         let legacy = data_root.join(legacy_id);
         if !legacy.exists() {
             continue;
         }
 
+        // ── The current root already exists ──
+        //
+        // Only meaningful for a NON-EMPTY legacy root: an empty one carries
+        // nothing worth keeping, and moving it aside would litter the data
+        // directory for every user, on every launch, forever.
+        if current.exists() {
+            if is_effectively_empty(&legacy) {
+                return Ok(None);
+            }
+            let aside = sibling_adoption_path(&current, legacy_id);
+            return match fs::rename(&legacy, &aside) {
+                Ok(()) => Ok(Some(DataRootAdoption::AdoptedAside {
+                    from: legacy,
+                    to: aside,
+                })),
+                Err(error) => Err(anyhow::anyhow!(
+                    "found the pre-Chrysalis data directory {legacy:?} but could not move it aside as \
+                     {aside:?}: {error}. Its contents (including the activation code) are still there; \
+                     move it manually."
+                )),
+            };
+        }
+
         match fs::rename(&legacy, &current) {
-            Ok(()) => return Ok(Some(legacy)),
+            Ok(()) => return Ok(Some(DataRootAdoption::Relocated { from: legacy })),
             Err(error) => {
                 // Do NOT fall back to a recursive copy here. A partial copy is
                 // worse than no migration: the app would start on a truncated
@@ -165,6 +244,33 @@ fn adopt_legacy_app_data_dir(data_root: &Path, app_id: &str, legacy_ids: &[&str]
     }
 
     Ok(None)
+}
+
+/// Whether a directory exists but holds nothing a person would miss.
+///
+/// Deliberately strict: only a directory with no entries at all counts. Anything
+/// with a file or a subdirectory in it is treated as real data, even if a future
+/// build would consider it disposable — the cost of moving an uninteresting
+/// directory aside is one stray folder, and the cost of the opposite is a
+/// student's paid code.
+fn is_effectively_empty(dir: &Path) -> bool {
+    match fs::read_dir(dir) {
+        Ok(mut entries) => entries.next().is_none(),
+        // Unreadable is NOT empty. An unreadable directory is exactly the case
+        // where deciding on the student's behalf is least defensible.
+        Err(_) => false,
+    }
+}
+
+/// The sibling name an already-existing root gets moved to.
+///
+/// Deterministic rather than random, so a second launch finds the same name
+/// instead of accumulating copies. The suffix is the *legacy* id, so the folder
+/// names the product whose data it holds — the only thing a person looking at
+/// their data directory can act on.
+fn sibling_adoption_path(current: &Path, legacy_id: &str) -> PathBuf {
+    let name = current.file_name().and_then(|name| name.to_str()).unwrap_or("data");
+    current.with_file_name(format!("{name}.adopted-from-{legacy_id}"))
 }
 
 pub fn preinit_app_data_dir() -> Result<PathBuf> {
@@ -457,7 +563,7 @@ mod ipc_tests {
 
 #[cfg(test)]
 mod app_data_migration_tests {
-    use super::{APP_ID, LEGACY_APP_IDS, adopt_legacy_app_data_dir};
+    use super::{APP_ID, DataRootAdoption, LEGACY_APP_IDS, adopt_legacy_app_data_dir};
     use std::fs;
 
     /// A scratch data root, unique per test so tests can run concurrently.
@@ -497,9 +603,9 @@ mod app_data_migration_tests {
         let adopted = adopt_legacy_app_data_dir(&scratch.root, APP_ID, LEGACY_APP_IDS).expect("migration runs");
 
         assert_eq!(
-            adopted.as_deref(),
-            Some(legacy.as_path()),
-            "should report what it adopted"
+            adopted,
+            Some(DataRootAdoption::Relocated { from: legacy.clone() }),
+            "should report what it relocated, and that it was a relocation"
         );
         assert!(!legacy.exists(), "the legacy directory should be gone, not copied");
         let moved = scratch.dir(APP_ID).join("verge.yaml");
@@ -511,8 +617,110 @@ mod app_data_migration_tests {
         );
     }
 
-    /// An existing Chrysalis root is never touched. This is what makes it safe to
-    /// call the migration unconditionally on every launch.
+    /// A non-empty legacy root is **moved aside**, not ignored, when the current
+    /// root already exists.
+    ///
+    /// THIS IS THE REGRESSION THIS TEST EXISTS FOR. The adoption used to return
+    /// early whenever the current root existed, which is the state an update
+    /// produces: the new build starts once, creates an empty root, and from then
+    /// on every launch declares "already adopted" and leaves the activation code
+    /// in a directory nothing reads. From the student's seat that is a lost code,
+    /// and it has no error anywhere.
+    ///
+    /// Demonstrated failing by restoring the early `return Ok(None)` — the
+    /// assertions below then see `None` and no sibling directory.
+    #[test]
+    fn a_populated_legacy_root_is_moved_aside_when_the_current_one_exists() {
+        let scratch = Scratch::new("aside");
+        let current = scratch.dir(APP_ID);
+        fs::create_dir_all(&current).expect("create current root");
+        fs::write(current.join("verge.yaml"), "current\n").expect("seed current file");
+
+        let legacy_id = LEGACY_APP_IDS[0];
+        let legacy = scratch.dir(legacy_id);
+        fs::create_dir_all(&legacy).expect("create legacy root");
+        fs::write(legacy.join("verge.yaml"), "activation_code: RQ-PAID\n").expect("seed legacy");
+
+        let adopted = adopt_legacy_app_data_dir(&scratch.root, APP_ID, LEGACY_APP_IDS).expect("migration runs");
+
+        let Some(DataRootAdoption::AdoptedAside { from, to }) = adopted else {
+            panic!("a populated legacy root beside a current one must be moved aside, got {adopted:?}");
+        };
+        assert_eq!(from, legacy);
+        assert!(
+            to.starts_with(&current) || to.parent() == current.parent(),
+            "the aside directory must be a sibling of the current root: {to:?}"
+        );
+        assert!(
+            to.file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name.contains(legacy_id)),
+            "the aside directory must name the product whose data it holds, got {to:?}"
+        );
+        assert!(
+            !legacy.exists(),
+            "the legacy root must have moved, not been left in place"
+        );
+        assert_eq!(
+            fs::read_to_string(to.join("verge.yaml")).expect("read aside file"),
+            "activation_code: RQ-PAID\n",
+            "the code must survive the move — this is the whole point"
+        );
+        assert_eq!(
+            fs::read_to_string(current.join("verge.yaml")).expect("read current file"),
+            "current\n",
+            "the current root must not be merged into or overwritten"
+        );
+    }
+
+    /// An *empty* legacy root beside a current one is a quiet no-op.
+    ///
+    /// Without this, every launch would litter the data directory with an empty
+    /// `....adopted-from-...` folder, and a second run would find the first one's
+    /// leftovers and keep going.
+    #[test]
+    fn an_empty_legacy_root_is_not_worth_moving_aside() {
+        let scratch = Scratch::new("aside-empty");
+        fs::create_dir_all(scratch.dir(APP_ID)).expect("create current root");
+        let legacy_id = LEGACY_APP_IDS[0];
+        fs::create_dir_all(scratch.dir(legacy_id)).expect("create empty legacy root");
+
+        let adopted = adopt_legacy_app_data_dir(&scratch.root, APP_ID, LEGACY_APP_IDS).expect("migration runs");
+
+        assert_eq!(adopted, None, "an empty legacy root carries nothing to preserve");
+        assert!(
+            scratch.dir(legacy_id).exists(),
+            "an empty legacy root is left where it is rather than renamed"
+        );
+    }
+
+    /// A candidate equal to the current id must never be "adopted": that is a
+    /// self-rename, which `fs::rename` reports as success while moving nothing.
+    #[test]
+    fn the_current_identity_is_never_its_own_candidate() {
+        let scratch = Scratch::new("self");
+        let current = scratch.dir(APP_ID);
+        fs::create_dir_all(&current).expect("create current root");
+        fs::write(current.join("verge.yaml"), "keep\n").expect("seed");
+
+        let adopted = adopt_legacy_app_data_dir(&scratch.root, APP_ID, &[APP_ID]).expect("migration runs");
+
+        assert_eq!(adopted, None);
+        assert_eq!(
+            fs::read_to_string(current.join("verge.yaml")).expect("read current file"),
+            "keep\n",
+            "an id equal to the current one must be skipped, not renamed onto itself"
+        );
+    }
+
+    /// An existing Chrysalis root is never **overwritten or merged into**. This is
+    /// what makes it safe to call the migration unconditionally on every launch.
+    ///
+    /// The legacy root is no longer "left alone", and that change is the point of
+    /// [`a_populated_legacy_root_is_moved_aside_when_the_current_one_exists`]: the
+    /// old assertion here (`assert!(legacy.exists())`) encoded the defect. Leaving
+    /// a populated legacy root in place is safe for the current launch and fatal
+    /// for the student, because nothing ever looks at that directory again.
     #[test]
     fn never_overwrites_an_existing_chrysalis_root() {
         let scratch = Scratch::new("idempotent");
@@ -528,15 +736,19 @@ mod app_data_migration_tests {
         let adopted = adopt_legacy_app_data_dir(&scratch.root, APP_ID, LEGACY_APP_IDS).expect("migration runs");
 
         assert!(
-            adopted.is_none(),
-            "nothing should be adopted when the current root exists"
+            matches!(adopted, Some(DataRootAdoption::AdoptedAside { .. })),
+            "a populated legacy root beside a current one is preserved aside, got {adopted:?}"
         );
         assert_eq!(
             fs::read_to_string(current.join("verge.yaml")).expect("read current file"),
             "current\n",
-            "the current root must be left exactly as it was"
+            "the current root must be left exactly as it was — this is the half that \
+             must never change, because merging two profile sets is worse than either"
         );
-        assert!(legacy.exists(), "the legacy directory must be left alone, not consumed");
+        assert!(
+            !legacy.exists(),
+            "the legacy root must have moved aside rather than being left where nothing reads it"
+        );
     }
 
     /// No legacy directory is the normal first-install case: it must be a quiet
@@ -566,7 +778,12 @@ mod app_data_migration_tests {
 
         let adopted = adopt_legacy_app_data_dir(&scratch.root, APP_ID, &[first, second]).expect("migration runs");
 
-        assert_eq!(adopted.as_deref(), Some(scratch.dir(first).as_path()));
+        assert_eq!(
+            adopted,
+            Some(DataRootAdoption::Relocated {
+                from: scratch.dir(first)
+            })
+        );
         assert_eq!(
             fs::read_to_string(scratch.dir(APP_ID).join("marker")).expect("read adopted marker"),
             "newer\n"

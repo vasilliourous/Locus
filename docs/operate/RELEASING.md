@@ -272,6 +272,31 @@ Omitting `--from-github` uses files from `RELEASE_DIR` (default
 1MB (a truncated download or Git LFS pointer), when a hash disagrees with
 `manifest.json`, or when a signature is missing.
 
+### The supervised cross-grade run, since this fleet is beta testers
+
+The ordering in §"cross-grade releases" is the *unattended* answer. For the small,
+known beta fleet the cross-grade is run **with the operator present**, which is both
+acceptable and better evidence — a silent roll-out produces the same defect with no
+witness. The checklist that a run follows lives with the design, not here:
+[`client/docs/UPDATE-INSTALL-MIGRATION.md`](../../client/docs/UPDATE-INSTALL-MIGRATION.md)
+§4.3. Three things an operator must do around it:
+
+- **Record the before-state** (does `%APPDATA%\com.locus.client` exist, is `Locus`
+  listed in Add/Remove Programs) and the after-state. The comparison is the
+  evidence that closes `FIXES.md`'s "cause unidentified" bullet, and it cannot be
+  reconstructed later.
+- **Read the setup's log for the `Chrysalis:` lines.** Every branch of
+  `migrate-predecessor.nsh` names itself in `DetailPrint`, so the log says which
+  case ran rather than requiring an inference.
+- **Confirm the code is the tester's existing one.** A device that asks to activate
+  again has either lost its root or had it moved aside; the aside directory
+  (`<id>.adopted-from-com.locus.client`) is the recovery, and its existence is why
+  the macro renames instead of deleting.
+
+Re-enable the `update_config` row only after the supervised runs are done. **The
+withdrawal is the only thing holding the fleet still** while the fix lands, because
+the guard has to be compiled into the build doing the updating.
+
 ### Why signatures are not optional
 
 The Tauri updater verifies a minisign signature over every download and offers no
@@ -323,6 +348,35 @@ or point at a different version.
 build can only be fixed by publishing a higher version, which the possibly-broken
 client must then successfully fetch. So **test on real hardware before publishing**,
 not before widening a rollout, because there is no rollout to widen.
+
+### ⚠️ Cross-grade releases: the guard ships with the fix, not before it
+
+A release whose **install location or data root differs from the installed one**
+(an identity move — `com.locus.client` → `com.chrysalis.client` being the one that
+has happened) is not an ordinary upgrade. It installs *beside* the old application
+instead of over it, and the old data root holds the activation code. Design and
+platform detail: [`client/docs/UPDATE-INSTALL-MIGRATION.md`](../../client/docs/UPDATE-INSTALL-MIGRATION.md).
+
+**The ordering is the whole safety argument, and it is not replaceable by care:**
+
+1. **Ship the client-side detection first, with the offer still withdrawn.** That
+   build adds `chrysalis::update::predecessor` — it refuses to hand over while a
+   predecessor is running, and records a stage the Account page can show. It reaches
+   the fleet as a deliberate install, not as an offer, because the row that would
+   offer it is off.
+2. **Then publish the release that carries the installer hook** and the client
+   change. The hook (`packages/windows/migrate-predecessor.nsh`) is what moves the
+   predecessor's data root aside and removes the old application; the client change
+   is what stops it racing a live one.
+3. **Re-enable `update_config` last.**
+
+Why it cannot be collapsed: a client released *before* step 1 has no detection and
+no hook, and it is the one being replaced. **There is no way to push a fix for this
+through the update path without the version already on the device cooperating**, so
+the withdrawal (step 0, already true) is the only thing holding the fleet still while
+steps 1–2 land. Recorded here because a later reader will reasonably ask "why not
+just publish it", and the answer is that the guard has to be *compiled into* the
+build that is doing the updating.
 
 ---
 

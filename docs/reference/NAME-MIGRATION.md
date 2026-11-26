@@ -21,6 +21,12 @@ verified-against: server/scripts/check-consistency.sh §53; docs/state.toml
 > [`server/scripts/check-consistency.sh`](../../server/scripts/check-consistency.sh)
 > asserts this list against the tree, so a name that is neither documented here nor
 > renamed fails the build.
+>
+> **A `locus` name also survives as an *installed application*, not just as a
+> string.** Updating across the move installs the new identity beside the old one,
+> so the migration has an installer half as well as a data half; §56 guards that
+> pair and [`client/docs/UPDATE-INSTALL-MIGRATION.md`](../../client/docs/UPDATE-INSTALL-MIGRATION.md)
+> is where it is designed.
 
 ---
 
@@ -144,6 +150,26 @@ the identifier does not name. So the identifier was never the update contract.
 
 **The data-root half was right, and it is the whole reason `LEGACY_APP_IDS` is not
 optional.** That reasoning follows the two tables.
+
+**What the identifier *does* decide, and what the 2026-11 update proved the hard
+way.** It is not an updater contract, but it is three other things, and the last
+one is not recoverable by the user:
+
+1. the app-data root (`%APPDATA%\com.chrysalis.client`, `~/.local/share/...`);
+2. the **install directory** on Windows, because `%PROGRAMFILES%\<productName>`
+   is `productName`, not the identifier;
+3. the **NSIS uninstall registration** on Windows, keyed on `productName`
+   (`Software\Microsoft\Windows\CurrentVersion\Uninstall\<productName>` — see the
+   bundler's own template, quoted in
+   [`client/docs/UPDATE-INSTALL-MIGRATION.md`](../../client/docs/UPDATE-INSTALL-MIGRATION.md) §2.1).
+
+Because (2) and (3) moved with `productName`, updating across the move installed a
+**second application** rather than a new version — and the older one's data root
+held the activation code. That is a fleet contract nobody had written down, and
+it is now the row below plus a guard: `check-consistency.sh` §56 compares the
+`Locus` identity in `client/src-tauri/src/chrysalis/update/identity_table.rs`
+against `packages/windows/migrate-predecessor.nsh`, so the client and the
+installer cannot disagree about which identity to migrate.
 
 | Now current | Where | Why it is a contract | Retires when |
 |---|---|---|---|
@@ -307,6 +333,16 @@ Not exhaustive — the point is the *classes*, because each had its own hazard:
 - **§53 of `check-consistency.sh`** asserts the retained set: it fails if a
   documented alias vanishes (someone "completed" the rename and broke the fleet)
   or if the documented list is empty (someone deleted the register).
+- **§56** keeps the two halves of the *cross-grade* migration honest: it reads
+  `client/src-tauri/src/chrysalis/update/identity_table.rs` (by running the
+  `predecessors` binary, so it reads what the compiler reads) and compares it,
+  row by row and in order, against
+  `client/src-tauri/packages/windows/migrate-predecessor.nsh`. The client uses
+  the first to refuse a hand-over while a predecessor is running; the installer
+  uses the second to move that predecessor's data root aside and remove the old
+  application. A row in one and not the other is a fleet that either races a live
+  application or keeps the duplicate installed — silently, because on Windows the
+  app has already exited by the time the installer runs.
 - **`docs/state.toml`** carries `[site.domain_legacy]` as a **derived** fact, so
   §9 recomputes it against `05-caddy.sh` and fails when the two disagree.
 - **`§5b`/`§5c`** keep `.chrysalis-keys/` carrying nothing but its README, and

@@ -271,17 +271,39 @@ pub fn run() -> std::process::ExitCode {
     // logger all resolve paths through it. Running after any of those would mean
     // operating on the new root before the old contents moved into it.
     match utils::dirs::migrate_legacy_app_data_dir() {
-        Ok(Some(adopted)) => {
+        Ok(Some(adoption)) => {
             // The logger is not installed yet, so record it on stderr as well.
-            eprintln!("[chrysalis] adopted pre-Chrysalis application data from {adopted:?}");
+            if adoption.is_side_adoption() {
+                // The data is safe but this launch is NOT using it — the current
+                // root already existed. That distinction is the whole reason the
+                // return value is a type rather than a path: it is reported here
+                // so the state is recoverable, and carried to the Account page as
+                // `InstallStage::AdoptedAside`.
+                eprintln!(
+                    "[chrysalis] WARNING: a pre-Chrysalis data directory was moved aside because \
+                     this app already had one: {}. If the activation code is missing, it is in the \
+                     directory named above.",
+                    adoption.describe()
+                );
+            } else {
+                eprintln!(
+                    "[chrysalis] adopted pre-Chrysalis application data from {}",
+                    adoption.describe()
+                );
+            }
         }
         Ok(None) => {}
         Err(error) => {
             // Deliberately non-fatal: a failed adoption must not stop the app
             // from starting. The user gets an empty profile set and re-activates,
             // and the original directory is left untouched for a manual move —
-            // which is strictly better than refusing to launch.
-            eprintln!("[chrysalis] WARNING: {error:#}");
+            // which is strictly better than refusing to launch. What is NOT
+            // acceptable is it being invisible, so the message names the
+            // consequence rather than only the errno.
+            eprintln!(
+                "[chrysalis] WARNING: pre-Chrysalis application data was NOT adopted, so this \
+                 device may start without its activation code: {error:#}"
+            );
         }
     }
 

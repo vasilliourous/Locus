@@ -15,7 +15,8 @@
         "displayLanguageSelector": true,
         "installerIcon": "icons/icon.ico",
         "languages": ["SimpChinese", "English", "Russian"],
-        "installMode": "perMachine"
+        "installMode": "perMachine",
+        "installerHooks": "./packages/windows/migrate-predecessor.nsh"
       }
     }
   },
