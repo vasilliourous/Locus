@@ -3299,10 +3299,20 @@ jobs:
                   indent = cur
               if cur < indent:
                   break
-              # A `#` line here is a comment, not a path. Without this the guard
-              # reports every explanatory line as missing and buries the real one.
-              if not l.strip().startswith("#"):
-                  patterns.append(l.strip())
+              # A `#` line here is a DEFECT, not a comment to skip. This block is
+              # read by action-gh-release as a flat list of paths, so a comment
+              # inside it is uploaded as a filename and `fail_on_unmatched_files`
+              # aborts the release on it — which is exactly how v3.5.2 failed
+              # with `Pattern '# Which build this is' does not match any files`
+              # after every build and signature check had passed. Skipping such
+              # a line here would let this guard bless the very line that breaks
+              # the upload, so it is reported instead.
+              if l.strip().startswith("#"):
+                  print("::error::the release `files:` block contains a comment line: %s" % l.strip())
+                  print("::error::  action-gh-release treats it as a path and the upload fails on it.")
+                  print("::error::  Move the comment above the block.")
+                  sys.exit(1)
+              patterns.append(l.strip())
 
           missing = [p for p in patterns if not glob.glob(p)]
           if missing:
@@ -3418,6 +3428,17 @@ jobs:
           # by `fetch-release.py`.
           # THIS LIST MUST MATCH WHAT manifest.json ADVERTISES.
           #
+          # NO `#` LINES INSIDE THE `files:` BLOCK. action-gh-release reads that
+          # block as a list of paths, not as YAML it understands, so a comment in
+          # there is uploaded as a FILENAME and `fail_on_unmatched_files` aborts
+          # the release on it. That is how v3.5.2 failed one upload short of
+          # finishing, with
+          #   Pattern '# Which build this is' does not match any files.
+          # Every four-platform build had passed, signing was verified, and the
+          # only thing left was the upload. Comments about the list go ABOVE it.
+          # `Verify every file the release names exists` now rejects a `#` line
+          # inside the block for this reason, rather than skipping it.
+          #
           # The macOS entries name the `.app.tar.gz` payloads, NOT the bare
           # Mach-O binaries — the same names `manifest.json` declares and
           # `fetch-release.py` resolves. This list used to name the raw
@@ -3477,10 +3498,6 @@ jobs:
             release/locus-darwin-arm64.sig
             release/manifest.json
             release/installer-*
-            # Which build this is, as a file rather than a tag name. The step
-            # "Prefix and stage the installers" REFUSES to continue if this is
-            # staged and not listed here, because an asset read by the job and
-            # missing from the release is the failure that made v3.5.1 ambiguous.
             release/release_notes.md
           draft: false
           # Idempotent: re-running on the same tag replaces assets rather than
