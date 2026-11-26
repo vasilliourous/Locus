@@ -195,9 +195,11 @@ curl -s -X POST "$PB_API/api/admin/console" \
   -H "Content-Type: application/json" -H "X-Admin-Token: $ADMIN_TOKEN" \
   -d '{"action":"codes.list","expiring_within_days":7}' | jq \
   '.codes[] | {code, label, days_remaining, expires_at}'
-# Sorted most-urgent first. Suspended and already-lapsed codes are excluded:
-# a suspended code was cut off deliberately, and a lapsed one needs a catch-up
-# rather than a reminder.
+# Sorted most-urgent first. Three kinds of code are excluded, each for a reason:
+#   suspended  — cut off deliberately; renewing would ask you to undo your call
+#   lapsed     — already lost access; needs a catch-up, not a reminder
+#   unused     — nobody holds it, so there is nothing to renew and nothing to
+#                collect. It carries a mint-time expiry and cannot lapse.
 ```
 
 ### A student moved to a new device — do nothing
@@ -222,7 +224,8 @@ Every console page is a POST to `/api/admin/console` with an `action`:
 
 | Action | Purpose |
 |---|---|
-| `dashboard` | Counts, per-tier totals, recent activity, codes expiring within 30 days |
+| `dashboard` | Counts, per-tier totals, recent activity, codes expiring within 30 days, and check-in attempts over their live window split by kind |
+| **`attention.list`** | The Overview's four checks: `unservable_tier` (tier has no ACTIVE config row), `lapsed` (past expiry, not stopped), `shared` (`release_count >= 2` while in term), `no_label` (in use, no name). Returns counts plus up to 8 example rows each |
 | `codes.list` | Search/filter codes (`query`, `tier`, `status`, `middleman`, **`expiring_within_days`**) |
 | `codes.generate` | Create codes (`tier`, `count`, **`term_days`**, `expires_at`, `middleman`, `label`, `notes`) |
 | **`codes.renew`** | **Extend a code's term after a payment** (`code`, `term_days` override, `price`, `middleman`) |
@@ -237,6 +240,7 @@ Every console page is a POST to `/api/admin/console` with an `action`:
 | `codes.delete` / `codes.deleteBatch` | Remove one / many codes (**prefer suspend or unbind**) |
 | `device.get` / `devices.list` | **Retired.** Codes are not tied to a device; both return `410` pointing at `codes.list` |
 | `middlemen.list` | Distinct middleman labels and their code counts |
+| **`middlemen.summary`** | Per middleman: stock by state, renewals and money collected in a window (`window_days`, default 30). Parses `price=`/`middleman=` out of `code_events.detail`; `collected_complete` is false when any renewal in the window had no price, in which case the console shows the figure as a floor (`≥`) rather than a total |
 | `tiers.list` / `tiers.update` | Read / edit tier connection settings |
 | `releases.get` / `releases.set` | Read the current release / turn it on or off |
 | `releases.fetchLink` / `releases.publish` | Mint a one-shot fetch link / publish a fetched release |
@@ -501,20 +505,45 @@ when you sign out or the session ends.
 
 ### What each page does
 
+Four destinations, grouped by the job rather than by the collection.
+
 | Page | What it is for |
 |---|---|
-| **Dashboard** | Counts of available / activated / suspended codes, codes per tier, codes expiring in 30 days, and a recent-activity feed. |
-| **Codes & Clients** | Generate codes (1–500 at a time, per tier, with a **term** or an absolute expiry, a middleman and a label), search by code **or name**, renew a code after a payment, suspend/reactivate, release a used code, edit detail, export CSV. The **Due in 7 / 30 days** toggles turn the list into a renewal worklist. |
-| **Devices** | Every code/device binding, live and released. Shows the states the unique index cannot express: a binding whose code is gone (`code_missing`), and any duplicate live fingerprint (which should be impossible — the index prevents it, so seeing one means the rule is not holding). Read-only. |
-| **Releases** | Pull a build straight from its GitHub Release, verify it, and offer it (or stop offering it). |
-| **Tiers** | Server hostname, port, method and active/UDP-relay flags per tier. |
+| **Overview** | Whether anything needs attention, and the way in to each thing. Every count is a button that opens the Codes page already filtered to it. Below the counts, four checks over real data: codes on a tier the hub cannot serve, codes lapsed and NOT stopped, codes signed out on several machines while still in term, and codes in use with no name recorded. |
+| **Codes** | Find a code and act on it. Search matches the code, the student's **name** (`label`), notes and the middleman. Filters apply as you change them — there is no Apply button. One row shows the code, its state, who holds it, and days remaining; **Renew** is the row's primary action, and everything else (open, stop/reactivate, manual expiry, delete) is behind `⋯`. Detail opens as a panel beside the list, with separate **Detail / Actions / History / Danger** tabs. **Create codes** is a drawer. |
+| **Distribution** | One row per middleman: how much stock they hold, how much is in term, how much is due within 7 days, and how many renewals and how much money was recorded through them in the chosen window (30 / 90 / 365 days). Free stock is a segment, not a separate page. |
+| **Settings › Tiers** | Server hostname, port, method, active/UDP-relay flags and the hub address offered to that tier. One table; edit a row to change it. |
+| **Settings › Releases** | Pull a build straight from its GitHub Release, verify it, and offer it (or stop offering it). |
+| **Settings › Maintenance** | Add codes the hub is missing (`codes.import`), and mint a one-shot fetch link. |
+
+There is also a **command palette** on `⌘K` / `Ctrl-K` (or `/`): type a code, a
+student's name or a middleman and jump straight to it, or type a page name to go
+there. It is the fastest route to "a student called, their name is X".
+
+> **The "Used codes" page and the "Devices" page are gone.** A code is
+> single-use and is not tied to a machine, so both listed the same rows
+> `codes.list` already returns. Device lookups return HTTP 410 with an
+> explanation, kept so an old runbook gets a sentence rather than a silent no-op.
+> To see which codes are in use: **Codes → State → In term**.
 
 ### Common jobs
 
 **Issue 20 codes to a middleman**
-Codes & Clients → Tier = `eco`, How many = `20`, Expires = (a year out),
-For middleman = `Sarah`, Label = anything you find useful → **Create codes** →
-**Copy all**. The generated list is shown once; export CSV if you want a record.
+Codes → **Create codes** → Tier, How many = `20`, Term (days) = `70`,
+Middleman = `Sarah`, Label = anything you find useful (ideally the student's
+name) → **Create codes** → **Copy all** or **Download CSV**. The list is shown
+once; it is the only time the console shows the batch as a set.
+
+**Renew a code after a payment**
+Find the code (or press `⌘K` and type the student's name) → **Renew** → pick the
+purchased term → **read the before → after dates in the panel** → fill in Price
+and Middleman if you know them → **Renew**. Write the new date down: the panel
+shows the hub's own answer, not a prediction.
+
+> **Record the price.** It is optional and it is the only thing that makes
+> "how much did Sarah collect this month" answerable later — it cannot be
+> reconstructed from memory. A renewal without it counts in Distribution's
+> **Renewals** column but leaves **Collected** showing a dash.
 
 **A student changed laptops**
 Nothing to do — codes are not tied to a device. The student enters the same code

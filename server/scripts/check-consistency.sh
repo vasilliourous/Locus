@@ -273,6 +273,33 @@ else
     bad "releases.publish writes signature_<platform> without a shape check —
          a raw-text row can be published and reach every client"
 fi
+
+# ── The Overview's cards and the lists they open must count the SAME rows ──
+#
+# WHY THIS IS A CHECK. On the live tree the "Activated on a device" card read
+# `data.codes.bound` after the hook had stopped returning `bound`, so it rendered
+# blank; and `expiringSoon` counted every future expiry inside 30 days — including
+# UNUSED stock — while the worklist it links to excludes unsold and suspended
+# codes. Both look like a working page. The operator clicks a card that says 7 and
+# gets 11 rows, and concludes the console is stale.
+#
+# It runs the REAL handler rather than grepping it: a text match cannot tell
+# whether two expressions agree about a boundary. Each assertion below was
+# observed FAILING against the pre-fix expression (`isUsed` removed from the
+# expiringSoon condition) before it was kept.
+CARD_CHECK="$REPO/server/scripts/console-card-consistency.js"
+if [ -f "$CARD_CHECK" ] && command -v node >/dev/null 2>&1; then
+    if card_out=$(node "$CARD_CHECK" 2>&1); then
+        ok "the Overview's cards agree with the lists they open ($(printf '%s' "$card_out" | grep -c '^OK') assertions)"
+    else
+        while IFS= read -r line; do
+            [ -n "$line" ] && bad "  $line"
+        done <<< "$(printf '%s' "$card_out" | grep -v '^OK')"
+        bad "the Overview's cards disagree with the lists they open — an operator clicks a count and gets a different set of rows"
+    fi
+else
+    warn "console-card-consistency.js or node is unavailable — cannot check the Overview's cards"
+fi
 if grep -qE 'isPlausibleMinisignSignature\(gsig\)' "$HOOKS/admin_console.pb.js" 2>/dev/null; then
     ok "releases.set validates the signature shape before activating"
 else
@@ -381,7 +408,17 @@ else
 fi
 
 # The console must name the same shape, or the link 404s for the student.
-CONSOLE_VUE="$REPO/server/console/src/views/Releases.vue"
+# The release read-out moved under Settings in the console redesign; this name
+# follows the file rather than the old path, so the check keeps checking the code
+# that exists instead of warning that it cannot find it.
+CONSOLE_VUE="$REPO/server/console/src/views/settings/ReleasesPanel.vue"
+# The console's source root and the two files §27 reads out of it. The redesign
+# moved the mint form into views/codes/CreateDrawer.vue and the release read-out
+# into views/settings/ReleasesPanel.vue; these names follow the code so a reader
+# is not sent to a file that no longer exists.
+CONSOLE_SRC="$REPO/server/console/src"
+CONSOLE_CREATE="$CONSOLE_SRC/views/codes/CreateDrawer.vue"
+CONSOLE_CODES="$CONSOLE_SRC/views/Codes.vue"
 if [ -f "$CONSOLE_VUE" ]; then
     if grep -q 'installer-Locus_${v}_${a.arch}.zip' "$CONSOLE_VUE" 2>/dev/null; then
         ok "the console builds the same zip filename"
@@ -3870,7 +3907,6 @@ echo "27. The paid tier is the only paid tier, and every surface agrees"
 PAID_PORT=8445
 PAID_CAP=100mbit
 PAID_ROW=strike
-CONSOLE_CODES="$REPO/server/console/src/views/Codes.vue"
 
 if [ ! -f "$TC_MOD" ] || [ ! -f "$SEED" ]; then
     warn "paid-tier guard: a file it needs is missing — skipping"
@@ -3936,24 +3972,32 @@ else
         ok "seed-pb.py seeds no retired \`stealth\` row"
     fi
 
-    # (f) TWO-SIDED, the console. The dropdown literal is a PRE-LOAD placeholder
-    #     (Codes.vue hydrates it from tiers.list), so it is not an allow-list in
-    #     the way a deployed client's enum is — but a placeholder naming a
-    #     retired tier is a dropdown entry that can mint an unresolvable code on
-    #     first paint. Assert it names only seeded rows.
-    if [ -f "$CONSOLE_CODES" ]; then
-        if grep -Eq "ref<string\[\]>\(\[[^]]*'${PAID_ROW}'" "$CONSOLE_CODES"; then
-            ok "the console's tier placeholder names the paid row"
+    # (f) THE CONSOLE OFFERS NO TIER OF ITS OWN.
+    #
+    #     INVERTED WITH THE CONSOLE REDESIGN (2026-11). Until then the mint form
+    #     carried a hardcoded `ref<string[]>(['free','budget','strike'])` — a
+    #     PRE-LOAD placeholder, because the list is hydrated from `tiers.list` —
+    #     and this check asserted that literal named the paid row. The redesign
+    #     deleted the literal: the form's list now starts EMPTY and is filled
+    #     only by the hub, so it can no longer offer a tier the hub does not
+    #     hold, on first paint or any other. That makes the old assertion
+    #     unsatisfiable AND unnecessary, and re-adding a literal to satisfy it
+    #     would restore the defect the check existed to catch.
+    #
+    #     So the assertion is now the STRONGER, one-sided form: no tier name may
+    #     appear as a literal list in the console at all. Verified to FAIL against
+    #     the pre-redesign tree (`ref<string[]>(['free','budget','strike'])`
+    #     matches it), and against this tree with that line put back.
+    if [ -d "$CONSOLE_SRC" ]; then
+        tier_literal=$(grep -rnE "ref<string\[\]>\(\[[^]]*'(free|budget|strike|stealth|eco)'" "$CONSOLE_SRC" 2>/dev/null || true)
+        if [ -z "$tier_literal" ]; then
+            ok "the console names no tier literal — mint options come only from the hub's tiers.list"
         else
-            bad "the console's tier placeholder does not name '${PAID_ROW}' — the mint form could offer no valid paid tier on first paint"
-        fi
-        if grep -Eq "ref<string\[\]>\(\[[^]]*'stealth'" "$CONSOLE_CODES"; then
-            bad "the console's tier placeholder still names the retired 'stealth' tier"
-        else
-            ok "the console's tier placeholder names no retired tier"
+            bad "the console hardcodes a tier list again; a literal can offer a tier the hub cannot serve"
+            bad "  $tier_literal"
         fi
     else
-        warn "no console Codes.vue found — cannot check the tier placeholder"
+        warn "no console src/ found — cannot check the tier list"
     fi
 
     # (h) UDP IS A GIVEN — BOTH PLANS ADVERTISE IT, ON SEPARATE PORTS.
@@ -4251,12 +4295,27 @@ else
     #      original Stealth/Strike divergence years earlier. A tier can be live
     #      on the hub and still be unsellable (no console entry) or unbranded
     #      (no colour). Neither is an error anywhere; both are invisible.
-    if [ -f "$CONSOLE_CODES" ]; then
-        if grep -Eq "ref<string\[\]>\(\[[^]]*'${BUDGET_ROW}'" "$CONSOLE_CODES"; then
-            ok "the console's tier placeholder offers the Budget row"
+    # The console half. §27(f) asserts the NEGATIVE (no tier literal anywhere);
+    # this asserts the POSITIVE that makes the negative safe: the mint form's
+    # option list is assigned from the hub's `tiers.list`, so Budget is offered
+    # by construction rather than by a name somebody remembered to type here.
+    #     The fetch lives on the page that OWNS the tier list (Codes.vue), and the
+    #     drawer receives it as a prop — so assert the two halves that together
+    #     make the claim true: the page reads `tiers.list`, and the drawer's
+    #     option list is bound to that prop rather than to a literal.
+    if [ -f "$CONSOLE_CREATE" ] && [ -f "$CONSOLE_CODES" ]; then
+        if grep -q "call<{ tiers: { tier: string }\[\] }>('tiers.list')" "$CONSOLE_CODES"; then
+            ok "the console reads the tier list from the hub's tiers.list"
         else
-            bad "the console's tier placeholder does not name '${BUDGET_ROW}' — the plan would be live on the hub and un-mintable"
+            bad "the console does not read tiers from tiers.list — the plan would be live on the hub and un-mintable"
         fi
+        if grep -qE '<option v-for="t in tiers"' "$CONSOLE_CREATE"; then
+            ok "the mint form's options are bound to that list"
+        else
+            bad "the mint form's tier options are not bound to the hub's list — a literal would offer tiers that cannot be served"
+        fi
+    else
+        bad "a console file §27 needs is missing (expected: views/Codes.vue and views/codes/CreateDrawer.vue)"
     fi
     if [ -f "$THEME_TSX" ]; then
         if grep -Eq "^[[:space:]]*${BUDGET_ROW}:[[:space:]]*\{[[:space:]]*color:" "$THEME_TSX"; then
@@ -8082,7 +8141,10 @@ CHECKS = [
     ("chrysalis-linux-amd64",     "server/scripts/fetch-release.py",           "chrysalis-linux-amd64"),
     ("chrysalis-linux-amd64",     "server/scripts/publish-release.sh",         "chrysalis-linux-amd64"),
     ("chrysalis-linux-amd64",     "server/scripts/verify-release.sh",          "chrysalis-linux-amd64"),
-    ("chrysalis-linux-amd64",     "server/console/src/views/Releases.vue",     "chrysalis-linux-amd64"),
+    # The console's release read-out moved under Settings in the redesign. This
+    # row follows the file: a row pointing at a path that no longer exists fails
+    # as "missing" — correct, but it stops checking the literal it is here for.
+    ("chrysalis-linux-amd64",     "server/console/src/views/settings/ReleasesPanel.vue", "chrysalis-linux-amd64"),
     ("LOCUS_UPDATE_KEY_B64",     "server/scripts/chrysalis-key-extract.sh",   "LOCUS_UPDATE_KEY_B64"),
     # The encrypt-side FORM CHECK, not just a doc: a required-var list naming the
     # wrong spelling refuses every re-encrypt with "LOCUS_UPDATE_KEY_B64(absent)".

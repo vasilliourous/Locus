@@ -1,935 +1,537 @@
 <script setup lang="ts">
-import { ref, onMounted, computed, watch } from 'vue'
-import { call } from '../api'
-import { toast } from '../toast'
-
-interface CodeRow {
-  id: string
-  code: string
-  tier: string
-  status: 'available' | 'redeemed' | 'suspended' | 'expired'
-  /**
-   * Whether this code has been redeemed. A code is single-use and is not tied
-   * to a device, so this replaces the old `bound` flag.
-   */
-  redeemed: boolean
-  suspended: boolean
-  expires_at: string
-  activated_at: string
-  middleman: string
-  label: string
-  notes: string
-  /** How long one purchase lasts, in days. 0/absent = never expires. */
-  term_days?: number | null
-  term_kind?: string
-  /** Whole days until expiry (rounded up), or null when there is no expiry. */
-  days_remaining?: number | null
-  /**
-   * When this code was FIRST redeemed. Survives an operator release, so it is
-   * the difference between "never issued" and "issued once, then released" —
-   * which `status: 'available'` alone cannot express.
-   */
-  first_seen_at?: string
-  /** Truncated hash of the machine that made that first activation. */
-  first_seen_fingerprint?: string
-  /** When a student last signed out of this code (device_release.pb.js). */
-  released_at?: string
-  /** How many times a student has signed out of it. */
-  release_count?: number
-}
-
-const codes = ref<CodeRow[]>([])
-const loading = ref(false)
-
-// Row selection, for bulk delete. A Set keyed by code string; cleared whenever
-// the filter changes or a bulk action completes, so a stale tick cannot delete
-// a row the operator can no longer see.
-const selected = ref<Set<string>>(new Set())
-const selectedCount = computed(() => selected.value.size)
-function toggleSelected(code: string) {
-  const next = new Set(selected.value)
-  if (next.has(code)) next.delete(code)
-  else next.add(code)
-  selected.value = next
-}
-function toggleSelectAll() {
-  if (selected.value.size === codes.value.length) selected.value = new Set()
-  else selected.value = new Set(codes.value.map((c) => c.code))
-}
-
-// Filters
-const query = ref('')
-const tierFilter = ref('')
-const statusFilter = ref('')
-const middlemanFilter = ref('')
-/** 0 = all codes; >0 = only codes expiring within this many days. */
-const worklistDays = ref(0)
-
-// Set by another page (the Dashboard's expiring card) to open this view already
-// filtered to the renewal worklist. Applied once on mount, then owned by the
-// local toggle buttons — the parent must not keep re-imposing a mode the
-// operator has since changed.
-const props = defineProps<{ worklistDays?: number }>()
-
-// Generation form
-// Defaults to `free`: the retired `eco` row was removed from tier_configs, so
-// minting against it would now fail with a tier that does not resolve. The
-// form is re-hydrated from `tiers.list` on load; this is the pre-load value.
-const genTier = ref('free')
-const genCount = ref(10)
-const genExpires = ref('')
-// The term is the PREFERRED way to mint: the clock starts at activation, so a
-// card does not decay on the shelf while it waits to be sold. Defaults to 70
-// days (~10 weeks), matching the term-pass product the business plan leads
-// with; 0 means the code never expires.
-const genTermDays = ref(70)
-const genMiddleman = ref('')
-const genLabel = ref('')
-const genNotes = ref('')
-const generating = ref(false)
-const generated = ref<string[]>([])
-
-// Per-code detail
-const detail = ref<CodeRow | null>(null)
-const history = ref<{ event: string; detail: string; created: string }[]>([])
-const historyLoading = ref(false)
-
-// A filter change invalidates any ticked rows: the operator can no longer see
-// what they selected, and "delete N selected" where N counts rows that scrolled
-// out of view is how a bulk delete goes wrong.
-watch([query, tierFilter, statusFilter, middlemanFilter, worklistDays], () => {
-  selected.value = new Set()
-})
-
-// Pre-load placeholder only: `loadMeta()` replaces this with the hub's real
-// `tier_configs` rows via `tiers.list`. It exists so the dropdown is not empty
-// on first paint. It must still name only tiers the hub actually seeds — a
-// placeholder offering a retired tier is a dropdown entry that mints a code
-// which can never resolve, and `check-consistency.sh` §27 holds it to
-// `seed-pb.py` for exactly that reason.
+// Codes — the workbench.
 //
-// Keyed by the FROZEN row name the code will carry: `free`, `budget`, `strike`.
-// `budget` was added 2026-11-12 (docs/business/04-tiers.md §4.2.5); without it
-// here the mint form offers no Budget entry on first paint, and the operator
-// could not sell the plan the hub serves.
-const tiers = ref<string[]>(['free', 'budget', 'strike'])
-const middlemen = ref<{ name: string; codes: number }[]>([])
+// THE SHAPE, AND WHY. This page is where the console spends its life, and the
+// previous version made two jobs fight each other: minting (a permanent
+// two-row form at the top) and finding/renewing (an 11-column table with seven
+// buttons per row and an Apply button). The form pushed the data below the fold;
+// the action column wrapped; the primary job — renew — was a browser prompt.
+//
+// Now:
+//   * one sticky bar of filters that apply on change (no Apply button);
+//   * a compact table: code, state, who, days left, and ONE primary action;
+//   * everything else in the row menu;
+//   * create / renew / stop as drawers, so the list is never covered by a form;
+//   * detail as a slide-over, so the list stays visible while reading one code.
+//
+// DENSITY IS THE POINT. Six columns fit on a laptop, the header sticks, and the
+// numbers align — three things the old table could not do at 11 columns.
 
-async function load() {
-  loading.value = true
-  const res = await call<{ codes: CodeRow[]; total: number }>('codes.list', {
-    query: query.value,
-    tier: tierFilter.value,
-    status: statusFilter.value,
-    middleman: middlemanFilter.value,
-    // 0 = no window (every code). The hub treats anything <= 0 as "no window",
-    // so sending 0 is the explicit "all codes" case rather than an omission.
-    expiring_within_days: worklistDays.value,
-  })
-  if (res.ok && res.data) {
-    codes.value = res.data.codes
-  } else {
-    toast.err(res.message || res.transportError || 'Could not load codes')
-  }
-  loading.value = false
+import { computed, onMounted, ref, watch } from 'vue'
+import { nav, type CodeFilter } from '../nav'
+import { call } from '../api'
+import StateBlock from '../components/StateBlock.vue'
+import RowMenu from '../components/RowMenu.vue'
+import type { MenuItem } from '../components/menu'
+import { useCodes, act } from './codes/data'
+import type { CodeRow } from './codes/model'
+import { isUrgent, remainingText, shortDate, stateClass, stateLabel } from './codes/model'
+import CodeDetail from './codes/CodeDetail.vue'
+import CreateDrawer from './codes/CreateDrawer.vue'
+import RenewDrawer from './codes/RenewDrawer.vue'
+import StopDrawer from './codes/StopDrawer.vue'
+
+const { rows, facets, loading, failed, denied, total, load, history } = useCodes()
+
+// A holder for messages that must persist: a partial bulk delete reports what it
+// left behind, and a toast that vanished after 5 seconds would leave the operator
+// believing the cleanup finished. Declared here, above every handler that writes
+// it — it used to be declared 80 lines below its first use, which is a
+// temporal-dead-zone crash the first time a bulk delete actually ran.
+const loaded = ref({ err: '' })
+
+// ── Filter state ──
+// `view` is the segmented control (all / worklist); the rest are the query.
+const view = ref<'all' | 'worklist'>('all')
+const query = ref('')
+const tier = ref('')
+const status = ref('')
+const middleman = ref('')
+const worklistDays = ref(7)
+const sortKey = ref<'code' | 'days' | 'middleman'>('days')
+
+const currentQuery = computed(() => ({
+  query: query.value.trim(),
+  tier: tier.value,
+  status: status.value,
+  middleman: middleman.value.trim(),
+  // The worklist IS `expiring_within_days`; 0 means every code.
+  expiring_within_days: view.value === 'worklist' ? worklistDays.value : 0,
+}))
+
+let debounce: number | undefined
+function reload() {
+  void load(currentQuery.value)
+}
+/** Typing reloads after a pause; selects and toggles reload at once. */
+function reloadSoon() {
+  window.clearTimeout(debounce)
+  debounce = window.setTimeout(reload, 220)
 }
 
-/**
- * Switch between the full list and a renewal worklist.
- *
- * Reloads immediately: this is a mode change the operator performs in order to
- * act, so leaving the old rows on screen until they press something else would
- * mean acting on the wrong set.
- */
-async function setWorklist(days: number) {
-  worklistDays.value = days
-  selected.value = new Set()
-  await load()
+watch(currentQuery, reloadSoon, { deep: true })
+
+// ── Deep links from the Overview / palette ──
+// `nav.codeRequestSeq` bumps on every request, so asking for the same filter
+// twice still re-applies it (a watcher on an unchanged object would fire zero
+// times and the click would silently do nothing).
+// NOT `immediate`: the mount handler below is the one place that loads the page
+// for the first time, and it applies the pending request as part of that single
+// load. With `immediate` the page fetched twice on every arrival — once for the
+// deep link, once for `onMounted` — and the second response could land first and
+// discard the filter the operator asked for.
+watch(
+  () => nav.codeRequestSeq,
+  () => {
+    if (nav.page !== 'codes') return
+    applyFilter(nav.codeFilter)
+  },
+)
+
+function applyFilter(f: CodeFilter) {
+  // A deep link is an explicit instruction, so the fetch is immediate — not the
+  // 220ms debounce a keystroke waits for. The window.clearTimeout below stops the
+  // `watch(currentQuery)` from ALSO firing a fetch for the same change: the two
+  // would race, and the loser would overwrite the winner's rows with identical
+  // data or, worse, with a half-applied filter.
+  window.clearTimeout(debounce)
+  view.value = f.view === 'worklist' ? 'worklist' : 'all'
+  query.value = f.query || ''
+  tier.value = f.tier || ''
+  status.value = f.status || ''
+  middleman.value = f.middleman || ''
+  if (f.expiring_within_days) worklistDays.value = f.expiring_within_days
+  selection.value = new Set()
+  reload()
 }
+
+// ── Meta: the tier list and the middleman names ──
+const tiers = ref<string[]>([])
+const middlemen = ref<string[]>([])
 
 async function loadMeta() {
+  // Tiers come from the hub, never from a literal here. A literal can drift
+  // from the seed and offer a tier that mints an unresolvable code — the exact
+  // failure check-consistency.sh §27(f) guards.
   const t = await call<{ tiers: { tier: string }[] }>('tiers.list')
   if (t.ok && t.data) tiers.value = t.data.tiers.map((x) => x.tier)
-
-  const m = await call<{ middlemen: { name: string; codes: number }[] }>('middlemen.list')
-  if (m.ok && m.data) middlemen.value = m.data.middlemen
+  const m = await call<{ middlemen: { name: string }[] }>('middlemen.list')
+  if (m.ok && m.data) middlemen.value = m.data.middlemen.map((x) => x.name)
 }
 
-function defaultExpiry(): string {
-  // One year out — the previous codes all expired ~12 months after issue.
-  const d = new Date()
-  d.setFullYear(d.getFullYear() + 1)
-  return d.toISOString().slice(0, 10)
-}
-
-async function generate() {
-  if (!genTier.value) {
-    toast.err('Choose a tier first')
-    return
-  }
-  const count = Number(genCount.value)
-  if (!Number.isFinite(count) || count < 1 || count > 500) {
-    toast.err('Number of codes must be between 1 and 500')
-    return
-  }
-  generating.value = true
-  generated.value = []
-  try {
-    const res = await call<{ created: string[]; skipped: number }>('codes.generate', {
-      tier: genTier.value,
-      count,
-      // Both are sent when both are set. The hub treats the term as the
-      // authority at ACTIVATION (it recomputes the expiry then), and the
-      // absolute date as the mint-time value a code carries until it is
-      // activated — so the two do not fight.
-      term_days: genTermDays.value || 0,
-      expires_at: genExpires.value,
-      middleman: genMiddleman.value,
-      label: genLabel.value,
-      notes: genNotes.value,
+// ── Sorting ──
+// Server order is meaningful (most-recent activity, or most-urgent when the
+// worklist is on), so the default keeps it. Clicking a header re-sorts locally
+// over the rows already loaded — this is one page of a few hundred, not a
+// paged grid, so there is nothing to fetch.
+const shown = computed(() => {
+  const out = rows.value.slice()
+  if (sortKey.value === 'code') out.sort((a, b) => a.code.localeCompare(b.code))
+  else if (sortKey.value === 'middleman') out.sort((a, b) => (a.middleman || '~').localeCompare(b.middleman || '~'))
+  else
+    out.sort((a, b) => {
+      const da = a.days_remaining === null || a.days_remaining === undefined ? 1e9 : a.days_remaining
+      const db = b.days_remaining === null || b.days_remaining === undefined ? 1e9 : b.days_remaining
+      return da - db
     })
-    if (res.ok && res.data) {
-      generated.value = res.data.created
-      toast.ok(`Created ${res.data.created.length} code(s)` + (res.data.skipped ? `, ${res.data.skipped} skipped` : ''))
-      await load()
-      await loadMeta()
-    } else {
-      toast.err(res.message || res.transportError || 'Could not create codes')
-    }
-  } finally {
-    generating.value = false
-  }
+  return out
+})
+
+// ── Selection (bulk delete only) ──
+// Cleared on every filter change and after every bulk action, so a stale tick
+// can never delete a row the operator can no longer see.
+const selection = ref<Set<string>>(new Set())
+const selectedRows = computed(() => rows.value.filter((r) => selection.value.has(r.code)))
+const selectedDeletable = computed(() => selectedRows.value.filter((r) => !r.redeemed))
+function toggle(code: string) {
+  const next = new Set(selection.value)
+  if (next.has(code)) next.delete(code)
+  else next.add(code)
+  selection.value = next
 }
-
-/**
- * Kick a student out, with a reason they will read.
- *
- * # Why this is separate from Suspend
- *
- * `codes.suspend` stays for the plain case and for an older console. This one
- * requires a reason, because the reason is DISPLAYED to the student on their
- * kick-out screen: a suspension they cannot explain is a support call to whoever
- * sold them the code, asking about a decision nobody wrote down.
- *
- * The note the operator sees after confirming is the other half. "Kicked out"
- * sounds instantaneous and is not: the device is cut off at its next heartbeat,
- * which is up to about five minutes while it is connected. Saying so stops an
- * operator from concluding the action failed and doing it again.
- */
-async function kickOut(row: CodeRow) {
-  const reason = window.prompt(
-    `Kick ${row.code} out?\n\n` +
-      `The student's tunnel is stopped and their app shows a "signed out of Chrysalis" ` +
-      `screen carrying YOUR reason below — so write it for them, not for us.\n\n` +
-      `The code is KEPT on their computer: unsuspending restores their access ` +
-      `without them re-entering anything or restarting the app.\n\n` +
-      `They are cut off at the next check-in (within about 5 minutes while connected).`,
-    '',
-  )
-  // An empty reason is refused rather than defaulted — the server refuses it too,
-  // so offering it here would only turn a policy into a failed request.
-  if (reason === null) return
-  if (!reason.trim()) {
-    toast.err('A reason is required — the student sees it')
-    return
-  }
-  const res = await call('codes.kick', { code: row.code, reason: reason.trim() })
-  if (res.ok) {
-    toast.ok(`Kicked ${row.code} out — cut off at its next check-in`)
-    await load()
-    if (detail.value?.code === row.code) await openDetail(row)
-  } else {
-    toast.err(res.message || res.transportError || 'Kick-out failed')
-  }
+function toggleAll() {
+  // Only rows that CAN be deleted are selectable: the batch hook refuses a
+  // redeemed code, so offering it a tick would invite a guaranteed skip.
+  const deletable = shown.value.filter((r) => !r.redeemed)
+  if (deletable.every((r) => selection.value.has(r.code))) selection.value = new Set()
+  else selection.value = new Set(deletable.map((r) => r.code))
 }
+const allSelected = computed(() => {
+  const deletable = shown.value.filter((r) => !r.redeemed)
+  return deletable.length > 0 && deletable.every((r) => selection.value.has(r.code))
+})
+watch(currentQuery, () => (selection.value = new Set()), { deep: true })
 
-async function setSuspended(row: CodeRow, suspend: boolean) {
-  const res = await call('codes.' + (suspend ? 'suspend' : 'unsuspend'), { code: row.code })
-  if (res.ok) {
-    toast.ok(`${suspend ? 'Suspended' : 'Reactivated'} ${row.code}`)
-    await load()
-  } else {
-    toast.err(res.message || res.transportError || 'Action failed')
-  }
-}
-
-async function unbind(row: CodeRow) {
-  // ── Why the sign-out note is in here ──
-  //
-  // "A student signed out and the code was not released" is a report that
-  // resolves to this dialog, and the operator needs to leave it knowing two
-  // things: that releasing is NOT how you handle a student moving machines, and
-  // that this code has already been in someone's hands.
-  //
-  // The sign-out itself is recorded (`released_at`/`release_count`) and changes
-  // no entitlement, on purpose — `device_release.pb.js` explains why clearing
-  // `activated_at` on a sign-out would let anybody holding a card reset a paying
-  // student's term. So the console says what the sign-out means rather than
-  // offering a button that does it.
-  const signedOut = row.release_count
-    ? `\n\nNOTE: a student has signed out of this code ${row.release_count} time(s), ` +
-      `most recently ${row.released_at ? row.released_at.slice(0, 16).replace('T', ' ') : 'at an unknown time'}. ` +
-      `That is already recorded and needs no action — signing out deliberately ` +
-      `does not free the code, because doing so would let anyone holding the card ` +
-      `reset the paying student's term.`
-    : ''
-  const reissued = row.first_seen_at
-    ? `\n\nNOTE: this code was ALREADY issued once (${row.first_seen_at.slice(0, 10)}` +
-      `${row.first_seen_fingerprint ? `, machine ${row.first_seen_fingerprint}` : ''}). ` +
-      `If that student still holds the card, releasing it does not take the code ` +
-      `back from them — it hands the SAME code to a second person.`
-    : ''
-  const reason = window.prompt(
-    `Release ${row.code}?\n\n` +
-      `A code is single-use and is NOT tied to a device. Releasing it clears the ` +
-      `used stamp so a DIFFERENT student can activate it.\n\n` +
-      `You do not need this to move a student to a new laptop — they simply enter ` +
-      `the same code again and it restores their access.` +
-      signedOut +
-      reissued,
-    'Re-issued to a different student',
-  )
-  if (reason === null) return
-  const res = await call('codes.unbind', { code: row.code, reason })
-  if (res.ok) {
-    toast.ok(`Released ${row.code} — it is available again`)
-    await load()
-    if (detail.value?.code === row.code) await openDetail(row)
-  } else {
-    toast.err(res.message || res.transportError || 'Release failed')
-  }
-}
-
-/**
- * Renew a code after a middleman reports payment.
- *
- * The whole point of this action is that the operator never does date
- * arithmetic in their head. The confirm prompt therefore shows the BEFORE and
- * AFTER expiry, computed by the hub, and the operator approves a concrete
- * change rather than a number of days.
- *
- * A renewal EXTENDS FROM THE EXISTING EXPIRY — renewing a week early keeps the
- * week and adds the new term on top. That is stated in the prompt because the
- * alternative (measuring from today) would silently delete paid time, and an
- * operator quoting a date to a middleman needs to know which it is.
- */
-async function renew(row: CodeRow) {
-  const current = row.expires_at ? row.expires_at.slice(0, 10) : 'no expiry'
-  const stated = window.prompt(
-    `Renew ${row.code} (${row.tier})?\n\n` +
-      `Current expiry: ${current}\n\n` +
-      `Enter the number of DAYS being purchased (e.g. 70 for a ~10-week term, ` +
-      `30 for a month).\n\n` +
-      `The new term is ADDED to the current expiry, so paying early never loses days.`,
-    '70',
-  )
-  if (stated === null) return
-  const termDays = Number(stated)
-  if (!Number.isFinite(termDays) || termDays <= 0) {
-    toast.err('Enter a positive number of days')
-    return
-  }
-
-  // The middleman reference is optional but recorded in the audit detail, so
-  // "how much did X collect this month" is answerable later. Cash is collected
-  // by middlemen, and once a code can be renewed repeatedly that stops being
-  // derivable from a code count.
-  const reference = window.prompt(
-    `Optional: middleman name and price, recorded in the audit trail.\n\n` +
-      `Format: name, price   (e.g. "Wanzhen, 10")\n` +
-      `Leave blank to skip.`,
-    row.middleman || '',
-  )
-  if (reference === null) return
-  const [mmName, mmPrice] = reference.split(',').map((s) => s.trim())
-
-  const res = await call<{ expires_at: string; previous_expires_at: string; extended: boolean }>(
-    'codes.renew',
-    {
-      code: row.code,
-      term_days: termDays,
-      middleman: mmName || '',
-      price: mmPrice || '',
-    },
-  )
-  if (res.ok && res.data) {
-    const before = res.data.previous_expires_at ? res.data.previous_expires_at.slice(0, 10) : 'none'
-    const after = res.data.expires_at.slice(0, 10)
-    toast.ok(
-      `Renewed ${row.code}: ${before} → ${after}` +
-        (res.data.extended ? ' (extended from the existing expiry)' : ''),
-    )
-    await load()
-    if (detail.value?.code === row.code) {
-      const fresh = codes.value.find((c) => c.code === row.code)
-      if (fresh) await openDetail(fresh)
-    }
-  } else {
-    toast.err(res.message || res.transportError || 'Renew failed')
-  }
-}
-
-/**
- * Set a code's TERM (how long one purchase lasts), without touching its expiry.
- *
- * Distinct from Renew, which extends an expiry. This changes what future
- * activations and renewals produce; it must never rewrite a date a student is
- * already running on, which is why it is a separate button.
- */
-async function setTerm(row: CodeRow) {
-  const stated = window.prompt(
-    `Set the term for ${row.code}.\n\n` +
-      `The term is how long ONE purchase lasts, measured from ACTIVATION.\n` +
-      `Enter days (70 ≈ a 10-week term, 30 ≈ a month, 365 ≈ a year).\n` +
-      `Enter 0 for a code that never expires.\n\n` +
-      `This does NOT change the current expiry (${row.expires_at ? row.expires_at.slice(0, 10) : 'none'}).`,
-    '70',
-  )
-  if (stated === null) return
-  const days = Number(stated)
-  if (!Number.isFinite(days) || days < 0) {
-    toast.err('Enter a number of days (0 = never expires)')
-    return
-  }
-  const res = await call('codes.set-term', { code: row.code, term_days: days })
-  if (res.ok) {
-    toast.ok(`Term for ${row.code} set to ${days > 0 ? `${days}d` : 'never expires'} (expiry unchanged)`)
-    await load()
-    if (detail.value?.code === row.code) await openDetail(row)
-  } else {
-    toast.err(res.message || res.transportError || 'Could not set the term')
-  }
-}
-
-/**
- * Permanently delete ONE code.
- *
- * Deliberately the only destructive action in the console. The standing rule is
- * "suspend or unbind, never delete" (see docs/CONTEXT.md), so this exists only
- * for the cases that rule does not cover — a typo, a duplicate, a test row —
- * and it refuses a BOUND code outright, because that is a student mid-service.
- * The hook writes an audit event before the row goes, so the code_events trail
- * outlives the code.
- *
- * The confirmation names the code and its tier/middleman so a mis-click on the
- * wrong row is caught by reading, not by luck.
- */
-async function deleteCode(row: CodeRow) {
-  if (row.redeemed) {
-    toast.err(`${row.code} has been used by a student — release it first`)
-    return
-  }
-  const what = [row.tier, row.middleman].filter(Boolean).join(' / ')
-  const sure = window.confirm(
-    `Permanently DELETE ${row.code}${what ? ` (${what})` : ''}?\n\n` +
-      `This removes the code from the hub. It cannot be undone — an audit ` +
-      `entry is kept, but the code itself is gone and cannot be re-activated.`,
-  )
-  if (!sure) return
-  const res = await call('codes.delete', { code: row.code })
-  if (res.ok) {
-    toast.ok(`Deleted ${row.code}`)
-    if (detail.value?.code === row.code) detail.value = null
-    await load()
-  } else {
-    toast.err(res.message || res.transportError || 'Delete failed')
-  }
-}
-
-/**
- * Bulk-delete the codes ticked in the table.
- *
- * Redeemed codes are always skipped by the hook (there is no force flag on the
- * batch path), and the result reports what was skipped and why — a bulk delete
- * that silently left three rows behind would be worse than one that failed.
- */
 async function deleteSelected() {
-  const chosen = codes.value.filter((r) => selected.value.has(r.code)).map((r) => r.code)
-  if (!chosen.length) return
-  const used = codes.value.filter((r) => selected.value.has(r.code) && r.redeemed).length
-  const sure = window.confirm(
-    `Permanently DELETE ${chosen.length} code(s)?\n\n` +
-      (used ? `${used} of them have been used by a student and will be SKIPPED.\n\n` : '') +
-      `Cannot be undone. An audit entry is kept for each.`,
-  )
-  if (!sure) return
-  const res = await call('codes.deleteBatch', { codes: chosen })
-  if (res.ok) {
-    const d = Number(res.deleted_count ?? 0)
-    const s = Number(res.skipped_count ?? 0)
-    if (s) {
-      const why = (res.skipped || []).map((x: any) => `${x.code}: ${x.why}`).join('; ')
-      toast.err(`Deleted ${d}; skipped ${s} (${why})`)
-    } else {
-      toast.ok(`Deleted ${d} code(s)`)
-    }
-    selected.value = new Set()
-    await load()
-  } else {
-    toast.err(res.message || res.transportError || 'Bulk delete failed')
+  const codes = selectedDeletable.value.map((r) => r.code)
+  if (!codes.length) return
+  const res = await call<{
+    deleted_count: number
+    skipped_count: number
+    skipped?: { code: string; why: string }[]
+  }>('codes.deleteBatch', { codes })
+  if (!res.ok) {
+    loaded.value.err = res.message || res.transportError || 'Bulk delete failed'
+  } else if (res.data?.skipped_count) {
+    // A partial batch reports what it left behind. A bare "deleted" toast over a
+    // silent 3-of-50 would be worse than an error, because the operator would
+    // believe the cleanup is done.
+    const why = (res.data.skipped || []).map((s) => `${s.code}: ${s.why}`).join('; ')
+    loaded.value.err = `Deleted ${res.data.deleted_count}, skipped ${res.data.skipped_count} (${why})`
   }
+  await refreshAll()
+  selection.value = new Set()
 }
 
-/**
- * Set or clear a code's expiry.
- *
- * `codes.expire` existed in the hook but had no UI at all, so an operator could
- * only change an expiry by hand-editing PocketBase. That was tolerable while
- * expiry was advisory; it is not any more, because an expired code is now
- * refused on re-activation as well as on first use (see FIXES.md 33) — a lapsed
- * code needs a remedy the operator can reach.
- *
- * Empty clears the expiry (the code then never expires).
- */
-async function setExpiry(row: CodeRow, when: string) {
-  const res = await call('codes.expire', { code: row.code, expires_at: when })
-  if (res.ok) {
-    toast.ok(when ? `Expires ${when.slice(0, 10)}` : 'Expiry cleared')
-    await load()
-    if (detail.value?.code === row.code) {
-      detail.value.expires_at = when
-      await openDetail(detail.value)
-    }
-  } else {
-    toast.err(res.message || res.transportError || 'Could not set expiry')
-  }
-}
+// ── Panels ──
+const detailRow = ref<CodeRow | null>(null)
+const detailHistory = ref<Awaited<ReturnType<typeof history>>>([])
+const historyLoading = ref(false)
 
-/** Prompt for a new expiry date, pre-filled with the current one. */
-async function editExpiry(row: CodeRow) {
-  const current = row.expires_at ? row.expires_at.slice(0, 10) : ''
-  const input = window.prompt(
-    `Expiry for ${row.code}\n\nYYYY-MM-DD, or leave blank for no expiry.\n` +
-      `A code past its expiry is refused on activation AND on re-activation.`,
-    current,
-  )
-  if (input === null) return
-  const trimmed = input.trim()
-  if (trimmed && !/^\d{4}-\d{2}-\d{2}/.test(trimmed)) {
-    toast.err('Enter a date like 2027-03-01, or leave blank')
-    return
-  }
-  // Send a full timestamp so the server stores a well-formed date; PocketBase's
-  // date field accepts ISO 8601.
-  await setExpiry(row, trimmed ? `${trimmed}T00:00:00.000Z` : '')
-}
+const renewRow = ref<CodeRow | null>(null)
+const stopRow = ref<CodeRow | null>(null)
+const createOpen = ref(false)
 
 async function openDetail(row: CodeRow) {
-  detail.value = row
+  detailRow.value = row
+  detailHistory.value = []
   historyLoading.value = true
-  history.value = []
-
-  const res = await call<{ events: { event: string; detail: string; created: string }[] }>(
-    'codes.history',
-    { code: row.code },
-  )
-  if (res.ok && res.data) history.value = res.data.events
+  detailHistory.value = await history(row.code)
   historyLoading.value = false
 }
 
-async function saveDetail() {
-  if (!detail.value) return
-  const res = await call('codes.update', {
-    code: detail.value.code,
-    middleman: detail.value.middleman,
-    label: detail.value.label,
-    notes: detail.value.notes,
-  })
-  if (res.ok) {
-    toast.ok('Saved')
-    await load()
-    await loadMeta()
-  } else {
-    toast.err(res.message || res.transportError || 'Save failed')
-  }
-}
-
-async function copyCodes(list: string[]) {
-  const text = list.join('\n')
-  try {
-    await navigator.clipboard.writeText(text)
-    toast.ok(`Copied ${list.length} code(s) to the clipboard`)
-  } catch {
-    toast.warn('Could not copy automatically — select the text below and copy manually')
-  }
-}
-
-function downloadCsv() {
-  const rows = [['code', 'tier', 'status', 'middleman', 'label', 'expires_at', 'activated_at']]
-  for (const c of codes.value) {
-    rows.push([c.code, c.tier, c.status, c.middleman, c.label, c.expires_at, c.activated_at])
-  }
-  const csv = rows.map((r) => r.map((v) => `"${String(v).replace(/"/g, '""')}"`).join(',')).join('\n')
-  const blob = new Blob([csv], { type: 'text/csv' })
-  const a = document.createElement('a')
-  a.href = URL.createObjectURL(blob)
-  a.download = `chrysalis-codes-${new Date().toISOString().slice(0, 10)}.csv`
-  a.click()
-  URL.revokeObjectURL(a.href)
-}
-
-const shown = computed(() => codes.value.length)
-
-onMounted(async () => {
-  genExpires.value = defaultExpiry()
+/**
+ * Reload everything, keeping the open detail panel in sync.
+ *
+ * The detail panel holds a COPY of the row it was opened with, so after any
+ * action it would otherwise keep showing the pre-action state — "renewed" in the
+ * list while the panel still says the old expiry. Re-reading it is what makes
+ * the panel trustworthy after an action taken from inside it.
+ *
+ * `loadMeta` is awaited FIRST because the tier and middleman lists feed the
+ * drawers' datalists; refreshing them after the rows would let a newly minted
+ * middleman name be missing from the very list that offered it.
+ */
+async function refreshAll() {
   await loadMeta()
-  await load()
+  await load(currentQuery.value)
+  const open = detailRow.value
+  if (!open) return
+  const fresh = rows.value.find((r) => r.code === open.code)
+  if (!fresh) {
+    // The row is gone (deleted): close rather than leave a stale panel behind.
+    detailRow.value = null
+    return
+  }
+  detailRow.value = fresh
+  historyLoading.value = true
+  detailHistory.value = await history(fresh.code)
+  historyLoading.value = false
+}
+
+function rowMenu(row: CodeRow): MenuItem[] {
+  return [
+    { label: 'Open detail', run: () => openDetail(row) },
+    { label: 'Renew…', run: () => (renewRow.value = row) },
+    { sep: true, label: row.suspended ? 'Reactivate' : 'Stop access…', run: () => {
+      if (row.suspended) {
+        void act('codes.unsuspend', { code: row.code }, 'Reactivated').then(refreshAll)
+      } else {
+        stopRow.value = row
+      }
+    } },
+    { label: 'Set expiry (manual)…', run: () => manualExpiry(row) },
+    { sep: true, label: 'Delete…', danger: true, disabled: row.redeemed, hint: row.redeemed ? 'release first' : undefined, run: () => deleteOne(row) },
+  ]
+}
+
+function manualExpiry(row: CodeRow) {
+  const current = row.expires_at ? row.expires_at.slice(0, 10) : ''
+  const input = window.prompt(
+    `Set an expiry for ${row.code}\n\nYYYY-MM-DD, or blank for none.\n\n` +
+      `This is the manual override. To add paid time, use Renew instead — it ` +
+      `previews the new date and keeps what is left of the term.`,
+    current,
+  )
+  if (input === null) return
+  const v = input.trim()
+  if (v && !/^\d{4}-\d{2}-\d{2}/.test(v)) {
+    loaded.value.err = 'Enter a date like 2027-03-01, or leave it blank.'
+    return
+  }
+  void act('codes.expire', { code: row.code, expires_at: v ? `${v}T00:00:00.000Z` : '' }, v ? `Expires ${v}` : 'Expiry cleared').then(refreshAll)
+}
+
+async function deleteOne(row: CodeRow) {
+  if (row.redeemed) return
+  const sure = window.confirm(
+    `Permanently delete ${row.code}?${row.label ? ` (${row.label})` : ''}\n\n` +
+      `The code is removed from the hub and cannot be re-activated. An audit ` +
+      `entry is kept. This cannot be undone.`,
+  )
+  if (!sure) return
+  await act('codes.delete', { code: row.code }, 'Deleted')
+  if (detailRow.value?.code === row.code) detailRow.value = null
+  await refreshAll()
+}
+
+const activeFilterCount = computed(
+  () => [query.value, tier.value, status.value, middleman.value].filter((v) => String(v).trim()).length,
+)
+
+function clearFilters() {
+  query.value = ''
+  tier.value = ''
+  status.value = ''
+  middleman.value = ''
+  view.value = 'all'
+}
+
+const tierOptions = computed(() => {
+  const fromRows = Object.keys(facets.value.tier || {})
+  return (fromRows.length ? fromRows : tiers.value).sort()
 })
 
-// The Dashboard's "expiring" card can ask for the worklist while this view is
-// ALREADY mounted (the operator went Codes -> Dashboard -> card), in which case
-// `onMounted` will not run again. Watching the prop covers both paths: a first
-// mount and a return visit.
-watch(
-  () => props.worklistDays,
-  (days) => {
-    if (typeof days === 'number' && days >= 0) {
-      worklistDays.value = days
-      selected.value = new Set()
-      void load()
-    }
-  },
-)
+onMounted(async () => {
+  // One load, filter already applied. `codeRequestSeq` is 1 or more whenever the
+  // operator arrived here from a card or the palette; 0 means a plain click on
+  // the nav item, which wants the unfiltered list.
+  if (nav.codeRequestSeq > 0) applyFilter(nav.codeFilter)
+  await refreshAll()
+})
 </script>
 
 <template>
-  <h1 class="page-title">Codes &amp; Clients</h1>
-  <p class="page-sub">Generate activation codes, see who is using them, and fix problems.</p>
-
-  <!-- ── Generate ── -->
-  <div class="panel">
-    <h2>Create codes</h2>
-    <div class="row">
-      <label class="field">
-        <span>Tier</span>
-        <select v-model="genTier">
-          <option v-for="t in tiers" :key="t" :value="t">{{ t }}</option>
-        </select>
-      </label>
-      <label class="field">
-        <span>How many</span>
-        <input v-model.number="genCount" type="number" min="1" max="500" />
-      </label>
-      <label class="field">
-        <span>Term (days from activation)</span>
-        <input v-model.number="genTermDays" type="number" min="0" placeholder="70 = a 10-week term" />
-      </label>
-      <label class="field">
-        <span>Expires (absolute, overrides term)</span>
-        <input v-model="genExpires" type="date" />
-      </label>
-      <label class="field">
-        <span>For middleman (optional)</span>
-        <input v-model="genMiddleman" list="middlemen-list" placeholder="e.g. Sarah" />
-        <datalist id="middlemen-list">
-          <option v-for="m in middlemen" :key="m.name" :value="m.name" />
-        </datalist>
-      </label>
+  <div class="page-head">
+    <div class="titles">
+      <h1>Codes</h1>
+      <p class="page-sub">
+        Find a code, renew it, or fix an access problem.
+      </p>
     </div>
-    <div class="row">
-      <label class="field">
-        <span>Label (optional)</span>
-        <input v-model="genLabel" placeholder="e.g. Macleans Year 13" />
-      </label>
-      <label class="field">
-        <span>Notes (optional)</span>
-        <input v-model="genNotes" placeholder="free-form" />
-      </label>
-      <div class="shrink">
-        <button class="primary" :disabled="generating" @click="generate">
-          {{ generating ? 'Creating…' : 'Create codes' }}
-        </button>
-      </div>
-    </div>
-
-    <div v-if="generated.length" class="msg ok" style="margin-top: 12px">
-      <div><strong>Created {{ generated.length }} code(s):</strong></div>
-      <div class="pre-wrap mono" style="margin-top: 8px; max-height: 220px; overflow: auto">{{ generated.join('\n') }}</div>
-      <div class="actions">
-        <button class="tiny" @click="copyCodes(generated)">Copy all</button>
-        <button class="tiny" @click="generated = []">Hide</button>
-      </div>
-    </div>
+    <button class="primary" @click="createOpen = true">Create codes</button>
   </div>
 
-  <!-- ── Filter / list ── -->
-  <div class="panel">
-    <h2>Issued codes</h2>
+  <!-- ── Filters ── -->
+  <div class="sticky-bar">
+    <div class="filters">
+      <div class="search-input grow">
+        <span class="ico">⌕</span>
+        <input
+          v-model="query"
+          type="search"
+          placeholder="Code, student's name, notes or middleman"
+          @input="reloadSoon"
+        />
+      </div>
+      <select v-model="tier" aria-label="Tier">
+        <option value="">All tiers</option>
+        <option v-for="t in tierOptions" :key="t" :value="t">
+          {{ t }}<template v-if="facets.tier[t]"> · {{ facets.tier[t] }}</template>
+        </option>
+      </select>
+      <select v-model="status" aria-label="State">
+        <option value="">Any state</option>
+        <option value="available">Unused · {{ facets.status.available || 0 }}</option>
+        <option value="redeemed">In term · {{ facets.status.redeemed || 0 }}</option>
+        <option value="expired">Lapsed · {{ facets.status.expired || 0 }}</option>
+        <option value="suspended">Stopped · {{ facets.status.suspended || 0 }}</option>
+      </select>
+      <select v-model="middleman" aria-label="Middleman">
+        <option value="">Any middleman</option>
+        <option v-for="m in middlemen" :key="m" :value="m">{{ m }}</option>
+      </select>
+      <button v-if="activeFilterCount" class="tiny" @click="clearFilters">Clear</button>
+    </div>
 
-    <!-- The renewal worklist.
-         Renewal is an operator action and nothing in the system prompts one:
-         the hub holds no identity, so it cannot know a payment is due, only
-         that a date is approaching. This toggle is therefore the revenue
-         mechanism, not a convenience — if nobody opens it, students lapse
-         silently and no money is collected.
-         The 7-day window matches the client's own warning threshold, so the
-         student's notice and the operator's worklist agree on what "soon"
-         means. -->
-    <div class="actions" style="margin-bottom: 10px">
-      <button
-        class="tiny"
-        :class="{ primary: worklistDays === 0 }"
-        @click="setWorklist(0)"
-      >All codes</button>
-      <button
-        class="tiny"
-        :class="{ primary: worklistDays === 7 }"
-        @click="setWorklist(7)"
-      >Due in 7 days</button>
-      <button
-        class="tiny"
-        :class="{ primary: worklistDays === 30 }"
-        @click="setWorklist(30)"
-      >Due in 30 days</button>
-      <span v-if="worklistDays > 0" class="muted" style="font-size: 12px">
-        {{ codes.length }} code(s) ending within {{ worklistDays }} days, most urgent first.
-        Renew each as its payment is reported. Suspended codes are excluded.
+    <div class="filters" style="margin-top: 10px">
+      <div class="segmented" role="tablist">
+        <button :class="{ on: view === 'all' }" @click="view = 'all'">All codes</button>
+        <button :class="{ on: view === 'worklist' }" @click="view = 'worklist'">
+          Renewals due
+        </button>
+      </div>
+      <template v-if="view === 'worklist'">
+        <div class="segmented">
+          <button :class="{ on: worklistDays === 7 }" @click="worklistDays = 7">7 days</button>
+          <button :class="{ on: worklistDays === 30 }" @click="worklistDays = 30">30 days</button>
+        </div>
+        <span class="muted" style="font-size: 12px">
+          Most urgent first. Stopped codes are excluded — renewing one would ask you
+          to undo your own decision.
+        </span>
+      </template>
+      <div class="spacer" style="flex: 1" />
+      <span v-if="!loading" class="muted" style="font-size: 12px; font-variant-numeric: tabular-nums">
+        {{ total }} {{ total === 1 ? 'code' : 'codes' }}
       </span>
     </div>
-
-    <div class="row">
-      <label class="field">
-        <span>Search code</span>
-        <input v-model="query" placeholder="code, name or notes" @keyup.enter="load" />
-      </label>
-      <label class="field">
-        <span>Tier</span>
-        <select v-model="tierFilter" @change="load">
-          <option value="">All</option>
-          <option v-for="t in tiers" :key="t" :value="t">{{ t }}</option>
-        </select>
-      </label>
-      <label class="field">
-        <span>Status</span>
-        <select v-model="statusFilter" @change="load">
-          <option value="">All</option>
-          <option value="available">Available</option>
-          <option value="redeemed">Used</option>
-          <option value="suspended">Suspended</option>
-          <option value="expired">Expired</option>
-        </select>
-      </label>
-      <label class="field">
-        <span>Middleman</span>
-        <input v-model="middlemanFilter" placeholder="name" @keyup.enter="load" />
-      </label>
-      <div class="shrink">
-        <button @click="load">Apply</button>
-      </div>
-      <div class="shrink">
-        <button @click="downloadCsv">Export CSV</button>
-      </div>
-      <div v-if="selectedCount" class="shrink">
-        <button class="tiny danger" @click="deleteSelected">Delete {{ selectedCount }} selected</button>
-      </div>
-    </div>
-
-    <div v-if="loading" class="muted" style="margin-top: 10px">Loading…</div>
-    <div v-else-if="shown === 0" class="muted" style="margin-top: 10px">
-      No codes match. Create some above, or clear the filters.
-    </div>
-    <table v-else style="margin-top: 10px">
-      <thead>
-        <tr>
-          <th style="width: 26px">
-            <input
-              type="checkbox"
-              :checked="selectedCount > 0 && selectedCount === codes.length"
-              @change="toggleSelectAll"
-              title="Select all shown"
-            />
-          </th>
-          <th>Code</th><th>Tier</th><th>Status</th><th>Middleman</th>
-          <th>Expires</th><th>Activated</th><th></th>
-        </tr>
-      </thead>
-      <tbody>
-        <tr v-for="row in codes" :key="row.id">
-          <td>
-            <input
-              type="checkbox"
-              :checked="selected.has(row.code)"
-              @change="toggleSelected(row.code)"
-            />
-          </td>
-          <td>
-            <code>{{ row.code }}</code>
-            <div v-if="row.label" class="muted" style="font-size: 11px">{{ row.label }}</div>
-          </td>
-          <td>{{ row.tier }}</td>
-          <td>
-            <span class="badge" :class="row.status">{{ row.status }}</span>
-            <!-- A code that has been issued before but is free NOW. This is the
-                 one state `status` cannot express, and it is the state that
-                 double-sells a code: releasing a redeemed code puts it back into
-                 the pool, and the row then reads exactly like a fresh one. -->
-            <span
-              v-if="row.status === 'available' && row.first_seen_at"
-              class="badge issued"
-              :title="`This code was already issued once, on ${row.first_seen_at.slice(0, 10)} (
-                ${row.first_seen_fingerprint || 'machine not recorded'}), and then released.
-                Handing it to another student ends the first student's access.`"
-            >
-              issued before
-            </span>
-            <!-- Sign-outs. Not an error — a student moving to a new computer
-                 legitimately signs out. What it answers is the OTHER report:
-                 repeated sign-outs on one code with its term still running is
-                 what a shared key looks like from here. -->
-            <span
-              v-if="row.release_count"
-              class="badge signed-out"
-              :title="`Signed out ${row.release_count} time(s) on a device, most recently
-                ${row.released_at ? row.released_at.slice(0, 16).replace('T', ' ') : 'unknown'}.`"
-            >
-              signed out ×{{ row.release_count }}
-            </span>
-          </td>
-          <td class="muted">{{ row.middleman || '—' }}</td>
-          <!-- Expiry shows the DATE and the days left. A worklist is worked by
-               urgency, and "3 days" is the fact the operator acts on; the date
-               is kept because it is what a student or middleman will quote. -->
-          <td class="muted">
-            {{ row.expires_at ? row.expires_at.slice(0, 10) : '—' }}
-            <span v-if="row.days_remaining !== null && row.days_remaining !== undefined">
-              <strong v-if="row.days_remaining <= 7" class="urgent">
-                ({{ row.days_remaining }}d)
-              </strong>
-              <span v-else>({{ row.days_remaining }}d)</span>
-            </span>
-          </td>
-          <td class="muted">{{ row.activated_at ? row.activated_at.slice(0, 10) : '—' }}</td>
-          <td>
-            <div class="actions" style="margin: 0">
-              <button class="tiny" @click="openDetail(row)">Details</button>
-              <!-- Renew is the payment operation: the middleman has reported
-                   the money, so extend the term. Placed first among the
-                   mutating actions because it is the one performed routinely. -->
-              <button class="tiny primary" @click="renew(row)">Renew</button>
-              <button v-if="row.redeemed" class="tiny" @click="unbind(row)">Release</button>
-              <button class="tiny" @click="editExpiry(row)">Expiry</button>
-              <!-- Kick out is the operator's real control: suspend plus a reason
-                   the student is shown. Suspend stays, unlabelled as the quieter
-                   option, for a bounce that needs no explanation. -->
-              <button
-                v-if="!row.suspended"
-                class="tiny danger"
-                title="Stop this student's tunnel now, and tell them why"
-                @click="kickOut(row)"
-              >Kick out</button>
-              <button v-if="!row.suspended" class="tiny" @click="setSuspended(row, true)">Suspend</button>
-              <button v-else class="tiny" @click="setSuspended(row, false)">Reactivate</button>
-              <button
-                class="tiny danger"
-                :disabled="row.redeemed"
-                :title="row.redeemed ? 'Release it first' : 'Permanently delete this code'"
-                @click="deleteCode(row)"
-              >Delete</button>
-            </div>
-          </td>
-        </tr>
-      </tbody>
-    </table>
   </div>
 
-  <!-- ── Detail modal ── -->
-  <div v-if="detail" class="overlay" @click.self="detail = null">
-    <div class="modal">
-      <h2 style="margin-top: 0"><code>{{ detail.code }}</code></h2>
-      <p class="muted" style="margin-top: 0">
-        Tier <strong>{{ detail.tier }}</strong> ·
-        status <strong>{{ detail.status }}</strong>
-        <span v-if="detail.activated_at"> · first used {{ detail.activated_at.slice(0, 10) }}</span>
-      </p>
+  <div v-if="loaded.err" class="msg err">
+    {{ loaded.err }}
+    <button class="tiny" style="margin-left: 8px" @click="loaded.err = ''">Dismiss</button>
+  </div>
 
-      <label class="field">
-        <span>Middleman</span>
-        <input v-model="detail.middleman" list="middlemen-list" />
-      </label>
-      <label class="field">
-        <span>Label</span>
-        <input v-model="detail.label" />
-      </label>
-      <label class="field">
-        <span>Notes</span>
-        <textarea v-model="detail.notes"></textarea>
-      </label>
+  <!-- ── Bulk bar ── -->
+  <div v-if="selection.size" class="bulkbar">
+    <strong>{{ selection.size }} selected</strong>
+    <span class="muted" style="font-size: 12.5px">
+      Used codes are never selectable — the batch refuses them.
+    </span>
+    <div class="spacer" />
+    <button class="tiny" @click="selection = new Set()">Clear</button>
+    <button class="tiny danger" :disabled="!selectedDeletable.length" @click="deleteSelected">
+      Delete {{ selectedDeletable.length }}
+    </button>
+  </div>
 
-      <label class="field">
-        <span>Expiry</span>
-        <input
-          :value="detail.expires_at ? detail.expires_at.slice(0, 10) : ''"
-          placeholder="YYYY-MM-DD (blank = never expires)"
-          @change="editExpiry(detail)"
-        />
-      </label>
+  <!-- ── Table ── -->
+  <div class="table-wrap">
+    <StateBlock
+      v-if="loading && !rows.length"
+      state="loading"
+      :rows="8"
+    />
+    <StateBlock
+      v-else-if="denied"
+      state="denied"
+      @retry="() => load(currentQuery)"
+    />
+    <StateBlock
+      v-else-if="failed"
+      state="error"
+      :message="failed"
+      @retry="() => load(currentQuery)"
+    />
+    <StateBlock
+      v-else-if="!shown.length"
+      state="empty"
+      :title="view === 'worklist' ? 'Nothing due in this window' : 'No codes match'"
+      :message="
+        view === 'worklist'
+          ? 'No code is ending in this window. Widen it to 30 days, or check All codes.'
+          : 'No code matches these filters.'
+      "
+      :hint="
+        view === 'worklist'
+          ? 'Codes already lapsed are not here — they are on the Overview under “Lapsed”.'
+          : 'Try a shorter search, or clear the filters.'
+      "
+    >
+      <template #actions>
+        <button v-if="view === 'worklist'" @click="view = 'all'">Show all codes</button>
+        <button v-else @click="clearFilters">Clear filters</button>
+      </template>
+    </StateBlock>
 
-      <div class="actions">
-        <button class="primary" @click="saveDetail">Save details</button>
-        <!-- Renew is the routine action a student's payment triggers, so it
-             leads. Set term is separate and less frequent: it changes what
-             FUTURE renewals produce, and deliberately never moves the expiry
-             of the term already running. -->
-        <button class="primary" @click="renew(detail)">Renew</button>
-        <button @click="setTerm(detail)">
-          Set term{{ detail.term_days ? ` (${detail.term_days}d)` : ' (none)' }}
-        </button>
-        <!-- Release is for handing the code to a DIFFERENT student. A student
-             moving to a new laptop just enters the code again. -->
-        <button v-if="detail.redeemed" @click="unbind(detail)">Release code</button>
-        <button
-          v-if="!detail.suspended"
-          class="danger"
-          @click="setSuspended(detail, true); detail = null"
-        >Suspend</button>
-        <button v-else @click="setSuspended(detail, false); detail = null">Reactivate</button>
-        <button
-          class="danger"
-          :disabled="detail.redeemed"
-          :title="detail.redeemed ? 'Release it first' : 'Permanently delete this code'"
-          @click="deleteCode(detail)"
-        >Delete code</button>
-        <button @click="detail = null">Close</button>
-      </div>
-
-      <!-- State the two invariants the operator would otherwise have to
-           remember: what this code's term is, and that renewing ADDS to the
-           expiry rather than replacing it. -->
-      <p class="muted" style="font-size: 12px; margin-top: 8px">
-        Term:
-        <strong>{{ detail.term_days ? `${detail.term_days} days from activation` : 'none (never expires)' }}</strong>
-        · Renewing adds the purchased days to the current expiry, so paying early
-        never loses days · Renew does not change the tier or whether the code is in use.
-      </p>
-
-      <!-- A code is single-use and is not tied to a device. This states the
-           rule where the operator acts on a code, so "Release" is not mistaken
-           for "move this student to a new laptop". -->
-      <div class="muted" style="font-size: 12px; margin-top: 6px">
-        <template v-if="detail.redeemed">
-          <strong>Used</strong> — first activated
-          {{ detail.activated_at ? detail.activated_at.slice(0, 16).replace('T', ' ') : '' }}.
-          The student can enter this code again on any machine and it restores
-          their access; use <strong>Release</strong> only to hand it to a
-          different student.
-        </template>
-        <template v-else>
-          <strong>Not used yet</strong> — available for a student to activate.
-        </template>
-      </div>
-
-      <h3 style="font-size: 13px; margin-bottom: 6px">History</h3>
-      <div v-if="historyLoading" class="muted">Loading…</div>
-      <div v-else-if="history.length === 0" class="muted">No recorded events for this code.</div>
-      <table v-else>
+    <div v-else class="table-scroll">
+      <table class="data">
+        <thead>
+          <tr>
+            <th style="width: 30px">
+              <input
+                type="checkbox"
+                :checked="allSelected"
+                :disabled="!shown.filter((r) => !r.redeemed).length"
+                aria-label="Select all unused codes"
+                @change="toggleAll"
+              />
+            </th>
+            <th class="sortable" :class="{ sorted: sortKey === 'code' }" @click="sortKey = 'code'">
+              Code <span class="arrow">↑</span>
+            </th>
+            <th>State</th>
+            <th class="sortable" :class="{ sorted: sortKey === 'middleman' }" @click="sortKey = 'middleman'">
+              Who <span class="arrow">↑</span>
+            </th>
+            <th class="sortable num" :class="{ sorted: sortKey === 'days' }" @click="sortKey = 'days'">
+              Days left <span class="arrow">↑</span>
+            </th>
+            <th style="width: 150px"></th>
+          </tr>
+        </thead>
         <tbody>
-          <tr v-for="(h, i) in history" :key="i">
-            <td class="muted">{{ h.created ? h.created.slice(0, 16).replace('T', ' ') : '' }}</td>
-            <td>{{ h.event }}</td>
-            <td class="muted">{{ h.detail }}</td>
+          <tr v-for="row in shown" :key="row.id" :class="{ selected: selection.has(row.code) }">
+            <td>
+              <input
+                type="checkbox"
+                :checked="selection.has(row.code)"
+                :disabled="row.redeemed"
+                :aria-label="`Select ${row.code}`"
+                @change="toggle(row.code)"
+              />
+            </td>
+            <td>
+              <button
+                class="mono"
+                style="border: none; background: none; padding: 0; color: var(--accent); font-size: 12.5px"
+                @click="openDetail(row)"
+              >
+                {{ row.code }}
+              </button>
+              <div v-if="row.label" class="muted truncate" style="font-size: 11.5px">{{ row.label }}</div>
+            </td>
+            <td>
+              <span class="badge" :class="stateClass(row)">{{ stateLabel(row) }}</span>
+            </td>
+            <td class="muted truncate">
+              {{ row.middleman || '—' }}
+            </td>
+            <td class="num nowrap">
+              <template v-if="row.expires_at">
+                <strong v-if="isUrgent(row)" class="urgent">{{ remainingText(row) }}</strong>
+                <span v-else>{{ remainingText(row) }}</span>
+                <div class="muted" style="font-size: 11px">{{ shortDate(row.expires_at) }}</div>
+              </template>
+              <span v-else class="muted">never</span>
+            </td>
+            <td>
+              <div style="display: flex; gap: 4px; align-items: center; justify-content: flex-end">
+                <button
+                  class="row-action primary"
+                  :title="`Add paid time to ${row.code}`"
+                  @click="renewRow = row"
+                >
+                  Renew
+                </button>
+                <RowMenu :items="rowMenu(row)" :label="`More actions for ${row.code}`" />
+              </div>
+            </td>
           </tr>
         </tbody>
       </table>
     </div>
   </div>
+
+  <p class="foot-note">
+    A code is single-use and is not tied to a machine: a student on a new laptop
+    re-enters their own code and it just works. <strong>Release</strong> is only
+    for handing a code to a <em>different</em> student.
+  </p>
+
+  <!-- ── Panels ── -->
+  <CodeDetail
+    :row="detailRow"
+    :history="detailHistory"
+    :history-loading="historyLoading"
+    @close="detailRow = null"
+    @changed="refreshAll"
+    @renew="renewRow = detailRow"
+    @stop="stopRow = detailRow"
+  />
+  <RenewDrawer
+    :row="renewRow"
+    :middlemen="middlemen"
+    @close="renewRow = null"
+    @done="refreshAll"
+  />
+  <StopDrawer :row="stopRow" @close="stopRow = null" @done="stopRow = null; refreshAll()" />
+  <CreateDrawer
+    :open="createOpen"
+    :tiers="tiers"
+    :middlemen="middlemen"
+    @close="createOpen = false"
+    @created="refreshAll"
+  />
 </template>

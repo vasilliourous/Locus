@@ -19,13 +19,17 @@ panel" description.
 
 | Group | Actions |
 |---|---|
-| Overview | `dashboard` |
-| Codes | `codes.list` · `codes.generate` · `codes.suspend` · `codes.unsuspend` · `codes.renew` · `codes.set-term` · `codes.expire` · `codes.unbind` · `codes.history` · `codes.update` · `codes.delete` · `codes.deleteBatch` |
-| Middlemen | `middlemen.list` |
-| Devices | `devices.list` |
+| Overview | `dashboard` · `attention.list` |
+| Codes | `codes.list` · `codes.generate` · `codes.suspend` · `codes.unsuspend` · `codes.renew` · `codes.set-term` · `codes.expire` · `codes.unbind` · `codes.history` · `codes.update` · `codes.delete` · `codes.deleteBatch` · `codes.import` |
+| Middlemen | `middlemen.list` · `middlemen.summary` |
 | Tiers | `tiers.list` · `tiers.update` |
 | Releases | `releases.get` · `releases.fetchLink` · `releases.publish` · `releases.set` |
 
+> **`device.get` / `devices.list` are retired too** — they return HTTP 410, and
+> the console's "Devices" page was deleted with them (it had been a client-side
+> re-filter of `codes.list`). What an operator needs there — "is this code in
+> use, and until when" — is `codes.list` with `status: "redeemed"`.
+>
 > **`codes.rebind` is retired, not listed.** The action name still exists in
 > `admin_console.pb.js`, but it now returns **HTTP 410** — *"Rebinding is no
 > longer needed: codes are not tied to a device."* It is kept so an operator
@@ -67,19 +71,23 @@ Worth recording, because it bounds what the operator can delegate:
   ([`04-tiers.md`](04-tiers.md#443-why-enforcement-is-client-side-and-what-that-means)).
 - **No revenue or billing view.** Revenue is inferred from code counts and
   the price ladder, by hand ([`16-metrics.md`](16-metrics.md)).
-- **No middleman ledger.** `middlemen.list` gives counts, not money owed;
-  remittance is reconciled manually ([`07-billing.md`](07-billing.md#74-cash-handling)).
-  **This matters more now** that renewal creates repeating revenue: before, "who
-  owes what" was derivable from a count of codes sold. It no longer is, which
-  is why the renewal action records the optional `price`/`middleman` in the
-  audit detail — the raw material a ledger would need, captured now rather than
-  lost ([`redesign/08-metrics-and-instrumentation.md`](redesign/08-metrics-and-instrumentation.md) §8.4).
-- **No renewal prompting.** The console shows an *Expiring in 30 days* count
-  and a 7-day worklist, but nothing tells the operator a specific student is
-  due. That is a consequence of storing no personal data
-  ([`redesign/01-identity-without-pii.md`](redesign/01-identity-without-pii.md) §1.2)
-  and it is the largest operational risk in the current design
-  ([`14-risks.md`](14-risks.md)).
+- **No middleman ledger — partially closed.** `middlemen.summary` (the
+  **Distribution** page) now shows, per middleman: stock by state, renewals in a
+  window, and the money recorded against them. What it is **not** is a ledger:
+  there is no commission rate, no remittance record and no carried balance. A
+  figure is reported as a floor (`≥`) when any renewal in the window carried no
+  price, because a total built from partial data would be believed. The rate
+  stays a business agreement, not a stored value
+  ([`07-billing.md`](07-billing.md#74-cash-handling)).
+- **No renewal prompting by the SYSTEM — only by the console.** Nothing
+  notifies anyone that a student is due; the hub holds no identity and therefore
+  no contact route
+  ([`redesign/01-identity-without-pii.md`](redesign/01-identity-without-pii.md) §1.2).
+  The console answers it the only way it can: a live count on the **Codes** nav
+  item (codes ending within 7 days), a **Renewals due** view sorted most-urgent
+  first, and an Overview check for codes that lapsed without being noticed. That
+  is still the largest operational risk in the design
+  ([`14-risks.md`](14-risks.md)) — a queue only works if somebody opens it.
 - **No free-tier quota control.** The allowance is enforced client-side and
   is not configurable from here.
 

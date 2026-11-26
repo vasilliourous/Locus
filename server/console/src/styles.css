@@ -295,3 +295,708 @@ tr.dim { opacity: .55; }
 .kv { display: flex; flex-wrap: wrap; gap: 22px; margin-bottom: 6px; }
 .kv > div { display: flex; flex-direction: column; gap: 2px; }
 .kv .muted { font-size: 11px; text-transform: uppercase; letter-spacing: .04em; }
+
+/* ══════════════════════════════════════════════════════════════════════════
+   REDESIGN PRIMITIVES
+   ──────────────────────────────────────────────────────────────────────────
+   Everything below is a PATTERN, not a page: one table, one filter bar, one
+   detail layout, one drawer, one empty/loading/error state. Pages compose
+   these instead of inventing their own, which is what the console did before
+   (three different table renderings, two different "Loading…" treatments, and
+   a modal that contained a table inside another table).
+
+   The palette is unchanged — every value below is a role from :root, per the
+   note at the top of this file. Spacing is on a 4px grid: `--s1`…`--s6`.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+:root {
+  --s1: 4px; --s2: 8px; --s3: 12px; --s4: 16px; --s5: 24px; --s6: 32px;
+  /* The comfortable row height for a table an operator reads in bursts. */
+  --row-h: 40px;
+  /* Sidebar width, named because the main column's max-width depends on it. */
+  --side-w: 224px;
+}
+
+/* ── Shell ──────────────────────────────────────────────────────────────── */
+
+/* The sidebar is fixed-height and the main column scrolls independently, so a
+   long table cannot push the navigation off-screen. The old shell grew with
+   the document: on the Codes page, 200 rows scrolled the nav away and the only
+   way back was scrolling up. */
+.shell { display: flex; min-height: 100vh; }
+
+.sidebar {
+  width: var(--side-w);
+  flex: 0 0 var(--side-w);
+  background: var(--panel);
+  border-right: 1px solid var(--border);
+  padding: var(--s4) var(--s3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--s1);
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  overflow-y: auto;
+}
+
+.main {
+  flex: 1;
+  min-width: 0; /* a wide table must scroll, not stretch the page */
+  padding: var(--s5) var(--s6) 80px;
+  max-width: 1180px;
+}
+
+/* ── Navigation ─────────────────────────────────────────────────────────── */
+
+.nav-group {
+  margin-top: var(--s4);
+  padding: 0 var(--s2) var(--s1);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  color: var(--muted);
+  opacity: .75;
+}
+
+.nav-item {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  padding: 7px var(--s3);
+  border-radius: 6px;
+  color: var(--text);
+  cursor: pointer;
+  border: none;
+  background: none;
+  text-align: left;
+  font: inherit;
+  width: 100%;
+}
+.nav-item:hover { background: var(--panel-2); }
+.nav-item.active {
+  background: var(--accent-dim);
+  color: var(--text);
+  font-weight: 600;
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+/* A count riding a nav item (the renewal queue). Reads as data, not decoration:
+   it is the number of rows waiting, and it disappears when that is zero. */
+.nav-count {
+  margin-left: auto;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--warn);
+  font-variant-numeric: tabular-nums;
+}
+
+/* The ⌘K affordance. A real button so it is reachable without a keyboard —
+   a shortcut nobody can discover is not an affordance. */
+.search-trigger {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  width: 100%;
+  padding: 7px var(--s3);
+  margin-bottom: var(--s3);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--muted);
+  font-size: 13px;
+  cursor: pointer;
+}
+.search-trigger:hover { border-color: var(--accent-dim); color: var(--text); }
+.kbd {
+  margin-left: auto;
+  font-family: var(--mono);
+  font-size: 10px;
+  padding: 1px 5px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: var(--panel-2);
+  color: var(--muted);
+}
+
+/* ── Page header ────────────────────────────────────────────────────────── */
+
+.page-head {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--s3);
+  margin-bottom: var(--s4);
+}
+.page-head .titles { flex: 1; min-width: 0; }
+.page-head h1 { margin: 0; font-size: 21px; font-weight: 650; letter-spacing: -.01em; }
+.page-sub { margin: 3px 0 0; color: var(--muted); font-size: 13px; }
+
+/* A sticky strip for the controls of a long list. Kept for tables only: a
+   settings form must not sit under a sticky bar. */
+.sticky-bar {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  background: var(--bg);
+  padding: var(--s2) 0 var(--s3);
+  margin-bottom: var(--s1);
+  border-bottom: 1px solid var(--border);
+}
+
+/* ── Filter bar ─────────────────────────────────────────────────────────── */
+
+/* Row of controls that own their own state and apply on change. The old page
+   had an explicit "Apply" button next to two selects that applied immediately,
+   so the operator could not predict which controls needed it. */
+.filters {
+  display: flex;
+  gap: var(--s2);
+  align-items: center;
+  flex-wrap: wrap;
+}
+.filters > .grow { flex: 1 1 220px; min-width: 160px; }
+
+.search-input {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+.search-input input { padding-left: 30px; }
+.search-input .ico {
+  position: absolute;
+  left: 9px;
+  color: var(--muted);
+  pointer-events: none;
+  font-size: 13px;
+}
+.search-input input::-webkit-search-cancel-button { display: none; }
+
+/* Segmented control — for a set of mutually exclusive views of the same data
+   (all / worklist). A select would hide the alternatives; tabs would suggest
+   separate destinations, which they are not. */
+.segmented {
+  display: inline-flex;
+  padding: 2px;
+  gap: 2px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+}
+.segmented button {
+  padding: 4px 10px;
+  border: none;
+  background: none;
+  border-radius: 5px;
+  font-size: 12.5px;
+  color: var(--muted);
+}
+.segmented button:hover:not(.on) { color: var(--text); background: var(--panel-2); }
+.segmented button.on {
+  background: var(--panel-2);
+  color: var(--text);
+  font-weight: 600;
+  box-shadow: 0 1px 0 rgba(0,0,0,.25);
+}
+.segmented button .n {
+  margin-left: 5px;
+  font-variant-numeric: tabular-nums;
+  opacity: .7;
+}
+
+/* Selects inside a filter bar are sized to content, not 100% — a full-width
+   "Status" dropdown reads like a form field, which it is not. */
+.filters select { width: auto; min-width: 0; padding: 7px 10px; font-size: 13px; }
+.filters input[type="text"], .filters input[type="search"] { padding-top: 7px; padding-bottom: 7px; font-size: 13px; }
+
+/* ── Tables ─────────────────────────────────────────────────────────────── */
+
+.table-wrap {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden; /* clip the header's rounded corners */
+}
+.table-scroll { max-height: calc(100vh - 300px); overflow: auto; }
+
+table.data { font-size: 13px; }
+table.data thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
+  padding: var(--s2) var(--s3);
+  white-space: nowrap;
+  /* Sortable headers are buttons; unsortable ones are plain text with the same
+     metrics so the row does not jump between columns. */
+}
+table.data thead th.sortable { cursor: pointer; user-select: none; }
+table.data thead th.sortable:hover { color: var(--text); }
+table.data thead th .arrow { opacity: .45; margin-left: 3px; font-size: 10px; }
+table.data thead th.sorted .arrow { opacity: 1; color: var(--accent); }
+
+table.data tbody td {
+  padding: 0 var(--s3);
+  height: var(--row-h);
+  border-bottom: 1px solid var(--border);
+  vertical-align: middle;
+}
+table.data tbody tr:last-child td { border-bottom: none; }
+table.data tbody tr:hover td { background: var(--panel-2); }
+table.data tbody tr.selected td { background: var(--accent-dim); }
+/* A row the operator should read but not act on first. Used for released or
+   expired rows shown alongside live ones. */
+table.data tbody tr.dim td { opacity: .6; }
+
+/* Numbers align on the decimal, which is what makes a column scannable. */
+.num { font-variant-numeric: tabular-nums; text-align: right; }
+.nowrap { white-space: nowrap; }
+.truncate { max-width: 1px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* The one mutating action a row offers, at a fixed size so the column reads as
+   a column. Everything else lives behind the row menu — the old table had up to
+   seven same-weight buttons per row, so "Renew" and "Delete" looked identical. */
+.row-action { padding: 3px 9px; font-size: 12px; }
+.row-menu {
+  border: 1px solid transparent;
+  background: none;
+  padding: 2px 7px;
+  font-size: 15px;
+  line-height: 1;
+  color: var(--muted);
+  border-radius: 5px;
+}
+.row-menu:hover { background: var(--panel); border-color: var(--border); color: var(--text); }
+
+/* ── Overflow menu ──────────────────────────────────────────────────────── */
+
+.menu {
+  position: fixed;
+  z-index: 60;
+  min-width: 190px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  padding: var(--s1);
+  box-shadow: 0 10px 30px rgba(0,0,0,.45);
+}
+.menu button {
+  display: flex;
+  width: 100%;
+  gap: var(--s2);
+  align-items: baseline;
+  border: none;
+  background: none;
+  padding: 7px 9px;
+  border-radius: 5px;
+  font-size: 13px;
+  text-align: left;
+}
+.menu button:hover:not(:disabled) { background: var(--panel-2); }
+.menu button.danger { color: var(--danger); }
+.menu .sep { height: 1px; background: var(--border); margin: var(--s1) 0; }
+.menu .hint { margin-left: auto; font-size: 11px; color: var(--muted); }
+.menu .label {
+  padding: var(--s1) 9px;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  color: var(--muted);
+}
+
+/* ── Slide-over (detail) ────────────────────────────────────────────────── */
+
+/* A detail panel, not a modal: the operator keeps the list behind it, which is
+   what makes "renew, then the next row" a single habit rather than a
+   close-and-refind loop. Escape closes; clicking the scrim closes. */
+.scrim {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,.45);
+  z-index: 40;
+}
+.slideover {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: min(560px, 100vw);
+  background: var(--panel);
+  border-left: 1px solid var(--border);
+  z-index: 41;
+  display: flex;
+  flex-direction: column;
+  box-shadow: -10px 0 40px rgba(0,0,0,.35);
+}
+.slideover .so-head {
+  padding: var(--s4) var(--s5);
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: flex-start;
+  gap: var(--s3);
+}
+.slideover .so-body { flex: 1; overflow-y: auto; padding: var(--s5); }
+.slideover .so-foot {
+  padding: var(--s3) var(--s5);
+  border-top: 1px solid var(--border);
+  display: flex;
+  gap: var(--s2);
+  flex-wrap: wrap;
+  align-items: center;
+}
+.so-title { font-family: var(--mono); font-size: 16px; font-weight: 600; margin: 0; }
+
+/* Peek animation. Short (140ms) and only on the transform: a full slide from
+   off-screen reads as slow on a tool used twenty times an hour. */
+@media (prefers-reduced-motion: no-preference) {
+  .slideover { animation: so-in .14s ease-out; }
+  @keyframes so-in { from { transform: translateX(12px); opacity: .6; } to { transform: none; opacity: 1; } }
+}
+
+/* ── Tabs inside a detail panel ─────────────────────────────────────────── */
+
+.subtabs {
+  display: flex;
+  gap: var(--s4);
+  border-bottom: 1px solid var(--border);
+  margin-bottom: var(--s4);
+}
+.subtabs button {
+  border: none;
+  background: none;
+  padding: var(--s2) 0;
+  margin-bottom: -1px;
+  font-size: 13px;
+  color: var(--muted);
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+}
+.subtabs button.on { color: var(--text); font-weight: 600; border-bottom-color: var(--accent); }
+
+/* ── Definition lists (read-only facts) ─────────────────────────────────── */
+
+/* A key/value grid for facts the operator reads but does not edit. Distinct
+   from a form: no inputs, tighter rhythm, labels in muted small caps. */
+.facts {
+  display: grid;
+  grid-template-columns: minmax(96px, max-content) 1fr;
+  gap: var(--s2) var(--s4);
+  align-items: baseline;
+  margin: 0 0 var(--s4);
+}
+.facts dt {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: .05em;
+  color: var(--muted);
+}
+.facts dd { margin: 0; font-size: 13px; }
+.facts dd.mono { font-size: 12.5px; }
+
+/* ── Section headers inside a panel ─────────────────────────────────────── */
+
+.section-title {
+  display: flex;
+  align-items: baseline;
+  gap: var(--s2);
+  margin: var(--s5) 0 var(--s3);
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  color: var(--muted);
+}
+.section-title:first-child { margin-top: 0; }
+.section-title .n { color: var(--text); font-variant-numeric: tabular-nums; }
+
+/* ── Drawer (create / destructive flows) ────────────────────────────────── */
+
+/* Same geometry as the slide-over, used for a FLOW rather than a view: create
+   codes, import, renew. Kept visually distinct by a footer that holds the
+   primary action, so "what will this do" and "do it" are never the same
+   button in the same place. */
+.drawer {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: min(520px, 100vw);
+  background: var(--panel);
+  border-left: 1px solid var(--border);
+  z-index: 45;
+  display: flex;
+  flex-direction: column;
+  box-shadow: -10px 0 40px rgba(0,0,0,.4);
+}
+.drawer .dw-head { padding: var(--s4) var(--s5); border-bottom: 1px solid var(--border); }
+.drawer .dw-head h2 { margin: 0; font-size: 16px; }
+.drawer .dw-body { flex: 1; overflow-y: auto; padding: var(--s5); }
+.drawer .dw-foot {
+  padding: var(--s3) var(--s5);
+  border-top: 1px solid var(--border);
+  display: flex;
+  gap: var(--s2);
+  justify-content: flex-end;
+  align-items: center;
+}
+.drawer .dw-foot .spacer { flex: 1; }
+
+/* ── Overview cards ─────────────────────────────────────────────────────── */
+
+/* A card that deep-links. The affordance is the whole card being a button:
+   hover lifts the border, focus draws a ring. Keyboard-reachable because it IS
+   a <button>, not a div with a click handler. */
+.stat-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(168px, 1fr));
+  gap: var(--s3);
+  margin-bottom: var(--s5);
+}
+.stat {
+  display: block;
+  text-align: left;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: var(--s3) var(--s4);
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+}
+.stat:hover:not(:disabled) { border-color: var(--accent-dim); background: var(--panel-2); }
+.stat .n { font-size: 25px; font-weight: 700; line-height: 1.1; font-variant-numeric: tabular-nums; }
+.stat .l { color: var(--muted); font-size: 12px; margin-top: 3px; }
+.stat .sub { color: var(--muted); font-size: 11px; margin-top: 1px; opacity: .8; }
+.stat.good .n { color: var(--success); }
+.stat.warn .n { color: var(--warn); }
+.stat.bad .n { color: var(--danger); }
+/* A card whose number is already fine: still clickable (it is a filter), but
+   it must not compete for attention with one that is not. */
+.stat.quiet .n { color: var(--text); opacity: .85; }
+
+/* ── Attention list ─────────────────────────────────────────────────────── */
+
+/* One row per check. Collapsed to a sentence and a count; expanding reveals the
+   example rows and the "open in Codes" action. This is the progressive
+   disclosure rule applied to monitoring: the overview states the problem, the
+   Codes page is where it is solved. */
+.check {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  margin-bottom: var(--s2);
+  background: var(--panel);
+  overflow: hidden;
+}
+.check > summary {
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  padding: var(--s3) var(--s4);
+  cursor: pointer;
+  list-style: none;
+}
+.check > summary::-webkit-details-marker { display: none; }
+.check > summary:hover { background: var(--panel-2); }
+.check .dot {
+  width: 7px; height: 7px; border-radius: 50%; flex: 0 0 auto;
+  background: var(--muted);
+}
+.check .dot.bad { background: var(--danger); }
+.check .dot.warn { background: var(--warn); }
+.check .dot.ok { background: var(--success); }
+.check .what { flex: 1; min-width: 0; }
+.check .what strong { font-weight: 600; }
+.check .what span { display: block; color: var(--muted); font-size: 12px; }
+.check .count { font-variant-numeric: tabular-nums; font-weight: 600; }
+.check .body { padding: 0 var(--s4) var(--s4); border-top: 1px solid var(--border); }
+
+/* ── Empty / loading / error states ─────────────────────────────────────── */
+
+.state {
+  padding: var(--s6) var(--s5);
+  text-align: center;
+  color: var(--muted);
+  font-size: 13px;
+}
+.state strong { display: block; color: var(--text); font-size: 14px; margin-bottom: var(--s1); }
+.state .hint { font-size: 12px; margin-top: var(--s2); opacity: .8; }
+.state.err strong { color: var(--danger); }
+.state .actions { justify-content: center; margin-top: var(--s3); }
+
+/* Skeleton rows rather than a spinner: the table keeps its geometry, so
+   content does not jump when the data lands. */
+.skel-row { display: flex; gap: var(--s3); padding: 0 var(--s3); }
+.skel {
+  height: 9px;
+  border-radius: 4px;
+  background: var(--panel-2);
+  flex: 1;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .skel { animation: pulse 1.2s ease-in-out infinite; }
+  @keyframes pulse { 0%, 100% { opacity: .45; } 50% { opacity: .8; } }
+}
+
+/* ── Command palette ────────────────────────────────────────────────────── */
+
+.palette-wrap {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  background: rgba(0,0,0,.5);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 12vh var(--s4) var(--s4);
+}
+.palette {
+  width: min(620px, 100%);
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 20px 60px rgba(0,0,0,.5);
+  overflow: hidden;
+}
+.palette input {
+  width: 100%;
+  border: none;
+  border-bottom: 1px solid var(--border);
+  border-radius: 0;
+  padding: var(--s3) var(--s4);
+  font-size: 15px;
+  background: var(--panel);
+}
+.palette input:focus { outline: none; }
+.palette .results { max-height: 50vh; overflow-y: auto; padding: var(--s1); }
+.palette .item {
+  display: flex;
+  align-items: baseline;
+  gap: var(--s3);
+  width: 100%;
+  padding: 8px var(--s3);
+  border: none;
+  background: none;
+  border-radius: 6px;
+  text-align: left;
+  font-size: 13px;
+}
+.palette .item .kind {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: .05em;
+  color: var(--muted);
+  min-width: 62px;
+}
+.palette .item .what { flex: 1; min-width: 0; }
+.palette .item .what small { display: block; color: var(--muted); font-size: 11.5px; }
+.palette .item.active { background: var(--panel-2); }
+.palette .foot {
+  padding: var(--s2) var(--s4);
+  border-top: 1px solid var(--border);
+  font-size: 11px;
+  color: var(--muted);
+  display: flex;
+  gap: var(--s3);
+}
+
+/* ── Inline field rows (settings) ───────────────────────────────────────── */
+
+/* Settings forms read as label-left / control-right on wide screens, which is
+   the layout that makes a 5-field panel scannable down its labels. Falls back
+   to stacked on a narrow window. */
+.form-row {
+  display: grid;
+  grid-template-columns: 200px minmax(0, 1fr);
+  gap: var(--s2) var(--s4);
+  align-items: center;
+  padding: var(--s2) 0;
+}
+.form-row > .lbl { font-size: 13px; }
+.form-row > .lbl small { display: block; color: var(--muted); font-size: 11.5px; font-weight: 400; }
+.form-row > .ctl { min-width: 0; }
+@media (max-width: 720px) {
+  .form-row { grid-template-columns: 1fr; }
+}
+
+/* A disclosure for the long explanations that used to be paragraphs between
+   controls. The prose is worth keeping (it is the institutional memory) but it
+   cannot sit between the operator and the control. */
+.help {
+  margin-top: var(--s3);
+  border-top: 1px solid var(--border);
+  padding-top: var(--s2);
+}
+.help > summary {
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 12px;
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: var(--s1);
+}
+.help > summary::-webkit-details-marker { display: none; }
+.help > summary::before { content: '▸'; font-size: 9px; opacity: .7; }
+.help[open] > summary::before { content: '▾'; }
+.help > summary:hover { color: var(--text); }
+.help .body { font-size: 12.5px; color: var(--muted); line-height: 1.6; padding-top: var(--s2); }
+.help .body p { margin: 0 0 var(--s2); }
+.help .body code { color: var(--text); }
+
+/* ── Chips ──────────────────────────────────────────────────────────────── */
+
+/* Small inline facts that are not status (a tier name, a middleman). Distinct
+   from .badge, which is reserved for the code's state. */
+.chip {
+  display: inline-block;
+  padding: 1px 7px;
+  border-radius: 5px;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  font-size: 11px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.chip.plain { background: none; border-color: transparent; }
+
+/* ── Bulk action bar ────────────────────────────────────────────────────── */
+
+/* Appears only when rows are selected, so the list has no permanent toolbar
+   for a mode the operator is not in. */
+.bulkbar {
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  padding: var(--s2) var(--s3);
+  margin-bottom: var(--s2);
+  background: var(--panel-2);
+  border: 1px solid var(--accent-dim);
+  border-radius: 7px;
+  font-size: 13px;
+}
+.bulkbar .spacer { flex: 1; }
+
+/* A quick, low-risk confirmation rendered inline instead of window.confirm —
+   the browser dialog cannot show a code, a before/after, or a reason field, and
+   it blocks the whole page. */
+.inline-confirm {
+  border: 1px solid var(--warn);
+  border-radius: 7px;
+  background: var(--panel-2);
+  padding: var(--s3);
+  font-size: 13px;
+  margin-bottom: var(--s2);
+}
+.inline-confirm .actions { margin-top: var(--s2); }
+
+/* ── Small print ────────────────────────────────────────────────────────── */
+
+.foot-note { font-size: 11.5px; color: var(--muted); line-height: 1.55; margin-top: var(--s3); }
+.sr-only {
+  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0;
+}
+
+/* Slide-over header actions sit on one line with the title; the old modal put
+   every button in a wrap-anywhere `.actions` row, so a 6-button detail panel
+   reflowed on every resize. */
+.so-head .row-menu { flex: 0 0 auto; }

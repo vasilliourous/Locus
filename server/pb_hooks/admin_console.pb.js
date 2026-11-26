@@ -311,17 +311,51 @@ routerAdd("POST", "/api/admin/console", function(e) {
                 var exp = c.get("expires_at");
                 var expMs = parsePBDate(exp);
                 var isExp = expMs && !isNaN(expMs) && expMs < now;
+                var isUsed = c.get("activated_at") !== null && c.get("activated_at") !== undefined
+                             && String(c.get("activated_at")).trim() !== "";
                 if (isSusp) suspended++;
                 else if (isExp) expired++;
                 // "Redeemed" replaces the old "bound": a code is single-use now,
                 // and `activated_at` is the record of that (see activation.pb.js).
                 // No device is named, so there is nothing per-device to count.
-                else if (c.get("activated_at") !== null && c.get("activated_at") !== undefined && String(c.get("activated_at")).trim() !== "") redeemed++;
+                else if (isUsed) redeemed++;
                 else available++;
-                if (expMs && !isNaN(expMs) && expMs > now && expMs < in30) expiringSoon++;
+                // ── expiringSoon: the RENEWAL queue's size ──
+                //
+                // Counted with the same rule `codes.list` applies when
+                // `expiring_within_days` is set — because the console's card
+                // links straight to that filtered list, and a card that says 7
+                // while the page shows 11 is a bug an operator would read as a
+                // stale page. Measured: the old line counted every future
+                // expiry inside 30 days, including UNUSED stock, which the
+                // worklist correctly excludes — an unsold card cannot lapse, so
+                // there is nothing to renew.
+                //
+                // Suspended codes are excluded for the same reason the worklist
+                // excludes them: the operator deliberately cut that student off,
+                // and prompting a renewal would be asking them to undo it.
+                if (expMs && !isNaN(expMs) && expMs > now && expMs < in30 && !isSusp && isUsed) expiringSoon++;
             }
 
+            // `attempts` was a bare count of `activation_attempts` — a table
+            // activation.pb.js PURGES at ten minutes, holding a code truncated to
+            // four characters. As a number alone it answered nothing: no window
+            // was stated, no code shown, no way to tell a mistyped card from a
+            // scanning run. The console labelled it "in the last 10 minutes
+            // window", which was true only by accident of the purge.
+            //
+            // It is now reported with the window it actually covers and split
+            // by the namespace `rate_key` already carries (`activate_` vs
+            // `lookup_` — see activation.pb.js), so a spike in REFUSED ACTIVATIONS
+            // reads differently from a spike in LOOKUPS, which is the difference
+            // between "someone cannot get in" and "someone is guessing".
             var attempts = $app.dao().findRecordsByExpr("activation_attempts", $dbx.exp("id != ''"));
+            var attemptActivate = 0, attemptLookup = 0;
+            for (var ati = 0; ati < attempts.length; ati++) {
+                var rk = String(attempts[ati].getString("rate_key") || "");
+                if (rk.indexOf("lookup_") === 0) attemptLookup++;
+                else attemptActivate++;
+            }
             var recent = $app.dao().findRecordsByExpr("code_events", $dbx.exp("id != ''"));
 
             // Newest first, capped — the console only shows a short feed.
@@ -348,7 +382,18 @@ routerAdd("POST", "/api/admin/console", function(e) {
                     byTier: byTier,
                     expiringSoon: expiringSoon,
                 },
-                attempts: attempts.length,
+                // `total` is kept for older callers; the split is what the
+                // console reads. `window_minutes` states the window rather than
+                // leaving the console to imply one, because the table is
+                // purged by the hooks that write to it and a hard-coded "10
+                // minutes" in the template would be a guess that can silently
+                // stop being true.
+                attempts: {
+                    total: attempts.length,
+                    activate: attemptActivate,
+                    lookup: attemptLookup,
+                    window_minutes: 10,
+                },
                 recent: feed,
             });
         }
@@ -393,6 +438,40 @@ routerAdd("POST", "/api/admin/console", function(e) {
             // them would be asking to undo their own decision.
             var excludeSuspended = useWindow;
 
+            // ── Facet counts ──
+            //
+            // Counts for the console's filter bar, over the SAME snapshot the
+            // caller's rows come from — so the number beside "suspended" cannot
+            // describe a different instant than the list below it.
+            //
+            // Deliberately UNFILTERED except by the window: the point of a facet
+            // count is "how many are over there", so counting within the current
+            // filter would make every unpressed facet read 0 and the control
+            // useless. With thousands of codes this costs one extra pass over
+            // rows the handler already loaded, which is why it is here rather
+            // than a second round-trip from the browser.
+            //
+            // The window still applies, because a worklist facet that counted
+            // codes outside the worklist would be actively misleading.
+            var facetStatus = {"available": 0, "redeemed": 0, "expired": 0, "suspended": 0};
+            var facetTier = {};
+            for (var fj = 0; fj < recs.length; fj++) {
+                var fr = recs[fj];
+                var fexpRaw = fr.get("expires_at");
+                var fexp = parsePBDate(fexpRaw);
+                var fisExp = fexp && !isNaN(fexp) && fexp < nowMs;
+                var fsusp = fr.getBool("suspended");
+                var fred = !!String(fr.getString("activated_at") || "");
+                if (useWindow) {
+                    if (excludeSuspended && fsusp) continue;
+                    if (!fexp || isNaN(fexp) || fexp <= nowMs || fexp > windowEndMs) continue;
+                }
+                var fstatus = fsusp ? "suspended" : fisExp ? "expired" : fred ? "redeemed" : "available";
+                facetStatus[fstatus] = (facetStatus[fstatus] || 0) + 1;
+                var ftier = fr.getString("tier") || "(none)";
+                facetTier[ftier] = (facetTier[ftier] || 0) + 1;
+            }
+
             var out = [];
             for (var j = 0; j < recs.length; j++) {
                 var rec = recs[j];
@@ -420,6 +499,15 @@ routerAdd("POST", "/api/admin/console", function(e) {
                     if (!expMs2 || isNaN(expMs2)) continue;
                     if (expMs2 <= nowMs) continue;
                     if (expMs2 > windowEndMs) continue;
+                    // Only codes somebody HOLDS belong in a renewal queue.
+                    //
+                    // An unsold card carries a mint-time `expires_at` and cannot
+                    // lapse: there is no student to lose access, and nothing to
+                    // collect. It was included, so the queue held stock — which
+                    // is also why `dashboard.expiringSoon` (which now applies the
+                    // same rule) and this list disagreed.
+                    // server/scripts/console-card-consistency.js is the guard.
+                    if (!redeemedAt) continue;
                 }
 
                 // The query matches the CODE, or the operator's NAME for the
@@ -526,6 +614,12 @@ routerAdd("POST", "/api/admin/console", function(e) {
                 // it, and so a caller that passed a window can tell it was
                 // applied.
                 expiring_within_days: useWindow ? windowDays : 0,
+                // Counts for the filter bar. `facets.tier` is keyed by the
+                // stored tier string, so the console renders only tiers the hub
+                // actually holds rather than a literal list that can drift from
+                // the seed — the failure check-consistency.sh §27(f) exists to
+                // catch.
+                facets: { status: facetStatus, tier: facetTier },
             });
         }
 
@@ -945,7 +1039,15 @@ routerAdd("POST", "/api/admin/console", function(e) {
             // repeatedly "how much did X collect" stops being derivable from a
             // code count. One string now avoids a data migration later.
             var price = String(body.price || "").trim();
-            var mm = String(body.middleman || "").trim();
+            // An omitted `middleman` falls back to the code's own, because the
+            // two are the same fact: the code carries who distributed it, and a
+            // renewal for that code is that middleman's sale. Without the
+            // fallback, a renewal recorded from a screen that does not show the
+            // field loses the attribution — which is the ONE thing a ledger
+            // cannot recover later (docs/business/redesign/08-metrics §8.4). An
+            // explicit `middleman` still wins, for the rare case where a code
+            // has been handed on to someone else.
+            var mm = String(body.middleman || "").trim() || String(recR.getString("middleman") || "").trim();
             var detail = (prevValid ? String(prevRaw) : "(none)") + " → " + newIso +
                          " (term_days=" + termDays +
                          (price ? ", price=" + price : "") +
@@ -1070,11 +1172,24 @@ routerAdd("POST", "/api/admin/console", function(e) {
             var recUp = null;
             try { recUp = $app.dao().findFirstRecordByData("codes", "code", targetUp); } catch (nf5) { recUp = null; }
             if (!recUp) return bad(404, "Code not found");
-            if (body.middleman !== undefined) recUp.set("middleman", String(body.middleman || "").trim());
-            if (body.label !== undefined) recUp.set("label", String(body.label || "").trim());
-            if (body.notes !== undefined) recUp.set("notes", String(body.notes || "").trim());
+            // WHICH fields changed, not just "changed".
+            //
+            // The audit row used to read "details changed", which is the one
+            // thing an operator already knows. The question actually asked of
+            // this trail is "who set this label, and to what" — e.g. a student
+            // is unfindable because a label was overwritten in a bulk fix. The
+            // field NAMES are recorded; the values are not, because `label` is
+            // the student's name and `notes` is free text (see
+            // docs/operate/CLAIMS.md §4: the trail is not a second copy of the
+            // data, and it outlives the row it describes).
+            var changedUp = [];
+            if (body.middleman !== undefined) { recUp.set("middleman", String(body.middleman || "").trim()); changedUp.push("middleman"); }
+            if (body.label !== undefined) { recUp.set("label", String(body.label || "").trim()); changedUp.push("label"); }
+            if (body.notes !== undefined) { recUp.set("notes", String(body.notes || "").trim()); changedUp.push("notes"); }
             $app.dao().saveRecord(recUp);
-            logEvent(targetUp, "updated", "details changed", "");
+            logEvent(targetUp, "updated",
+                     changedUp.length ? "changed: " + changedUp.join(", ") : "no fields changed",
+                     "");
             return ok({code: targetUp});
         }
 
@@ -1196,6 +1311,257 @@ routerAdd("POST", "/api/admin/console", function(e) {
         }
 
         // ─────────────────────────────────────────────────────────────
+        // middlemen.summary — attribution AND remittance, per middleman
+        //
+        // WHY THIS EXISTS
+        //
+        // `middlemen.list` answers "how many codes carry this name", which was
+        // sufficient while revenue was derivable from a code count. Renewal
+        // breaks that: one code sold once can now be paid for five times, so
+        // "how many did Sarah sell" and "how much did Sarah collect" stopped
+        // being the same question (docs/business/07-billing.md §7.4). Both the
+        // billing file and the console design record (06-console §6.6) name the
+        // missing per-middleman view; this is it, built on data that already
+        // exists. No schema change: the money comes out of the `price=` token
+        // `codes.renew` writes into `code_events.detail`.
+        //
+        // THE PARSING IS DELIBERATELY TOLERANT. The detail string is free text
+        // written by previous versions of this file, so a row may carry no
+        // price at all (renewal from before the capture landed, or an operator
+        // who left it blank). Those parse to "no money recorded" rather than to
+        // zero — the console shows a dash for them, because a zero in a money
+        // column reads as "collected $0", which is a different and much worse
+        // claim than "not recorded".
+        //
+        // STOCK CLASSES, not a second list of middlemen. 08-distribution §8.5
+        // makes free stock a different thing commercially (no cut, operator-
+        // given, foot-in-the-door) while remaining the same entity
+        // operationally, so it is a segment here rather than a separate page —
+        // splitting it would reintroduce the Tiers problem.
+        if (action === "middlemen.summary") {
+            // The window for "renewals" and "collected". Defaults to 30 days,
+            // because the natural question is "this month" and a rolling window
+            // needs no month-boundary handling.
+            var windowDaysM = Number(body.window_days);
+            if (!isFinite(windowDaysM) || windowDaysM <= 0) windowDaysM = 30;
+            if (windowDaysM > 3650) return bad(400, "window_days must be 3650 or less");
+            var sinceMs = Date.now() - (windowDaysM * 24 * 60 * 60 * 1000);
+
+            var allM = $app.dao().findRecordsByExpr("codes", $dbx.exp("id != ''"));
+            var nowM = Date.now();
+            var in7 = nowM + (7 * 24 * 60 * 60 * 1000);
+            var byName = {};
+
+            // NOTE: helper declarations are repeated inside each `if` block on
+            // purpose — goja does not hoist a function declaration past the
+            // enclosing block to the routerAdd callback (the "helperFn is not
+            // defined" trap, FIXES.md 2026-09-19), and a closure that captures
+            // nothing is cheap.
+            var bucketFor = function(nm) {
+                if (!byName[nm]) {
+                    byName[nm] = {
+                        name: nm,
+                        codes: 0,           // every code carrying this name
+                        available: 0,       // minted, never redeemed
+                        in_term: 0,         // redeemed and still running
+                        due_7d: 0,          // in term, inside the 7-day worklist
+                        suspended: 0,
+                        expired: 0,
+                        released_once: 0,   // handed out then released: resale risk
+                        free_codes: 0,      // a segment, not a second page
+                        paid_codes: 0,
+                        renewals: 0,        // in the window
+                        collected: 0,       // in the window, priced renewals only
+                        priced_renewals: 0, // how many of `renewals` carried a price
+                    };
+                }
+                return byName[nm];
+            };
+
+            for (var mi = 0; mi < allM.length; mi++) {
+                var cm = allM[mi];
+                // Unattributed stock gets its own bucket rather than being
+                // dropped: a code with no middleman is the operator's own, and
+                // hiding it would make this page's totals disagree with the
+                // Overview's without either being obviously wrong.
+                var nmM = String(cm.getString("middleman") || "").trim() || "(unattributed)";
+                var bM = bucketFor(nmM);
+                bM.codes++;
+                if (String(cm.getString("tier") || "") === "free") bM.free_codes++;
+                else bM.paid_codes++;
+
+                var expM = parsePBDate(cm.get("expires_at"));
+                var hasExpM = expM && !isNaN(expM);
+                var lapsedM = hasExpM && expM < nowM;
+                var redeemedM = !!String(cm.getString("activated_at") || "");
+
+                if (cm.getBool("suspended")) bM.suspended++;
+                else if (lapsedM) bM.expired++;
+                else if (redeemedM) {
+                    bM.in_term++;
+                    if (hasExpM && expM <= in7) bM.due_7d++;
+                } else bM.available++;
+                if (String(cm.getString("first_seen_at") || "") && !redeemedM) bM.released_once++;
+            }
+
+            // The money. One pass over the renewals in the window; the audit
+            // trail is a ledger's only source until a price column exists.
+            var evsM = $app.dao().findRecordsByExpr("code_events", $dbx.exp("event = {:e}", { e: "renewed" }));
+            for (var ei = 0; ei < evsM.length; ei++) {
+                var evM = evsM[ei];
+                var whenM = parsePBDate(evM.get("created"));
+                if (isNaN(whenM) || whenM < sinceMs) continue;
+                var detM = String(evM.getString("detail") || "");
+                var mmMatch = detM.match(/middleman=([^,)]+)/);
+                var nmE = mmMatch ? String(mmMatch[1]).trim() : "";
+                if (!nmE) {
+                    // Fall back to the code's own attribution when the event
+                    // recorded none — a renewal from before the capture landed.
+                    var rcM = null;
+                    try { rcM = $app.dao().findFirstRecordByData("codes", "code", String(evM.getString("code") || "")); } catch (nxM) { rcM = null; }
+                    nmE = rcM ? String(rcM.getString("middleman") || "").trim() : "";
+                }
+                if (!nmE) nmE = "(unattributed)";
+                var bE = bucketFor(nmE);
+                bE.renewals++;
+                var prMatch = detM.match(/price=([0-9]+(\.[0-9]+)?)/);
+                if (prMatch) {
+                    var amountM = Number(prMatch[1]);
+                    if (isFinite(amountM)) { bE.collected += amountM; bE.priced_renewals++; }
+                }
+            }
+
+            var outM = [];
+            for (var kM in byName) {
+                var bO = byName[kM];
+                // A money total is only a total if EVERY renewal in the window
+                // carried a price. Otherwise it is a floor, and saying which is
+                // the difference between a report and a plausible-looking lie.
+                bO.collected_complete = bO.renewals > 0 && bO.priced_renewals === bO.renewals;
+                bO.collected = Math.round(bO.collected * 100) / 100;
+                outM.push(bO);
+            }
+            outM.sort(function(a, b) {
+                // Busiest first: the operator's attention follows stock, not the
+                // alphabet.
+                if (b.codes !== a.codes) return b.codes - a.codes;
+                return a.name < b.name ? -1 : (a.name > b.name ? 1 : 0);
+            });
+            return ok({middlemen: outM, window_days: windowDaysM, since: new Date(sinceMs).toISOString()});
+        }
+
+        // ─────────────────────────────────────────────────────────────
+        // attention.list — the checks the Overview strip runs
+        //
+        // Each is a FILTER over fields `codes.list` already returns. It lives
+        // server-side so the console gets counts plus a few examples instead of
+        // every row, and so one definition of each check serves every surface
+        // that shows it.
+        //
+        // Every check answers "what is wrong that nobody has looked at", and
+        // each is backed by a failure this project has already paid for:
+        //
+        //   unservable_tier — a code whose tier has no ACTIVE tier_configs row.
+        //     activation.pb.js returns the stored tier and the client resolves
+        //     server_config by that string alone, so such a code activates
+        //     "successfully" and hands the device nothing: a connected app that
+        //     reaches no internet. It is the exact failure `codes.import`
+        //     guards against, and nothing was watching for it afterwards.
+        //
+        //   lapsed — past `expires_at`, not suspended. The 7-day worklist
+        //     EXCLUDES these by design (it is for codes still running), so
+        //     without this bucket a student who has already lost access is
+        //     invisible rather than being a catch-up call.
+        //
+        //   shared — `release_count >= 2` while still in term. The counter was
+        //     built to answer "is this student moving machines, or is this key
+        //     being shared?" and no view ever showed it.
+        //
+        //   no_label — redeemed, in term, `label` empty. 08-distribution §8.3.1
+        //     makes the label THE link between a student and their code, so
+        //     these are support calls waiting to be unanswerable. Not an error:
+        //     the gap worth counting.
+        if (action === "attention.list") {
+            var allA = $app.dao().findRecordsByExpr("codes", $dbx.exp("id != ''"));
+            var nowA = Date.now();
+
+            // Which tiers can actually be served right now.
+            var served = {};
+            var cfgsA = $app.dao().findRecordsByExpr("tier_configs", $dbx.exp("id != ''"));
+            for (var ci = 0; ci < cfgsA.length; ci++) {
+                if (cfgsA[ci].getBool("active")) served[cfgsA[ci].getString("tier")] = true;
+            }
+
+            // A representative handful per check, for the card's preview. 8 is
+            // enough to answer "is this the row I think it is" without turning
+            // an overview into a list.
+            var CAP = 8;
+            var groupsA = { unservable_tier: [], lapsed: [], shared: [], no_label: [] };
+            var countsA = { unservable_tier: 0, lapsed: 0, shared: 0, no_label: 0 };
+
+            for (var ai = 0; ai < allA.length; ai++) {
+                var ca = allA[ai];
+                var codeA = ca.getString("code");
+                var expA = parsePBDate(ca.get("expires_at"));
+                var hasExpA = expA && !isNaN(expA);
+                var lapsedA = hasExpA && expA < nowA;
+                var suspA = ca.getBool("suspended");
+                var redeemedA = !!String(ca.getString("activated_at") || "");
+
+                var tierA = String(ca.getString("tier") || "");
+                // Unservable is counted even on suspended/expired rows: the row
+                // would bite the moment either is cleared, and the fix (mint a
+                // config row, or remap the code) is the same either way.
+                if (tierA && !served[tierA]) {
+                    countsA.unservable_tier++;
+                    if (groupsA.unservable_tier.length < CAP) {
+                        groupsA.unservable_tier.push({ code: codeA, tier: tierA, middleman: ca.getString("middleman") || "" });
+                    }
+                }
+                if (lapsedA && !suspA) {
+                    countsA.lapsed++;
+                    if (groupsA.lapsed.length < CAP) {
+                        groupsA.lapsed.push({
+                            code: codeA,
+                            label: ca.getString("label") || "",
+                            middleman: ca.getString("middleman") || "",
+                            days_past: Math.floor((nowA - expA) / (24 * 60 * 60 * 1000)),
+                        });
+                    }
+                }
+                var relA = Number(ca.get("release_count") || 0);
+                if (relA >= 2 && !suspA && !lapsedA && (redeemedA || !hasExpA)) {
+                    countsA.shared++;
+                    if (groupsA.shared.length < CAP) {
+                        groupsA.shared.push({
+                            code: codeA,
+                            label: ca.getString("label") || "",
+                            release_count: relA,
+                            released_at: ca.getString("released_at") || "",
+                        });
+                    }
+                }
+                if (redeemedA && !lapsedA && !suspA && !String(ca.getString("label") || "").trim()) {
+                    countsA.no_label++;
+                    if (groupsA.no_label.length < CAP) {
+                        groupsA.no_label.push({
+                            code: codeA,
+                            middleman: ca.getString("middleman") || "",
+                            activated_at: ca.getString("activated_at") || "",
+                        });
+                    }
+                }
+            }
+
+            return ok({
+                total_codes: allA.length,
+                tiers_served: Object.keys(served),
+                counts: countsA,
+                groups: groupsA,
+            });
+        }
+
+        // ─────────────────────────────────────────────────────────────
         // device.get / devices.list — REMOVED with the device binding
         //
         // These read the `device_bindings` index, which no longer exists (see
@@ -1310,7 +1676,31 @@ routerAdd("POST", "/api/admin/console", function(e) {
             if (body.active !== undefined) recT.set("active", !!body.active);
             if (body.udp_relay !== undefined) recT.set("udp_relay", !!body.udp_relay);
             $app.dao().saveRecord(recT);
-            logEvent("(tier " + tierName + ")", "tier-updated", JSON.stringify(cfgT), "");
+            // NEVER log cfgT.
+            //
+            // This wrote `JSON.stringify(cfgT)` — the tier's shadowsocks
+            // password in cleartext — into `code_events`, which is a table the
+            // console reads, an operator can export, and a backup carries off
+            // the box. The whole shape of `tiers.*` is built to keep that secret
+            // out of responses (tiers.list omits it, tiers.update refuses to
+            // echo it), and this one line put it back into a place with weaker
+            // handling than the tier row it came from.
+            //
+            // The audit question is "what changed and when", so record the
+            // KEYS that changed. Who changed it needs no field: `logEvent`
+            // stamps actor="console". Add a field name here if a new editable
+            // key is added below, or the trail silently under-reports it.
+            var tierChanged = [];
+            if (body.server !== undefined && String(body.server).trim()) tierChanged.push("server");
+            if (body.server_port !== undefined) tierChanged.push("server_port");
+            if (body.method !== undefined && String(body.method).trim()) tierChanged.push("method");
+            if (body.uot_port !== undefined) tierChanged.push("uot_port");
+            if (body.hub_alias !== undefined) tierChanged.push("hub_alias");
+            if (body.active !== undefined) tierChanged.push("active");
+            if (body.udp_relay !== undefined) tierChanged.push("udp_relay");
+            logEvent("(tier " + tierName + ")", "tier-updated",
+                     tierChanged.length ? "changed: " + tierChanged.join(", ") : "no fields changed",
+                     "");
             // Deliberately NOT returning cfgT.
             //
             // cfgT contains the tier password in cleartext (the shadowsocks PSK

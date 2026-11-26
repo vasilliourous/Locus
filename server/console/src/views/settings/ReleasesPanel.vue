@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted, computed } from 'vue'
-import { call, fetchRelease, type FetchArtifact } from '../api'
-import { toast } from '../toast'
+import { call, fetchRelease, type FetchArtifact } from '../../api'
+import { toast } from '../../toast'
 
 // ── Releases page: publish by pulling a GitHub Release ──
 //
@@ -319,11 +319,6 @@ onMounted(() => {
 </script>
 
 <template>
-  <h1 class="page-title">Releases</h1>
-  <p class="page-sub">
-    Publish a client update by pulling its build straight from GitHub. Nothing is
-    uploaded from this browser.
-  </p>
 
   <!-- ── What the hub currently advertises ── -->
   <div class="card">
