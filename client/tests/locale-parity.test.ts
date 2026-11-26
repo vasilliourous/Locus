@@ -185,9 +185,14 @@ describe('no finished surface ships in English', () => {
       expect(english.has(key), `${key} is not an en key`).toBe(true)
     }
     const owned = [...english.keys()].filter((k) =>
-      Object.values(FINISHED_SURFACES).some((owns) => owns(k) && !NOT_PROSE.has(k)),
+      Object.values(FINISHED_SURFACES).some(
+        (owns) => owns(k) && !NOT_PROSE.has(k),
+      ),
     )
-    expect(owned.length, 'no finished surface has any prose left to assert').toBeGreaterThan(0)
+    expect(
+      owned.length,
+      'no finished surface has any prose left to assert',
+    ).toBeGreaterThan(0)
   })
 
   for (const [surface, owns] of Object.entries(FINISHED_SURFACES)) {
