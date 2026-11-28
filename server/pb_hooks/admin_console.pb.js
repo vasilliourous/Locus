@@ -635,6 +635,23 @@ routerAdd("POST", "/api/admin/console", function(e) {
                     first_seen_fingerprint: rec.getString("first_seen_fingerprint") || "",
                     released_at: rec.getString("released_at") || "",
                     release_count: rec.get("release_count") || 0,
+                    // ── The LIVENESS axis, which is not the entitlement axis ──
+                    //
+                    // `last_seen_at` is the only trace a heartbeat leaves (see
+                    // heartbeat.pb.js). It is passed through RAW and unjudged:
+                    // this hook does not compute "live"/"stale"/"absent",
+                    // because a second implementation of the lease arithmetic
+                    // is a second thing that can disagree with
+                    // session_probe.pb.js. The console classifies it in ONE
+                    // place (`views/codes/model.ts: livenessOf`), and §43
+                    // asserts the vocabulary matches the hook's.
+                    //
+                    // EMPTY STRING, NOT A FABRICATED DATE. A code that has never
+                    // beaten has no liveness, and the console renders that as
+                    // "—" rather than as "away"/"signed out". Turning a missing
+                    // value into a definite state is the exact defect this whole
+                    // change removes; it must not be reintroduced here.
+                    last_seen_at: rec.getString("last_seen_at") || "",
                     middleman: rec.getString("middleman") || "",
                     label: rec.getString("label") || "",
                     notes: rec.getString("notes") || "",
@@ -1580,8 +1597,8 @@ routerAdd("POST", "/api/admin/console", function(e) {
             // enough to answer "is this the row I think it is" without turning
             // an overview into a list.
             var CAP = 8;
-            var groupsA = { unservable_tier: [], lapsed: [], shared: [], no_label: [] };
-            var countsA = { unservable_tier: 0, lapsed: 0, shared: 0, no_label: 0 };
+            var groupsA = { unservable_tier: [], lapsed: [], shared: [], no_label: [], gone_quiet: [] };
+            var countsA = { unservable_tier: 0, lapsed: 0, shared: 0, no_label: 0, gone_quiet: 0 };
 
             for (var ai = 0; ai < allA.length; ai++) {
                 var ca = allA[ai];
@@ -1638,6 +1655,48 @@ routerAdd("POST", "/api/admin/console", function(e) {
                             code: codeA,
                             middleman: ca.getString("middleman") || "",
                             activated_at: ca.getString("activated_at") || "",
+                        });
+                    }
+                }
+
+                // ── gone_quiet: in term, has beaten before, has stopped ──
+                //
+                // The liveness axis, surfaced where an operator looks first.
+                // Without this, `last_seen_at` was a column only the Codes table
+                // and the probe used, so "how many paying devices have stopped
+                // checking in" was a question no screen could answer — and that
+                // is the question a hub outage, a bad hook deploy or a blocked
+                // school network all present as.
+                //
+                // STRICTLY requires a PRIOR beat (`seenMs > 0`). A code that has
+                // never beaten is `unknown`, not "quiet" — it may be stock nobody
+                // has activated, and counting it here would open every fresh
+                // import as an emergency. The two are different questions and
+                // this check answers only the one with evidence behind it.
+                //
+                // The threshold is the same lease the console and the probe use,
+                // written out in full rather than as `2 * 60 * 60`: the lease is
+                // 2h MAX_INTERVAL * 1.1 jitter + 15s timeout + 60s slack, and the
+                // rounded-down version says "quiet" 16 minutes before the probe
+                // does. That is exactly the drift `liveness-consistency.js` §4b
+                // exists to catch — it caught this line when it was the round
+                // number.
+                //
+                // Duplicated rather than shared because this hook cannot import
+                // from `session_probe.pb.js` (goja hoists nothing across files);
+                // §4b evaluates all three and fails when they disagree.
+                var seenAMs = parsePBDate(ca.get("last_seen_at"));
+                var seenAValid = seenAMs > 0 && !isNaN(seenAMs);
+                var goneQuietA = redeemedA && !lapsedA && !suspA && seenAValid && (nowA - seenAMs) > (2 * 60 * 60 + 16 * 60) * 1000;
+                if (goneQuietA) {
+                    countsA.gone_quiet++;
+                    if (groupsA.gone_quiet.length < CAP) {
+                        groupsA.gone_quiet.push({
+                            code: codeA,
+                            label: ca.getString("label") || "",
+                            middleman: ca.getString("middleman") || "",
+                            last_seen_at: String(ca.getString("last_seen_at")),
+                            hours_quiet: Math.floor((nowA - seenAMs) / (60 * 60 * 1000)),
                         });
                     }
                 }

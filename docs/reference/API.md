@@ -615,6 +615,135 @@ a code is a bearer credential and logs are things people paste.
 
 ---
 
+## 5d. Session Probe (the desync diagnostic)
+
+### `POST /api/session-probe`
+
+Answers **"is this code in term, and is the device holding it alive?"** as two
+separate facts. It exists because the console answered the second question from
+the first question's data, and a client that was heartbeating every five minutes
+was displayed as signed out. The state model behind that is
+[`AUTH-STATE.md`](AUTH-STATE.md); the procedure that uses this endpoint is
+[`../operate/RUNBOOK-DESYNC.md`](../operate/RUNBOOK-DESYNC.md).
+
+**Strictly read-only.** It writes nothing — not even `last_seen_at`. Every write
+belongs to the flow that owns it (the beat writes liveness, `/api/release-entitlement`
+writes `released_at`, activation writes `activated_at`). Repair is a separate,
+audited, idempotent operator action (`codes.unbind`).
+
+**Authentication:** possession of the code **and** the matching redacted device
+fingerprint. A caller who cannot present the machine that first redeemed the code
+gets the same bare `404` an unknown code gets, so this cannot be used as a
+code-existence oracle. See `server/pb_hooks/session_probe.pb.js`.
+
+**Rate limited:** 10 per 10 minutes per IP (Caddy `probe` zone, the activation
+tunnel's own `probe` bucket, and the hook's `probe_` bucket — three doors, one
+bound, so a support session cannot spend a student's activation budget).
+
+**Request:**
+```json
+{
+  "probe_version": 1,
+  "code": "RQ-ABCD-EFGH-JKMN-T",
+  "device_id": "a1b2c3d4e5f6",
+  "client": {
+    "app_version": "3.5.0",
+    "platform": "linux",
+    "auth_state": "activated",
+    "last_heartbeat_ok_unix": 1765000000,
+    "heartbeat_failures": 0,
+    "grace_remaining_s": 590000,
+    "hub_enforcement": 4,
+    "recorded_refusal": null,
+    "clock": { "unix": 1765000300, "utc_offset_min": 720 },
+    "degradation": [],
+    "transport": "direct"
+  }
+}
+```
+
+| Field | Required | Description |
+|---|:--:|---|
+| `probe_version` | ✅ | Schema version. An unrecognised value answers `409` rather than being interpreted — a half-understood probe is worse than a refused one. |
+| `code` | ✅ | The activation code. |
+| `device_id` | ✅ | The client's **already-redacted** 12-char fingerprint (`store::redact`). Compared to `codes.first_seen_fingerprint`; a mismatch is an indistinguishable `404`. |
+| `client` | ❌ | The client's own view, when the operator is at the device. Omitted is normal and is reported as `null`, never defaulted. |
+
+**Response `200`:**
+```json
+{
+  "probe_version": 1,
+  "server_time": "2026-11-25T10:09:42.945Z",
+  "entitlement": "active",
+  "liveness": "live",
+  "hub_view": {
+    "activated_at": "2026-11-20T08:11:02.000Z",
+    "released_at": null,
+    "released_pending": false,
+    "suspended": false,
+    "suspended_reason": null,
+    "expires_at": "2027-03-01T00:00:00.000Z",
+    "tier": "strike",
+    "last_seen_at": "2026-11-25T10:04:12.000Z",
+    "last_seen_age_s": 330,
+    "first_seen_fingerprint": "a1b2c3d4e5f6"
+  },
+  "client_view": null,
+  "lease_expires_at": "2026-11-25T12:20:12.000Z",
+  "reason_code": "client_beating_hub_quiet",
+  "divergence": []
+}
+```
+
+**The two axes.** `entitlement` and `liveness` are never collapsed into one
+label; a caller that wants a single badge has to choose, which is the point.
+
+| `entitlement` | Meaning |
+|---|---|
+| `active` | In term, not suspended, no unspent sign-out claim. |
+| `released-unclaimed` | `released_at > activated_at`: a sign-out is waiting to be claimed. The code is free for the next activation. |
+| `suspended` | An operator stopped it. `suspended_reason` carries their words. |
+| `expired` | Past `expires_at`. |
+| `never-activated` | No `activated_at`. |
+
+| `liveness` | Meaning |
+|---|---|
+| `live` | Beat within the lease (2 h 16 min, derived from the client's max backoff). |
+| `stale` | No beat within the lease, but within 7 days. |
+| `absent` | No beat for over 7 days. |
+| `unknown` | **`last_seen_at` is null.** Never render this as `absent`. |
+
+> **`unknown` is a first-class answer.** A code that has never beaten since the
+> column existed has no liveness, and reporting it as anything definite would
+> accuse a device on no evidence. It is `null` in `hub_view.last_seen_at` and
+> `unknown` here, and the console renders it as `—`.
+
+**`reason_code` — what the operator should do:**
+
+| `reason_code` | Meaning | Action |
+|---|---|---|
+| `in_sync` | Both sides agree. | none |
+| `client_beating_hub_quiet` | The device is beating; the console's "signed out" was an inference from `released_at`. | none — a console defect, not a device one |
+| `stale_release_claim` | A sign-out claim contradicts a beating device. | `codes.unbind`, or have the student sign in once |
+| `hub_refused_client_hasnt_noticed` | Hub already refuses; the client has not beaten since. | wait one beat, or `beat_now` |
+| `client_unreachable` | No recent beat. Killed, offline or quit — **this endpoint does not guess which**. | check the Account screen, or wait for TTL |
+| `client_dropped_session` | Client lost its record; the hub still holds a live one. | student re-activates |
+| `genuinely_signed_out` | Both sides agree it is signed out. | none |
+| `clock_skew` | Client and hub clocks differ by >300 s. **Reported, never acted on.** | none — liveness uses the hub's clock |
+| `unknown` | Nothing to conclude. | use the console |
+
+**Error responses:**
+
+| Status | Code | Meaning |
+|:--:|:--:|---|
+| 400 | 400 | `probe_version` or `code` missing |
+| 404 | 404 | **Uniform.** Unknown code, unparseable code, suspended, expired, or a `device_id` that does not match the first-redeeming machine — all indistinguishable, deliberately |
+| 409 | 409 | Unsupported `probe_version`; the body carries the supported one |
+| 429 | 429 | Rate limited |
+| 500 | 500 | Unexpected failure — never a partial `200` |
+
+---
+
 ## 6. Update Check
 
 ### `GET /api/update?version=<running>&platform=<key>`
@@ -725,6 +854,8 @@ PocketBase admin interface at `https://networkingguides.jadedns.uk/_/`.
 Activation:    POST /api/activate            ─── JSON body (PocketBase hook)
 Code lookup:   POST /api/code-lookup         ─── JSON body, read-only pre-check (PB hook)
 Heartbeat:     POST /api/heartbeat           ─── JSON body, code (PB hook)
+Session probe: POST /api/session-probe       ─── JSON body, code + redacted device id (PB hook)
+Device release: POST /api/release-entitlement ─── JSON body, code (PB hook)
 Release manifest: GET /api/release           ─── Public, credential-free (PB hook)
 Update manifest:  GET /api/update            ─── Query: version, platform (PB hook, no auth)
 Admin Unbind:  POST /api/admin/unbind-code   ─── JSON body (admin_token)
@@ -792,6 +923,8 @@ HTTP status code matches the `code` field in the JSON body.
 | `/api/activate` | 5 | 10 minutes | Caddy + JS hook |
 | `/api/code-lookup` | 10 | 10 minutes | JS hook (own bucket) |
 | `/api/heartbeat` | 1 | 10 seconds | Caddy |
+| `/api/release-entitlement` | 10 | 10 minutes | Caddy + forwarder + JS hook (own `release_` bucket) |
+| `/api/session-probe` | 10 | 10 minutes | Caddy + forwarder + JS hook (own `probe_` bucket) |
 | `/api/*` (general) | 100 | 10 seconds | Caddy default zone |
 | `/api/admin/unbind-code` | None | — | Admin token required instead |
 | `/api/admin/fetch-release` | None | — | Admin token, **or** a one-shot signed link |

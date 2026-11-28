@@ -21,7 +21,8 @@
       "POST /api/code-lookup",
       "POST /api/device-recognise",
       "POST /api/heartbeat",
-      "POST /api/release-entitlement"
+      "POST /api/release-entitlement",
+      "POST /api/session-probe"
     ]
   },
   "enums": {
@@ -53,6 +54,7 @@
       "chrysalis_hub_url",
       "chrysalis_install_update",
       "chrysalis_js_log",
+      "chrysalis_probe",
       "chrysalis_sign_out",
       "chrysalis_status",
       "chrysalis_update_staging_dir",
@@ -70,6 +72,7 @@
       "chrysalis_hub_url",
       "chrysalis_install_update",
       "chrysalis_js_log",
+      "chrysalis_probe",
       "chrysalis_sign_out",
       "chrysalis_status",
       "chrysalis_update_staging_dir",
@@ -87,6 +90,7 @@
       "chrysalis_hub_url",
       "chrysalis_install_update",
       "chrysalis_js_log",
+      "chrysalis_probe",
       "chrysalis_sign_out",
       "chrysalis_status",
       "chrysalis_update_staging_dir",

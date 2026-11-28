@@ -34,6 +34,15 @@ export interface TranslationResources {
             plan: string
             platform: string
             preferences: string
+            'probe.intro': string
+            'probe.livenessAbsent': string
+            'probe.livenessLive': string
+            'probe.livenessStale': string
+            'probe.livenessUnknown': string
+            'probe.reasonLabel': string
+            'probe.run': string
+            'probe.running': string
+            'probe.title': string
             refresh: string
             refreshBusy: string
             refreshed: string

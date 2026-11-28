@@ -202,6 +202,7 @@ mod app_init {
             cmd::chrysalis_hub_url,
             cmd::chrysalis_check_subscription,
             cmd::chrysalis_sign_out,
+            cmd::chrysalis_probe,
             cmd::chrysalis_update_staging_dir,
             cmd::chrysalis_update_status,
             cmd::chrysalis_install_update,

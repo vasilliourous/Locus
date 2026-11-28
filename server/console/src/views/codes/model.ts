@@ -35,6 +35,20 @@ export interface CodeRow {
    * Same comparison as `activation.pb.js`, which is the authority.
    */
   released_pending?: boolean
+  /**
+   * The last time this code checked in with the hub, or `''` when it never has.
+   *
+   * This is the LIVENESS axis, and it is a different fact from `status`, which is
+   * the ENTITLEMENT axis. They were conflated, and that is the defect this field
+   * exists to fix: `status: 'signed out'` is derived from `released_at` — "the
+   * student pressed Sign out since the last activation" — which says nothing
+   * about whether the device is in use. A client beating every five minutes was
+   * displayed as signed out because a stale `released_at` happened to be present.
+   *
+   * READ THIS BEFORE RENDERING IT. `''` means unknown, and unknown MUST NOT be
+   * rendered as any liveness state — see `livenessOf` below.
+   */
+  last_seen_at?: string
 }
 
 export interface HistoryEvent {
@@ -64,7 +78,20 @@ export function stateLabel(row: CodeRow): string {
   // one: the next activation of this code will SUCCEED (a second device would be
   // refused), so calling it "in term" would tell the operator the key is tied up
   // when it is in fact free. See `released_pending` above.
-  if (row.redeemed && row.released_pending) return 'signed out'
+  //
+  // IT DOES **NOT** SAY "SIGNED OUT", and that change is the whole point of the
+  // liveness column beside it. `released_at` means "a Sign out was recorded since
+  // the last activation" — an ENTITLEMENT fact about the CODE. It says nothing
+  // about whether a device is using it, and for a beating device it is usually
+  // stale (a reinstall that re-activated, a claim nobody spent, a sign-out from a
+  // machine the student has since replaced).
+  //
+  // Rendered as "signed out" beside "checked in 2m ago" those two columns
+  // contradict each other, and the operator believes the word over the datum —
+  // which is how the original report ("the hub says I'm signed out") happened.
+  // The label now names its own axis: the CODE is released, not the DEVICE
+  // signed out. The runbook's step 0 quotes this wording.
+  if (row.redeemed && row.released_pending) return 'sign-out recorded'
   if (row.redeemed) return 'in term'
   if (row.first_seen_at) return 'released'
   return 'unused'
@@ -117,4 +144,117 @@ export function remainingText(row: CodeRow): string | null {
 export function isUrgent(row: CodeRow): boolean {
   const d = row.days_remaining
   return d !== null && d !== undefined && d <= 7
+}
+
+// ── The liveness axis ─────────────────────────────────────────────────────────
+//
+// WHY THIS IS SEPARATE FROM `stateLabel`, AND MUST STAY SEPARATE
+//
+// The hub has two independent questions about a code and they have different
+// owners:
+//
+//   entitlement — "may this code be used?"   → the HUB's to answer (it refuses)
+//   liveness    — "is this device alive?"    → the CLIENT's to answer (it beats)
+//
+// Collapsing them into one badge is the bug this change removes. The console used
+// to answer the liveness question from `released_at`, an entitlement fact, so a
+// client that was heartbeating every five minutes rendered as "signed out". No
+// amount of fixing the comparison would have helped: the input was the wrong
+// fact. So the two axes are now two fields, and `stateLabel` keeps its existing
+// entitlement meaning.
+//
+// The vocabulary below is a CONTRACT with `server/pb_hooks/session_probe.pb.js`,
+// which emits the same five strings. `check-consistency.sh` §43 asserts they
+// agree, because a string duplicated across languages with nothing enforcing
+// agreement is the incident class this repo has paid for four times
+// (docs/reference/CONTRACT.md).
+export type Liveness = 'live' | 'stale' | 'absent' | 'unknown'
+
+/**
+ * How long a client may be silent before it is not "live".
+ *
+ * Derived from the CLIENT's heartbeat constants — `MAX_INTERVAL` is 2 h, ±10 %
+ * jitter, 15 s timeout, one maintenance-tunnel retry — not chosen by feel. A
+ * shorter lease would declare a healthy device absent the moment it backed off
+ * to its maximum interval after an outage, which is the failure this number
+ * exists to prevent. `server/pb_hooks/session_probe.pb.js` carries the same
+ * number for the same reason.
+ *
+ * `STALE_MS` mirrors the client's own `GRACE_PERIOD` (7 days) so both sides age
+ * a device out on the same clock; two windows would recreate the desync.
+ */
+const LEASE_MS = (2 * 60 * 60 + 16 * 60) * 1000
+const STALE_MS = 7 * 24 * 60 * 60 * 1000
+
+/**
+ * Classifies the liveness of a code from `last_seen_at`.
+ *
+ * # `unknown` is a real answer, and the most important one
+ *
+ * An empty or unparseable `last_seen_at` returns `'unknown'`, NEVER `'absent'`.
+ * A code that has never beaten has no evidence either way, and rendering that as
+ * "away" — still less as "signed out" — would accuse a device on no evidence.
+ * The brief for this work names this as the failure that must not happen: an
+ * unknown state silently rendered as a definite one. `livenessLabel` renders it
+ * as "—" for exactly that reason.
+ *
+ * `now` is injectable so the boundaries are testable without freezing the clock,
+ * which is how the lease constants are shown to be the ones actually applied.
+ */
+export function livenessOf(row: CodeRow, now: number = Date.now()): Liveness {
+  const raw = row.last_seen_at
+  if (!raw) return 'unknown'
+  const seen = new Date(raw).getTime()
+  if (Number.isNaN(seen)) return 'unknown'
+  // A future timestamp means the two clocks disagree or the column was written
+  // wrongly. Either way the age is not knowable, and it must not be reported as
+  // "live forever" — the negative age would otherwise pass every bound below.
+  if (seen > now + 5 * 60 * 1000) return 'unknown'
+  const age = now - seen
+  if (age <= LEASE_MS) return 'live'
+  if (age <= STALE_MS) return 'stale'
+  return 'absent'
+}
+
+/**
+ * The operator's word for a liveness state.
+ *
+ * Deliberately says "checked in" rather than "online": `last_seen_at` proves the
+ * device REACHED THE HUB, not that the student is at it. A laptop in a tray,
+ * connected to nothing, beats every five minutes and is genuinely `live`. Calling
+ * that "online" would be a claim about the student that the data does not
+ * support; "checked in 2m ago" is precisely what was observed.
+ */
+export function livenessLabel(state: Liveness): string {
+  switch (state) {
+    case 'live':
+      return 'checked in'
+    case 'stale':
+      return 'not checked in'
+    case 'absent':
+      return 'away'
+    // NOT "unknown" and NOT "signed out": a dash says "no data" without saying
+    // anything false. This branch is the whole point of the type.
+    case 'unknown':
+      return '—'
+  }
+}
+
+/**
+ * The `livenessLabel` result with the age appended, for a table cell.
+ *
+ * Kept apart from the label so a caller that only wants the word does not have to
+ * strip the number back off. `now` is injectable for the same reason as above.
+ */
+export function livenessText(row: CodeRow, now: number = Date.now()): string {
+  const state = livenessOf(row, now)
+  const label = livenessLabel(state)
+  const raw = row.last_seen_at
+  if (state === 'unknown' || !raw) return label
+  const seen = new Date(raw).getTime()
+  const ageMin = Math.max(0, Math.round((now - seen) / 60000))
+  if (ageMin < 60) return `${label} ${ageMin}m ago`
+  const ageH = Math.round(ageMin / 60)
+  if (ageH < 48) return `${label} ${ageH}h ago`
+  return `${label} ${Math.round(ageH / 24)}d ago`
 }

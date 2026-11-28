@@ -80,7 +80,16 @@
         "notActivatedToCheck": "Activate a code first — there is nothing to confirm yet.",
         "updateCheckOff": "Automatic update checking is off, so Chrysalis is not being told about new versions. Turn it on above to receive fixes.",
         "updateCheckOffAction": "Turn on automatic updates",
-        "updateBlocked": "Chrysalis cannot update itself right now: {{reason}}"
+        "updateBlocked": "Chrysalis cannot update itself right now: {{reason}}",
+        "probe.title": "Check this device against the server",
+        "probe.intro": "If you have been told you are signed out while this app says otherwise, run this check and quote the code it shows.",
+        "probe.run": "Run the check",
+        "probe.running": "Checking…",
+        "probe.reasonLabel": "Result:",
+        "probe.livenessLive": "The server heard from this device recently.",
+        "probe.livenessStale": "The server has not heard from this device for a while. It may be off, offline, or the app may have been closed — the server cannot tell which.",
+        "probe.livenessAbsent": "The server has not heard from this device for over a week.",
+        "probe.livenessUnknown": "The server has no record of this device checking in yet, so it cannot say whether it is working. This is not the same as being signed out."
       },
       "cancel": "Stop",
       "toggleHint": "Press Enter to turn the VPN on or off",

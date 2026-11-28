@@ -281,6 +281,32 @@ collections = [
         # answers. `code_events` carries the full history; this is the latest.
         {"name":"released_at","type":"date"},
         {"name":"release_count","type":"number"},
+        # ── The only trace a heartbeat leaves: the last time this code checked in ──
+        #
+        # Written by `heartbeat.pb.js` on EVERY answered beat — including the
+        # 403 suspended and 410 expired refusals, because a refused device that
+        # is still checking in is ALIVE and that is the operator's business.
+        # Uses the HUB's clock, never a client-supplied timestamp, so clock skew
+        # cannot corrupt it.
+        #
+        # WHY IT HAD TO EXIST. Until this column, the heartbeat wrote nothing at
+        # all, so the hub could not distinguish "beating 30 seconds ago" from
+        # "killed three weeks ago" — both looked like the same row. The console
+        # filled that hole by inferring device state from `released_at`, which
+        # answers a different question ("did the student press Sign out since the
+        # last activation?"), and a signed-in client was therefore displayed as
+        # signed out. See docs/reference/AUTH-STATE.md and §41 of
+        # check-consistency.sh, which fails when this write is removed.
+        #
+        # NULLABLE ON PURPOSE, and null MEANS UNKNOWN, NOT ABSENT. A code that has
+        # never beaten since this column existed has no age, and rendering that as
+        # "absent" would accuse a device of being gone on no evidence. The console
+        # must render null as "—" (never as a liveness state); §42 fails if it
+        # does not.
+        #
+        # Additive: no backfill, no migration of existing rows. A row that has
+        # not beaten yet simply shows unknown until it does.
+        {"name":"last_seen_at","type":"date"},
         # ── When this code was FIRST redeemed, and which machine did it ──
         #
         # `activated_at` is not enough to answer "is this code already in

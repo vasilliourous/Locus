@@ -27,6 +27,7 @@ import { useTranslation } from 'react-i18next'
 import { TierBadge } from '@/components/connection/tier-badge'
 import { TrafficSummaryCard } from '@/components/connection/traffic-summary'
 import { useConnection } from '@/components/connection/use-connection'
+import { ProbeCard } from '@/components/shared/probe-card'
 import { SignOutCard } from '@/components/shared/sign-out-card'
 import { SupportBlock } from '@/components/shared/support-block'
 import { useI18n } from '@/hooks/use-i18n'
@@ -396,6 +397,17 @@ const AccountPage = () => {
             they should find who to quote it to. */}
         <SupportBlock showDeviceIdHint sx={{ mt: 1.5 }} />
       </Paper>
+
+      {/* ── Check against the server ─────────────────────────────────────────
+          The student-facing end of `docs/operate/RUNBOOK-DESYNC.md`. It is a
+          button rather than an automatic check because the answer only means
+          something when a person is reading it during a disagreement — and
+          because it is against a 10-per-10-minute rate limit, so a schedule
+          would be a polling storm for a diagnostic nobody asked for.
+
+          Offered only to an activated device: with no code there is nothing to
+          ask the hub about, and the button would always fail. */}
+      {status?.activated && <ProbeCard />}
 
       {/* ── Sign out ─────────────────────────────────────────────────────────
           Last on the page and visually last of the day-to-day controls, because

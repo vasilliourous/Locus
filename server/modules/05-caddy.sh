@@ -359,6 +359,30 @@ ${HUB_BLOCK_NAMES} {
         reverse_proxy 127.0.0.1:8090
     }
 
+    # ── Session probe (rate limited: 10 per 10 min per IP) ──
+    #
+    # POST /api/session-probe, from session_probe.pb.js. Its own zone for the
+    # same reason `release` has one: this is a DIAGNOSTIC, and a support session
+    # must not be able to spend a student's activation budget. The bound matches
+    # the `release` and `probe` buckets the forwarder and the hook keep, so all
+    # three shed alike and none of them is the laxest.
+    #
+    # It is READ-ONLY. The limit is not here to protect a write — it is here
+    # because the endpoint is authenticated by possession of a code, which is
+    # printed on every card, and an unbounded read against that is an unbounded
+    # code-existence oracle. See session_probe.pb.js for how the oracle is
+    # closed; this is the volume half.
+    handle /api/session-probe {
+        rate_limit {
+            zone probe {
+                key {remote_host}
+                events 10
+                window 10m
+            }
+        }
+        reverse_proxy 127.0.0.1:8090
+    }
+
     # ── Admin console ──
     # The console is a static SPA served at /admin/. A request for /admin
     # (no slash) is redirected so a typed URL or bookmark does not 404.

@@ -18,7 +18,7 @@
 import { computed, ref, watch } from 'vue'
 import SlideOver from '../../components/SlideOver.vue'
 import type { CodeRow, HistoryEvent } from './model'
-import { remainingText, shortDate, shortDateTime, stateClass, stateLabel } from './model'
+import { livenessOf, livenessText, remainingText, shortDate, shortDateTime, stateClass, stateLabel } from './model'
 import { act } from './data'
 
 const props = defineProps<{ row: CodeRow | null; history: HistoryEvent[]; historyLoading: boolean }>()
@@ -227,6 +227,51 @@ const verdict = computed(() => {
               <span v-if="!row.redeemed" class="muted"> · released since</span>
             </dd>
           </template>
+          <!--
+            THE DEVICE ID, SHOWN BECAUSE THE RUNBOOK NEEDS IT.
+
+            `session-probe` requires the caller to present this value as
+            `device_id`, and refuses with a uniform 404 if it does not match. The
+            runbook's step 3 tells an operator to run the probe "if you have both
+            the code and their device id" — and nothing displayed it, so the
+            instruction was unexecutable from the console alone. This is the
+            field it meant.
+
+            It is the TRUNCATED fingerprint (`first_seen_fingerprint`), stored the
+            way `code_events` stores one: enough to correlate, not enough to be a
+            usable identifier if it is screenshotted. Nothing compares it as an
+            identity.
+          -->
+          <template v-if="row.first_seen_fingerprint">
+            <dt>Device id</dt>
+            <dd>
+              <code>{{ row.first_seen_fingerprint }}</code>
+              <div class="muted" style="font-size: 11.5px">
+                Quote this to run the session probe. It is not a sign-in credential.
+              </div>
+            </dd>
+          </template>
+          <!--
+            THE LIVENESS AXIS, beside the entitlement one on purpose.
+
+            "Last seen" answers "is the device reaching us"; everything above
+            answers "may this code be used". They were conflated for the life of
+            the feature and the conflation IS the reported bug, so the detail view
+            shows both and labels which is which. An unknown renders as a dash and
+            a sentence, never as "gone" — see `livenessOf` in ./model.
+          -->
+          <dt>Last seen</dt>
+          <dd>
+            <template v-if="livenessOf(row) === 'unknown'">
+              <span class="muted">— never checked in</span>
+              <div class="muted" style="font-size: 11.5px">
+                No heartbeat recorded, so nothing is known either way. This is not the same as signed out.
+              </div>
+            </template>
+            <template v-else>
+              {{ livenessText(row) }}
+            </template>
+          </dd>
           <template v-if="row.release_count">
             <dt>Sign-outs</dt>
             <dd>
@@ -243,7 +288,7 @@ const verdict = computed(() => {
           <template v-if="row.redeemed">
             <dt>Next activation</dt>
             <dd v-if="row.released_pending">
-              Will succeed — signed out on {{ shortDateTime(row.released_at) }} and not claimed since
+              Will succeed — a Sign out was recorded {{ shortDateTime(row.released_at) }} and not claimed since
             </dd>
             <dd v-else>
               Refused on another device until this one signs out

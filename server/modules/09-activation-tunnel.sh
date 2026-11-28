@@ -193,7 +193,7 @@ import urllib.parse
 LISTEN = ("127.0.0.1", int(os.environ.get("ACTIVATION_FORWARD_PORT", "18090")))
 UPSTREAM = ("127.0.0.1", 8090)
 
-ALLOWED = ("/api/activate", "/api/code-lookup", "/api/heartbeat", "/api/release-entitlement")
+ALLOWED = ("/api/activate", "/api/code-lookup", "/api/heartbeat", "/api/release-entitlement", "/api/session-probe")
 
 # Deliberately NOT allowed, stated so a reader sees the boundary rather than
 # inferring it from an absence:
@@ -244,8 +244,26 @@ RELEASE_LIMIT_PATH = "/api/release-entitlement"
 RELEASE_EVENTS = 10
 RELEASE_WINDOW = 600  # seconds
 
+# ── WHY /api/session-probe IS IN THIS LIST ──
+#
+# The probe is the surface support ASKS A STUDENT TO REACH — "open Account, run
+# the check, send me the code" — so it is precisely the request that must work on
+# the network that made them call support. A student who has fallen back to this
+# tunnel because the hub name is refused by their school is exactly the student
+# whose desync needs diagnosing, and leaving the probe off this list would make
+# the diagnostic unavailable in the one condition that causes the report.
+#
+# The surface cost is one more READ. It is strictly weaker than
+# /api/release-entitlement beside it: it writes nothing at all (not even
+# `last_seen_at`), grants no entitlement, and reveals nothing to a caller who
+# cannot present the machine's redacted fingerprint — see session_probe.pb.js.
+PROBE_LIMIT_PATH = "/api/session-probe"
+PROBE_EVENTS = 10
+PROBE_WINDOW = 600  # seconds
+
 _seen: dict[str, list[float]] = {}
 _seen_release: dict[str, list[float]] = {}
+_seen_probe: dict[str, list[float]] = {}
 
 # The header this process sets on every forwarded request, and the ONLY thing
 # the hub uses to tell one tunnelled client from another. See the `identity`
@@ -298,6 +316,10 @@ def release_rate_limited(peer: str) -> bool:
     return _limited(_seen_release, peer, RELEASE_EVENTS, RELEASE_WINDOW)
 
 
+def probe_rate_limited(peer: str) -> bool:
+    return _limited(_seen_probe, peer, PROBE_EVENTS, PROBE_WINDOW)
+
+
 def allowed(path: str) -> bool:
     # urllib.parse unquotes, so an encoded traversal is decoded BEFORE the check
     # — the check must run on the path the upstream will actually see.
@@ -332,7 +354,12 @@ def main() -> None:
             # operations and the hub applies the same bound from the other side.
             if req_path.startswith(RELEASE_LIMIT_PATH) and release_rate_limited(peer):
                 return self.respond(429, b'{"code":429,"message":"Too many attempts"}')
-
+            # A third bucket, for the same reason the second one exists: a probe
+            # is neither an activation nor a sign-out, and spending either budget
+            # on a diagnostic would be spending a student's access on support
+            # work. Matches Caddy's `probe` zone from the other side.
+            if req_path.startswith(PROBE_LIMIT_PATH) and probe_rate_limited(peer):
+                return self.respond(429, b'{"code":429,"message":"Too many attempts"}')
             # Drain headers, then forward. Content-Length is required; a chunked
             # body from a bootstrap client is not worth supporting and silently
             # truncating one would corrupt the code.

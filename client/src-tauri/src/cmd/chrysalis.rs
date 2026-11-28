@@ -2210,6 +2210,39 @@ pub async fn chrysalis_sign_out() -> CmdResult<SignOutResult> {
         .map_err(|error| super::coded_error("CHRYSALIS_SIGN_OUT_FAILED", format!("{error:#}")))
 }
 
+/// Asks the hub what it believes about this device, and reports both halves.
+///
+/// # Why this is a command and not a background task
+///
+/// It is never scheduled. The probe is what a person runs while diagnosing a
+/// disagreement (see `docs/operate/RUNBOOK-DESYNC.md`), and running it on a timer
+/// would be the polling storm the heartbeat's backoff exists to prevent —
+/// against a 10-per-10-minute rate limit. Its whole value is that it is
+/// deliberate: the operator sees the *failed* attempt, not a retried success.
+///
+/// # Why it is fallible, unlike `chrysalis_status`
+///
+/// `chrysalis_status` never fails because the UI must render something. This is
+/// the opposite case: an operator asked a question and is owed the hub's answer
+/// or an honest reason there is none. Returning a fabricated `"unknown"` report
+/// on a network failure would read as the hub's verdict, which is the exact
+/// confusion the probe exists to end.
+///
+/// # Redaction
+///
+/// The response carries the hub's view of this code — never the code itself, and
+/// never the full fingerprint. The error path is formatted with `{error:#}` the
+/// same way `chrysalis_sign_out` is, because `probe` builds its messages without
+/// the code in them.
+#[tauri::command]
+pub async fn chrysalis_probe() -> CmdResult<crate::chrysalis::probe::ProbeResponse> {
+    let verge = Config::verge().await;
+    let report = crate::chrysalis::probe::client_report(&verge.latest_arc());
+    crate::chrysalis::probe::probe(report)
+        .await
+        .map_err(|error| super::coded_error("CHRYSALIS_PROBE_FAILED", format!("{error:#}")))
+}
+
 #[cfg(test)]
 #[allow(clippy::expect_used, clippy::panic, reason = "tests assert by panicking")]
 mod tests {

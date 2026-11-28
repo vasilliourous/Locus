@@ -34,23 +34,81 @@ section_40() {
     if [ ! -f "$TUNNEL_MODULE" ]; then
         bad "09-activation-tunnel.sh is missing — the module list in setup.sh references it"
     else
-        # 1. The allowlist is exactly the three enrolment endpoints, and nothing that
-        #    reaches a privileged or administrative surface.
+        # 1. The allowlist carries the student endpoints, and nothing that reaches a
+        #    privileged or administrative surface.
+        #
+        # ── WHY THE PREDICATE CHANGED, AND WHY IT GOT STRICTER ──
+        #
+        # It was a substring test:  *admin*|*release*|*updates*|*/_/*
+        #
+        # `*release*` was there to keep the OPERATOR's `/api/release` manifest out,
+        # but it also matches `/api/release-entitlement` — the STUDENT's sign-out,
+        # which the module header argues at length must be here, because a device
+        # that fell back to this tunnel cannot otherwise free its own code. So the
+        # guard was already failing on a correct tree, and its own failure message
+        # could not distinguish the two. That is a check that cannot fail for the
+        # right reason, which is worse than none.
+        #
+        # The replacement tests the PATHS, not substrings of the whole line, and it
+        # tests them exactly. Two consequences worth stating:
+        #   * `/api/release` (operator) is still refused, and now for the right
+        #     reason rather than by accident;
+        #   * every entry is checked, so a future `/api/admin/...` is caught even if
+        #     it sits beside a legitimate one.
         allowlist=$(sed -n 's/^ALLOWED = (\(.*\))$/\1/p' "$TUNNEL_MODULE" | head -1)
         if [ -z "$allowlist" ]; then
             bad "could not read ALLOWED from the forwarder — the allowlist guard is blind"
         else
-            case "$allowlist" in
-                *admin*|*release*|*updates*|*/_/*)
-                    bad "the activation tunnel's allowlist names a privileged path: ${allowlist}"
+            # The complete, closed set. A path not listed here must not be added
+            # without editing this line — which is the point: the allowlist is a
+            # decision, and this is where the decision is recorded and reviewed.
+            #
+            #   /api/activate            enrols; mints an entitlement
+            #   /api/code-lookup         read-only pre-check
+            #   /api/heartbeat           the liveness + refusal channel
+            #   /api/release-entitlement the student's sign-out claim
+            #   /api/session-probe       read-only desync diagnostic
+            #
+            # All five are STUDENT surfaces. None of them is privileged: the two
+            # that write cannot escalate (the sign-out only stamps a claim, the
+            # probe writes nothing at all), and the operator's `/api/release`
+            # manifest, `/api/admin/*`, `/admin/`, `/updates/` and `/_/` remain out.
+            permitted=""
+            for p in $(printf '%s' "$allowlist" | tr ',' '\n' | tr -d ' "' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//'); do
+                [ -z "$p" ] && continue
+                case "$p" in
+                    /api/activate|/api/code-lookup|/api/heartbeat|/api/release-entitlement|/api/session-probe)
+                        permitted="$permitted $p"
+                        ;;
+                    *)
+                        bad "the activation tunnel's allowlist names a path that is not a reviewed student surface: ${p}"
+                        ;;
+                esac
+            done
+
+            # Belt and braces: even a path that passed the list above must not be a
+            # privileged prefix. Catches a future edit to the case list.
+            case "$permitted" in
+                *admin*|*updates*|*/_/*)
+                    bad "the activation tunnel's allowlist names a privileged path: ${permitted}"
                     ;;
-                *) ok "the activation tunnel's allowlist names no privileged path" ;;
+                *) ok "the activation tunnel's allowlist names only reviewed student surfaces" ;;
             esac
 
-            for want in /api/activate /api/code-lookup /api/heartbeat; do
+            # The operator's release manifest is the one `/api/release`-prefixed
+            # path that must never be reachable here, and it is now distinguished
+            # EXACTLY from the student's sign-out.
+            case "$permitted" in
+                *" /api/release "*|*" /api/release")
+                    bad "the activation tunnel carries the operator release manifest (/api/release)"
+                    ;;
+                *) ok "the activation tunnel does not carry the operator release manifest" ;;
+            esac
+
+            for want in /api/activate /api/code-lookup /api/heartbeat /api/release-entitlement /api/session-probe; do
                 case "$allowlist" in
                     *"\"$want\""*) ok "allowlist carries ${want}" ;;
-                    *) bad "allowlist does not carry ${want} — enrolment needs it" ;;
+                    *) bad "allowlist does not carry ${want} — a student on a network that needs this tunnel would lose that surface" ;;
                 esac
             done
         fi

@@ -40,7 +40,7 @@ interface Dash {
 interface Attention {
   total_codes: number
   tiers_served: string[]
-  counts: { unservable_tier: number; lapsed: number; shared: number; no_label: number }
+  counts: { unservable_tier: number; lapsed: number; shared: number; no_label: number; gone_quiet: number }
   groups: Record<string, { code: string; label?: string; middleman?: string; tier?: string; days_past?: number; release_count?: number; released_at?: string; expires_at?: string; activated_at?: string }[]>
 }
 
@@ -128,7 +128,7 @@ const problems = computed(() => {
   // a subscription business, and folding it in would leave this page saying
   // "needs attention" forever — which trains the operator to ignore the section.
   // Lapsed codes surface in their own check, below the three that are faults.
-  return a.counts.unservable_tier + a.counts.shared + a.counts.no_label
+  return a.counts.unservable_tier + a.counts.shared + a.counts.no_label + a.counts.gone_quiet
 })
 
 const checks = computed(() => {
@@ -182,6 +182,25 @@ const checks = computed(() => {
         detail: `free since ${shortDateTime(r.released_at).split(',')[0]}`,
       })),
       open: () => openCodes({ view: 'all' }),
+      openLabel: 'Open in Codes',
+    },
+    {
+      id: 'quiet',
+      n: a.counts.gone_quiet,
+      tone: 'warn',
+      // NOT 'bad'. A device that has stopped checking in is usually a closed
+      // laptop, and calling that a fault would make this card red every night on
+      // a healthy fleet. It is `warn` because the unremarkable causes and the
+      // serious ones (a hub outage, a bad hook deploy, a school blocking the
+      // hostname) look identical from here — and the only way to tell is to look.
+      what: 'In term, but the device has stopped checking in',
+      why: 'Usually a closed laptop. It is also what a hub outage, a stale hook deploy or a blocked school network look like — so once it is more than a handful, check the hub before the students (Runbook: desync).',
+      rows: (a.groups.gone_quiet || []).map((r) => ({
+        key: r.code,
+        main: r.label || r.code,
+        detail: `quiet ${r.hours_quiet}h · ${r.middleman || 'no middleman'}`,
+      })),
+      open: () => openCodes({ status: 'redeemed' }),
       openLabel: 'Open in Codes',
     },
     {

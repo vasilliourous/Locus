@@ -60,6 +60,41 @@ routerAdd("POST", "/api/heartbeat", function(e) {
         }
         if (!record) return e.json(404, {code:404, message:"Code not found"});
 
+        // ── Liveness: the ONE trace a heartbeat leaves on the hub ────────────
+        //
+        // Until this existed the heartbeat was a pure READ. It answered the
+        // device and wrote nothing, so "this device beat 30 seconds ago" and
+        // "this device was killed three weeks ago" produced IDENTICAL hub state.
+        // The console then had to guess, and it guessed from `released_at` —
+        // an unrelated fact — which is how a signed-in client came to be shown
+        // as signed out. See docs/reference/AUTH-STATE.md.
+        //
+        // WHY IT RUNS HERE, BEFORE THE EXPIRY AND SUSPENSION RETURNS BELOW:
+        // a device that is suspended, or whose code has lapsed, and is STILL
+        // BEATING is alive — it is checking in every 2 minutes precisely because
+        // the client keeps asking. That is a materially different situation for
+        // the operator from "suspended and gone", and it is free data. Writing
+        // only on the success path would erase it, and would make a refused
+        // device look absent within one lease.
+        //
+        // WHY THE HUB'S CLOCK, NEVER THE CLIENT'S: `new Date()` here is the
+        // instant the hub handled the request. A client-supplied timestamp would
+        // have to be compared across two clocks, and this repo already has a
+        // date-dialect trap (goja returns NaN for PocketBase's space-separated
+        // dates — see parsePBDate above). Using the hub's own clock makes skew
+        // structurally irrelevant to liveness rather than something to correct.
+        //
+        // WHY IT IS WRAPPED IN try/catch: this is telemetry. A telemetry write
+        // must never be able to refuse a paying student's heartbeat, and a hub
+        // mid-deploy may briefly lack the column. A failure here costs an
+        // operator the age of a row; it must not cost a student their access.
+        try {
+            record.set("last_seen_at", new Date().toISOString());
+            $app.dao().saveRecord(record);
+        } catch (seenErr) {
+            // Deliberately swallowed. See above.
+        }
+
         // ── Subscription expiry, ENFORCED ────────────────────────────────────
         //
         // This is the check that makes a lapsed code actually stop. It runs

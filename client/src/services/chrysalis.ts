@@ -202,3 +202,54 @@ export const chrysalisDismissUpdate = () =>
  */
 export const chrysalisSignOut = () =>
   invoke<SignOutResult>('chrysalis_sign_out')
+
+/**
+ * The hub's answer to "what do YOU believe about this device", plus this
+ * device's own report, so a divergence has both halves in one place.
+ *
+ * This is the surface `docs/operate/RUNBOOK-DESYNC.md` is written against. Read
+ * that before rendering any of these fields: in particular `liveness` is NOT and
+ * never becomes "signed in" or "signed out" — it is about whether the device is
+ * reaching the hub, and `entitlement` is about whether the code may be used. The
+ * whole class of desync this exists to diagnose came from collapsing those two.
+ */
+export interface ProbeResult {
+  probeVersion: number
+  serverTime: string
+  /** May this code be used? One of: active, released-unclaimed, suspended, expired, never-activated. */
+  entitlement: string
+  /** Is this device reaching the hub? One of: live, stale, absent, unknown. `unknown` is NOT `absent`. */
+  liveness: string
+  hubView: {
+    activatedAt: string | null
+    releasedAt: string | null
+    releasedPending: boolean
+    suspended: boolean
+    suspendedReason: string | null
+    expiresAt: string | null
+    tier: string
+    /** null means the hub has never seen this code beat — never render it as "absent". */
+    lastSeenAt: string | null
+    lastSeenAgeS: number | null
+    firstSeenFingerprint: string
+  }
+  clientView: Record<string, unknown> | null
+  leaseExpiresAt: string | null
+  /** The named case. See RUNBOOK-DESYNC.md §4 for the action each one implies. */
+  reasonCode: string
+  divergence: string[]
+}
+
+/**
+ * Asks the hub, once, what it believes about this device.
+ *
+ * Never scheduled — this is a deliberate diagnostic a person runs, and calling it
+ * on a timer would be the polling storm the heartbeat's backoff exists to prevent,
+ * against a 10-per-10-minute rate limit.
+ *
+ * Rejects with a `CHRYSALIS_PROBE_FAILED` error rather than resolving to a
+ * fabricated report: an operator asked a question and is owed the hub's answer or
+ * an honest reason there is none. A made-up `"unknown"` would read as the hub's
+ * verdict, which is the exact confusion the probe exists to end.
+ */
+export const chrysalisProbe = () => invoke<ProbeResult>('chrysalis_probe')

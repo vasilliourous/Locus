@@ -25,7 +25,15 @@ import RowMenu from '../components/RowMenu.vue'
 import type { MenuItem } from '../components/menu'
 import { useCodes, act } from './codes/data'
 import type { CodeRow } from './codes/model'
-import { isUrgent, remainingText, shortDate, stateClass, stateLabel } from './codes/model'
+import {
+  isUrgent,
+  livenessOf,
+  livenessText,
+  remainingText,
+  shortDate,
+  stateClass,
+  stateLabel,
+} from './codes/model'
 import CodeDetail from './codes/CodeDetail.vue'
 import CreateDrawer from './codes/CreateDrawer.vue'
 import RenewDrawer from './codes/RenewDrawer.vue'
@@ -136,6 +144,28 @@ const shown = computed(() => {
     })
   return out
 })
+
+/**
+ * The tooltip for the liveness cell.
+ *
+ * It states what was OBSERVED and what was not. "Checked in" means the device
+ * reached the hub, not that the student is in front of it, and an unknown says so
+ * explicitly rather than leaving a dash to be read as "gone". The wording is the
+ * operator's only defence against re-deriving "signed out" from a missing value,
+ * which is the defect this column exists to remove.
+ */
+function livenessTitle(row: CodeRow): string {
+  switch (livenessOf(row)) {
+    case 'live':
+      return 'This device reached the hub recently. It does not mean the student is using it.'
+    case 'stale':
+      return 'No contact for longer than the heartbeat lease. The device may be off, offline, or quits — the hub cannot tell which.'
+    case 'absent':
+      return 'No contact for over 7 days. The record is kept; the device is presumed gone.'
+    case 'unknown':
+      return 'This code has never checked in, so there is no liveness to report. This is not the same as signed out.'
+  }
+}
 
 // ── Selection (bulk delete only) ──
 // Cleared on every filter change and after every bulk action, so a stale tick
@@ -442,6 +472,9 @@ onMounted(async () => {
               Code <span class="arrow">↑</span>
             </th>
             <th>State</th>
+            <th title="The last time this code reached the hub — a different fact from State, which is about the entitlement">
+              Last seen
+            </th>
             <th class="sortable" :class="{ sorted: sortKey === 'middleman' }" @click="sortKey = 'middleman'">
               Who <span class="arrow">↑</span>
             </th>
@@ -474,6 +507,19 @@ onMounted(async () => {
             </td>
             <td>
               <span class="badge" :class="stateClass(row)">{{ stateLabel(row) }}</span>
+            </td>
+            <!--
+              The LIVENESS cell, deliberately its own column rather than folded
+              into the State badge. The two answer different questions with
+              different owners, and merging them is the defect this change fixes:
+              "signed out" is derived from `released_at` (an entitlement fact) and
+              says nothing about whether the device is beating.
+
+              An unknown liveness renders as "—" with a tooltip, never as "away"
+              and never as "signed out". See `livenessOf` in ./codes/model.
+            -->
+            <td class="muted nowrap" :title="livenessTitle(row)">
+              {{ livenessText(row) }}
             </td>
             <td class="muted truncate">
               {{ row.middleman || '—' }}
