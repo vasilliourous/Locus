@@ -241,29 +241,6 @@ routerAdd("POST", "/api/session-probe", function (e) {
         }
         if (!machineMatches) return opaqueNotFound();
 
-        // ── The entitlement axis ────────────────────────────────────────────
-        var suspended = record.getBool("suspended");
-        var suspendedReason = String(record.get("suspended_reason") || "").trim();
-        var expMs = parsePBDate(record.get("expires_at"));
-        var expired = !isNaN(expMs) && expMs > 0 && expMs < nowMs;
-
-        var activatedAtRaw = record.get("activated_at");
-        var releasedAtRaw = record.get("released_at");
-        var actMs = parsePBDate(activatedAtRaw);
-        var relMs = parsePBDate(releasedAtRaw);
-
-        // The SAME comparison activation.pb.js and admin_console.pb.js use, byte
-        // for byte. Three copies of one rule is three things that can disagree;
-        // §43 asserts this one matches, and the console's copy does too.
-        var releasedPending = (actMs > 0 && relMs > 0 && relMs > actMs);
-
-        var entitlement;
-        if (suspended) entitlement = "suspended";
-        else if (expired) entitlement = "expired";
-        else if (!activatedAtRaw || actMs <= 0) entitlement = "never-activated";
-        else if (releasedPending) entitlement = "released-unclaimed";
-        else entitlement = "active";
-
         // ── The operator's override: a marker the probe MUST report ─────────
         //
         // A release by an operator is a decision, not a derived state: it clears
@@ -281,6 +258,36 @@ routerAdd("POST", "/api/session-probe", function (e) {
         var evictReason = String(record.get("evict_reason") || "").trim();
         var overrideId = String(record.get("override_id") || "").trim();
         var hasOverride = forceState !== "" || evictAt !== "";
+
+        // ── The entitlement axis ────────────────────────────────────────────
+        var suspended = record.getBool("suspended");
+        var suspendedReason = String(record.get("suspended_reason") || "").trim();
+        var expMs = parsePBDate(record.get("expires_at"));
+        var expired = !isNaN(expMs) && expMs > 0 && expMs < nowMs;
+
+        var activatedAtRaw = record.get("activated_at");
+        var releasedAtRaw = record.get("released_at");
+        var actMs = parsePBDate(activatedAtRaw);
+        var relMs = parsePBDate(releasedAtRaw);
+
+        // The SAME comparison activation.pb.js and admin_console.pb.js use, byte
+        // for byte. Three copies of one rule is three things that can disagree;
+        // §43 asserts this one matches, and the console's copy does too.
+        var releasedPending = (actMs > 0 && relMs > 0 && relMs > actMs);
+
+        // ── `never-activated` is NOT the word for a released code ──
+        //
+        // A release clears `activated_at`, so the old chain reported every
+        // operator-released code as `never-activated` — a false statement about a
+        // card that was sold and freed, and the console shows it verbatim next to
+        // "released". The claim state has its own word: `released`.
+        var entitlement;
+        if (suspended) entitlement = "suspended";
+        else if (expired) entitlement = "expired";
+        else if (forceState === "released") entitlement = "released";
+        else if (!activatedAtRaw || actMs <= 0) entitlement = "never-activated";
+        else if (releasedPending) entitlement = "released-unclaimed";
+        else entitlement = "active";
 
         // ── The liveness axis, from the ONE column the beat writes ──────────
         //
@@ -364,6 +371,14 @@ routerAdd("POST", "/api/session-probe", function (e) {
 
         if (skewed) {
             reasonCode = "clock_skew";
+        } else if (forceState === "released") {
+            // THE OPERATOR'S OWN ACTION, named. Without this arm a released code
+            // fell through to `unknown` (its entitlement is no longer `active` and
+            // it is not a refusal), which told the operator the probe could not
+            // name a case it had just described in `override`. The eviction detail
+            // travels in `override` and `divergence`, so this verdict only has to
+            // say why the two sides are as they are.
+            reasonCode = "released_by_override";
         } else if (clientState === "activated" && entitlement === "released-unclaimed") {
             // THE REPORTED BUG, named. The hub holds a sign-out claim that a
             // beating device contradicts: something wrote `released_at` for a

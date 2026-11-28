@@ -216,7 +216,12 @@ export const chrysalisSignOut = () =>
 export interface ProbeResult {
   probeVersion: number
   serverTime: string
-  /** May this code be used? One of: active, released-unclaimed, suspended, expired, never-activated. */
+  /**
+   * May this code be used? One of: active, released-unclaimed, released,
+   * suspended, expired, never-activated. `released` is an OPERATOR's decision
+   * (`force_state: "released"`), which is a different fact from
+   * `never-activated` — a released code was sold once and freed on purpose.
+   */
   entitlement: string
   /** Is this device reaching the hub? One of: live, stale, absent, unknown. `unknown` is NOT `absent`. */
   liveness: string

@@ -139,7 +139,7 @@
       },
       "suspended": {
         "lapsedTitle": "Your subscription has ended",
-        "suspendedTitle": "This device has been signed out",
+        "suspendedTitle": "Access to this device is paused",
         "lapsedBody": "Your code has expired, so the connection was stopped. Renewing with whoever sold you the code restores access.",
         "suspendedBody": "An operator has suspended this code, so the connection was stopped. Your code is still saved on this computer.",
         "lapsedAction": "Contact whoever sold you the code to renew it.",

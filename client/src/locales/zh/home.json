@@ -139,7 +139,7 @@
       },
       "suspended": {
         "lapsedTitle": "您的订阅已结束",
-        "suspendedTitle": "此设备已注销登录",
+        "suspendedTitle": "此设备的访问已暂停",
         "lapsedBody": "您的代码已过期，因此连接已停止。向出售代码给您的人续费即可恢复访问。",
         "suspendedBody": "运营人员已暂停此代码，因此连接已停止。您的代码仍保存在这台电脑上。",
         "lapsedAction": "请联系出售代码给您的人进行续费。",

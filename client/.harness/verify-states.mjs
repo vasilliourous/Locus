@@ -61,6 +61,17 @@ const textOf = async (query) => {
     !/In use|days? left in the term/.test(text),
     'the normal connection page still rendered — the gate did not leave it',
   )
+  // I3: the device is not signed out — it keeps its code — so the title must not
+  // say so. It said "This device has been signed out" above a body explaining a
+  // suspension, which is a label contradicting its own screen.
+  check(
+    !/signed out/i.test(text),
+    `the stopped page claims the device was signed out: ${text.slice(0, 120)}`,
+  )
+  check(
+    /access to this device is paused/i.test(text),
+    `the stopped page does not state what happened: ${text.slice(0, 120)}`,
+  )
   // The one control the screen must NOT offer: a code prompt invites a student to
   // re-enter a code the hub already holds and already refuses.
   const inputs = await page.locator('input, textarea, button').count()

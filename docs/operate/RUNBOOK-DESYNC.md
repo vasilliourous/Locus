@@ -143,6 +143,8 @@ you should treat them differently:
 | `reason_code` | What it means | What you do |
 |---|---|---|
 | `client_beating_hub_quiet` | The device is checking in. The console's "signed out" was an inference from `released_at`. | **Nothing on the device.** If State also says signed out, treat it as D3 below. |
+| `released_by_override` | An operator released this code, which is why the two sides look as they do. `override` carries the eviction detail. | **Nothing on the device.** If the student should be back in, press **Mark in term** in the console: it puts the claim back and stops cutting the device off. |
+
 | `stale_release_claim` | A sign-out claim contradicts a device that is demonstrably still using the code. | Ask the student to sign in once — that spends the claim. If they cannot, `codes.unbind` from the console. **Do not** reset the term; unbind only clears `activated_at`. |
 | `hub_refused_client_hasnt_noticed` | The hub already refuses (suspended or expired); the client has not beaten since. | Wait one beat, or press "check now". If it persists past two beats, it is a client problem — get the Account screen. |
 | `client_unreachable` | No recent beat. Killed, offline, or quit — **the probe does not know which**. | Nothing, unless the student is on the phone. If they are, step 5. |

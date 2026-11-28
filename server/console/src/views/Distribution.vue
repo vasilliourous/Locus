@@ -177,7 +177,7 @@ function openFor(r: Middleman, status?: string) {
             <th class="num">Codes</th>
             <th class="num">In term</th>
             <th class="num">Due ≤7d</th>
-            <th class="num">Unused</th>
+            <th class="num" title="never used, or used and since released">Available</th>
             <th class="num">Stopped</th>
             <th class="num">Lapsed</th>
             <th class="num">Renewals</th>

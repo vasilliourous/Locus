@@ -139,7 +139,7 @@
       },
       "suspended": {
         "lapsedTitle": "Tu suscripción ha terminado",
-        "suspendedTitle": "Este dispositivo se ha desconectado",
+        "suspendedTitle": "El acceso a este dispositivo está en pausa",
         "lapsedBody": "Tu código ha caducado, así que la conexión se detuvo. Renovar con quien te vendió el código restablece el acceso.",
         "suspendedBody": "Un operador ha suspendido este código, así que la conexión se detuvo. Tu código sigue guardado en esta computadora.",
         "lapsedAction": "Contacta con quien te vendió el código para renovarlo.",

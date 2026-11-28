@@ -1475,31 +1475,57 @@ routerAdd("POST", "/api/admin/console", function(e) {
         }
 
         // ─────────────────────────────────────────────────────────────
-        // codes.override — a direct state correction that is not a release
+        // codes.override — put a code back IN TERM, from any state
         //
-        // The console exposes ONE transition besides release/undo: a code whose
-        // holder pressed Sign out (`released_pending` — `released_at` is later
-        // than `activated_at`) can be put back IN TERM. That means the sign-out
-        // is withdrawn and the claim that is already on a machine is the one in
-        // force again.
+        // This is the one state the other actions cannot express. Every other
+        // target in the state model already has a direct control:
         //
-        // ── WHY THIS IS A REAL STATE CHANGE, NOT A FLAG ──
+        //   released  ← codes.release          (the claim is cleared)
+        //   lapsed    ← codes.expire           (a past date)
+        //   stopped   ← codes.suspend / kick
+        //   unused    ← nothing, by design     (see below)
+        //   unclaimed ← nothing, by design     (see below)
         //
-        // `activation.pb.js` decides whether a second device may redeem this code
-        // by comparing `released_at` with `activated_at`. Clearing `released_at`
-        // therefore changes what the hub will DO: a second machine is refused
-        // again, and the current holder keeps the claim. Writing a cosmetic
-        // "in term" marker without this would leave the hub handing the code to
-        // the next caller — the exact "records an intention" failure the console
-        // must not have.
+        // "In term" had two narrow routes (consume a pending sign-out, or
+        // unsuspend an already-claimed code) and NO route at all for a code that
+        // is `released` — the operator could free a code but not take it back.
+        // So this action is defined by its TARGET state, not by the one state it
+        // used to fix, and it clears every input that would make the derivation
+        // disagree with the operator's decision:
         //
-        // `force_state` is deliberately NOT set. It pins the label when the
-        // derivation would disagree with the operator; here the derivation
-        // already agrees once `released_at` is cleared, and a pin that restates
-        // the derived answer is a second source of truth for it.
+        //   suspended / suspended_reason   — "in term" cannot also mean stopped
+        //   evict_requested_at / evict_reason — stop cutting the device off
+        //   force_state                     — "released" is not "in term"
+        //   released_at                     — withdraw a pending sign-out
+        //   activated_at                    — claim it if nobody holds it
         //
-        // The audit row is HARD-FAIL (writeOverride throws) and runs before the
-        // save, so a correction cannot apply without a justification.
+        // ── THE TWO STATES IT DELIBERATELY CANNOT PRODUCE ──
+        //
+        // `unused` means never issued. Making an issued code look never-issued
+        // requires erasing `first_seen_at`, which is the ONLY record that the card
+        // was ever sold — and `codes.delete` refuses on exactly that fact. Erasing
+        // it would make a second sale invisible, which is a worse outcome than any
+        // convenience it buys. So `unused` is not a target; `released` is what an
+        // issued-then-freed code honestly is.
+        //
+        // A code with no `first_seen_at` and no `activated_at` has never been
+        // issued, so there is no holder to put in term — and claiming it here
+        // would be actively harmful: `activation.pb.js` refuses a code whose
+        // `activated_at` is already set ("already in use on another device"), so
+        // the student's OWN first activation would fail. The student claims it by
+        // activating; the console must not claim it for them.
+        //
+        // `unclaimed` is the DEVICE's report (`released_at`), which
+        // docs/reference/OVERRIDES.md forbids an override from writing.
+        //
+        // ── WHY THE EXPIRY IS SOMETIMES MOVED ──
+        //
+        // "In term" and a past expiry cannot both be true: the derivation reads
+        // expired first. A code that has lapsed therefore gets its expiry
+        // extended by its own TERM — the same arithmetic `codes.renew` uses and
+        // the same audit event — because the operator has explicitly said this
+        // code is in force. A code with no term cannot be extended without
+        // inventing a span, so it is refused with the two ways to supply one.
         // ─────────────────────────────────────────────────────────────
         if (action === "codes.override") {
             var targetO = canonical(body.code);
@@ -1513,10 +1539,39 @@ routerAdd("POST", "/api/admin/console", function(e) {
                 return bad(400, "to_state must be in_term; every other state has its own action");
             }
 
-            var actO = parsePBDate(recO.get("activated_at"));
-            var relO = parsePBDate(recO.get("released_at"));
-            var pendingO = actO > 0 && relO > 0 && relO > actO;
-            if (!pendingO) {
+            var actRawO = String(recO.get("activated_at") || "").trim();
+            var firstSeenO = String(recO.get("first_seen_at") || "").trim();
+            if (!actRawO && !firstSeenO) {
+                return bad(400,
+                    "This code has never been issued, so there is no holder to put in term. " +
+                    "Its first holder claims it by activating — claiming it here would make that " +
+                    "activation fail, because the hub refuses a code that is already in use.");
+            }
+
+            var nowO = Date.now();
+            var expRawO = recO.get("expires_at");
+            var expMsO = parsePBDate(expRawO);
+            var lapsedO = !isNaN(expMsO) && expMsO > 0 && expMsO < nowO;
+            var termO = Number(recO.get("term_days"));
+            var hasTermO = isFinite(termO) && termO > 0;
+            var newExpiryO = "";
+            if (lapsedO) {
+                if (!hasTermO) {
+                    return bad(400,
+                        "This code has lapsed and carries no term to extend it by. Set its term " +
+                        "(or its expiry) first, then set it in term.");
+                }
+                newExpiryO = new Date(nowO + termO * 24 * 60 * 60 * 1000).toISOString();
+            }
+
+            var actMsO = parsePBDate(recO.get("activated_at"));
+            var relMsO = parsePBDate(recO.get("released_at"));
+            var pendingO = actMsO > 0 && relMsO > 0 && relMsO > actMsO;
+            var forceO = String(recO.get("force_state") || "");
+            var evictO = String(recO.get("evict_requested_at") || "");
+            var suspO = recO.getBool("suspended");
+            var alreadyInTermO = !!actRawO && !suspO && !lapsedO && !pendingO && !evictO && forceO !== "released";
+            if (alreadyInTermO) {
                 // Truthful no-op, like a repeated release: the code is already in
                 // the state asked for, and that is not a failure.
                 return ok({
@@ -1536,9 +1591,16 @@ routerAdd("POST", "/api/admin/console", function(e) {
                 code: targetO,
                 override_id: ovIdO,
                 aspect: "in_term",
-                from_value: "sign-out@" + String(recO.get("released_at") || "").substring(0, 19),
+                // What the row said BEFORE, as fields rather than a label: the
+                // hub does not own the console's vocabulary, and a copied label
+                // is a second place for it to drift.
+                from_value: "suspended=" + (suspO ? "true" : "false") +
+                    " activated_at=" + actRawO +
+                    " released_at=" + String(recO.get("released_at") || "") +
+                    " force_state=" + forceO +
+                    " evict_requested_at=" + evictO,
                 to_value: "in_term",
-                reason: String(body.reason || "Sign-out cleared from console").trim(),
+                reason: String(body.reason || "Set in term from console").trim(),
                 actor: String(body.actor || "console"),
                 observed_state: livenessForConfirmation(recO),
                 observed_at_override: String(recO.get("last_seen_at") || ""),
@@ -1548,12 +1610,30 @@ routerAdd("POST", "/api/admin/console", function(e) {
             // ONE save. `release_count` is the student's own statement about
             // their sign-outs and is deliberately left alone; clearing the date
             // withdraws the pending claim, it does not un-record that one happened.
+            setIfPresent(recO, "suspended", false);
+            setIfPresent(recO, "suspended_reason", "");
             setIfPresent(recO, "released_at", null);
+            setIfPresent(recO, "evict_requested_at", null);
+            setIfPresent(recO, "evict_reason", "");
+            setIfPresent(recO, "force_state", "");
+            if (!actRawO) setIfPresent(recO, "activated_at", new Date(nowO).toISOString());
+            if (newExpiryO) setIfPresent(recO, "expires_at", newExpiryO);
             setIfPresent(recO, "override_id", ovIdO);
             $app.dao().saveRecord(recO);
+
             logEvent(targetO, "override-in-term",
-                     "the student's pending sign-out was cleared — the code is in term again", "");
-            return ok({code: targetO, state: "in_term", cleared_sign_out: true, override_id: ovIdO});
+                     "set in term" + (pendingO ? "; the pending sign-out was withdrawn" : "") +
+                     (suspO ? "; the suspension was lifted" : "") +
+                     (newExpiryO ? "; expiry extended to " + newExpiryO : ""), "");
+            return ok({
+                code: targetO,
+                state: "in_term",
+                cleared_sign_out: pendingO,
+                cleared_suspension: suspO,
+                cleared_override: forceO !== "" || evictO !== "",
+                expires_at: newExpiryO || null,
+                override_id: ovIdO
+            });
         }
 
         // ─────────────────────────────────────────────────────────────

@@ -47,7 +47,7 @@ says, edit the rows under that screen's heading.
 | `home.components.connection.suspended.lapsedTitle` | Your subscription has ended | src/pages/suspended.tsx:100 |
 | `home.components.connection.suspended.suspendedAction` | Ask them to lift the suspension. You can connect again without re-entering your code or restarting the app. | src/pages/suspended.tsx:138 |
 | `home.components.connection.suspended.suspendedBody` | An operator has suspended this code, so the connection was stopped. Your code is still saved on this computer. | src/pages/suspended.tsx:117 |
-| `home.components.connection.suspended.suspendedTitle` | This device has been signed out | src/pages/suspended.tsx:101 |
+| `home.components.connection.suspended.suspendedTitle` | Access to this device is paused | src/pages/suspended.tsx:101 |
 
 ## Connection tab
 

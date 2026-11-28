@@ -150,8 +150,11 @@ const cards = computed(() => {
     {
       id: 'unused',
       n: d.codes.available,
-      label: 'Unused stock',
-      sub: 'minted, not yet sold',
+      // The count is the hub's `available` bucket, which includes codes that were
+      // sold and have since been released. "Minted, not yet sold" was false for
+      // those; the badge on the row says "released" for exactly that reason.
+      label: 'Available',
+      sub: 'free to sell — never used, or released',
       tone: 'good',
       run: () => navigate('codes', { status: 'available' }),
     },

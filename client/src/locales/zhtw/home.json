@@ -139,7 +139,7 @@
       },
       "suspended": {
         "lapsedTitle": "您的訂閱已結束",
-        "suspendedTitle": "此裝置已登出",
+        "suspendedTitle": "此裝置的存取已暫停",
         "lapsedBody": "您的代碼已過期，因此連線已停止。向出售代碼給您的人續訂即可恢復存取。",
         "suspendedBody": "營運人員已暫停此代碼，因此連線已停止。您的代碼仍儲存在這台電腦上。",
         "lapsedAction": "請聯絡出售代碼給您的人進行續訂。",

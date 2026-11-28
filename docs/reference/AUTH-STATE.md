@@ -60,7 +60,8 @@ own different facts and **neither can answer the other's question**.
             │  entitlement: may this code be used?    │   THE HUB answers —
             │  values: active · released-unclaimed    │   it is the only side
             │          suspended · expired            │   that can refuse
-            │          never-activated · unknown      │
+            │          released · never-activated     │
+            │          unknown                        │
             └─────────────────────────────────────────┘
 
             ┌─────────────────────────────────────────┐

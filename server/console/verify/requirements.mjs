@@ -60,7 +60,7 @@ async function open(code) {
   check('R4: no “type the last four characters” input exists', (await ins.locator('input[placeholder*="Last four"]').count()) === 0)
   check('R4: no reason/“shown to the student” textarea exists', (await ins.locator('textarea[placeholder*="Write it for the student"]').count()) === 0)
   check('R4: no “Manual overrides” disclosure exists', (await ins.locator('summary', { hasText: 'Manual overrides' }).count()) === 0)
-  check('R4: the release is a direct action (Mark unused is present)', (await ins.getByRole('button', { name: 'Mark unused' }).count()) === 1)
+  check('R4: the release is a direct action (Release is present)', (await ins.getByRole('button', { name: 'Release', exact: true }).count()) === 1)
 }
 
 // ── R6b: Term and Expiry are top-level editable tiles ──────────────────────
@@ -126,7 +126,32 @@ async function open(code) {
   check('R2: the result names the verdict (reason_code)', /verdict:\s*\w+/.test(text), (text.match(/verdict:[^·]*/) || [''])[0])
   check('R2: the result shows a run timestamp', /ran .*\d{4}/.test(text), (text.match(/ran [^C]*/) || [''])[0])
   check('R2: a successful run shows no failure banner', (await ins.locator('.msg.err', { hasText: 'did not answer' }).count()) === 0)
+
+  // D1: the run is legible from the MAIN VIEW — a persistent line under the page
+  // title, with the counts, that survives switching codes.
+  const lastRun = (await page.locator('.probe-last').innerText()).replace(/\s+/g, ' ')
+  check('D1: the page header reports the last probe run', /Probe ran .*on RQ-/.test(lastRun), lastRun)
+  check('D1: the last-run line carries checks/findings/changes/errors', /\d+ checks · \d+ findings? · 0 changes · no errors/.test(lastRun), lastRun)
+  // Select a DIFFERENT row in the same SPA session (a reload would legitimately
+  // reset the panel, and the point is that changing selection does not erase the
+  // evidence).
+  await page.locator('table.codes-table tbody tr', { hasText: 'RQ-BCDE-FGHJ-KMNP-2' }).first().click()
+  await page.waitForTimeout(400)
+  const stillThere = await page.locator('.probe-last').innerText()
+  check('D1: the last-run line survives selecting another code', /RQ-ABCD-EFGH-JKMN-T/.test(stillThere), stillThere.replace(/\s+/g, ' '))
+  await page.locator('table.codes-table tbody tr', { hasText: 'RQ-ABCD-EFGH-JKMN-T' }).first().click()
+  await page.waitForTimeout(400)
   await page.screenshot({ path: `${SHOTS}/req-probe.png` })
+}
+
+// ── D1: a run that cannot happen is reported as a failure, not silence ────
+{
+  const ins = await open('RQ-EFGH-JKMN-PQRS-5') // never issued: no device id
+  await ins.getByRole('button', { name: 'Run session probe' }).click()
+  await page.waitForTimeout(300)
+  const lastRun = (await page.locator('.probe-last').innerText()).replace(/\s+/g, ' ')
+  check('D1: a probe that cannot run says so in the header', /and failed:/.test(lastRun), lastRun)
+  check('D1: the failure explains why (no device to compare)', /device id/.test(lastRun), lastRun)
 }
 
 // ── R5: a real expiry, then cleared, both readable at the top level ───────
@@ -152,7 +177,7 @@ async function open(code) {
 {
   const ins = await open('RQ-ABCD-EFGH-JKMN-T')
   const before = (await ins.locator('.badge').first().innerText()).trim()
-  await ins.getByRole('button', { name: 'Mark unused' }).click()
+  await ins.getByRole('button', { name: 'Release', exact: true }).click()
   await page.waitForTimeout(700)
   const afterBadge = (await ins.locator('.badge').first().innerText()).trim()
   check('R3: in term → released (the derived state changed)', before === 'in term' && afterBadge === 'released', `${before} → ${afterBadge}`)
@@ -177,6 +202,10 @@ async function open(code) {
   await page.waitForTimeout(500)
   const probeText = (await ins.innerText()).replace(/\n/g, ' ')
   check('R3: the next probe run ALERTS on the override', probeText.includes('Override active'), (probeText.match(/Override active[^.]*/) || [''])[0])
+  // I3: a released code was SOLD once, so the hub must not call it "never
+  // activated", and the verdict must name the decision rather than "unknown".
+  check('I3: the probe calls a released code "released", not "never-activated"', /May be used: released\b/.test(probeText), (probeText.match(/May be used:[^·]*/) || [''])[0])
+  check('I3: the probe names the override as the verdict', /verdict:\s*released_by_override/.test(probeText), (probeText.match(/verdict:[^C]*/) || [''])[0])
   await page.screenshot({ path: `${SHOTS}/req-override-probe.png` })
 }
 

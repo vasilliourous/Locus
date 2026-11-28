@@ -591,6 +591,16 @@ table.data tbody tr.dim td { opacity: .6; }
    used only where a cell is genuinely free text. */
 .truncate { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
+/* Free-text columns WRAP instead of ellipsising. A student's name is the one
+   link between them and their code; "Macleans Y13 — Tom R…" is not findable by
+   eye, and the row is allowed to be two lines tall (I4: nothing important is
+   ellipsised). `anywhere` handles a pasted id with no spaces. */
+table.codes-table td.wrapcell {
+  white-space: normal;
+  overflow-wrap: anywhere;
+  line-height: 1.35;
+}
+
 /* The Codes table sizes to its container, never to its content.
    Two problems this solves, both measured in a real browser:
      1. The intrinsic width of eight populated columns was 919px inside a 756px
@@ -1191,6 +1201,13 @@ table.codes-table .row-verbs { justify-content: flex-end; flex-wrap: nowrap; }
 .ins-actions.ins-state-actions button { flex: 0 0 auto; }
 
 .ins-probe { display: flex; align-items: center; gap: var(--s2); margin-bottom: var(--s2); }
+
+/* The last probe run, under the page title. Deliberately part of the header
+   rather than a toast: a toast is gone in five seconds and the question it
+   answers ("did that run?") is asked minutes later, during a support call. */
+.probe-last { margin: 6px 0 0; font-size: 12px; color: var(--muted); }
+.probe-last strong { color: var(--text); font-weight: 600; }
+.probe-last.failed, .probe-last.failed strong { color: var(--danger); }
 .ins-probe-when { font-size: 11px; }
 .ins-probe-result .msg { margin-bottom: var(--s2); line-height: 1.5; }
 .ins-probe-result code { font-size: 0.95em; }
@@ -1753,7 +1770,10 @@ table.codes-table .c-code  { width: 160px; }  /* fixed: never truncates */
 table.codes-table .c-name  { width: auto; }   /* free text: truncates */
 table.codes-table .c-plan  { width: 88px; }
 table.codes-table .c-state { width: 124px; }
-table.codes-table .c-seen  { width: 124px; }
+/* "not checked in 5d ago" is 158px at this type size. 124 ellipsised it, which
+   the I4 scan measured; the column now fits the longest real value instead of
+   clipping the datum the operator reads during a support call. */
+table.codes-table .c-seen  { width: 172px; }
 table.codes-table .c-who   { width: auto; }   /* also free text: shares leftover */
 table.codes-table .c-days  { width: 94px; }  /* fits "DAYS LEFT ↑" + arrow */
 table.codes-table .c-verbs { width: 144px; }

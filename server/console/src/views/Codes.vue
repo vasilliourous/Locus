@@ -36,7 +36,7 @@ import StateBlock from '../components/StateBlock.vue'
 import ConfirmSheet from '../components/ConfirmSheet.vue'
 import { useCodes, act } from './codes/data'
 import { meta } from './codes/meta'
-import type { CodeRow } from './codes/model'
+import type { CodeRow, ProbeSummary } from './codes/model'
 import {
   isUrgent,
   livenessOf,
@@ -46,6 +46,7 @@ import {
   overrideNote,
   remainingText,
   shortDate,
+  shortDateTime,
   stateClass,
   stateLabel,
 } from './codes/model'
@@ -313,7 +314,11 @@ onBeforeUnmount(() => document.removeEventListener('keydown', onKey))
 // look at a row would arm a delete.
 const checked = ref<Set<string>>(new Set())
 const checkedRows = computed(() => rows.value.filter((r) => checked.value.has(r.code)))
-const checkedDeletable = computed(() => checkedRows.value.filter((r) => !r.redeemed))
+// The hub refuses to delete a code that has EVER been issued, not merely one
+// that is in use now (`admin_console.pb.js`, `codes.delete`). A checkbox that
+// selects a released code is therefore a control that cannot work, so the
+// predicate is the hub's: no live claim AND no first-issue record.
+const checkedDeletable = computed(() => checkedRows.value.filter((r) => !r.redeemed && !r.first_seen_at))
 
 function toggleCheck(code: string) {
   const next = new Set(checked.value)
@@ -322,12 +327,12 @@ function toggleCheck(code: string) {
   checked.value = next
 }
 function toggleAll() {
-  const deletable = shown.value.filter((r) => !r.redeemed)
+  const deletable = shown.value.filter((r) => !r.redeemed && !r.first_seen_at)
   if (deletable.every((r) => checked.value.has(r.code))) checked.value = new Set()
   else checked.value = new Set(deletable.map((r) => r.code))
 }
 const allChecked = computed(() => {
-  const deletable = shown.value.filter((r) => !r.redeemed)
+  const deletable = shown.value.filter((r) => !r.redeemed && !r.first_seen_at)
   return deletable.length > 0 && deletable.every((r) => checked.value.has(r.code))
 })
 // A stale tick must never delete a row the operator can no longer see.
@@ -358,6 +363,18 @@ async function deleteChecked() {
 const renewRow = ref<CodeRow | null>(null)
 const stopRow = ref<CodeRow | null>(null)
 const createOpen = ref(false)
+
+/**
+ * The last session probe run, as the header reports it (D1).
+ *
+ * Held HERE rather than in the inspector because a probe belongs to one code and
+ * the header is about the page: switching codes must not erase the evidence that
+ * a run happened, and a run for a code the operator has since navigated away
+ * from must still be attributable to that code. It is deliberately not persisted
+ * — a run from yesterday is not evidence about today, and a restarted console
+ * reloads its data anyway.
+ */
+const lastProbe = ref<ProbeSummary | null>(null)
 
 // ── Row verbs ──
 // Three, by frequency. Renew and Stop are daily; Open is how you read a row.
@@ -422,6 +439,21 @@ function livenessTitle(row: CodeRow): string {
         <div class="titles">
           <h1>Codes</h1>
           <p class="page-sub">Find a code, renew it, or fix an access problem.</p>
+          <!-- D1: the last probe run, visible from the main view with no log
+               viewer. Counts are the probe's own vocabulary: the checks it
+               performed, the flags it raised, and the writes it made (always 0 —
+               the endpoint is documented as write-nothing). -->
+          <p v-if="lastProbe" class="probe-last" :class="{ failed: !!lastProbe.error }">
+            <template v-if="lastProbe.error">
+              <strong>Probe ran {{ shortDateTime(lastProbe.ranAt) }} on {{ lastProbe.code }} and failed:</strong>
+              {{ lastProbe.error }}
+            </template>
+            <template v-else>
+              <strong>Probe ran {{ shortDateTime(lastProbe.ranAt) }} on {{ lastProbe.code }}:</strong>
+              {{ lastProbe.checks }} checks · {{ lastProbe.findings }}
+              {{ lastProbe.findings === 1 ? 'finding' : 'findings' }} · {{ lastProbe.changed }} changes · no errors
+            </template>
+          </p>
         </div>
         <button class="primary" @click="createOpen = true">Create codes</button>
       </div>
@@ -447,7 +479,11 @@ function livenessTitle(row: CodeRow): string {
           </select>
           <select :value="route.status" aria-label="State" @change="setQuery({ status: ($event.target as HTMLSelectElement).value })">
             <option value="">Any state</option>
-            <option value="available">Unused · {{ facets.status.available || 0 }}</option>
+            <!-- "Available", not "unused": the bucket counts every code the hub
+                 calls available, which includes one that was sold and has since
+                 been released. Calling that "unused" is false about half the
+                 rows it lists, and the row badge says so. -->
+            <option value="available" title="never used, or used and since released">Available · {{ facets.status.available || 0 }}</option>
             <option value="redeemed">In term · {{ facets.status.redeemed || 0 }}</option>
             <option value="expired">Lapsed · {{ facets.status.expired || 0 }}</option>
             <option value="suspended">Stopped · {{ facets.status.suspended || 0 }}</option>
@@ -501,7 +537,7 @@ function livenessTitle(row: CodeRow): string {
       <!-- ── Bulk bar ── -->
       <div v-if="checked.size" class="bulkbar">
         <strong>{{ checked.size }} selected</strong>
-        <span class="muted" style="font-size: 12.5px">Used codes are never selectable — the batch refuses them.</span>
+        <span class="muted" style="font-size: 12.5px">Only codes that have never been issued are selectable — the batch refuses the rest.</span>
         <div class="spacer" />
         <button class="tiny" @click="checked = new Set()">Clear</button>
         <button class="tiny danger" :disabled="!checkedDeletable.length" @click="deleteChecked">
@@ -546,8 +582,8 @@ function livenessTitle(row: CodeRow): string {
                   <input
                     type="checkbox"
                     :checked="allChecked"
-                    :disabled="!shown.filter((r) => !r.redeemed).length"
-                    aria-label="Select all unused codes"
+                    :disabled="!shown.filter((r) => !r.redeemed && !r.first_seen_at).length"
+                    aria-label="Select all codes that have never been issued"
                     @change="toggleAll"
                   />
                 </th>
@@ -604,7 +640,7 @@ function livenessTitle(row: CodeRow): string {
                   <input
                     type="checkbox"
                     :checked="checked.has(row.code)"
-                    :disabled="row.redeemed"
+                    :disabled="row.redeemed || !!row.first_seen_at"
                     :aria-label="`Select ${row.code}`"
                     @change="toggleCheck(row.code)"
                   />
@@ -618,7 +654,7 @@ function livenessTitle(row: CodeRow): string {
                      text as a title so a truncated name is still one hover away —
                      the alternative (clipping silently) made two students with the
                      same school prefix look identical. -->
-                <td v-if="visible.has('name')" class="truncate" :title="row.label || 'No name recorded'">
+                <td v-if="visible.has('name')" class="wrapcell" :title="row.label || 'No name recorded'">
                   <span v-if="row.label">{{ row.label }}</span>
                   <span v-else class="muted">— no name</span>
                 </td>
@@ -658,7 +694,7 @@ function livenessTitle(row: CodeRow): string {
                 <td v-if="visible.has('seen')" class="muted nowrap" :title="livenessTitle(row)">
                   {{ livenessText(row) }}
                 </td>
-                <td v-if="visible.has('who')" class="muted truncate">
+                <td v-if="visible.has('who')" class="muted wrapcell">
                   {{ row.middleman || '—' }}
                 </td>
                 <td v-if="visible.has('days')" class="num nowrap">
@@ -699,6 +735,7 @@ function livenessTitle(row: CodeRow): string {
       @changed="refreshAll"
       @renew="(r) => (renewRow = r)"
       @stop="(r) => (stopRow = r)"
+      @probed="(s) => (lastProbe = s)"
     />
   </div>
 

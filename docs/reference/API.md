@@ -728,7 +728,8 @@ label; a caller that wants a single badge has to choose, which is the point.
 | `released-unclaimed` | `released_at > activated_at`: a sign-out is waiting to be claimed. The code is free for the next activation. |
 | `suspended` | An operator stopped it. `suspended_reason` carries their words. |
 | `expired` | Past `expires_at`. |
-| `never-activated` | No `activated_at`. |
+| `released` | An operator released it (`force_state: "released"`). The claim was cleared on purpose and the code is free for the next activation. Distinct from `never-activated`, which is what the old chain wrongly reported for every released code. |
+| `never-activated` | No `activated_at`, and not released: nothing has ever claimed this code. |
 
 | `liveness` | Meaning |
 |---|---|
@@ -748,6 +749,7 @@ label; a caller that wants a single badge has to choose, which is the point.
 |---|---|---|
 | `in_sync` | Both sides agree. | none |
 | `client_beating_hub_quiet` | The device is beating; the console's "signed out" was an inference from `released_at`. | none — a console defect, not a device one |
+| `released_by_override` | An operator released this code. `override` carries the eviction detail. | Nothing on the device. To put the student back, press **Mark in term** in the console — it restores the claim and clears the cut-off. |
 | `stale_release_claim` | A sign-out claim contradicts a beating device. | `codes.unbind`, or have the student sign in once |
 | `hub_refused_client_hasnt_noticed` | Hub already refuses; the client has not beaten since. | wait one beat, or `beat_now` |
 | `client_unreachable` | No recent beat. Killed, offline or quit — **this endpoint does not guess which**. | check the Account screen, or wait for TTL |

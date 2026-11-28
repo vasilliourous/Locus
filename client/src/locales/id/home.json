@@ -139,7 +139,7 @@
       },
       "suspended": {
         "lapsedTitle": "Langganan Anda telah berakhir",
-        "suspendedTitle": "Perangkat ini telah dikeluarkan",
+        "suspendedTitle": "Akses ke perangkat ini dijeda",
         "lapsedBody": "Kode Anda telah kedaluwarsa, jadi koneksi dihentikan. Memperpanjang dengan penjual kode Anda memulihkan akses.",
         "suspendedBody": "Seorang operator telah menangguhkan kode ini, jadi koneksi dihentikan. Kode Anda masih tersimpan di komputer ini.",
         "lapsedAction": "Hubungi penjual kode Anda untuk memperpanjangnya.",

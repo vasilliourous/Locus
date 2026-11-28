@@ -36,8 +36,11 @@ node drive.mjs        # 48 functional checks: routes, filters, keyboard, deep li
 node workflows.mjs    # 16 mutating flows: renew, save, guard, bulk, create, back
 node audit.mjs        # contrast (WCAG AA), touch targets, focus visibility
 node visual.mjs       # layout facts: overflow, clipping, rhythm, type sizes
-node requirements.mjs # R2–R6: probe result, direct overrides, no no-op fields,
-                      # Term/Expiry at top level, History/Record demoted
+node requirements.mjs # R2–R6 + D1: probe result and last-run line, direct
+                      # overrides, no no-op fields, Term/Expiry at top level,
+                      # History/Record demoted
+node invariants.mjs   # I1–I5: reachability, state round-trips, no clipped
+                      # strings, no inert controls, label truth
 ```
 
 `requirements.mjs` MUTATES the mock's fixture (a release, an in-term override, an
@@ -54,6 +57,11 @@ Screenshots land in `shots/`.
 | `audit.mjs` | Is text readable (contrast) and is every control big enough to hit? |
 | `visual.mjs` | Does anything overflow, clip silently, or use unreadably small type? |
 | `requirements.mjs` | Does the probe run and report, does an override change the state the panel/list show, and are the deleted no-op controls really gone? |
+| `invariants.mjs` | Is every property two actions away, does every state action move the badge, is anything clipped, and is every control's label true? |
+
+The full 36-cell state matrix is not a browser test: it is
+`server/scripts/state-matrix.js`, run by `check-consistency.sh` §67, because it
+drives the real hook handlers rather than the stand-in hub.
 
 `mock-hub.mjs` implements the `admin/console` actions from
 `server/pb_hooks/admin_console.pb.js` with the same field names and refusal

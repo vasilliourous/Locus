@@ -338,6 +338,12 @@ function req(over) {
 {
   const table = [
     ['active', {}, 'active'],
+    // A release clears `activated_at`; without its own word the probe called a
+    // sold-then-freed code "never-activated", which the console shows verbatim.
+    // The REAL shape a release leaves: the claim is cleared, `force_state` is
+    // set. Without its own word this row answered `never-activated` — a false
+    // statement about a card that was sold.
+    ['released by an operator', { force_state: 'released', activated_at: null }, 'released'],
     ['released-unclaimed', { released_at: iso(1 * MIN) }, 'released-unclaimed'],
     ['suspended beats everything', { suspended: true, released_at: iso(1 * MIN) }, 'suspended'],
     [
@@ -545,6 +551,7 @@ function req(over) {
 {
   const KNOWN = new Set([
     'in_sync',
+    'released_by_override',
     'client_beating_hub_quiet',
     'stale_release_claim',
     'hub_refused_client_hasnt_noticed',
@@ -561,6 +568,9 @@ function req(over) {
   const scenarios = [
     ['healthy, both observed', {}, { auth_state: 'activated' }, 'client_beating_hub_quiet'],
     ['client says activated, hub released', { released_at: iso(MIN) }, { auth_state: 'activated' }, 'stale_release_claim'],
+    // The operator's decision, named instead of falling through to `unknown`.
+    ['hub released by override', { force_state: 'released' }, { auth_state: 'activated' }, 'released_by_override'],
+    ['hub released by override, client absent', { force_state: 'released' }, null, 'released_by_override'],
     ['client says activated, hub suspended', { suspended: true }, { auth_state: 'activated' }, 'hub_refused_client_hasnt_noticed'],
     ['client says activated, hub expired', { expires_at: new Date(NOW - MIN).toISOString() }, { auth_state: 'activated' }, 'hub_refused_client_hasnt_noticed'],
     // THE CASE THE `in_sync` FALLTHROUGH USED TO SWALLOW. A hub that has never

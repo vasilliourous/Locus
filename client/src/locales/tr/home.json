@@ -139,7 +139,7 @@
       },
       "suspended": {
         "lapsedTitle": "Aboneliğiniz sona erdi",
-        "suspendedTitle": "Bu cihazın oturumu kapatıldı",
+        "suspendedTitle": "Bu cihaza erişim duraklatıldı",
         "lapsedBody": "Kodunuzun süresi dolduğu için bağlantı durduruldu. Kodu size satan kişiyle yenilemek erişimi geri getirir.",
         "suspendedBody": "Bir operatör bu kodu askıya aldı, bu yüzden bağlantı durduruldu. Kodunuz bu bilgisayarda kayıtlı kalmaya devam ediyor.",
         "lapsedAction": "Yenilemek için kodu size satan kişiyle iletişime geçin.",

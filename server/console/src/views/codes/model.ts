@@ -65,6 +65,26 @@ export interface CodeRow {
   override_id?: string
 }
 
+/**
+ * One probe run, summarised for the list header (D1).
+ *
+ * The inspector owns the detail; this is the line that survives a selection
+ * change, so "did the probe run, and what did it say?" stays answerable from the
+ * main view without opening a log.
+ */
+export interface ProbeSummary {
+  code: string
+  ranAt: string
+  /** Fields the probe evaluated: machine gate, entitlement, liveness, override. */
+  checks: number
+  /** Flags the hub raised for this code (its `divergence` list). */
+  findings: number
+  /** Always 0: the probe is documented as write-nothing. */
+  changed: number
+  /** '' on success; the hub's or the transport's own message otherwise. */
+  error: string
+}
+
 export interface HistoryEvent {
   event: string
   detail: string

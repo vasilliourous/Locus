@@ -17,9 +17,9 @@
 //   the facts  — term, expiry, last seen, who sold it. Expiry and Term are
 //                EDITABLE tiles, not values behind a disclosure: they are
 //                always-manual inputs and belong at the top level.
-//   actions    — renew/stop, then the direct STATE actions (mark unused, mark
-//                in term, undo release) with no confirmation step, then the
-//                session probe and its visible result.
+//   actions    — renew/stop, then the direct STATE actions (release, mark in
+//                term) with no confirmation step, then the session probe and its
+//                visible result.
 //   who        — the name/plan/middleman EDITORS (the label is a name here).
 //   danger     — delete, last and confirmed in the panel rather than by
 //                window.confirm.
@@ -36,7 +36,7 @@
 // is exactly the case a URL like /admin/codes/RQ-ABCD opens.
 
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import type { CodeRow, HistoryEvent } from './model'
+import type { CodeRow, HistoryEvent, ProbeSummary } from './model'
 import {
   livenessOf,
   livenessText,
@@ -67,7 +67,29 @@ const emit = defineEmits<{
   (e: 'changed'): void
   (e: 'renew', row: CodeRow): void
   (e: 'stop', row: CodeRow): void
+  /**
+   * One line for the LIST's header: the probe ran, when, and what it concluded.
+   *
+   * D1 asks for the last run to be legible from the main view without a log
+   * viewer. The rail shows the detail for the code on screen, but switching
+   * codes would otherwise erase the only evidence that a run happened — so the
+   * summary is lifted to the page that owns the selection.
+   */
+  (e: 'probed', summary: ProbeSummary): void
 }>()
+
+export interface ProbeSummary {
+  code: string
+  ranAt: string
+  /** Fields the probe evaluated (machine gate, entitlement, liveness, override). */
+  checks: number
+  /** Flags the hub raised for this code. */
+  findings: number
+  /** Always 0: the probe is documented as write-nothing. */
+  changed: number
+  /** '' on success; the hub's or the transport's own message otherwise. */
+  error: string
+}
 
 // ── The row ──
 //
@@ -323,31 +345,29 @@ async function toggleSuspend() {
   }
 }
 
-// ── State overrides: direct actions, no confirmation step ──
+// ── State: direct actions, no confirmation step ──
 //
-// R4/R7. These are the corrections an operator makes while a code is being
-// managed by hand — and there is no fixed workflow to protect them from. The
-// previous release flow asked for a reason and, when a live device was about to
-// be cut off, made the operator type the last four characters of the code. That
-// typed step changed nothing on the server (the commit is guarded by a claim
-// token, not by the typing) and the reason field's only effect was the sentence
-// the student might read. The override is now one click, and the reason it used
-// to ask for is gone: the audit row records the action, and the student sees the
-// hub's frozen generic sentence.
+// R4/D3. These are corrections an operator makes while a code is being managed
+// by hand — and there is no fixed workflow to protect them from. The previous
+// release flow asked for a reason and, when a live device was about to be cut
+// off, made the operator type the last four characters of the code. That typed
+// step changed nothing on the server (the commit was guarded by a claim token,
+// not by the typing), so it is gone; the release is one click.
 //
-// WHAT IS AND IS NOT REVERSIBLE, plainly: `Mark unused` clears the claim, so a
-// later `Undo release` removes the eviction and the override pin but does NOT
-// resurrect the cleared claim (a re-redeemed claim is a real fact and must
-// survive). R4's "the operator can override back" is therefore only partly true
-// for this one action; it is stated here rather than invented around.
+// THE PAIR IS NOW A TRUE UNDO. `Release` clears the claim (and cuts off a live
+// device); `Mark in term` puts the claim back and clears the eviction. So the
+// operator can go in either direction without leaving the panel, which is what
+// D3's "reversible by overriding back" means here. The old `Undo release`
+// button is gone: it cleared only the eviction and left the code `released`,
+// which made its label a promise it did not keep.
 const stateBusy = ref(false)
 
-async function markUnused() {
+async function releaseCode() {
   const r = row.value
   if (!r || stateBusy.value) return
   stateBusy.value = true
   try {
-    const ok = await act('codes.release', { code: r.code }, 'Marked unused — free for a new holder')
+    const ok = await act('codes.release', { code: r.code }, 'Released — free for a new holder')
     if (ok) {
       emit('changed')
       await refresh()
@@ -367,7 +387,7 @@ async function markInTerm() {
     const ok = await act(
       'codes.override',
       { code: r.code, to_state: 'in_term', override_id: id },
-      'In term — the pending sign-out was cleared',
+      'In term',
     )
     if (ok) {
       emit('changed')
@@ -378,20 +398,33 @@ async function markInTerm() {
   }
 }
 
-async function undoRelease() {
+/**
+ * Whether "Mark in term" would change anything.
+ *
+ * Derived from the SAME label the badge renders, so the button can never appear
+ * on a code that already reads "in term" (an inert control — I5) and can never
+ * be missing from one that does not (a dead end — I2). A code that has never been
+ * issued is excluded for a different reason: the student's own activation claims
+ * it, and claiming it here would make that activation fail.
+ */
+const canMarkInTerm = computed(() => {
   const r = row.value
-  if (!r || stateBusy.value) return
-  stateBusy.value = true
-  try {
-    const ok = await act('codes.reactivate', { code: r.code }, 'Release undone')
-    if (ok) {
-      emit('changed')
-      await refresh()
-    }
-  } finally {
-    stateBusy.value = false
+  if (!r) return false
+  // The student's activation claims an unissued code; claiming it here would make
+  // that activation fail ("already in use on another device").
+  if (!r.first_seen_at && !r.activated_at) return false
+  const label = stateLabel(r)
+  if (label === 'in term') return false
+  // A PLAIN suspension is undone by `Reactivate`, which is one control away in the
+  // row above. Offering both would be two controls for one outcome, and a stopped
+  // code's expiry is hidden behind its badge (`status` is "suspended"), so the
+  // lapsed case has to be read from the date itself.
+  const lapsed = !!r.expires_at && new Date(r.expires_at).getTime() < Date.now()
+  if (label === 'stopped' && r.redeemed && !r.released_pending && !lapsed && r.force_state !== 'released') {
+    return false
   }
-}
+  return true
+})
 
 // ── The session probe, run by hand ──
 //
@@ -408,6 +441,29 @@ const probeResult = ref<ProbeResponse | null>(null)
 const probeError = ref('')
 const probeRanAt = ref('')
 
+// The checks the probe performs, as four named ones rather than a number chosen
+// to look thorough: the machine gate, then the three things it reports.
+const PROBE_CHECKS = 4
+
+/** Flags the hub raised: its divergence list. `0` is a real, common answer. */
+function findingsOf(result: ProbeResponse): number {
+  return (result.divergence || []).length
+}
+
+function reportProbe(code: string, ranAt: string, result: ProbeResponse | null, error: string) {
+  emit('probed', {
+    code,
+    ranAt,
+    checks: PROBE_CHECKS,
+    findings: result ? findingsOf(result) : 0,
+    // The endpoint's contract (`session_probe.pb.js`): it writes NOTHING, not
+    // even `last_seen_at`. So "changed" is not a guess — it is the design, and
+    // showing 0 is the honest report of it.
+    changed: 0,
+    error,
+  })
+}
+
 async function runProbe() {
   const r = row.value
   if (!r || probeBusy.value) return
@@ -417,6 +473,8 @@ async function runProbe() {
   if (!device) {
     probeError.value =
       'The hub holds no device id for this code — it was never activated, or it predates the field. The probe needs the machine that first redeemed it.'
+    probeRanAt.value = new Date().toISOString()
+    reportProbe(r.code, probeRanAt.value, null, probeError.value)
     return
   }
   probeBusy.value = true
@@ -428,6 +486,7 @@ async function runProbe() {
     } else {
       probeError.value = res.message || res.transportError || 'The probe did not answer'
     }
+    reportProbe(r.code, probeRanAt.value, probeResult.value, probeError.value)
   } finally {
     probeBusy.value = false
   }
@@ -609,22 +668,26 @@ const planOptions = computed(() => {
         </div>
 
         <!-- ── State, changed directly ──
-             One click, no confirmation step. `Mark unused` clears the claim (and
-             cuts off a live device at its next check-in); `Mark in term` withdraws
-             a pending sign-out so the claim on the machine is the one in force
-             again; `Undo release` clears the override pin and the eviction. -->
-        <div v-if="row.redeemed || row.force_state === 'released'" class="ins-actions ins-state-actions">
-          <button v-if="row.redeemed" class="tiny" :disabled="stateBusy" @click="markUnused">Mark unused</button>
-          <button v-if="row.released_pending" class="tiny" :disabled="stateBusy" @click="markInTerm">Mark in term</button>
-          <button v-if="row.force_state === 'released'" class="tiny" :disabled="stateBusy" @click="undoRelease">
-            Undo release
-          </button>
+             One click, no confirmation step. `Release` clears the claim (and cuts
+             off a live device at its next check-in); `Mark in term` restores the
+             claim, stops the cut-off, lifts a suspension and, on a lapsed code,
+             extends the expiry by the code's own term. Between them the operator
+             can move a code in either direction from this panel. -->
+        <div v-if="(row.redeemed && !row.suspended) || canMarkInTerm" class="ins-actions ins-state-actions">
+          <!-- Not while stopped: releasing leaves the suspension in place, so the
+               badge would stay "stopped" and the button would be a promise it does
+               not keep. `Reactivate` (above) is the first half of that move. -->
+          <button v-if="row.redeemed && !row.suspended" class="tiny" :disabled="stateBusy" @click="releaseCode">Release</button>
+          <button v-if="canMarkInTerm" class="tiny" :disabled="stateBusy" @click="markInTerm">Mark in term</button>
         </div>
-        <p v-if="row.redeemed || row.force_state === 'released'" class="foot-note" style="margin-top: 2px">
-          <template v-if="row.released_pending">A sign-out is recorded and not claimed. </template>
+        <p v-if="(row.redeemed && !row.suspended) || canMarkInTerm" class="foot-note" style="margin-top: 2px">
           <template v-if="row.redeemed">
-            Marking it unused frees it for a different student and cuts off the device using it within about five
-            minutes.
+            Release frees it for a different student and cuts off the device using it within about five minutes.
+            The badge then reads “released”, not “unused”, because this code has been sold before.
+          </template>
+          <template v-else>
+            Mark in term puts the claim back and stops cutting the device off.
+            <template v-if="row.status === 'expired'"> It also extends the expiry by the code’s term.</template>
           </template>
         </p>
 
@@ -655,6 +718,11 @@ const planOptions = computed(() => {
             >: the device is cut off at its next check-in</template
             >.<span v-if="probeResult.override.evicted_reason"> Reason: {{ probeResult.override.evicted_reason }}</span>
           </div>
+          <p class="foot-note" style="margin: 4px 0">
+            <strong>{{ PROBE_CHECKS }} checks</strong> · {{ findingsOf(probeResult) }}
+            {{ findingsOf(probeResult) === 1 ? 'finding' : 'findings' }} · 0 changes (the probe writes nothing) · no
+            errors
+          </p>
           <p class="foot-note" style="margin: 4px 0">
             Checked in:
             {{ probeResult.hub_view.last_seen_at ? shortDateTime(probeResult.hub_view.last_seen_at) : 'never' }}
@@ -702,7 +770,7 @@ const planOptions = computed(() => {
 
         <!-- ── Irreversible, last of the ACTIONS ──
              Release left this section: it is now a direct state action above
-             (`Mark unused`), not a confirmed destructive flow. Delete is the one
+             (`Release`), not a confirmed destructive flow. Delete is the one
              thing here that destroys the row. -->
         <div class="section-title">Irreversible</div>
 
@@ -711,9 +779,18 @@ const planOptions = computed(() => {
             <div class="ins-row">
               <span class="ins-row-label">
                 Delete permanently
-                <small>Prefer stopping or marking unused. An audit entry is kept but the code is gone — for typos, duplicate batches and test rows.</small>
+                <small>Prefer stopping or releasing. An audit entry is kept but the code is gone — for typos, duplicate batches and test rows that were never issued.</small>
               </span>
-              <button class="tiny" :disabled="row.redeemed" :title="row.redeemed ? 'Mark it unused first' : ''" @click="confirmDelete = true">
+              <!-- The hub refuses a code that has EVER been issued, so the control
+                   is disabled on the same predicate. It used to check only the live
+                   claim, which left an enabled button that could never work on a
+                   released code (I5). -->
+              <button
+                class="tiny"
+                :disabled="row.redeemed || !!row.first_seen_at"
+                :title="row.redeemed ? 'Release it first' : row.first_seen_at ? 'This code has been issued, so its record cannot be deleted' : ''"
+                @click="confirmDelete = true"
+              >
                 Delete…
               </button>
             </div>

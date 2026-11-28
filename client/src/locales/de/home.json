@@ -139,7 +139,7 @@
       },
       "suspended": {
         "lapsedTitle": "Dein Abonnement ist abgelaufen",
-        "suspendedTitle": "Dieses Gerät wurde abgemeldet",
+        "suspendedTitle": "Der Zugriff auf dieses Gerät ist pausiert",
         "lapsedBody": "Dein Code ist abgelaufen, daher wurde die Verbindung getrennt. Eine Verlängerung bei demjenigen, der dir den Code verkauft hat, stellt den Zugang wieder her.",
         "suspendedBody": "Ein Betreiber hat diesen Code gesperrt, daher wurde die Verbindung getrennt. Dein Code ist weiterhin auf diesem Computer gespeichert.",
         "lapsedAction": "Wende dich zum Verlängern an die Person, die dir den Code verkauft hat.",

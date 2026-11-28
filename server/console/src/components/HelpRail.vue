@@ -78,10 +78,10 @@ const HELP: Record<RouteName, HelpSection[]> = {
       ],
     },
     {
-      h: '“Mark unused” is not “move to a new computer”',
+      h: '“Release” is not “move to a new computer”',
       p: [
         'A code is not tied to a machine. A student on a new laptop re-enters their own code and it just works.',
-        '“Mark unused” ends the current holder’s access and frees the code for a DIFFERENT student. It is one click: the audit row records the decision, and the device is cut off at its next check-in.',
+        '“Release” ends the current holder’s access and frees the code for a DIFFERENT student. It is one click: the audit row records the decision, and the device is cut off at its next check-in. “Mark in term” puts the claim back, so the two go in either direction.',
       ],
     },
     {

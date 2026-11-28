@@ -268,17 +268,25 @@ const server = http.createServer((req, res) => {
         ? 'suspended'
         : exp && exp < nowMs
           ? 'expired'
-          : !c.activated_at
-            ? 'never-activated'
-            : releasedPending
-              ? 'released-unclaimed'
-              : 'active'
+          : c.force_state === 'released'
+            ? 'released'
+            : !c.activated_at
+              ? 'never-activated'
+              : releasedPending
+                ? 'released-unclaimed'
+                : 'active'
       const seenMs = c.last_seen_at ? new Date(c.last_seen_at).getTime() : 0
       const ageS = seenMs ? Math.floor((nowMs - seenMs) / 1000) : null
       const liveness = ageS === null ? 'unknown' : ageS <= 8040 ? 'live' : ageS <= 7 * 86400 ? 'stale' : 'absent'
       const hasOverride = !!c.force_state || !!c.evict_requested_at
       const divergence = []
       if (hasOverride) divergence.push('operator_override')
+      const verdict =
+        c.force_state === 'released'
+          ? 'released_by_override'
+          : liveness === 'unknown'
+            ? 'unknown'
+            : 'client_beating_hub_quiet'
       res.writeHead(200, { 'Content-Type': 'application/json' })
       return res.end(
         JSON.stringify({
@@ -300,7 +308,7 @@ const server = http.createServer((req, res) => {
           },
           client_view: null,
           lease_expires_at: seenMs ? iso(seenMs + 8040 * 1000) : null,
-          reason_code: liveness === 'unknown' ? 'unknown' : 'client_beating_hub_quiet',
+          reason_code: verdict,
           divergence,
           override: hasOverride
             ? {
@@ -417,15 +425,45 @@ const server = http.createServer((req, res) => {
         return send({ code: c.code, evicted: willEvict, outcome: willEvict ? 'applied_with_eviction' : 'applied' })
       }
       case 'codes.override': {
+        // Mirrors the generalized handler: "in term" clears every input that
+        // would make the derivation disagree (suspension, eviction, release pin,
+        // pending sign-out), claims the code if nobody holds it, and extends a
+        // LAPSED expiry by the code's own term.
         const c = codes.find((x) => x.code === String(body.code || '').toUpperCase())
         if (!c) return send({ ok: false, message: 'Code not found' }, 404)
         if (String(body.to_state || '') !== 'in_term') return send({ ok: false, message: 'to_state must be in_term' }, 400)
+        if (!c.activated_at && !c.first_seen_at) {
+          return send({
+            ok: false,
+            message:
+              'This code has never been issued, so there is no holder to put in term. Its first holder claims it by activating.',
+          })
+        }
+        const exp = c.expires_at ? new Date(c.expires_at).getTime() : 0
+        const lapsed = exp > 0 && exp < now
+        if (lapsed && !(Number(c.term_days) > 0)) {
+          return send({ ok: false, message: 'This code has lapsed and carries no term to extend it by.' })
+        }
         const pending = !!c.released_at && new Date(c.released_at).getTime() > new Date(c.activated_at || 0).getTime()
-        if (!pending) return send({ code: c.code, noop: true, state: 'in_term' })
+        const already = !!c.activated_at && !c.suspended && !lapsed && !pending && !c.evict_requested_at && c.force_state !== 'released'
+        if (already) return send({ code: c.code, noop: true, state: 'in_term' })
+        const wasSuspended = !!c.suspended
+        c.suspended = false
+        c.suspended_reason = ''
         c.released_at = ''
         c.released_pending = false
+        c.evict_requested_at = ''
+        c.evict_reason = ''
+        c.force_state = ''
+        if (!c.activated_at) c.activated_at = iso(now)
+        c.redeemed = true
+        if (lapsed) {
+          c.expires_at = iso(now + Number(c.term_days) * DAY)
+          c.days_remaining = Math.ceil(Number(c.term_days))
+        }
+        c.status = c.expires_at && new Date(c.expires_at).getTime() < now ? 'expired' : 'redeemed'
         c.override_id = String(body.override_id || '')
-        return send({ code: c.code, state: 'in_term', cleared_sign_out: true })
+        return send({ code: c.code, state: 'in_term', cleared_sign_out: pending, cleared_suspension: wasSuspended })
       }
       case 'codes.reactivate': {
         const c = codes.find((x) => x.code === String(body.code || '').toUpperCase())
