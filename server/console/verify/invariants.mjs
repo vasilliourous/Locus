@@ -128,6 +128,17 @@ const badgeOf = async (ins) => (await ins.locator('.badge').first().innerText())
   )
 }
 
+// ── I3 (second pass): the panel's verdict must agree with its own badge ────
+{
+  const unclaimed = await openInspector('RQ-FGHJ-KMNP-QRST-6')
+  const text = (await unclaimed.innerText()).replace(/\s+/g, ' ')
+  check(
+    'I3: an unclaimed code is not described as "In use"',
+    /sign-out is recorded and not claimed/i.test(text) && !/^In use/m.test(text) && !/In use\./.test(text),
+    text.slice(0, 180),
+  )
+}
+
 // ── I2 (UI binding): every state action the panel offers changes the badge ─
 //
 // The full 36-cell matrix is driven against the HOOK by

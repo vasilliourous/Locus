@@ -534,6 +534,15 @@ const verdict = computed(() => {
   if (r.status === 'expired') {
     return { tone: 'warn', text: 'Term ended. Access is refused until this is renewed.' }
   }
+  // BEFORE the `redeemed` arm, because an unclaimed code IS redeemed and would
+  // otherwise be described as "In use" while its badge says "unclaimed" and the
+  // next activation can take it. The badge and this sentence disagreed.
+  if (r.redeemed && r.released_pending) {
+    return {
+      tone: 'warn',
+      text: 'A sign-out is recorded and not claimed: the next activation takes this code. Mark it in term to put the claim back.',
+    }
+  }
   if (r.redeemed) {
     if (!r.expires_at) return { tone: 'good', text: 'In use, never expires.' }
     return { tone: 'good', text: `In use. ${remaining.value || ''} left in the term.` }
