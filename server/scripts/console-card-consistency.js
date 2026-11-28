@@ -107,6 +107,36 @@ const codes = [
   rec({ code: 'STOPPED-5D', tier: 'free', suspended: true, activated_at: iso(NOW - 60 * DAY), expires_at: iso(NOW + 5 * DAY) }),
   // Suspended and lapsed: must count as suspended, not expired.
   rec({ code: 'STOPPED-LAPSED', tier: 'free', suspended: true, activated_at: iso(NOW - 60 * DAY), expires_at: iso(NOW - 9 * DAY) }),
+  // SIGNED OUT AND NOT CLAIMED. Still `status: redeemed` (the code has been
+  // redeemed and is not lapsed or suspended), but `released_pending` is true —
+  // `released_at` is later than `activated_at`, so the next activation will be
+  // admitted. This row is what makes the In-term card and the Attention list
+  // agree: the badge must read "signed out", and the card must still count it
+  // as in term, because a code with term left is one the operator is owed for.
+  rec({
+    code: 'RELEASED-12D',
+    tier: 'free',
+    activated_at: iso(NOW - 48 * DAY),
+    released_at: iso(NOW - 1 * DAY),
+    release_count: 1,
+    expires_at: iso(NOW + 12 * DAY),
+  }),
+  // Claimed again after that sign-out: `activated_at` is now LATER than
+  // `released_at`, so the claim is spent and this is in force on a machine.
+  rec({
+    code: 'RECLAIMED-30D',
+    tier: 'free',
+    activated_at: iso(NOW - 1 * DAY),
+    released_at: iso(NOW - 2 * DAY),
+    release_count: 1,
+    // 29.5 days, NOT exactly 30. The hook computes its own `Date.now()` some
+    // milliseconds after this fixture does, so `NOW + 30*DAY` lands a few ms
+    // PAST the window and the row falls out of both sides — which made this
+    // fixture test nothing while appearing to. Deliberately inside, so the row
+    // is genuinely counted, and a separate boundary assertion pins the `<`/`<=`
+    // question directly (see the worklist-boundary check below).
+    expires_at: iso(NOW + 29.5 * DAY),
+  }),
 ]
 
 const tierConfigs = [rec({ tier: 'free', active: true }), rec({ tier: 'strike', active: true })]
@@ -169,6 +199,75 @@ const thirty = list({ expiring_within_days: 30 }).codes.length
 if (seven <= thirty) console.log(`OK 7-day queue is within the 30-day window (${seven} ≤ ${thirty})`)
 else {
   console.log(`the 7-day queue (${seven}) exceeds the 30-day window (${thirty})`)
+  failures++
+}
+
+// ── The window BOUNDARY, asserted directly rather than by accident ──
+//
+// The card (`dashboard.expiringSoon`) and the list it opens
+// (`codes.list` with `expiring_within_days`) compute the same window in two
+// places, and they disagreed at the edge: the card used `expMs < in30` while the
+// list keeps a row whose expiry EQUALS `windowEnd` (`expMs2 > windowEndMs`
+// skips it, so equal passes). A code expiring in exactly 30 days was therefore in
+// the list and not in the count.
+//
+// This is asserted on the source rather than through a fixture row because the
+// fixture cannot sit on a boundary reliably: the hook computes its own `Date.now()`
+// after this file does, so a row pinned at `NOW + 30*DAY` is a few milliseconds
+// outside the window and tests nothing. An earlier version of this file made
+// exactly that mistake — the row looked like a boundary case and silently fell out
+// of both sides, so reverting the comparison did not fail the guard.
+const dashSrc = src.slice(src.indexOf('action === "dashboard"'), src.indexOf('expiringSoon++'))
+if (/expMs <= in30/.test(dashSrc)) {
+  console.log('OK the expiring card includes a code expiring exactly on the window edge (matches the list)')
+} else if (/expMs < in30/.test(dashSrc)) {
+  console.log('the expiring card uses `expMs < in30` while the list keeps `expires_at == windowEnd` — a code on the boundary is in the list and missing from the count')
+  failures++
+} else {
+  console.log('could not read the expiringSoon comparison from dashboard — this boundary guard is blind')
+  failures++
+}
+
+// ── The sign-out state, which is the console's half of "one code, one machine"
+//
+// `activation.pb.js` refuses a redeemed code unless `released_at` is LATER than
+// `activated_at`, so the console has to answer the same question the same way or
+// an operator is told a student can get in when they cannot (or the reverse).
+// `released_pending` is that answer, and these pin it in both directions: a row
+// with a waiting sign-out must say so, and one whose sign-out was already
+// consumed must NOT.
+const byCode = (c) => (list({ view: 'all' }).codes || []).find((r) => r.code === c) || {}
+
+const releasedRow = byCode('RELEASED-12D')
+if (releasedRow.released_pending === true) console.log('OK a waiting sign-out is reported as released_pending')
+else {
+  console.log(`RELEASED-12D released_pending is ${releasedRow.released_pending}, but its released_at is later than its activated_at — a second device would be admitted and the console says nothing`)
+  failures++
+}
+// It is still an in-term code, not a free one: the student's term is running and
+// the operator is owed nothing. Counting it as `available` would tell the
+// operator there is stock to sell.
+if (releasedRow.status === 'redeemed') console.log('OK a signed-out code is still status=redeemed (it has a term, not stock)')
+else {
+  console.log(`RELEASED-12D has status ${releasedRow.status}; a signed-out code with term left is not available stock`)
+  failures++
+}
+
+const reclaimedRow = byCode('RECLAIMED-30D')
+if (reclaimedRow.released_pending === false) console.log('OK a consumed sign-out is not reported as released_pending')
+else {
+  console.log(`RECLAIMED-30D released_pending is ${reclaimedRow.released_pending}, but activated_at is later than released_at — the sign-out was spent and a second device would be refused`)
+  failures++
+}
+
+// The two halves must agree with the hook's own comparison, not merely with
+// each other: read the threshold the hook uses and assert the console's answer
+// on the row that sits closest to it.
+const hooks = fs.readFileSync(path.join(__dirname, '..', 'pb_hooks', 'activation.pb.js'), 'utf8')
+if (hooks.includes('return relMs > atMs;')) {
+  console.log('OK activation.pb.js compares released_at > activated_at, the same rule asserted here')
+} else {
+  console.log('activation.pb.js no longer compares released_at > activated_at — this fixture proves nothing until it does')
   failures++
 }
 

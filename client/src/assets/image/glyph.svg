@@ -13,7 +13,7 @@
   not a palette: every surface the app draws carries them unchanged, which is
   what "the icon is the FlClash glyph" means. See COLOURS.md §8.
 -->
-<svg width="240" height="240" viewBox="0 0 240 240" xmlns="http://www.w3.org/2000/svg">
+<svg viewBox="0 0 240 240" xmlns="http://www.w3.org/2000/svg">
   <title>Chrysalis mark</title>
   <defs>
     <linearGradient id="top" x1="0" y1="8.31" x2="0" y2="124.11" gradientUnits="userSpaceOnUse">

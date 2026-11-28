@@ -200,6 +200,40 @@ routerAdd("POST", "/api/admin/console", function(e) {
         } catch (evErr) { /* audit is best-effort; never fail the action for it */ }
     }
 
+    // ── Writing a column the live hub may not have yet ──
+    //
+    // Same helper as activation.pb.js — read that one for the source-verified
+    // account. The short version, because the first draft of this comment was
+    // WRONG and the correction matters:
+    //
+    // PocketBase does NOT fail a save for an undefined field. `Record.Set` keeps
+    // it in the record's custom data and `Dao.update` writes only the collection
+    // SCHEMA's columns, so the value is silently discarded. Writing
+    // `suspended_reason` on the live hub — whose `codes` table has no such column
+    // — was therefore harmless to the save, not fatal to it.
+    //
+    // What it cost is real but different from what was first written here: the
+    // operator's reason was accepted and thrown away, so a kicked student saw the
+    // generic "contact your middleman" instead of the sentence the operator
+    // actually typed. Nothing said the reason had been dropped — which is exactly
+    // the "operator presses the button and nothing happens" shape, and it is why
+    // this helper makes the drop REPORTABLE rather than silent.
+    //
+    // `suspended` itself does NOT go through this: it decides whether a device is
+    // cut off, it exists on every deployed hub, and if it were ever missing that
+    // should be loud.
+    function setIfPresent(record, name, value) {
+        try {
+            if (record.collection().fields.getByName(name)) {
+                record.set(name, value);
+                return true;
+            }
+            return false;
+        } catch (noCollection) {
+            return false;
+        }
+    }
+
     // ── Device binding: REMOVED ──
     //
     // There used to be a `device_bindings` index here, keyed on a fingerprint,
@@ -334,7 +368,14 @@ routerAdd("POST", "/api/admin/console", function(e) {
                 // Suspended codes are excluded for the same reason the worklist
                 // excludes them: the operator deliberately cut that student off,
                 // and prompting a renewal would be asking them to undo it.
-                if (expMs && !isNaN(expMs) && expMs > now && expMs < in30 && !isSusp && isUsed) expiringSoon++;
+                // `<=`, not `<`. The list this card links to keeps a code whose
+                // expiry is exactly `windowEnd` (`expMs2 > windowEndMs` skips it,
+                // so equal passes). With `<` here, a code expiring in exactly 30
+                // days appeared in the list and not in the count — the card said
+                // 3 and the page showed 4. Found by the fixture in
+                // console-card-consistency.js, which now carries a row on the
+                // boundary; the two expressions must stay the same shape.
+                if (expMs && !isNaN(expMs) && expMs > now && expMs <= in30 && !isSusp && isUsed) expiringSoon++;
             }
 
             // `attempts` was a bare count of `activation_attempts` — a table
@@ -490,6 +531,30 @@ routerAdd("POST", "/api/admin/console", function(e) {
                            : redeemedAt ? "redeemed"
                            : "available";
 
+                // ── Is a sign-out waiting to be claimed? ──
+                //
+                // `device_release.pb.js` writes `released_at`, and
+                // `activation.pb.js` refuses a redeemed code unless `released_at`
+                // is LATER than `activated_at`. Until this existed the console
+                // could not tell the two post-sign-out states apart, and they
+                // mean opposite things to an operator:
+                //
+                //   released   — the code is FREE. The student's next activation
+                //                claims it, and a code sitting released is one
+                //                whose holder is between machines.
+                //   redeemed   — in force on a machine. `release_count > 0` now
+                //                means "moved machines at some point", not
+                //                "shared", which is the whole change: a second
+                //                device is REFUSED while this is the state.
+                //
+                // Same comparison as the two hooks, byte for byte, because the
+                // console's answer and the hub's answer must not disagree about
+                // whether a student can get in.
+                var relAt2 = rec.get("released_at") || "";
+                var isReleased2 = status === "redeemed"
+                    && parsePBDate(relAt2) > 0
+                    && parsePBDate(relAt2) > parsePBDate(redeemedAt);
+
                 // The window filter. A code must have a parsable expiry in the
                 // FUTURE and within the window — so already-lapsed codes are
                 // absent (they are a different problem: the student has already
@@ -541,6 +606,10 @@ routerAdd("POST", "/api/admin/console", function(e) {
                     code: codeVal,
                     tier: rec.getString("tier"),
                     status: status,
+                    // Whether a sign-out is waiting to be claimed. The row is
+                    // "redeemed" either way — the difference is whether the next
+                    // machine can get in, which is the operator's actual question.
+                    released_pending: isReleased2,
                     // Whether this code has been redeemed. No device is named:
                     // a code is single-use, not device-bound.
                     redeemed: !!redeemedAt,
@@ -859,7 +928,7 @@ routerAdd("POST", "/api/admin/console", function(e) {
             // so leaving it behind after an unsuspend would keep a reinstated
             // student on a page explaining why they were cut off. Cleared with the
             // flag, in the same write.
-            recS.set("suspended_reason", wantSuspend ? String(body.reason || "").trim() : "");
+            setIfPresent(recS, "suspended_reason", wantSuspend ? String(body.reason || "").trim() : "");
             $app.dao().saveRecord(recS);
             logEvent(target, wantSuspend ? "suspended" : "unsuspended",
                      String(body.reason || ""), "");
@@ -910,7 +979,7 @@ routerAdd("POST", "/api/admin/console", function(e) {
             if (!recK) return bad(404, "Code not found");
 
             recK.set("suspended", true);
-            recK.set("suspended_reason", reasonK);
+            setIfPresent(recK, "suspended_reason", reasonK);
             $app.dao().saveRecord(recK);
             logEvent(targetK, "kicked", reasonK, "");
 
@@ -953,8 +1022,8 @@ routerAdd("POST", "/api/admin/console", function(e) {
             recU.set("activated_at", null);
             // These two columns previously did not exist, so the audit trail
             // recorded nothing. They are part of the schema now.
-            recU.set("unbound_at", nowISO());
-            recU.set("unbind_reason", reason);
+            setIfPresent(recU, "unbound_at", nowISO());
+            setIfPresent(recU, "unbind_reason", reason);
             // `first_seen_at` is DELIBERATELY left alone. Releasing a code puts
             // it back into the pool for a different student, and that is the
             // operator's decision — but it does not un-issue it. Erasing the
@@ -1473,9 +1542,24 @@ routerAdd("POST", "/api/admin/console", function(e) {
         //     without this bucket a student who has already lost access is
         //     invisible rather than being a catch-up call.
         //
-        //   shared — `release_count >= 2` while still in term. The counter was
-        //     built to answer "is this student moving machines, or is this key
-        //     being shared?" and no view ever showed it.
+        //   shared — this one CHANGED MEANING when activation started refusing a
+        //     second device, and leaving the old rule in place would have made it
+        //     lie in the most reassuring direction.
+        //
+        //     It used to be `release_count >= 2` while in term, read as "moving
+        //     machines, or sharing this key?" — two readings it could not tell
+        //     apart, because a sign-out recorded nothing and a second device was
+        //     admitted silently. A careless holder therefore left exactly the same
+        //     trail as an honest student on their third laptop: no trace at all.
+        //
+        //     A second device is now REFUSED (activation.pb.js answers 409), so a
+        //     code in force on a machine cannot be in use anywhere else. The
+        //     question the check can actually answer is the one an operator can act
+        //     on: "somebody signed out and has not come back" — a code that is
+        //     free, still has term left, and whose holder may be mid-move, or may
+        //     have handed their card to someone who has not activated it yet.
+        //
+        //     Lapsing codes stay in `lapsed`, where they already were.
         //
         //   no_label — redeemed, in term, `label` empty. 08-distribution §8.3.1
         //     makes the label THE link between a student and their code, so
@@ -1529,15 +1613,21 @@ routerAdd("POST", "/api/admin/console", function(e) {
                         });
                     }
                 }
-                var relA = Number(ca.get("release_count") || 0);
-                if (relA >= 2 && !suspA && !lapsedA && (redeemedA || !hasExpA)) {
+                // A sign-out that nobody has claimed. See the note on `shared`
+                // above for why this replaced a `release_count` threshold.
+                var relARaw = ca.get("released_at") || "";
+                var relAMs = parsePBDate(relARaw);
+                var heldA = !!(ca.getString("activated_at") || "");
+                var releasedA = heldA && relAMs > 0 && relAMs > parsePBDate(ca.get("activated_at"));
+                if (releasedA && !suspA && !lapsedA) {
                     countsA.shared++;
                     if (groupsA.shared.length < CAP) {
                         groupsA.shared.push({
                             code: codeA,
                             label: ca.getString("label") || "",
-                            release_count: relA,
-                            released_at: ca.getString("released_at") || "",
+                            release_count: Number(ca.get("release_count") || 0),
+                            released_at: relARaw ? String(relARaw) : "",
+                            expires_at: ca.getString("expires_at") || "",
                         });
                     }
                 }

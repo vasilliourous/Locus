@@ -99,7 +99,7 @@ provenance = "derived"
 # in STATE.md for months, went stale three times, and finished by naming an
 # address that no longer existed — while being labelled "authoritative".
 value      = "networkingguides.jadedns.uk"
-source     = "client/src-tauri/src/chrysalis/contract.rs (HUB_URL); server/setup.sh (DOMAIN, required env)"
+source     = "client/src-tauri/src/chrysalis/contract.rs (HUB_URL); server/modules/05-caddy.sh (CANONICAL_DOMAIN, served on the hub block)"
 provenance = "derived"
 
 [hub.domain_legacy]

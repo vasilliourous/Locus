@@ -141,21 +141,18 @@ export const LayoutSidebar = (props: LayoutSidebarProps) => {
           style={{
             height: '27px',
             display: 'flex',
-            justifyContent: 'space-between',
+            alignItems: 'center',
+            gap: '8px',
             color: theme.palette.primary.main,
           }}
         >
-          <SvgIcon
-            component={iconMark}
-            style={{
-              height: '36px',
-              width: '36px',
-              marginTop: '-3px',
-              marginRight: '5px',
-              marginLeft: '-3px',
-            }}
-            inheritViewBox
-          />
+          {/* Sizing lives in `layout.scss` on `.the-logo`, not here: the rules
+              that break an icon in this slot did so from CSS, and a `style`
+              attribute cannot win against a stylesheet's `width: 100%` on a
+              sibling. The `-3px` margins that used to be here were hand-
+              compensating for a wordmark whose viewBox did not match its ink;
+              that is fixed in `logo.svg` and the compensation is gone. */}
+          <SvgIcon component={iconMark} inheritViewBox />
           <LogoSvg />
         </div>
       </div>

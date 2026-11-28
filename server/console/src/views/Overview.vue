@@ -41,7 +41,7 @@ interface Attention {
   total_codes: number
   tiers_served: string[]
   counts: { unservable_tier: number; lapsed: number; shared: number; no_label: number }
-  groups: Record<string, { code: string; label?: string; middleman?: string; tier?: string; days_past?: number; release_count?: number; activated_at?: string }[]>
+  groups: Record<string, { code: string; label?: string; middleman?: string; tier?: string; days_past?: number; release_count?: number; released_at?: string; expires_at?: string; activated_at?: string }[]>
 }
 
 const dash = ref<Dash | null>(null)
@@ -167,12 +167,19 @@ const checks = computed(() => {
       id: 'shared',
       n: a.counts.shared,
       tone: 'warn',
-      what: 'Signed out on more than one machine while still in term',
-      why: 'Moving to a new laptop looks like this too — but a repeated pattern is what a shared key looks like from here.',
+      // WHAT THIS SAYS, AND WHY IT CHANGED. The hub now refuses a redeemed code
+      // on a second device (activation.pb.js), so "in use in two places at once"
+      // is no longer a state a code can be in — a careless holder leaves no
+      // trace of a second machine, and this card must not imply one. What it
+      // CAN see is a sign-out nobody claimed: the code is free, still has term
+      // left, and the student has not come back. That is either a move in
+      // progress or a card handed to someone who has not activated it yet.
+      what: 'Signed out and not claimed again, with term left',
+      why: 'A move in progress normally claims the code within minutes. Sitting here for days means the key is free — and a code that is free is one somebody else can claim with nothing but the card.',
       rows: (a.groups.shared || []).map((r) => ({
         key: r.code,
         main: r.label || r.code,
-        detail: `${r.release_count} sign-outs`,
+        detail: `free since ${shortDateTime(r.released_at).split(',')[0]}`,
       })),
       open: () => openCodes({ view: 'all' }),
       openLabel: 'Open in Codes',

@@ -47,11 +47,62 @@ CADDY_DATA_DIR="/var/www/html"
 # and only once no earlier build remains in the field.
 LEGACY_DOMAIN="${LEGACY_DOMAIN-networkingguides.duckdns.org}"
 
-# The address line for the hub site block: both names share ONE block.
-if [ -n "${LEGACY_DOMAIN}" ] && [ "${LEGACY_DOMAIN}" != "${DOMAIN}" ]; then
-    HUB_BLOCK_NAMES="${DOMAIN}, ${LEGACY_DOMAIN}"
-else
-    HUB_BLOCK_NAMES="${DOMAIN}"
+# ── The hub's CANONICAL name ──
+#
+# `DOMAIN` is what this host deploys *as* (it comes from secrets.env.age and
+# drives the admin identity, the tier-config `server` field and every URL the
+# hub writes). It is NOT the same thing as the name every client dials — that
+# one is `HUB_URL` in client/src-tauri/src/chrysalis/contract.rs, and the two
+# drifted apart: the box served only the duckdns name while every shipped build
+# dialled the jadedns one, so the fleet's own name had no certificate at all
+# (measured 2026-11-27: `curl` exit 35, no TLS).
+#
+# Serving the canonical name is therefore NOT optional and must not depend on
+# somebody remembering to set DOMAIN: an earlier `DOMAIN=duckdns` deploy plus a
+# `DOMAIN=jadedns` client update is exactly the state that loses the fleet.
+# Mirroring the client constant means the hub answers the name its own builds
+# ask for, on ANY host, including one where DOMAIN still names the old host.
+#
+# Safe to serve even when this name's DNS does not point here: Caddy only
+# requests a certificate on first request, so a name with no A record fails
+# loudly and alone. Safe to serve when it DOES point here but through a proxy:
+# the failure is a TLS error for this one identifier, not a broken site block.
+#
+# Rotating HUB_URL means editing this default in the same change — the same rule
+# as LEGACY_DOMAIN below, and for the same reason.
+CANONICAL_DOMAIN="${CANONICAL_DOMAIN-networkingguides.jadedns.uk}"
+export CANONICAL_DOMAIN
+
+# A name that is neither the canonical one nor the legacy one is a HOST THAT IS
+# NOT CHRYSALIS — say so rather than silently serving a product name on somebody
+# else's hostname. Left as a warning, not a failure: the deploy is otherwise
+# correct, and refusing to run would strand a fork that has not yet set its own
+# CANONICAL_DOMAIN, which is a worse outcome than a loud line in the log.
+if [ -n "${CANONICAL_DOMAIN}" ] \
+   && [ "${CANONICAL_DOMAIN}" != "${DOMAIN}" ] \
+   && [ "${DOMAIN}" != "${LEGACY_DOMAIN}" ]; then
+    log "NOTE: DOMAIN=${DOMAIN} is neither the canonical name (${CANONICAL_DOMAIN})"
+    log "      nor the legacy one (${LEGACY_DOMAIN}). The hub will serve ALL THREE."
+    log "      If this is not the Chrysalis hub, set CANONICAL_DOMAIN=\"\" (and"
+    log "      LEGACY_DOMAIN=\"\") so only your own name is served."
+fi
+
+# The address line for the hub site block: every hub name shares ONE block.
+#
+# Built as a set rather than a pair because the three cases are independent: a
+# host whose DOMAIN is already canonical (one name), one where DOMAIN is the old
+# host (two), and one where all three differ (three). Caddy issues a SEPARATE
+# certificate per name even on a shared block — verified on the live host
+# 2026-11-27, where each cert carried a single SAN — so adding a name here
+# cannot weaken another name's certificate.
+HUB_BLOCK_NAMES="${DOMAIN}"
+if [ "${CANONICAL_DOMAIN}" != "${DOMAIN}" ] && [ -n "${CANONICAL_DOMAIN}" ]; then
+    HUB_BLOCK_NAMES="${CANONICAL_DOMAIN}, ${HUB_BLOCK_NAMES}"
+fi
+if [ -n "${LEGACY_DOMAIN}" ] \
+   && [ "${LEGACY_DOMAIN}" != "${DOMAIN}" ] \
+   && [ "${LEGACY_DOMAIN}" != "${CANONICAL_DOMAIN}" ]; then
+    HUB_BLOCK_NAMES="${HUB_BLOCK_NAMES}, ${LEGACY_DOMAIN}"
 fi
 
 

@@ -29,6 +29,12 @@ export interface CodeRow {
   released_at?: string
   /** How many times a student has signed out of it. */
   release_count?: number
+  /**
+   * A sign-out is waiting to be claimed: `released_at` is later than
+   * `activated_at`, so the code is free until the student's next activation.
+   * Same comparison as `activation.pb.js`, which is the authority.
+   */
+  released_pending?: boolean
 }
 
 export interface HistoryEvent {
@@ -54,6 +60,11 @@ export interface Facets {
 export function stateLabel(row: CodeRow): string {
   if (row.suspended) return 'stopped'
   if (row.status === 'expired') return 'lapsed'
+  // A sign-out waiting to be claimed. It reads as its own state because it is
+  // one: the next activation of this code will SUCCEED (a second device would be
+  // refused), so calling it "in term" would tell the operator the key is tied up
+  // when it is in fact free. See `released_pending` above.
+  if (row.redeemed && row.released_pending) return 'signed out'
   if (row.redeemed) return 'in term'
   if (row.first_seen_at) return 'released'
   return 'unused'
@@ -62,6 +73,7 @@ export function stateLabel(row: CodeRow): string {
 export function stateClass(row: CodeRow): string {
   if (row.suspended) return 'suspended'
   if (row.status === 'expired') return 'expired'
+  if (row.redeemed && row.released_pending) return 'issued'
   if (row.redeemed) return 'bound'
   if (row.first_seen_at) return 'issued'
   return 'available'

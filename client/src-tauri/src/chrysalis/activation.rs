@@ -334,6 +334,18 @@ fn classify_lookup(response: &LookupResponse) -> CodeCheck {
             true,
             "This code is already in use — if it is yours, re-activating restores your access",
         ),
+        // The code is in use on a machine that has not signed out, so
+        // `/api/activate` will answer 409. `ready: false` is the hub stating a
+        // fact, not this client guessing: the two are kept in step by
+        // `a_redeemed_code_is_refused_on_a_second_device` in
+        // `tests/activation_contract.rs`, which reads the hook.
+        //
+        // An older hub never sends this variant (a redeemed code was always
+        // "ready" there), so no deployed client loses a code to it.
+        LookupStatus::BoundOther => (
+            false,
+            "This code is already in use on another device — sign out there first, or use this code on that device",
+        ),
         LookupStatus::Suspended => (false, "This code has been suspended"),
         LookupStatus::Expired => (false, "This code has expired"),
         LookupStatus::NotFound => (false, "That code was not found"),
@@ -919,6 +931,27 @@ mod tests {
         });
         assert!(reused.ready, "an already-used code must still be activatable");
 
+        // ...but a code held by a device that has NOT signed out is not, because
+        // `/api/activate` refuses it with 409. The two answers are the hub's, and
+        // `a_redeemed_code_is_refused_on_a_second_device` pins the hook they come
+        // from; this pins the reading of them.
+        let elsewhere = classify_lookup(&LookupResponse {
+            status: LookupStatus::BoundOther,
+            tier: None,
+            expires_at: None,
+            message: None,
+        });
+        assert!(
+            !elsewhere.ready,
+            "a code in use on another device must not be offered as ready: activation will \
+             refuse it, and the student would spend an attempt learning that"
+        );
+        assert!(
+            elsewhere.message.contains("another device"),
+            "the screen must say WHERE the code is in use, not merely that it is: {}",
+            elsewhere.message
+        );
+
         // THE REGRESSION THIS PINS: an unrecognised status must not block.
         //
         // It used to return `ready: false`, which meant a client meeting a hub
@@ -938,12 +971,14 @@ mod tests {
         );
     }
 
-    /// The wire names the hub uses for a redeemed code must both be understood.
+    /// The wire names the hub uses for a redeemed code must all be understood.
     ///
-    /// `bound_this_device` is what the hub actually sends (a frozen name every
-    /// deployed client already accepts as ready); `already_used` is the
-    /// descriptive alias. Reading either as `Unknown` is the dead end that
-    /// stranded reinstalling students on 2026-10-03.
+    /// `bound_this_device` and `already_used` are the "it is yours, go ahead"
+    /// pair; `bound_other` is the "it is somebody else's machine" one. Reading any
+    /// of them as `Unknown` is the dead end that stranded reinstalling students on
+    /// 2026-10-03, so each is pinned to the variant it must land on — and the two
+    /// groups are pinned apart, because swapping them would either promise an
+    /// activation that will be refused or refuse one that would have worked.
     #[test]
     fn the_redeemed_status_names_are_both_understood() {
         for name in ["bound_this_device", "already_used"] {
@@ -956,6 +991,15 @@ mod tests {
                  not to Unknown"
             );
         }
+
+        let other: LookupStatus =
+            serde_json::from_value(serde_json::json!("bound_other")).expect("a frozen status must deserialize");
+        assert_eq!(
+            other,
+            LookupStatus::BoundOther,
+            "`bound_other` must not decay to Unknown: Unknown falls through to activation, which \
+             would spend an attempt on a code the hub is going to refuse"
+        );
     }
 
     /// A genuinely unknown name still degrades safely — to `Unknown`, which the

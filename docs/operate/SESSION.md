@@ -152,6 +152,16 @@ cargo fmt --manifest-path src-tauri/Cargo.toml --check
 bash ../server/scripts/check-consistency.sh
 ```
 
+> **Its output is quiet by default, and that is a cost decision.** A passing run
+> prints one line (`PASS  63 sections ran, 63 silent`); a failing run prints only
+> the sections that produced a BAD or a WARN, with their evidence, and nothing
+> else. Measured on this checkout: 37 KB of transcript became 3.6 KB, and a clean
+> run became 74 bytes — which matters because an agent runs this several times per
+> change and was re-reading ~9,000 tokens to learn "nothing is wrong".
+> **`--verbose`** restores the full section-by-section transcript for CI logs or a
+> human reading a terminal. Neither mode can hide a failure: every BAD prints, and
+> the exit code is the same in both.
+
 > **A config that passes every test can still be refused by the engine.** For
 > anything touching generated mihomo YAML, run the real sidecar against the
 > output: `verge-mihomo -t -f <config>`. Valid YAML is not a valid config — a
@@ -180,7 +190,7 @@ empty directory and running the workflow from this page, not reasoned about.
 | Read, search, edit code | No | — |
 | `pnpm typecheck` / `lint` / `format:check` | No | ✅ all exit 0 |
 | `pnpm test` (117 tests) | No | ✅ 13 files, 117 passed |
-| `check-consistency.sh` (49 sections) | No | ✅ all passed |
+| `check-consistency.sh` (63 sections) | No | ✅ all passed |
 | `cargo test --lib` (684 tests) | No | ✅ 684 passed — **after `prebuild` + `web:build`** |
 | `cargo clippy` / `cargo fmt` | No | ✅ exit 0 |
 | Build the app (`pnpm build`) | No | ✅ inputs are vendored |

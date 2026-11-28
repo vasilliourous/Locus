@@ -1,0 +1,27 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <style>
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        background: #1a1b26;
+      }
+      #root {
+        display: inline-block;
+        vertical-align: top;
+      }
+      /* The harness renders ONE sidebar or one card, so the page must not be
+         viewport-wide: `.layout` is `width: 100%` and would fill it. */
+      body {
+        width: max-content;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="./entry.tsx"></script>
+  </body>
+</html>

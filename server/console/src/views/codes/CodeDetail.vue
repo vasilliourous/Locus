@@ -234,6 +234,21 @@ const verdict = computed(() => {
               <span v-if="row.released_at" class="muted"> · last {{ shortDate(row.released_at) }}</span>
             </dd>
           </template>
+          <!--
+            WHETHER THE CODE IS FREE. This is the fact the sign-out exists to
+            record and that nothing showed: since activation refuses a redeemed
+            code on a second device, "signed out" now decides whether the student
+            can get in anywhere at all.
+          -->
+          <template v-if="row.redeemed">
+            <dt>Next activation</dt>
+            <dd v-if="row.released_pending">
+              Will succeed — signed out on {{ shortDateTime(row.released_at) }} and not claimed since
+            </dd>
+            <dd v-else>
+              Refused on another device until this one signs out
+            </dd>
+          </template>
         </dl>
 
         <div class="section-title">Who owns this</div>

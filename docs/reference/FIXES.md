@@ -24,6 +24,57 @@ commercial gaps, [`../business/17-not-built.md`](../business/17-not-built.md).
 
 ---
 
+## A FRESH DEPLOY ON A WIPED HOST SILENTLY DESTROYED EVERY LIVE ACTIVATION CODE (2026-11-27)
+
+**What broke.** The hub was rebuilt onto a blank VPS and `setup.sh` ran `seed-pb.py`
+against a **new, empty** database. `seed-pb.py` reconciles collections and seeds
+tier configs — it cannot know that "empty" means "the old data has not been
+restored yet" — so the hub came up healthy, with 29/29 passing checks, and with
+zero customer rows. The operator's codes, `code_events` history and device
+bindings were gone. The deploy looked finished because **every check a fresh
+deploy runs is a check that a fresh deploy *should* pass**.
+
+**The recovery, and why it worked.** Backups are the thing that saved this, and
+they are on B2, not the box: `b2 ls --long b2://<bucket>/backups/` held 131 hourly
+snapshots, and the largest timestamped before the wipe
+(`data-20261127-070346.db.gz`) is the last true state. Three traps sat in the
+recovery path:
+
+1. **Backup size is the tell.** Snapshots were ~26 KB until the wipe and 8–15 KB
+   after. A restore script that picks "the latest backup" rather than "the last
+   one before the incident" restores the empty state and reports success.
+2. **The restored DB's collections are named `<other-ts>_created_*.js`, not the
+   ones `pb_migrations/` now holds.** PocketBase compares migration *filenames*,
+   so the five collection migrations from the new deploy looked unapplied against
+   the restored DB and it **refused to start** with
+   `UNIQUE constraint failed: _collections.name`. The DB's `_migrations` rows are
+   authoritative; renaming the local migration files to match the DB (or removing
+   the local copies) is what lets it boot.
+3. **Reads that return `0` are not proof of empty.** Two separate causes were
+   mistaken for data loss before either was found: the cached PB JWT predated the
+   restore, so `totalItems: 0` was an *anonymous* read against a collection whose
+   public rule is empty; and the restored DB's superuser was
+   `admin@<canonical domain>` while the secrets bundle supplies a password for
+   `admin@<deploy domain>` — the admin login failed and nothing said so. Verify
+   with `sqlite3` against the file *and* re-authenticate before believing a count.
+
+**The rule this produces.** A hub restoring onto a blank host is a **restore**
+operation, not a **setup** operation, and `server/restore.sh` is the entry point
+that knows the difference. Running `setup.sh` first and restoring afterwards
+means a window in which live codes are presented as absent — and `seed-pb.py`
+will have already rewritten `tier_configs` and `update_config`. On any host that
+has ever served customers, **restore before you seed**, and pick the backup by
+"last snapshot before the incident", never by "latest".
+
+**Verified 2026-11-27:** the restored hub serves 11 codes, 228 `code_events` and
+3 tier configs; tier passwords in `tier_configs` match the running
+`ssserver` configs byte for byte, so existing codes still activate (an unbound
+code → `200`, a bound one → `409 already_in_use`, which is the correct answer);
+`smoke-test.sh` 29/29; release `3.5.2` fetched, verified and published.
+**Not verified:** that any device *installs* an update (A5).
+
+---
+
 ## UPDATING ACROSS THE IDENTITY MOVE INSTALLED A SECOND APPLICATION AND STRANDED THE ACTIVATION CODE (3.5.1, withdrawn from the hub)
 
 **What broke.** A device on `Locus` that took `3.5.1` ended up with **both**
@@ -589,7 +640,229 @@ which turned out to be one root cause and one genuine latent bug.
 
 ---
 
+## THE THIRD REPORT OF THE SAME DEFECT, AND WHY THE FIRST TWO FIXES WERE INERT (2026-11-27, after the host was found down)
+
+**What was reported, a third time.** "The code isn't being registered and used
+properly, and sign-out isn't registered on the hub — this keeps coming back even
+though previous fixes promised to solve it."
+
+That last clause is the important one, and it was treated as the finding rather
+than as frustration. Two earlier entries in this file claim to have fixed exactly
+this. Both were correct in the tree. Neither could take effect on the hub. This
+entry records why, because "the fix was right" and "the fix ran" are different
+claims and only the second one helps a student.
+
+**The host was down when this was investigated**, so the live system could not be
+asked directly. The live `codes` schema and every row could still be read from the
+newest B2 backup, taken **at 06:01Z on the outage day, 126 backups deep and
+hourly** — so the following is measured, not inferred.
+
+### Cause 1 — the hooks were newer than the schema, and the drift was silent
+
+The backup's `codes` table has **no `first_seen_at`**, **no `first_seen_fingerprint`**
+and **no `suspended_reason`**. `seed-pb.py` declares all three, and its reconciler
+would add them — but that script only runs on a deploy, and this hub had been
+updated piecemeal for months.
+
+**This entry first claimed the drift broke activation, and that claim was wrong.**
+It was checked against PocketBase 0.22.21 source rather than left standing, and
+the correction is recorded because a wrong diagnosis in this file is a trap for
+the next agent:
+
+- `Record.Set` stores an undefined key in the record's custom data and returns no
+  error (`models/record.go`).
+- `Dao.update` writes `ColumnValueMap()`, which iterates the **collection schema
+  only** (`daos/base.go` → `models/record.go`).
+
+So a write to a column the hub lacks is **accepted and silently discarded**. The
+save succeeds; the entitlement is untouched. Nothing answers 500. The comment in
+the hooks that said otherwise has been corrected in all four files.
+
+What the drift actually cost is quieter and, for an operator, worse: the write
+*looks* like it worked. `first_seen_*` never exists, so the console cannot say
+"issued before" about a re-issued code. `suspended_reason` never exists, so a
+kicked student gets the generic sentence instead of the one the operator typed —
+and the operator has no way to know their words were dropped. That is the same
+"press the button and nothing happens" shape as the rest of this entry, arriving
+by a different route.
+
+**The fix is not "add the column"** — that is right for this host and returns the
+moment the next hub drifts. Optional, operator-facing columns now go through
+`setIfPresent(record, name, value)`, which **returns whether the write landed**, so
+a hook can distinguish "recorded" from "silently dropped" instead of both looking
+like success. Bringing the schema up to date (`scripts/seed-pb.py`, which only
+ever adds) then restores the behaviour with no hook change. Columns that DECIDE
+anything — `activated_at`, `expires_at`, `suspended`, `tier`, `released_at` —
+deliberately do NOT use it: they exist on every deployed hub, and one going
+missing should be loud, not skipped.
+
+**Guard:** `check-consistency.sh` §(e2c). It lists the optional columns and fails
+if any hook writes one bare. Run against the shipped code it names all seven
+offending writes; against the fixed tree it passes. It also caught this change's
+own first draft, which used an inline check instead of the helper.
+
+**What this does NOT explain**, and is left open rather than papered over: the
+reported *"code isn't registered properly"* is not accounted for by Cause 1 now
+that Cause 1 is understood. The strongest remaining explanation is the one the
+data supports directly — see Cause 2 and the evidence section below.
+
+Two rows read like a second defect and are **not** one, recorded so the next
+reader does not re-open it: `RQ-A33S-Z9NU-UQK4-B` and `RQ-V76K-SE2C-MVKJ-V` are
+activated, have `term_days = 70`, and carry **no `expires_at`**. The audit trail
+explains it exactly — both have a `code_events` row
+`expiry-changed / (cleared)` at `2026-11-26 09:03Z`, which is `codes.expire` with
+an empty body. An operator cleared them, deliberately and on the record. The term
+arithmetic worked; someone removed the dates afterwards.
+
+### Cause 2 — the sign-out could not reach the hub on the network that needed it
+
+`09-activation-tunnel.sh` carries `/api/activate`, `/api/code-lookup` and
+`/api/heartbeat`, and explicitly excluded `/api/release-entitlement` as "an
+optional audit row".
+
+That reasoning was sound when it was written. It stopped being sound when
+activation began refusing a redeemed code on a second device unless
+`released_at > activated_at`: the sign-out is now **the claim that frees the
+code**, not an audit row. And the client in this situation is by definition one
+that cannot reach the hub by name — that is what the tunnel is for — so its
+sign-out got a 403 and nothing anywhere recorded why. The client had done
+everything right.
+
+**The fix:** the path is in the allowlist, with its own rate-limit bucket
+(`RELEASE_LIMIT_PATH`, 10 per 10 minutes, matching Caddy's `release` zone and the
+hook's own `release_` bucket) so it can never consume activation's 5. It grants no
+entitlement and is strictly weaker than `/api/activate`, which is already there
+and mints them.
+
+**Guard:** §40. Its privileged-path pattern is `*release*`, which cannot tell
+`/api/release` (the operator's update manifest) from `/api/release-entitlement`
+(the student sign-out), so the sign-out is stripped before the pattern is applied
+and both are then asserted by name. Adding the real `/api/release` back was
+observed failing the guard.
+
+### What the evidence shows about the reported symptoms
+
+- **7 `signed_out` events** exist, so `device_release.pb.js` *was* being reached
+  and *was* writing. A sign-out that "doesn't register" was a sign-out whose
+  record nothing then read — which was true until the previous entry, and remains
+  true for a student who came through the tunnel.
+- `RQ-S6ZC-64SF-5E8S-F` carries **`release_count = 6`** and
+  `released_at (2026-11-16) > activated_at (2026-11-14)`. Six sign-outs, and
+  before this change none of them freed the code. One code, one student's name,
+  six machines' worth of sign-outs, no consequence.
+
+### Not verified
+
+Nothing here has run against a hub — the host went down mid-investigation and
+every TCP port has refused since. The hooks are reviewed, not executed. The one
+inference is that PocketBase refuses a save because of an unknown field rather
+than dropping it silently; the guard is written so that **either** behaviour is
+safe, which is why it was not left resting on that.
+
+---
+
+## ONE CODE SIGNED IN ON EVERY MACHINE, AND A SIGN-OUT THE HUB NEVER READ (2026-11-27, unreleased)
+
+**What was reported.** "I can still reuse codes: a code signed in on a client's
+device and registered in term on the console goes into a clean instance and signs
+in just fine. And signing out doesn't seem to update the status on the hub at all
+in regards to the code."
+
+Both halves were true, and they are one defect seen from two ends.
+
+**What the code did.** `activation.pb.js` had a single-use stamp (`activated_at`)
+and used it only to choose a MESSAGE. The re-issue arm returned a full tier config
+to anyone presenting a redeemed code, deliberately: re-entering your own code is
+the reinstall path, and there is no device identity left to tell a reinstalling
+student from a stranger. The cost of that reasoning had never been priced. A
+second machine inherited the entitlement for the full remaining term and the hub
+recorded nothing — not `release_count`, not a `code_events` row, nothing the
+console could show. One purchase served any number of machines.
+
+Meanwhile `device_release.pb.js` wrote `released_at`, `release_count` and a
+history row on sign-out, and **no hook ever read any of it**. The audit trail was
+complete and inert. The 2026-11-18 entry above called that deliberate and fixed
+the console instead; the report that follows says the intent does not survive
+being read from the student's side — the code really did stay signed in.
+
+**The rule now, and why it is a timestamp rather than a cleared field.** A
+redeemed code activates again only when `released_at > activated_at`: the device
+holding it signed out AFTER the redemption now in force. Consuming that sign-out
+re-stamps `activated_at`, which spends it. Three properties follow, and each of
+them was the reason a simpler rule was rejected:
+
+- **A sign-out cannot be stolen.** The sign-out endpoint is authenticated by
+  possession of the code, and codes are printed on cards. Clearing `activated_at`
+  there would let the holder of a photo free a paying student's code. Writing a
+  claim that only the next activation consumes, and that activation spends, means
+  the only party who benefits is the one who signed out — the honest reading of
+  "I am moving to another machine".
+- **One sign-out is one activation.** A monotonic `release_count > 0` would have
+  left the code permanently claimable by any card-holder for as long as the second
+  machine stayed signed in.
+- **A term cannot be reset.** Consuming a claim moves `activated_at` and leaves
+  `expires_at` alone, so signing out and back in gives a student exactly the clock
+  they already had.
+
+**The lookup had to move with it.** `/api/code-lookup` answered a redeemed code
+`bound_this_device` ("ready"), which was honest while activation admitted every
+presenter and became a promise the hub no longer keeps. There are now two frozen
+names for two states: `bound_this_device` when a sign-out is waiting (still
+`ready: true`, still the name every deployed build accepts as ready), and
+`bound_other` when a machine holds it (`ready: false`, with the sentence that says
+how to move). `bound_other` is the third entry in the SAME deployed enum — chosen
+because "bound to another device" is now literally the situation — so no deployed
+client sees an unknown status. This matters: an unknown status is `Unknown`, and
+`Unknown` on a deployed build is a dead end, which is what the 2026-10-03
+`already_used` incident cost a fleet.
+
+**What the operator sees.** `codes.list` returns `released_pending` (same
+comparison, same parser), `CodeDetail.vue` states whether the next activation will
+succeed or be refused, and the badge reads "signed out" instead of "in term". The
+Overview's `shared` check changed meaning with the rule and was rewritten rather
+than left to reassure: since a second device is now refused, "in use in two places
+at once" is not a state a code can be in, and the honest version of the question
+is "signed out and not claimed, with term left".
+
+**Guards, each observed failing** — the hook defect reinserted, watched red,
+restored:
+
+- `check-consistency.sh` §(e2b): the claim must be compared and consumed, the
+  refusal must be 409, and the lookup must ask the same question. Reverting the
+  comparison, removing the re-stamp, and re-sending `bound_this_device` for a held
+  code each turned it red with a message naming that half.
+- `a_redeemed_code_is_refused_on_a_second_device` and
+  `the_lookup_and_activation_agree_about_a_held_code` in
+  `client/src-tauri/tests/activation_contract.rs`: both red against the shipped
+  behaviour, green after.
+- `console-card-consistency.js`: a released row and a reclaimed row in the fixture,
+  asserted in both directions. Inverting the comparison turned both red — one for
+  each direction, so the guard cannot pass by returning a constant.
+- `a_repeat_activation_restores_rather_than_refuses` was rewritten mid-change: it
+  asserted the old message, and the guard caught its own reader twice (a comment
+  stripper hiding the slice's end marker, and a slice starting inside a doc
+  comment). A guard that fails for the wrong reason is still a guard that was not
+  checked.
+
+**Not verified.** Nothing here has run against a hub. No PocketBase in this
+environment, so the hooks are reviewed, not executed; the JS-level behaviour of
+`releasedSinceActivation` rests on `parsePBDate` returning `NaN` for a missing
+value, which is the same helper the expiry and re-activation paths already depend
+on. And per the standing rule: a hook in this repo is inert on the live hub until
+`setup.sh` re-runs, so this fix changes nothing until the deploy. A heartbeat
+response lacking `enforcement_version` is still the proof of a stale deployment.
+
+---
+
 ## THREE REPORTS ABOUT CODES, WITH THREE DIFFERENT CAUSES (2026-11-18, unreleased)
+
+> **SUPERSEDED IN PART, and the part that was wrong is the part that mattered.**
+> The second and third sections below decided that "a redeemed code activates"
+> was by design and that only the screen needed fixing. That reading is what let
+> one code sign in on any number of machines for a whole term, which was reported
+> again and is fixed in the entry above this one. Read this entry for the SIGN-OUT
+> history (still accurate) and treat "A redeemed code activates — by design" as
+> overturned: it activates again after a sign-out, and not otherwise.
 
 Reported as one symptom cluster: *"suspending a code on the admin hub does nothing
 to the client; when a client signs out the code is not released on the admin hub;

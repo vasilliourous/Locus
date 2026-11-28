@@ -83,7 +83,26 @@ export const LayoutItem = (props: Props) => {
           </ListItemIcon>
         )}
         {effectiveMenuIcon === 'colorful' && (
-          <ListItemIcon sx={{ cursor: 'inherit' }}>{icon[1]}</ListItemIcon>
+          /* The disc is the accent colour and the glyph is the canvas ground,
+             which is a 17:1 pair. The pair this replaces was white ink on the
+             same disc — 2.5:1, under the 3:1 that WCAG 1.4.11 asks of a non-text
+             icon, so the two-icon state read as a solid dot at the sidebar's
+             size.
+
+             Both are CSS custom properties rather than literal colours in the
+             SVGs: an SVG's own `fill`/`stop-color` are not reachable from the
+             theme, and a literal would have to be restated in four files
+             whenever the palette moved. They are declared here, on the wrapper
+             the SVG is a child of, so they inherit into it. */
+          <ListItemIcon
+            sx={(theme) => ({
+              cursor: 'inherit',
+              '--itemicon-disc': theme.palette.primary.main,
+              '--itemicon-glyph': theme.palette.background.paper,
+            })}
+          >
+            {icon[1]}
+          </ListItemIcon>
         )}
         <ListItemText
           sx={{

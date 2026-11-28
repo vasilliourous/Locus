@@ -28,6 +28,7 @@
     "LookupStatus": {
       "wire_values": [
         "already_used",
+        "bound_other",
         "expired",
         "not_found",
         "ok",

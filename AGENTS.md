@@ -64,6 +64,22 @@ One clause each; the file that owns it has the story.
   cannot see `cargo::unused_dependencies`, so clippy prints that warning and exits
   **0**; the class sat unaddressed until the guard existed and immediately found
   one (`rust_iso3166`, unreferenced since the initial commit).
+- **Do not stream a gate's output into your context — capture it and print the
+  verdict.** `cargo test` on this tree is thousands of lines of `test ... ok`, and
+  reading them to learn "everything passed" is the largest avoidable cost in a
+  small change. The pattern is the same for all four gates:
+
+  ```sh
+  cargo test 2>&1 | tail -5            # the summary, not the 4000 lines above it
+  cargo test >/tmp/t.log 2>&1 || tail -40 /tmp/t.log   # failures only when it fails
+  ```
+
+  The same applies to `check-consistency.sh`, which is quiet by default for this
+  reason — a passing run is one line, and `--verbose` is for when you need the
+  transcript. **Never pipe a gate through `head`** to trim it: `head` closes the
+  pipe early, a writing command dies of SIGPIPE, and `pipefail` reports a failure
+  that did not happen — a real defect in `client.yml`'s runner probe, explained in
+  the comment above that step's `gh api` loop. Use `tail`, or redirect to a file.
 - **A repo fix is inert until the piece that runs it is redeployed.** The hub runs
   its own copy; `server/scripts/hooks-sync.sh` compares them.
 - **`main` and the tag are separate pushes**, and CI does not bump versions — a

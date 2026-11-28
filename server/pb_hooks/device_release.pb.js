@@ -3,35 +3,37 @@
 // POST /api/release-entitlement
 //
 // A student signs out on a device. The client forgets the code locally (see
-// client/src-tauri/src/chrysalis/signout.rs) and tells the hub here, so the
-// operator can tell "this student moved to a new computer" apart from "this key
-// is being shared". From the console those two look identical otherwise.
+// client/src-tauri/src/chrysalis/signout.rs) and tells the hub here. This call
+// is what MAKES THE CODE SINGLE-USE actually mean anything: activation.pb.js
+// refuses a redeemed code unless `released_at` is later than `activated_at`, and
+// this is the only place that writes `released_at`.
 //
 // ── WHAT THIS ENDPOINT DELIBERATELY DOES NOT DO ──────────────────────────────
 //
-// It does NOT clear `codes.activated_at`.
+// It does NOT clear `codes.activated_at` in place. It writes a stamp that
+// OUTRANKS it instead, and the stamp is what the next activation reads.
 //
-// `/api/admin/unbind-code` does clear it, and that is correct FOR AN OPERATOR:
-// releasing a code puts it back to unused so it can be handed to someone else.
+// The difference is not cosmetic, and both halves of it matter:
 //
-// This endpoint must not, for two reasons that both bite:
+//   1. **It cannot be stolen.** The only credential required here is POSSESSION
+//      of the code. Every code is on a printed card, and middlemen hold stock, so
+//      if a sign-out simply freed the code, anyone who obtained one — a photo of
+//      a friend's card, an unsold batch in a middleman's drawer — could take it
+//      out from under the student who paid for it. Writing `released_at` frees it
+//      only for the NEXT activation, and the next activation can only come from
+//      whoever signed out; the moment it happens the stamp is spent. The holder
+//      of the photo loses the race unless the paying student signed out and then
+//      left the machine idle, which is the one case where the key really is free.
+//   2. **It cannot reset a term in a way that is free.** `activated_at` is the
+//      base a re-activation restarts the term from. Consuming a release re-stamps
+//      `activated_at` but leaves `expires_at` alone, so signing out and in again
+//      gives the student exactly the clock they already had.
 //
-//   1. `activated_at` is the base a re-activation restarts the term from
-//      (activation.pb.js → `expiryFromTerm(termDays, now)`). Clearing it lets a
-//      student reset their own clock by signing out and in again.
-//   2. The only credential required here is POSSESSION of the code. Every code
-//      is on a printed card, and middlemen hold stock. If a sign-out cleared the
-//      redemption, anyone who obtained a code — a photo of a friend's card, an
-//      unsold batch in a middleman's drawer — could release it out from under
-//      the student who paid for it. That is a griefing vector against paying
-//      customers, and it would be created by a convenience feature.
-//
-// So this records an AUDIT fact (`released_at`, `release_count`, a `code_events`
-// row) and leaves every entitlement field exactly as it was. Re-activation was
-// ALREADY allowed for a redeemed code ("Already activated" restores access), so
-// nothing about the student's next device depends on this call succeeding —
-// which is why the client treats a failure here as "signed out, not confirmed"
-// rather than failing the sign-out.
+// So this records a STATE fact (`released_at` — the claim — plus `release_count`
+// and a `code_events` row for the operator's history) and leaves the entitlement
+// fields as they were. A failure here means the device is signed out locally and
+// the code still looks held on the hub — which is why the client reports "signed
+// out, not confirmed" rather than failing the sign-out.
 //
 // ── AUTHENTICATION ──────────────────────────────────────────────────────────
 //
@@ -71,6 +73,22 @@ routerAdd("POST", "/api/release-entitlement", function (e) {
         if (!isNaN(direct)) return direct;
         var swapped = new Date(s.replace(" ", "T")).getTime();
         return swapped;
+    }
+
+    // Same helper as activation.pb.js — read that one for the source verification.
+    // `released_at` is NOT routed through it: it is the claim that frees the code,
+    // and a hub without that column must be visible as a problem rather than
+    // quietly recording a sign-out that changes nothing.
+    function setIfPresent(record, name, value) {
+        try {
+            if (record.collection().fields.getByName(name)) {
+                record.set(name, value);
+                return true;
+            }
+            return false;
+        } catch (noCollection) {
+            return false;
+        }
     }
 
     try {
@@ -153,17 +171,32 @@ routerAdd("POST", "/api/release-entitlement", function (e) {
 
         // ── Nothing to release? ──
         //
-        // An unredeemed code has no device to release from. A suspended or
-        // expired code has no live entitlement either — the student's access is
-        // already ended by a fact stronger than this record, and writing an audit
-        // row saying "signed out" would add noise to a case the operator is
-        // already handling.
+        // An unredeemed code has no device to release from. A code that is
+        // ALREADY released (a second sign-out from the same, already-free device)
+        // has no live redemption either — the first sign-out freed it and nothing
+        // has claimed it since.
         //
-        // All three answer the same way: a no-op success. The student's local
-        // sign-out has already happened and is unaffected.
+        // That second case needs an explicit check, and it is the one the
+        // `released_at > activated_at` rule made easy to get wrong: without it a
+        // second sign-out would walk the claim forward, so a code sitting free in
+        // the pool would stay claimable by any holder of the card indefinitely
+        // rather than for the student who actually released it.
+        //
+        // A suspended or expired code has no live entitlement either — the
+        // student's access is already ended by a fact stronger than this record,
+        // and writing an audit row saying "signed out" would add noise to a case
+        // the operator is already handling.
+        //
+        // Each answers the same way: a no-op success. The student's local sign-out
+        // has already happened and is unaffected.
         var at = record.get("activated_at");
         var wasRedeemed = at !== null && at !== undefined && String(at).trim() !== "";
         if (!wasRedeemed || record.getBool("suspended")) {
+            return e.json(404, { code: 404, message: "Nothing to release", released: false });
+        }
+        var atMs = parsePBDate(at);
+        var relMs = parsePBDate(record.get("released_at"));
+        if (!isNaN(relMs) && relMs > 0 && relMs > atMs) {
             return e.json(404, { code: 404, message: "Nothing to release", released: false });
         }
         var expMs = parsePBDate(record.get("expires_at"));
@@ -173,15 +206,25 @@ routerAdd("POST", "/api/release-entitlement", function (e) {
 
         // ── Record it ──
         //
-        // ONLY audit fields are written. `activated_at` and `expires_at` are
-        // untouched on purpose — see the header. Read-modify-write of the count
-        // rather than a separate counter collection: these are two small numbers
-        // on a row that is already being saved for `released_at`, and a second
-        // collection would be a second thing to keep consistent.
+        // ONLY state and audit fields are written. `activated_at` and `expires_at`
+        // are untouched on purpose — see the header; `released_at` outranks
+        // `activated_at` instead of clearing it, and activation.pb.js reads the
+        // comparison. Read-modify-write of the count rather than a separate
+        // counter collection: these are two small numbers on a row that is already
+        // being saved for `released_at`, and a second collection would be a second
+        // thing to keep consistent.
         var prior = record.get("release_count");
         var count = (typeof prior === "number" && isFinite(prior) ? prior : 0) + 1;
+        // `released_at` is the claim that frees the code (activation.pb.js reads
+        // it), so it is NOT optional and NOT routed through `setIfPresent`. If a
+        // hub ever lacks it the save must fail loudly rather than quietly record
+        // a sign-out that changes nothing — which is exactly the report this
+        // endpoint exists to answer.
         record.set("released_at", new Date().toISOString());
-        record.set("release_count", count);
+        // `release_count` IS optional: it is the operator's history, not the
+        // claim. Present on every deployed hub, but routed through the helper so
+        // a future schema change cannot make it silently vanish.
+        setIfPresent(record, "release_count", count);
         $app.dao().saveRecord(record);
 
         // The full history, so the console can answer "signed out how many times,
@@ -189,12 +232,19 @@ routerAdd("POST", "/api/release-entitlement", function (e) {
         // prefix and the fingerprint are the only identifiers recorded: the
         // console logs prefixes for the same reason (a code is a bearer
         // credential and a log is a thing people paste).
+        //
+        // `event: "released"` and not `"signed_out"`, and the difference is what
+        // the operator needs to read. This one means the code is FREE and the next
+        // activation will claim it; `signed_out` means a device stopped using a
+        // code that is still held (any deployment of this hook before this
+        // change). A console that showed both as one word would leave the operator
+        // unable to tell which codes can be moved and which are still in force.
         try {
             var evtCol = $app.dao().findCollectionByNameOrId("code_events");
             var evt = new Record(evtCol);
             evt.set("code", canonical);
-            evt.set("event", "signed_out");
-            evt.set("detail", "Signed out on a device (release #" + count + ")");
+            evt.set("event", "released");
+            evt.set("detail", "Signed out on a device (release #" + count + ") — the code is free for the next activation");
             evt.set("actor", "student");
             evt.set("fingerprint", fp.substring(0, 16) + "****");
             $app.dao().saveRecord(evt);
@@ -212,9 +262,14 @@ routerAdd("POST", "/api/release-entitlement", function (e) {
 
         // `code: 200` mirrors every other hook in this directory: the client
         // switches on the JSON `code`, not the HTTP status.
+        //
+        // `message` is deliberately not "Signed out." — the client uses its own
+        // sentences (signout.rs → HubOutcome) and shows this one only as a
+        // fallback, where "the code is free" is the fact that matters: it is what
+        // the student needs to know before they enter it on the next machine.
         return e.json(200, {
             code: 200,
-            message: "Release recorded",
+            message: "Release recorded — the code can be used on another device now",
             released: true,
             count: count
         });

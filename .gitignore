@@ -113,6 +113,14 @@ Thumbs.db
 # Diagnostic scratch (probe logs, one-off scripts)
 diag/
 whale.txt
+#
+# `scratch/` was 2.8 MB of one-off probes — ASCII-art rasterisers, `.ppm`
+# intermediates, font specimens — committed by a single "saving changes" commit.
+# Nothing references it: not a guard, not a doc, not a build script. It cost every
+# search and every directory walk, and it is not a build input (those live in
+# `vendor/build-inputs/`, deliberately and with a pin). Untracked rather than
+# deleted, so the working copy is unchanged for anyone still using it locally.
+scratch/
 
 # Local Go toolchain bootstrapped for builds on a host with no system Go.
 # Never part of the repository; see docs for the bootstrap procedure.

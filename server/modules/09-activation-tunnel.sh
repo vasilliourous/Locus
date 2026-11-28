@@ -193,7 +193,7 @@ import urllib.parse
 LISTEN = ("127.0.0.1", int(os.environ.get("ACTIVATION_FORWARD_PORT", "18090")))
 UPSTREAM = ("127.0.0.1", 8090)
 
-ALLOWED = ("/api/activate", "/api/code-lookup", "/api/heartbeat")
+ALLOWED = ("/api/activate", "/api/code-lookup", "/api/heartbeat", "/api/release-entitlement")
 
 # Deliberately NOT allowed, stated so a reader sees the boundary rather than
 # inferring it from an absence:
@@ -201,23 +201,51 @@ ALLOWED = ("/api/activate", "/api/code-lookup", "/api/heartbeat")
 #   /api/release      operator-only
 #   /updates/*        static payloads; large, and not needed to enrol
 #   /admin/, /_/      operator surfaces
-#   /api/release-entitlement
-#                     the student sign-out record. NOT here on purpose, and it
-#                     is the closest call in this list. The case FOR adding it is
-#                     real: a student signing out on a network that blocks the
-#                     hub by name is in the same situation as one activating.
-#                     The case AGAINST wins — this listener's credential is
-#                     compiled into every client, so its allowlist must stay as
-#                     small as the product allows, and a sign-out already works
-#                     WITHOUT the hub (the client forgets the code locally and
-#                     tells the student it could not reach us). Adding it would
-#                     widen the surface of a public key to make an optional
-#                     audit row more reliable.
+#
+# ── WHY /api/release-entitlement WAS ADDED, having once been left out ──
+#
+# It used to sit in the list above, on the reasoning that a sign-out was "an
+# optional audit row": the client forgets the code locally either way, and
+# widening the surface of a key compiled into every client was not worth it.
+#
+# THAT REASONING IS VOID. Since 2026-11-27 the hub refuses a redeemed code on a
+# second device unless `released_at` is later than `activated_at`
+# (activation.pb.js), and `device_release.pb.js` is the only writer of
+# `released_at`. The sign-out is therefore not an audit row — it is the claim
+# that frees the code, and a sign-out that cannot reach the hub leaves the
+# student locked out of their next machine until an operator releases the code
+# by hand.
+#
+# And it cannot reach the hub by the only other route on the network this
+# listener exists for: a client that fell back to this tunnel necessarily could
+# not reach the hub by name, so its sign-out gets a 403 here and nothing
+# anywhere records why. That is exactly the reported symptom — "signing out does
+# not register on the hub" — and it is unfixable on the client side, because the
+# client did everything right.
+#
+# The surface cost is one more POST: it is rate-limited here and again in the
+# hook's own `release_` bucket, it writes an audit row and two columns, and it
+# grants no entitlement. It is strictly weaker than `/api/activate`, which is
+# already in this list and mints them.
 RATE_LIMIT_PATH = "/api/activate"
 RATE_EVENTS = 5
 RATE_WINDOW = 600  # seconds
 
+# The SIGN-OUT gets its own bucket, and must never share `RATE_LIMIT_PATH`'s.
+#
+# This is the same separation Caddy makes (`release` zone, 10 per 10 minutes —
+# see 05-caddy.sh) and the same one the hook makes in its `release_` bucket:
+# signing out is not an activation attempt. If it consumed `activate_`, a
+# student who signed out and then failed to activate once would have spent part
+# of the budget on the wrong operation, and the screen that explains their code
+# is the one that stops loading. Keeping the two apart is what lets the bound
+# here match Caddy's instead of inheriting a stricter one.
+RELEASE_LIMIT_PATH = "/api/release-entitlement"
+RELEASE_EVENTS = 10
+RELEASE_WINDOW = 600  # seconds
+
 _seen: dict[str, list[float]] = {}
+_seen_release: dict[str, list[float]] = {}
 
 # The header this process sets on every forwarded request, and the ONLY thing
 # the hub uses to tell one tunnelled client from another. See the `identity`
@@ -250,15 +278,24 @@ def identity(peer: str) -> str:
     return hashlib.sha256((key + "|" + peer).encode("utf-8")).hexdigest()[:32]
 
 
-def rate_limited(peer: str) -> bool:
+def _limited(store: dict, peer: str, events: int, window: int) -> bool:
+    """One sliding-window bucket. Shared by the two below so they cannot drift."""
     now = time.monotonic()
-    hits = [t for t in _seen.get(peer, []) if now - t < RATE_WINDOW]
-    if len(hits) >= RATE_EVENTS:
-        _seen[peer] = hits
+    hits = [t for t in store.get(peer, []) if now - t < window]
+    if len(hits) >= events:
+        store[peer] = hits
         return True
     hits.append(now)
-    _seen[peer] = hits
+    store[peer] = hits
     return False
+
+
+def rate_limited(peer: str) -> bool:
+    return _limited(_seen, peer, RATE_EVENTS, RATE_WINDOW)
+
+
+def release_rate_limited(peer: str) -> bool:
+    return _limited(_seen_release, peer, RELEASE_EVENTS, RELEASE_WINDOW)
 
 
 def allowed(path: str) -> bool:
@@ -286,7 +323,14 @@ def main() -> None:
                 return self.refuse()
 
             peer = self.client_address[0]
-            if urllib.parse.urlsplit(target).path.startswith(RATE_LIMIT_PATH) and rate_limited(peer):
+            req_path = urllib.parse.urlsplit(target).path
+            if req_path.startswith(RATE_LIMIT_PATH) and rate_limited(peer):
+                return self.respond(429, b'{"code":429,"message":"Too many attempts"}')
+            # Separate bucket, on purpose — see RELEASE_LIMIT_PATH. The limit
+            # matches Caddy's `release` zone (10 per 10 minutes) rather than this
+            # listener's 5-per-10 activate rule, because they are different
+            # operations and the hub applies the same bound from the other side.
+            if req_path.startswith(RELEASE_LIMIT_PATH) and release_rate_limited(peer):
                 return self.respond(429, b'{"code":429,"message":"Too many attempts"}')
 
             # Drain headers, then forward. Content-Length is required; a chunked

@@ -1,0 +1,69 @@
+# Keep agents' and humans' searches cheap.
+#
+# `.gitignore` answers "should git track this?". This file answers a different
+# question: "should a TEXT SEARCH look at this?". ripgrep honours `.ignore` in
+# addition to `.gitignore`, so these exclusions apply to `rg` regardless of what
+# git thinks, and to any tool that respects the same convention.
+#
+# WHY IT MATTERS HERE SPECIFICALLY
+#
+# `vendor/build-inputs/` holds 524 MB of committed binaries — eight engine and
+# service executables plus four geo databases. They are tracked ON PURPOSE (see
+# docs/operate/VENDORED-BUILD-INPUTS.md: five outages came from build inputs
+# living behind third-party URLs), so `.gitignore` cannot exclude them. But no
+# search ever wants their contents, and a grep across the repository wades
+# through them every time.
+#
+# Nothing here is deleted or untracked. This only stops a search from paying for
+# files whose contents are not text in the first place.
+
+# ---- Binary build inputs: tracked deliberately, never searched ----
+vendor/build-inputs/
+
+# ---- Release output staged for upload; reproducible from the tag ----
+release-artifacts/
+
+# ---- Local build state ----
+client/target/
+client/node_modules/
+client/dist/
+client/src-tauri/sidecar/
+client/src-tauri/gen/
+server/console/node_modules/
+server/console/dist/
+server/site/node_modules/
+
+# ---- Asset binaries: images, fonts, data files ----
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.ico
+*.icns
+*.ppm
+*.ttf
+*.otf
+*.woff
+*.woff2
+*.mmdb
+*.dat
+*.exe
+*.dylib
+*.so
+*.rlib
+*.d
+
+# ---- Generated code and lockfiles: large, and never the answer to "where is
+#      this logic?" ----
+client/pnpm-lock.yaml
+client/Cargo.lock
+server/console/pnpm-lock.yaml
+server/site/package-lock.json
+
+# ---- Local scratch that is not the repository's business ----
+scratch/
+.diag/
+.hubtmp/
+.chrysalis-keys/
+.locus-keys/
+__pycache__/

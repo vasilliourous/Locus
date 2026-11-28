@@ -225,15 +225,25 @@ Every console page is a POST to `/api/admin/console` with an `action`:
 | Action | Purpose |
 |---|---|
 | `dashboard` | Counts, per-tier totals, recent activity, codes expiring within 30 days, and check-in attempts over their live window split by kind |
-| **`attention.list`** | The Overview's four checks: `unservable_tier` (tier has no ACTIVE config row), `lapsed` (past expiry, not stopped), `shared` (`release_count >= 2` while in term), `no_label` (in use, no name). Returns counts plus up to 8 example rows each |
+| **`attention.list`** | The Overview's four checks: `unservable_tier` (tier has no ACTIVE config row), `lapsed` (past expiry, not stopped), `shared` (signed out and not claimed again, with term left — see the note below), `no_label` (in use, no name). Returns counts plus up to 8 example rows each |
+
+> **`shared` changed meaning on 2026-11-27 and the old reading is now wrong.**
+> It used to be `release_count >= 2` while in term, read as "moving machines, or
+> sharing this key?" — two readings it could not separate, because a second
+> device was admitted silently and recorded nothing. A second device is now
+> **refused** (`/api/activate` answers `409`), so a code in term cannot be in use
+> anywhere else, and a careless holder leaves no trace at all. What the check can
+> answer is "somebody signed out and has not come back": the code is free, still
+> has term left, and is claimable by anyone holding the card. A move in progress
+> claims it within minutes, so a code sitting here for days is the signal.
 | `codes.list` | Search/filter codes (`query`, `tier`, `status`, `middleman`, **`expiring_within_days`**) |
 | `codes.generate` | Create codes (`tier`, `count`, **`term_days`**, `expires_at`, `middleman`, `label`, `notes`) |
 | **`codes.renew`** | **Extend a code's term after a payment** (`code`, `term_days` override, `price`, `middleman`) |
 | **`codes.set-term`** | Set how long one purchase lasts, **without moving the expiry** (`code`, `term_days`) |
-| **`codes.rebind`** | **Retired.** Codes are not tied to a device; returns `410` explaining that a student simply re-enters their code on a new machine |
+| **`codes.rebind`** | **Retired.** Codes are not tied to a device; returns `410`. Since 2026-11-27 a student moves machines by **signing out** on the old one — that is what admits the next activation (`/api/release-entitlement`, §API 5c) — and a code held elsewhere is refused with `409` |
 | `codes.kick` | **Kick a student out**, with a reason they are shown (`code`, `reason` — required) |
 | `codes.suspend` / `codes.unsuspend` | Toggle suspension without a student-facing reason |
-| `codes.unbind` | Release a used code back to unused, so a different student can activate it (`code`, `reason`) |
+| `codes.unbind` | Release a used code back to unused, so a different student can activate it (`code`, `reason`). **This is the operator's tool for a machine the student no longer has** (lost, stolen, dead disk): they cannot sign out on it, so nothing frees the code for them. It is not for moving a student to a new laptop they still have — that student signs out |
 | `codes.expire` | Set or clear an **absolute** expiry (`code`, `expires_at`) |
 | `codes.update` | Edit `middleman` / `label` / `notes` |
 | `codes.history` | Per-code event trail |
@@ -311,6 +321,23 @@ ssh root@new-vps "DOMAIN=networkingguides.jadedns.uk bash /root/server/scripts/s
 
 #### Blank-VPS gotchas (all previously caused failed deploys)
 
+- **A hook newer than the schema breaks the DECISION, not just the column.**
+  Measured 2026-11-27: the live `codes` collection had no `first_seen_at`, no
+  `first_seen_fingerprint` and no `suspended_reason`, but the hooks wrote all
+  three — so activation and Suspend/Unsuspend/Kick answered 500 while every test
+  in the tree passed. `seed-pb.py` only adds missing columns when it runs, and a
+  hub updated hook-by-hook can go months without it.
+
+  The hooks are now written so this cannot cost a decision (`setIfPresent` —
+  see [`../reference/FIXES.md`](../reference/FIXES.md), "the third report of the
+  same defect"), but the schema should still be brought up to date, because the
+  console reads those columns:
+  ```bash
+  ssh $VPS "cd /root/server && python3 scripts/seed-pb.py"
+  ```
+  It is **safe and non-destructive**: it only ever ADDs missing fields — never
+  removes, retypes, or touches rows. It ends by printing
+  `+ added column(s): ...`, and exits non-zero if it could not.
 - **`/root/server/` is a stale staging copy.** `setup.sh` deploys hooks from
   `/root/server/pb_hooks/` (not from the repo), so after changing a hook you
   must update **both** the staging dir and the live dir, then restart
@@ -509,7 +536,7 @@ Four destinations, grouped by the job rather than by the collection.
 
 | Page | What it is for |
 |---|---|
-| **Overview** | Whether anything needs attention, and the way in to each thing. Every count is a button that opens the Codes page already filtered to it. Below the counts, four checks over real data: codes on a tier the hub cannot serve, codes lapsed and NOT stopped, codes signed out on several machines while still in term, and codes in use with no name recorded. |
+| **Overview** | Whether anything needs attention, and the way in to each thing. Every count is a button that opens the Codes page already filtered to it. Below the counts, four checks over real data: codes on a tier the hub cannot serve, codes lapsed and NOT stopped, codes signed out and not claimed again with term left, and codes in use with no name recorded. |
 | **Codes** | Find a code and act on it. Search matches the code, the student's **name** (`label`), notes and the middleman. Filters apply as you change them — there is no Apply button. One row shows the code, its state, who holds it, and days remaining; **Renew** is the row's primary action, and everything else (open, stop/reactivate, manual expiry, delete) is behind `⋯`. Detail opens as a panel beside the list, with separate **Detail / Actions / History / Danger** tabs. **Create codes** is a drawer. |
 | **Distribution** | One row per middleman: how much stock they hold, how much is in term, how much is due within 7 days, and how many renewals and how much money was recorded through them in the chosen window (30 / 90 / 365 days). Free stock is a segment, not a separate page. |
 | **Settings › Tiers** | Server hostname, port, method, active/UDP-relay flags and the hub address offered to that tier. One table; edit a row to change it. |

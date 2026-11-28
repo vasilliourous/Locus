@@ -1,8 +1,16 @@
-import { Box, Button, CircularProgress, Typography, alpha } from '@mui/material'
+import {
+  Box,
+  Button,
+  CircularProgress,
+  SvgIcon,
+  Typography,
+  alpha,
+} from '@mui/material'
 import { useTheme } from '@mui/material/styles'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
+import glyph from '@/assets/image/glyph.svg?react'
 import { SupportBlock } from '@/components/shared/support-block'
 import { useSubscription } from '@/hooks/use-subscription'
 import { monoFontFamily } from '@/pages/_surfaces'
@@ -235,10 +243,23 @@ const ActivationScreen = ({ onActivated }: Props) => {
         sx={{ width: 420, maxWidth: 'calc(100vw - 48px)', textAlign: 'center' }}
       >
         {/* Brand mark. The name is set as live text, not the `logo.svg` wordmark:
-            this screen is 420 px wide and the wordmark is drawn for a 27 px
-            sidebar slot, while live text can be selected, translated and read by
-            a screen reader. The pictorial mark is `glyph.svg`, which the window,
-            taskbar, dock and favicon all carry. See `/COLOURS.md` §8. */}
+            this screen is 420 px wide and the wordmark is drawn to the sidebar's
+            slot, while live text can be selected, translated and read by a screen
+            reader. The pictorial mark is `glyph.svg`, which the window, taskbar,
+            dock and favicon all carry. See `/COLOURS.md` §8.
+
+            The glyph is rendered here — it was described in this comment for a
+            release without being in the JSX, so the screen a student sees before
+            they have paid carried no brand mark at all while every icon file on
+            disk was correct. `titleAccess` gives it an accessible name; without
+            one MUI emits a decorative `aria-hidden` image, which is right for a
+            mark beside its own word and wrong for a lone one. */}
+        <SvgIcon
+          component={glyph}
+          inheritViewBox
+          titleAccess="Chrysalis"
+          sx={{ width: 64, height: 64, mb: 1.5 }}
+        />
         <Typography
           variant="h4"
           sx={{ fontWeight: 700, letterSpacing: '-0.01em', mb: 0.5 }}

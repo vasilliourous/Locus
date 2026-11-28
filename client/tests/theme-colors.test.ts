@@ -538,11 +538,13 @@ describe('the wordmark says this product, not the previous one', () => {
    *     units of ink on a 54.41-unit box; the check below is a floor, not an
    *     equality, so a re-cut with different bearings is free and a return to a
    *     shorter word is not.
-   *  2. **Its grid.** `/COLOURS.md` §8 keeps the live band — cap top to baseline —
-   *     and `layout.scss` `.the-logo` reserves exactly a 27 px box for it. A
-   *     re-export that changes the `viewBox` height silently rescales the
-   *     wordmark inside that box, which is how this file regresses after a trip
-   *     through a design tool.
+   *  2. **Its grid.** `/COLOURS.md` §8 keeps the live band — cap top to baseline.
+   *     The `viewBox` must CONTAIN that band, with the sidebar sizing the element
+   *     from its aspect ratio rather than from a box reserved for it. It said
+   *     "27 px box" here and the assertion below checked the viewBox against 27,
+   *     so a re-export that changed the *artwork* rescale had to be caught by a
+   *     number that was itself wrong. Containment is the property; the box's own
+   *     height is not.
    *
    * What this CANNOT tell you: that the paths spell C-H-R-Y-S-A-L-I-S. Outlines
    * carry no text, and no assertion short of a golden PNG — a fixture nobody
@@ -585,19 +587,62 @@ describe('the wordmark says this product, not the previous one', () => {
     ).toBeGreaterThan(200)
   })
 
-  it('is drawn on the 27-unit grid the sidebar reserves', () => {
+  it('is drawn on the live band the sidebar reserves', () => {
     const wm = readWordmark()
-    // `layout.scss` `.the-logo` gives the wordmark a 27 px box and
-    // `layout-sidebar.tsx` paints it with `primary.main`. Both are facts the
-    // artwork has to agree with, and neither is visible from the SVG alone.
+    // `layout.scss` `.the-logo` paints the wordmark with `primary.main` and
+    // sizes it from its own aspect ratio. Both are facts the artwork has to
+    // agree with, and neither is visible from the SVG alone.
     expect(wm.viewBox, 'logo.svg has no viewBox').not.toBeNull()
-    expect(wm.viewBox?.[3]).toBe(27)
-    // Cap top at 16, baseline at 61 — the original's own numbers, kept because
-    // the 27 px box was sized for them. One unit of slack for round overshoot.
+    const [vx, vy, vw, vh] = wm.viewBox!
+
+    // THE ASSERTION THIS REPLACES WAS THE BUG, IN TEST FORM.
+    //
+    // It read `expect(wm.viewBox?.[3]).toBe(27)` — pinning the box to the 27-unit
+    // grid the *sidebar* reserved, and describing that as the two facts agreeing.
+    // They never did: the outlines run from `y = 15.01` to `y = 61.68`, 46.67
+    // units of ink, so a 27-unit window showed 11.7 of them and the wordmark
+    // shipped as the cap-tops of its own letters. The test passed the whole time,
+    // because it compared the box to the slot's size rather than to the drawing
+    // inside it.
+    //
+    // The invariant is containment, and it is stated as containment: the ink fits
+    // inside the box, with one unit of slack for stroke and round overshoot. A
+    // wrong box fails this; a rescale of the artwork fails it too, which is the
+    // regression the old comment claimed to guard and did not.
+    const slack = 1
+    expect(
+      wm.top,
+      `the wordmark's cap line is ${wm.top.toFixed(2)}, above its viewBox top ${vy}`,
+    ).toBeGreaterThanOrEqual(vy - slack)
+    expect(
+      wm.bottom,
+      `the wordmark's baseline is ${wm.bottom.toFixed(2)} but its viewBox ends at ` +
+        `${vy + vh} — the letters are CLIPPED, and every raster rendered from ` +
+        'this master is clipped the same way',
+    ).toBeLessThanOrEqual(vy + vh + slack)
+    expect(
+      wm.left,
+      'the first letter is left of its viewBox',
+    ).toBeGreaterThanOrEqual(vx - slack)
+    expect(
+      wm.right,
+      'the last letter is right of its viewBox',
+    ).toBeLessThanOrEqual(vx + vw + slack)
+
+    // Cap top at 16, baseline at 61 — the original's own numbers, kept so a
+    // re-export that rescales the letterforms is caught. One unit of slack for
+    // round overshoot.
     expect(wm.top).toBeGreaterThanOrEqual(15)
     expect(wm.top).toBeLessThanOrEqual(17)
     expect(wm.bottom).toBeGreaterThanOrEqual(61)
     expect(wm.bottom).toBeLessThanOrEqual(62)
+
+    // No intrinsic size. A `width`/`height` attribute is outranked by CSS but is
+    // still a size the element will not shrink below, which is how the wordmark
+    // overflowed a narrow sidebar. The viewBox is the geometry.
+    expect(wm.svg).not.toMatch(/<svg\b[^>]*\swidth="[\d.]+"/)
+    expect(wm.svg).not.toMatch(/<svg\b[^>]*\sheight="[\d.]+"/)
+
     // Colour is inherited, never stated. A literal here would be a second home
     // for colour, which `/COLOURS.md` §10 forbids.
     expect(wm.svg).toMatch(/fill:\s*currentColor/)

@@ -65,14 +65,44 @@ would relieve it.
 > (this section) is a **redirect** and **opt-in**. A redirect is useless for a name
 > whose certificate is the thing that broke, so the two cannot be swapped.
 >
+> ### `CANONICAL_DOMAIN` — the name every shipped client dials
+>
+> Defaults to `networkingguides.jadedns.uk` and is **also served on the same
+> block**. This is not the same thing as `DOMAIN`: `DOMAIN` is what the host
+> deploys *as* (it comes from `secrets.env.age` and drives the admin identity and
+> the tier-config `server` field), while `CANONICAL_DOMAIN` mirrors `HUB_URL` in
+> `client/src-tauri/src/chrysalis/contract.rs` — the name compiled into every
+> build. The two drifted apart on 2026-11-27 and the hub ended up serving only
+> the legacy name, with the canonical one presenting **no certificate at all**
+> while every client dialled it. Nothing failed, which is why it went unnoticed:
+> each device's stored config still named the old host, so the two names had
+> quietly swapped roles.
+>
+> Mirroring the client constant means the hub answers its own builds' name on any
+> host, without depending on someone remembering to set `DOMAIN`. Set
+> `CANONICAL_DOMAIN=""` on a host that is not this hub — the module warns
+> (rather than fails) when `DOMAIN` is neither the canonical nor the legacy name.
+>
+> `check-consistency.sh` asserts that the module assigns `CANONICAL_DOMAIN`, that
+> its default **equals** `contract::HUB_URL`, and that the value the shell
+> actually computes for `HUB_BLOCK_NAMES` contains it. That last part runs the
+> module header rather than grepping it, because a grep passes on a name that is
+> appended and then overwritten.
+>
 > ### `LEGACY_DOMAIN` — the previous hub name, served on the same block
 >
 > Set automatically to `networkingguides.duckdns.org` when `DOMAIN` moves. Caddy
-> puts both names on one site block, so there is one set of handles, one rate-limit
-> zone and one admin check. It is **not optional while any pre-3.3.2 build is in
-> the field**: those clients have the old name compiled in and the heartbeat — the
-> only channel that could tell them otherwise — needs a working hub to reach. Set
-> `LEGACY_DOMAIN=""` only once no earlier build remains.
+> puts every hub name on one site block, so there is one set of handles, one
+> rate-limit zone and one admin check. It is **not optional while any pre-3.3.2
+> build is in the field**: those clients have the old name compiled in and the
+> heartbeat — the only channel that could tell them otherwise — needs a working
+> hub to reach. Set `LEGACY_DOMAIN=""` only once no earlier build remains.
+>
+> Adding a name to the block does **not** disturb the others' certificates: Caddy
+> issues one certificate per name, each with a single SAN (verified on the live
+> hub 2026-11-27). That matters here because replacing the legacy name's own
+> certificate with a shared SAN cert is exactly the failure this whole mechanism
+> exists to avoid.
 >
 > `check-consistency.sh` **§32** asserts the block is addressed by
 > `${HUB_BLOCK_NAMES}` and that the alias block did not swallow the legacy name.

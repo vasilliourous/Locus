@@ -187,31 +187,55 @@ fn the_outcome_status_codes_are_unchanged() {
     }
 }
 
-/// A second activation of the same code is NOT a refusal — it restores access.
+/// A second activation of the same code is the recovery path — THROUGH THE
+/// SIGN-OUT, not around it.
 ///
-/// This is the contract that replaced device binding. A student reinstalling, or
-/// moving to a new machine, re-enters the same code; the hub must answer it as a
-/// success ("Already activated", with the tier config), not as an error. If this
-/// ever became a refusal, every reinstall would be a support call — which is the
-/// exact failure the client-side persistence of the code exists to prevent.
+/// This is the contract that replaced device binding, and it was measured being
+/// too generous: the hub answered any presenter of a redeemed code with a full
+/// tier config, so one purchase served any number of machines for the whole
+/// remaining term. The rule now is that the same code activates again after its
+/// holder signed out (a reinstall, a new laptop, a machine being handed on) and
+/// is refused while some device still holds it — see
+/// `a_redeemed_code_is_refused_on_a_second_device` for the enforcement.
+///
+/// The recovery property this test guards is therefore narrower and more
+/// important than before: a released code MUST come back, or every sign-out that
+/// did not have a device waiting becomes a support call. It is answered as
+/// "Activation successful" and not "Already activated" because it genuinely is a
+/// first redemption on this device — the student's own sign-out is what made it
+/// one.
 #[test]
 fn a_repeat_activation_restores_rather_than_refuses() {
     let hook = activation_hook();
 
-    assert!(
-        hook.contains(r#"message:"Already activated""#),
-        "the hub no longer answers a repeat activation with \"Already activated\". \
-         Re-activating the same code is the recovery path for a reinstall or a new \
-         machine, and it must succeed."
-    );
-    // And it must carry the tier config, so a reinstalling student's Connect has
-    // something to dial.
     assert!(
         hook.contains("alreadyRedeemed"),
         "the hub no longer distinguishes a first redemption from a repeat one. \
          Without that split the two paths cannot report different messages, and a \
          returning student would be told 'Activation successful' for a code they \
          already had."
+    );
+
+    // A released code must be admitted, and the branch that admits it is the one
+    // that consumes the release. Asserted on the branch rather than on the
+    // message, because the message is what the STUDENT reads and the branch is
+    // what decides whether they get in at all.
+    let reissue = hook
+        .find("if (alreadyRedeemed(rec)) {")
+        .expect("`alreadyRedeemed` must still gate the re-issue arm");
+    let tail = &hook[reissue..];
+    let arm = &tail[..tail.find("── First redemption ──").expect("the re-issue arm must end")];
+
+    assert!(
+        arm.contains("releasedSinceActivation(rec)"),
+        "the re-issue arm no longer mentions the sign-out at all, so a student who \
+         signed out and then reinstalled cannot get back in without an operator."
+    );
+    assert!(
+        tail.contains(r#"message:"Activation successful""#),
+        "consuming a released code no longer reports success. A student whose own \
+         sign-out freed the code must be told they are in, not that the code is \
+         already activated."
     );
 }
 
@@ -256,8 +280,9 @@ fn the_lookup_status_vocabulary_is_unchanged() {
     }
 }
 
-/// The status the hub sends for an already-redeemed code must be one the
-/// DEPLOYED clients already treat as ready.
+/// The statuses the hub sends for a redeemed code must be frozen names the
+/// DEPLOYED clients already decode, and the two available states must not share
+/// one name.
 ///
 /// # This is the defect that shipped, pinned
 ///
@@ -268,22 +293,32 @@ fn the_lookup_status_vocabulary_is_unchanged() {
 /// all. A student who reinstalled could not re-enter their code, and the only
 /// remedy was an operator releasing it. Found live 2026-10-03.
 ///
-/// So this asserts the AGREEMENT between the two sides rather than each alone:
-/// whatever the hook emits for a redeemed code must be `bound_this_device`,
-/// because that is the one frozen name every deployed build maps to
-/// `ready: true`. A new name here is a dead end for clients that cannot update
-/// their way out of it.
+/// # Why there are now two
+///
+/// Activation refuses a redeemed code on a second device (below), so "redeemed"
+/// is two states, not one: free (a sign-out is waiting) and held. They are sent
+/// as `bound_this_device` and `bound_other` — adjacent entries in the SAME
+/// deployed enum, so neither is a dead end, and a deployed build reads the first
+/// as ready and the second as bound-to-another-device, which is exactly the
+/// truth in each case.
 #[test]
 fn a_redeemed_code_reports_a_status_deployed_clients_accept() {
     let hook = lookup_hook();
 
     assert!(
         hook.contains(r#"resp.status = "bound_this_device""#),
-        "the lookup hook no longer reports a redeemed code as `bound_this_device`. \
-         That frozen name is the only status a DEPLOYED client maps to \
-         `ready: true`; any other name reaches it as `Unknown` and the client \
-         will refuse to activate — a student stuck at the code prompt with a \
-         valid code, unable even to update."
+        "the lookup hook no longer reports an AVAILABLE redeemed code (a sign-out \
+         waiting) as `bound_this_device`. That frozen name is the only status a \
+         DEPLOYED client maps to `ready: true` for a used code; any other name \
+         reaches it as `Unknown` and the client refuses to activate — a student \
+         stuck at the code prompt with a valid code, unable even to update."
+    );
+
+    assert!(
+        hook.contains(r#"resp.status = "bound_other""#),
+        "the lookup hook no longer reports a code held by another device as \
+         `bound_other`. Reporting it as `bound_this_device` (the pre-change \
+         behaviour) promises a `ready: true` that `/api/activate` now refuses."
     );
 
     assert!(
@@ -291,6 +326,126 @@ fn a_redeemed_code_reports_a_status_deployed_clients_accept() {
         "the lookup hook still emits `already_used`, which deployed clients read \
          as `Unknown` (= not ready) and which blocks activation. See the note in \
          code_lookup.pb.js: the meaning is right, the WIRE NAME is what broke."
+    );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// One code, one machine — the rule the sign-out exists to serve
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// `/api/activate` must REFUSE a redeemed code that no sign-out has released.
+///
+/// # The report this closes
+///
+/// "I have a code signed in on a client's device and registered in term, and I
+/// can put it into a clean instance and sign in just fine." That was true by
+/// construction: the re-issue arm returned a full tier config to anyone
+/// presenting a redeemed code, on the reasoning that a re-presented code is a
+/// reinstall. The reasoning is sound and the consequence was not — one purchase
+/// served any number of machines for the whole term, silently.
+///
+/// The release is what keeps the reinstall path open without opening that door:
+/// `device_release.pb.js` writes `released_at`, and a re-issue is allowed only
+/// when `released_at` is LATER than `activated_at` — i.e. the holder signed out
+/// after the redemption that is now in force. This test reads the hook because
+/// the rule is the hub's: a client cannot be trusted to enforce it, and the two
+/// hooks that read it (`activation.pb.js`, `code_lookup.pb.js`) must agree.
+#[test]
+fn a_redeemed_code_is_refused_on_a_second_device() {
+    // `read`, not `read_code`: `read_code` STRIPS comment lines, and this test
+    // slices the arm by the comment that ends it. Stripping turns "the region is
+    // bounded" into "the region runs to the end of the file", which silently
+    // widened what this test accepts until it was caught by its own panic.
+    let hook = read(&repo_root().join("server/pb_hooks/activation.pb.js"));
+
+    // The comparison must exist and must be the one the lookup hook uses.
+    assert!(
+        hook.contains("function releasedSinceActivation("),
+        "activation.pb.js no longer has `releasedSinceActivation`, so nothing \
+         distinguishes a redeemed code somebody signed out of from one that is \
+         still held — which means either every second device gets in (the defect) \
+         or none does (the reinstall path is broken). Both are worse than the rule."
+    );
+
+    // The arm BEGINS at its own governing `if` — anchored with its indentation,
+    // because the helper's doc comment above mentions `alreadyRedeemed(...)`
+    // too, and slicing from that mention puts `First redemption` BEHIND the
+    // start of the slice. (This test was first written that way and failed with
+    // "the re-issue arm must end", which is the guard catching its own reader.)
+    let reissue = hook
+        .find("\n        if (alreadyRedeemed(rec)) {")
+        .expect("`alreadyRedeemed` must still gate the re-issue arm");
+    let tail = &hook[reissue..];
+    let arm_end = tail
+        .find("── First redemption ──")
+        .unwrap_or_else(|| panic!("the re-issue arm must end where the first-redemption arm begins"));
+    let arm = &tail[..arm_end];
+
+    assert!(
+        arm.contains("if (!releasedSinceActivation(rec)) {"),
+        "the re-issue arm no longer checks whether a sign-out released this code, \
+         so a redeemed code activates on a second device for the whole remaining \
+         term. That is the reported defect, exactly. Arm was: {arm}"
+    );
+
+    assert!(
+        arm.contains("409"),
+        "the re-issue arm no longer answers a held code with 409. The status code \
+         is the contract: the client distinguishes it from 403 (suspended), and \
+         a client that read a shared code as a suspension would show the \
+         kick-out screen to a paying student."
+    );
+
+    assert!(
+        arm.contains("Sign out on that device first"),
+        "the refusal no longer tells the student HOW to move: there is no device \
+         to name and no remote release, so the sentence is the only route out of \
+         the state. Arm was: {arm}"
+    );
+
+    // The claim must be SPENT, or one sign-out frees the code forever.
+    assert!(
+        arm.contains(r#"rec.set("activated_at", new Date().toISOString())"#),
+        "consuming a release no longer re-stamps `activated_at`, so `released_at` \
+         stays later than it and EVERY subsequent presenter of the code — \
+         including a stranger holding a photo of the card — is admitted."
+    );
+
+    // And the term must not move. Consuming a release is not a new purchase.
+    assert!(
+        !arm.contains(r#"set("expires_at""#),
+        "consuming a release rewrites `expires_at`. Signing out and back in would \
+         then move the paid term, which is the reason this hook writes a stamp \
+         instead of clearing one."
+    );
+}
+
+/// The lookup pre-check must agree with activation about a held code.
+///
+/// The lookup is advisory and activation is the authority, but the screen is
+/// where the student learns what will happen. A lookup that says "ready" about a
+/// code activation is about to refuse spends an activation attempt teaching
+/// them otherwise, and an attempt is a rate-limited resource.
+#[test]
+fn the_lookup_and_activation_agree_about_a_held_code() {
+    let lookup = lookup_hook();
+
+    assert!(
+        lookup.contains("function releasedSince("),
+        "code_lookup.pb.js no longer has `releasedSince`, so it cannot tell a \
+         code whose sign-out is waiting from one still held — and it would send \
+         `bound_this_device` (ready) to a student whose activation will be \
+         refused with 409."
+    );
+
+    // The comparison itself, not merely its presence: an inverted one would be
+    // worse than none.
+    assert!(
+        lookup.contains("return relMs > atMs;"),
+        "`releasedSince` no longer means `released_at` is later than \
+         `activated_at`. That comparison IS the single-use rule; any other \
+         spelling (>=, or reversed) either admits a held code or refuses a \
+         released one."
     );
 }
 
@@ -341,67 +496,83 @@ fn the_lookup_enum_degrades_unknown_statuses_safely() {
 // A redeemed code must be DESCRIBED as redeemed, on both sides
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// A redeemed code's message must say it is already in use — not only that
-/// re-activating is safe.
+/// The two redeemed-code messages must each state a DIFFERENT fact, and neither
+/// may read like an untouched code.
 ///
-/// # The report this closes
+/// # The reports this closes
 ///
-/// "A client app can authorise and use an already redeemed code during sign-up."
-/// The hub does check `activated_at`, and it does the right thing: the code is
-/// re-issued to whoever presents it, because there is no device identity left to
-/// check against and refusing would strand every reinstalling student. What was
-/// wrong was the SCREEN. The lookup answered `bound_this_device` with the
-/// sentence "This code has already been activated — entering it again will
-/// restore your access", the activation page rendered it under the heading
-/// "Ready — this code gives you the X tier", and that is verbatim what an
-/// untouched code shows. A person holding a code that was not theirs had no way
-/// to tell that it had already been claimed, and neither did an operator testing
-/// whether the hub checks.
+/// "A client can authorise and use an already redeemed code during sign-up, and
+/// the screen says nothing." The earlier reading of that report was that only the
+/// SCREEN was wrong; the re-issue itself was the larger defect. Both halves are
+/// now tested: `a_redeemed_code_is_refused_on_a_second_device` for the rule, this
+/// one for the sentences.
 ///
-/// So the message has to carry both facts, and this asserts the FIRST one — the
-/// one that was missing. The wire NAME (`bound_this_device`) is pinned above and
-/// must not move; the `ready` flag must stay `true`; only the sentence changes.
+/// There are three states a student can meet at the prompt and they must not read
+/// alike:
+///
+///   * untouched — "Ready to activate".
+///   * yours, signed out — `bound_this_device`, ready. The student needs to know
+///     WHY a used code is ready, or they will assume the hub is not checking.
+///   * held by a machine — `bound_other`, not ready. The student needs the fix
+///     (sign out over there), because there is no device to name and no remote
+///     release.
 #[test]
 fn a_redeemed_code_says_it_is_already_in_use() {
     let hook = lookup_hook();
     let start = hook
         .find(r#"resp.status = "bound_this_device""#)
-        .expect("the hook must still report a redeemed code as `bound_this_device`");
+        .expect("the hook must still report an available redeemed code as `bound_this_device`");
     let arm = &hook[start..];
-    let end = arm.find("return e.json(200, resp);").expect("the arm must return");
+    let end = arm
+        .find(r#"resp.status = "bound_other""#)
+        .expect("the held arm must follow");
     let arm = &arm[..end];
 
     let message_line = arm
         .lines()
         .find(|line| line.contains("resp.message ="))
-        .unwrap_or_else(|| panic!("the redeemed-code arm sets no message at all: {arm}"));
+        .unwrap_or_else(|| panic!("the available-redeemed-code arm sets no message at all: {arm}"))
+        .to_lowercase();
 
-    // `already in use` / `already been used` / `already activated` all say the
-    // code is taken. The regression was a message that said ONLY what
-    // re-activating does for the caller, so the check is for a phrase about the
-    // code's state, not for one exact wording.
-    let states_the_code_is_taken = [
-        "already in use",
-        "already been used",
-        "already activated",
-        "already redeemed",
-    ]
-    .iter()
-    .any(|phrase| message_line.to_lowercase().contains(phrase));
-
+    // Says a sign-out happened. The regression was a message about what
+    // re-activating DOES for the caller ("entering it again will restore your
+    // access") with no statement about the code's state, which reads exactly like
+    // an untouched code — and is word-for-word what an operator testing the hub
+    // also read.
+    let states_it_was_released = ["signed out", "released", "already in use"]
+        .iter()
+        .any(|phrase| message_line.contains(phrase));
     assert!(
-        states_the_code_is_taken,
-        "the redeemed-code lookup message no longer tells the student the code is \
-         already in use. It said only that re-activating restores access, which \
-         reads exactly like a fresh code — that is how 'a client can use an \
-         already redeemed code' looked like the hub not checking at all. Message \
-         was: {message_line}"
+        states_it_was_released,
+        "the available-redeemed-code lookup message does not say the code was \
+         signed out / released, so it is indistinguishable from a fresh code. \
+         Message was: {message_line}"
     );
 
     assert!(
-        !message_line.contains(r#"resp.message = "Ready"#),
+        !message_line.contains(r#"resp.message = "ready"#),
         "the redeemed-code arm says the code is Ready, which is the sentence an \
          UNTOUCHED code gets. The two states must not read the same."
+    );
+
+    // The HELD arm: the student has to be told what to do about it, because
+    // there is no device to name and no remote release.
+    let held_start = hook.find(r#"resp.status = "bound_other""#).expect("pinned above");
+    let held = &hook[held_start..];
+    let held = &held[..held
+        .find("return e.json(200, resp);")
+        .expect("the held arm must return")];
+    let held_message = held
+        .lines()
+        .find(|line| line.contains("resp.message ="))
+        .unwrap_or_else(|| panic!("the held-code arm sets no message at all: {held}"));
+
+    assert!(
+        held_message.contains("Sign out"),
+        "the held-code lookup message no longer tells the student to sign out on \
+         the device that holds the code. The refusal is not an error they can \
+         retry their way past, so the sentence is the only route out of it. \
+         Message was: {held_message}"
     );
 }
 

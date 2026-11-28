@@ -1,5 +1,5 @@
 <svg version="1.1" xmlns="http://www.w3.org/2000/svg"
-     viewBox="0 0 376 27" width="376" height="27">
+     viewBox="0 15 376 47">
 <!--
   The wordmark, `CHRYSALIS`.
 
@@ -19,6 +19,29 @@
       uppercase `L` can never read as a lowercase `l` at 16 px.
 
   What changed is the word, so the box is wider. Nothing else moved.
+
+  **The box is the ink box, and it was not.** The viewBox read `0 0 376 27`
+  while the outlines run from `y = 15.01` (cap top, includes the `L`'s overshoot
+  above `16`) to `y = 61.68` (baseline plus the round overshoot below `61`) —
+  46.67 units of drawing shown through a 27-unit window. `preserveAspectRatio`
+  centres content in its box, so the whole word sat *above* centre and the
+  sidebar's 27 px slot then swallowed the overhang. Two marks were meant to sit
+  on one cap line and neither was on the line it was drawn for.
+
+  The viewBox is now the ink box, `0 15 376 47`: 47 units tall to hold 46.67 of
+  ink with a hair of floor under the baseline, and 376 wide to keep the `L`'s
+  block arm clear of the edge. Nothing was redrawn — the path data is unchanged,
+  so the letterforms are the ones that were measured. A box that is its own ink
+  is the one arrangement where `preserveAspectRatio` has nothing to move and the
+  wordmark's cap line is a number the sidebar can align to.
+
+  **No `width`/`height` attributes, deliberately.** There used to be a pair
+  reading `376`/`27` — the second wrong for the same reason the viewBox was, and
+  the first a fixed width the sidebar's 159 px slot did not always have. A
+  presentational attribute is outranked by CSS but is still an *intrinsic* size
+  an SVG will not shrink below, so stating one here meant the mark either
+  overflowed a narrow sidebar or was cropped by it. The viewBox is the only
+  geometry this file gives, and `layout.scss` supplies the rest.
 
   The letters are **outlines, not a font**, set in a face the app already renders
   with: `_theme.tsx`'s stack falls through to `Arial`, and Liberation Sans is its

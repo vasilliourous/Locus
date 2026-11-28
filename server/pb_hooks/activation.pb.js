@@ -106,6 +106,103 @@ routerAdd("POST", "/api/activate", function(e) {
         return String(at).trim() !== "";
     }
 
+    // ── Whether the holder of this code blew their own sign-out race ──
+    //
+    // `released_at` is written by device_release.pb.js when a device signs out.
+    // If it is LATER than `activated_at`, the device that is now presenting the
+    // code had already told the hub it was done with it — which is the one case
+    // where signing out must actually free the code.
+    //
+    // ── Why this exists at all, since an earlier version of this file refused ──
+    //
+    // This file used to allow any presenter of a redeemed code to re-activate it,
+    // on the reasoning that "the student re-entering their own code" is the
+    // reinstall path and there is no device identity to tell them from a stranger.
+    // The cost of that reasoning is the defect it was reported as: a code someone
+    // was still signed in with signed in fine on a second machine, for the whole
+    // remaining term, with nothing on the hub recording a second device at all.
+    // One code was one purchase and silently served any number of machines.
+    //
+    // The cost of the opposite rule — refuse every used code — is the reinstall
+    // path that the 2026-10-03 `already_used` incident was about. A student who
+    // reinstalls, or replaces a laptop that died, has no way to sign out first and
+    // would be locked out of what they paid for.
+    //
+    // A sign-out is the one act that distinguishes the two cases without a device
+    // identity, so it is the one that grants the release. The agent's sign-out
+    // already reaches this hub (device_release.pb.js); before this, nothing here
+    // ever READ it, which is why the report was "signing out does not update the
+    // status in regards to the code".
+    //
+    // ── Why the comparison, and not just "release_count > 0" ──
+    //
+    // A counter that only ever grows would misread a code that was released once
+    // and is now signed in on a second machine: the honest student who moves from
+    // laptop to desktop signs out the laptop, activates the desktop, and then
+    // installs on a third machine — and a `> 0` test would free the code for
+    // anyone holding a photo of the card, for as long as the desktop stayed
+    // signed in. The stamps are ordered by the same clock and are written by the
+    // SAME save, so `released_at > activated_at` means "the sign-out happened
+    // after the redemption that is now in force", and the claim is spent by the
+    // redemption that follows it (which rewrites `activated_at` to a later
+    // instant). One sign-out, one activation.
+    //
+    // `parsePBDate` is the shared declaration at the top of this callback.
+    function releasedSinceActivation(codeRec) {
+        var atMs = parsePBDate(codeRec.get("activated_at"));
+        var relMs = parsePBDate(codeRec.get("released_at"));
+        if (!atMs || isNaN(atMs)) return false;
+        if (!relMs || isNaN(relMs)) return false;
+        return relMs > atMs;
+    }
+
+    // ── Writing a column that the live hub may not have yet ──
+    //
+    // WHAT THIS IS NOT FOR, stated first because an earlier draft of this comment
+    // got it backwards and the correction is the point.
+    //
+    // A missing column does NOT fail the save. Verified against PocketBase
+    // 0.22.21 source, not inferred: `Record.Set` stores an undefined key in
+    // `m.data` without complaint (models/record.go), and `Dao.update` writes
+    // `ColumnValueMap()`, which iterates the COLLECTION SCHEMA ONLY
+    // (daos/base.go → models/record.go). An unknown field is therefore never in
+    // the UPDATE. It is silently dropped.
+    //
+    // So `rec.set("first_seen_at", …)` on the live hub — whose `codes` table has
+    // no such column — was harmless to the save, and the "activation answers 500"
+    // story this comment used to tell was wrong. What actually happened is quieter
+    // and worse for an operator: the write was ACCEPTED AND DISCARDED, so the
+    // console's "issued before" marker simply never appeared and nothing anywhere
+    // said why.
+    //
+    // WHAT THIS HELPER IS ACTUALLY FOR, then:
+    //   1. It makes the discard VISIBLE. `setIfPresent` returns false, so a hook
+    //      can tell the difference between "written" and "silently dropped"
+    //      instead of both looking like success.
+    //   2. It keeps the intent in one place, so bringing the schema up to date
+    //      (scripts/seed-pb.py adds missing columns) immediately restores the
+    //      behaviour without touching any hook.
+    //
+    // The fields that DECIDE anything (`activated_at`, `expires_at`, `suspended`,
+    // `tier`, `released_at`) deliberately do NOT go through it. They are columns
+    // every deployed hub has had since the first seed; if one were ever absent,
+    // writing it and having it dropped should be a loud problem, not a quiet skip.
+    function setIfPresent(record, name, value) {
+        try {
+            // `getByName` returns null when the field is absent — it does not
+            // throw (verified: models/schema/schema.go). The try/catch is for a
+            // record whose collection could not be resolved at all, which is a
+            // different failure and must not be mistaken for "column missing".
+            if (record.collection().fields.getByName(name)) {
+                record.set(name, value);
+                return true;
+            }
+            return false;
+        } catch (noCollection) {
+            return false;
+        }
+    }
+
 
     try {
         var data = $apis.requestInfo(e).data;
@@ -253,18 +350,28 @@ routerAdd("POST", "/api/activate", function(e) {
         // suspended student would actually reach.
         if (rec.getBool("suspended")) return e.json(403, {code:403, message:"Code suspended"});
 
-        // ── Redeemed already? ──
+        // ── One code, one machine ──
         //
         // `activated_at` is the whole of the single-use rule (see
-        // `alreadyRedeemed` above). A code that has been redeemed before is NOT
-        // refused — the student presenting their own code again is the recovery
-        // path, and there is no device identity left to check it against. It
-        // simply re-issues the entitlement and reports "Already activated" so
-        // the client can say so.
+        // `alreadyRedeemed` above), and this is the arm that ENFORCES it. It used
+        // to hand a full entitlement to anyone presenting a redeemed code, on the
+        // reasoning that a re-presented code is a reinstall. The measured cost was
+        // that a code still signed in on one machine signed in on a second one for
+        // the whole remaining term, with the hub recording nothing — see
+        // `releasedSinceActivation` above for the full argument.
         //
-        // The tier config is returned on this path too, so a reinstalling student
-        // refreshes stale connection parameters rather than keeping whatever was
-        // cached before (see FIXES.md).
+        // So there are exactly two ways past this point with a redeemed code:
+        //
+        //   1. The device that holds it signed out (device_release.pb.js) after the
+        //      redemption that is now in force. The next activation consumes that
+        //      sign-out and becomes the redemption in force.
+        //   2. Nobody: a second device gets 409 and the student is told to sign
+        //      the first one out first.
+        //
+        // Re-activating a code this device legitimately holds is still an "Already
+        // activated" success, because the alternative is a locked-out student who
+        // did nothing wrong: the code IS in force and the clock is running, and
+        // re-issuing the same entitlement changes nothing on the hub.
         if (alreadyRedeemed(rec)) {
             // Re-asserted here, not just at the top: this arm RETURNS a tier
             // config, which is the whole entitlement. One check on the way in
@@ -272,12 +379,43 @@ routerAdd("POST", "/api/activate", function(e) {
             // suspended student uses to get back in — and it is 3 lines away
             // from an `edit` that would not obviously need to keep it.
             if (rec.getBool("suspended")) return e.json(403, {code:403, message:"Code suspended"});
+
+            if (!releasedSinceActivation(rec)) {
+                // 409, not 403: the client keeps a refusal from a real answer, and
+                // a suspension must stay distinguishable from "this is somebody
+                // else's key" — the kick-out screen keys on the word "suspended".
+                //
+                // The sentence is the operator's only lever here: there is no
+                // device to name and no remote release, so the exact fix (sign out
+                // on the machine that is already using it, then enter the code on
+                // this one) has to be IN the message. So does the sentence that
+                // stops someone re-selling a key they cannot use. Pinned by
+                // `a_redeemed_code_is_refused_on_a_second_device` in
+                // client/src-tauri/tests/activation_contract.rs.
+                return e.json(409, {
+                    code: 409,
+                    message: "This code is already in use on another device. Sign out on that device first, then enter the code here",
+                    already_in_use: true
+                });
+            }
+
+            // A sign-out is waiting, so this is the first redemption on this
+            // device: consume it. `activated_at` is moved to now, which both
+            // records the redemption that is now in force and spends the claim —
+            // a second machine presenting the same code immediately afterwards
+            // finds `released_at` no longer later than it and is refused.
+            //
+            // `first_seen_at` is deliberately NOT touched: the code has been
+            // issued before, and the console's "issued before" marker would be a
+            // lie if this path rewrote it.
+            rec.set("activated_at", new Date().toISOString());
+            $app.dao().saveRecord(rec);
             var tierVal2 = rec.getString("tier").replace(/[^a-zA-Z0-9_]/g, "_");
             // findFirstRecordByFilter (NOT findRecordsByFilter — see the
             // rate-limit note above; the list variant returns nothing here).
             var cfgRec2 = null;
             try { cfgRec2 = $app.dao().findFirstRecordByFilter("tier_configs", "tier = '" + tierVal2 + "'"); } catch (e2) { cfgRec2 = null; }
-            var resp2 = {code:200, message:"Already activated", tier:rec.getString("tier")};
+            var resp2 = {code:200, message:"Activation successful", tier:rec.getString("tier")};
             resp2.expires_at = expiryForWire(rec);
             if (cfgRec2) {
                 try { resp2.server_config = JSON.parse(cfgRec2.get("config")); } catch(ex) { resp2.server_config = cfgRec2.get("config"); }
@@ -319,12 +457,19 @@ routerAdd("POST", "/api/activate", function(e) {
         // one record would be two chances to record only one of them.
         // `alreadyRedeemed` is still the reader of `activated_at` alone — this
         // is an operator signal and changes no behaviour for the student.
+        // Through `setIfPresent`: these columns are ABSENT on the live hub
+        // (measured 2026-11-27), and PocketBase silently discards a write to an
+        // undefined field rather than failing the save — so the marker was simply
+        // never recorded and the console showed a re-issued code as never issued.
+        // The helper makes that visible instead of silent. See it for the source
+        // verification, and note the entitlement write below is unaffected either
+        // way: `activated_at` is a real column and always reaches the UPDATE.
         if (!rec.get("first_seen_at")) {
-            rec.set("first_seen_at", new Date().toISOString());
+            setIfPresent(rec, "first_seen_at", new Date().toISOString());
             // Truncated, like every other fingerprint this hub stores. It is
             // corroboration for an operator, not a device index: nothing reads
             // it back to make a decision.
-            rec.set("first_seen_fingerprint", fp.substring(0, 16) + "****");
+            setIfPresent(rec, "first_seen_fingerprint", fp.substring(0, 16) + "****");
         }
         $app.dao().saveRecord(rec);
 

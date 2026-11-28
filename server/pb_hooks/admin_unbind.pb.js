@@ -18,6 +18,22 @@ routerAdd("POST", "/api/admin/unbind-code", function(e) {
         return diff === 0;
     }
 
+    // Same helper as activation.pb.js — read that one. `unbound_at` and
+    // `unbind_reason` are operator HISTORY: PocketBase silently discards a write
+    // to a column the schema lacks, so on a drifted hub the release still worked
+    // and the reason for it vanished. This makes that drop visible.
+    function setIfPresent(record, name, value) {
+        try {
+            if (record.collection().fields.getByName(name)) {
+                record.set(name, value);
+                return true;
+            }
+            return false;
+        } catch (noCollection) {
+            return false;
+        }
+    }
+
     try {
         var body = $apis.requestInfo(e).data;
         var adminToken = (body.admin_token || "").trim();
@@ -68,8 +84,8 @@ routerAdd("POST", "/api/admin/unbind-code", function(e) {
         // first redemption again. The tier and expiry are untouched — releasing a
         // code must not change what it entitles its holder to.
         record.set("activated_at", null);
-        record.set("unbound_at", new Date().toISOString());
-        record.set("unbind_reason", reason);
+        setIfPresent(record, "unbound_at", new Date().toISOString());
+        setIfPresent(record, "unbind_reason", reason);
         // `first_seen_at`/`first_seen_fingerprint` are deliberately NOT cleared:
         // a release returns the code to the pool, it does not un-issue it. The
         // console uses the surviving marker to tell "never activated" from

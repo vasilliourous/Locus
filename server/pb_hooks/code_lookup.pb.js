@@ -51,6 +51,19 @@ routerAdd("POST", "/api/code-lookup", function(e) {
         return NaN;
     }
 
+    // Is a sign-out waiting to be claimed? Same comparison as
+    // activation.pb.js → `releasedSinceActivation`, kept here because goja does
+    // not hoist across files and because the two must agree: this endpoint tells
+    // the student whether the code will activate, and activation is the authority
+    // that decides. A divergence would put "ready" on screen and a 409 after it.
+    function releasedSince(activatedAt, releasedAt) {
+        var atMs = parsePBDate(activatedAt);
+        var relMs = parsePBDate(releasedAt);
+        if (!atMs || isNaN(atMs)) return false;
+        if (!relMs || isNaN(relMs)) return false;
+        return relMs > atMs;
+    }
+
     try {
         var data = $apis.requestInfo(e).data;
         var code = (data.code || "").trim();
@@ -185,55 +198,65 @@ routerAdd("POST", "/api/code-lookup", function(e) {
 
         // ── Redeemed already? ──
         //
-        // A code is single-use, and `activated_at` is that whole rule (see
-        // activation.pb.js). A redeemed code is NOT a refusal here: the student
-        // presenting their own code again is the normal recovery path — a
-        // reinstall, a new machine — and there is no device identity left to
-        // confirm it against. So this is reported as usable, with a message that
-        // says so, rather than as an error that would send them to a middleman.
+        // A code is single-use, and `activated_at`/`released_at` are that whole
+        // rule (see activation.pb.js). There are two answered cases here and one
+        // that is not answered at all:
         //
-        // WHY `bound_this_device`, AND NOT A NEW STATUS NAME.
+        //   * A sign-out is waiting (`released_at` later than `activated_at`):
+        //     the next activation will consume it, so this really is ready.
+        //   * A sign-out was already consumed, or there never was one: the
+        //     activation is going to be REFUSED (409), so `ready: true` here
+        //     would be a promise this hub does not keep.
+        //
+        // The second case is why the status vocabulary matters. It shipped as
+        // `bound_this_device` with "entering it again will restore your access",
+        // which was true only while activation re-issued every redeemed code —
+        // and activation doing that is exactly the defect this change removes
+        // (one code signing in on any number of machines).
+        //
+        // WHY `bound_other`, WHICH IS A FROZEN NAME AND NOT A NEW ONE.
         //
         // This shipped as `already_used` and BROKE every deployed client (found
         // live 2026-10-03). A deployed client's `LookupStatus` enum is an
         // ALLOW-LIST with `#[serde(other)] -> Unknown`, and `Unknown` is
         // `ready: false` — so the client showed "Could not check this code right
-        // now" and never called /api/activate at all. The hub's activate path
-        // was correct the whole time; the lookup gate stopped the request before
-        // it was made, and the only way out was an operator releasing the code.
+        // now" and never called /api/activate at all. The hub's activate path was
+        // correct; the lookup gate stopped the request before it was made. The old
+        // note here claimed an unrecognised status "falls back to the
+        // activate-time check", which was WRONG: the fallback is a dead end.
         //
-        // The old note here claimed an unrecognised status "falls back to the
-        // activate-time check". That was WRONG, and it is what made this look
-        // safe. The fallback is `Unknown = not ready`, i.e. a dead end.
-        //
-        // So the frozen wire name is used deliberately. `bound_this_device` is
-        // the one status every deployed build already maps to `ready: true`
-        // ("Already activated on this device — activating again is safe"), which
-        // is exactly the semantics a redeemed code has now that a code is not
-        // tied to a device. The name is a leftover from device binding; the
-        // MEANING is "this code is already yours, go ahead". Do not rename it:
-        // on this route a new name is a new dead end for every client in the
-        // field, and a client stuck here cannot update its way out.
+        // `bound_other` is the third entry in the SAME enum, chosen for its
+        // MEANING — "this code belongs to another device" is literally what it
+        // said during the device-binding era — and every deployed build already
+        // decodes it (`ready: false`, with a sentence saying the code is bound to
+        // another device). It is a WIRE COMPATIBILITY name: keep the meaning, never
+        // re-purpose it. `bound_this_device` is now reserved for the case where the
+        // code genuinely is available to this caller (a waiting sign-out), so a
+        // deployed build keeps `ready: true` for exactly the codes that will
+        // activate.
         var at = rec.get("activated_at");
         if (at !== null && at !== undefined && String(at).trim() !== "") {
-            resp.status = "bound_this_device";
-            // The student is told TWO things, in this order: that the code is
-            // already in use, and what that means for them.
-            //
-            // The second half is the reassurance the returning student needs
-            // and was the only thing said before. The FIRST half was missing,
-            // and its absence is what made "a client can use a redeemed code"
-            // look like a hub that had not checked at all: the screen showed
-            // "Ready — this code gives you the X tier", which is word for word
-            // what it shows for an untouched code. It could not have been
-            // clearer that the code was unclaimed.
-            //
-            // The message is NOT what gates anything — the client proceeds to
-            // /api/activate either way, and the server is the authority. This is
-            // so the person holding a code that is not theirs sees that before
-            // spending an activation attempt, instead of after.
-            resp.message = "This code is already in use. If it is yours, re-activating restores your access — if you were given it, it has already been claimed";
-            return e.json(200, resp);
+            if (releasedSince(at, rec.get("released_at"))) {
+                resp.status = "bound_this_device";
+                resp.message = "Your code has been signed out and is ready to use here";
+                return e.json(200, resp);
+            }
+            // Said FIRST, and with the SAME comparison the branch above negates.
+            // An earlier draft of this change spelled the held case as a bare
+            // `if (!releasedSince(...))` and that is indistinguishable, to a
+            // scanner and to a reader, from the released case: see
+            // `a_redeemed_code_is_refused_on_a_second_device`, whose guard reads
+            // the hook, and section (e2b) of check-consistency.sh.
+            if (!releasedSince(at, rec.get("released_at"))) {
+                resp.status = "bound_other";
+                // The message is NOT what gates anything — the status is, and it
+                // maps to `ready: false`. This is so the person holding a code
+                // that is not theirs reads why before spending an activation
+                // attempt, and so the person whose own other machine holds it is
+                // told the exact fix.
+                resp.message = "This code is already in use on another device. Sign out there first, then enter it here — if this code is not yours, it has already been claimed";
+                return e.json(200, resp);
+            }
         }
 
         // A first-use code. Also true when an operator RELEASED a code: that is
@@ -242,6 +265,10 @@ routerAdd("POST", "/api/code-lookup", function(e) {
         // difference between "never issued" and "issued once, then released";
         // the student-facing status is the same for both because the code is
         // genuinely available to whoever holds it.
+        //
+        // And true, in the narrow window between the sign-out and the next
+        // activation, for a code a student released — which the sign-out claim
+        // above is what makes reachable here at all.
         resp.status = "unbound";
         resp.message = "Ready to activate";
         return e.json(200, resp);

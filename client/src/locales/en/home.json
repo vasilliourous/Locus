@@ -107,7 +107,7 @@
         "undo": "Cancel",
         "signedOut": "Signed out. This computer no longer holds your key.",
         "signedOutReleased": "Signed out. Your key has been released here and is ready for your next device.",
-        "signedOutOffline": "Signed out on this computer. We could not reach Chrysalis to record it — your key is still yours, and entering it on your next device will work.",
+        "signedOutOffline": "Signed out on this computer. We could not reach Chrysalis to record it, so this key will be refused on another computer until it is released here. Entering it again on THIS computer works; if this computer is going away, email us and we will release the key.",
         "signedOutFailed": "Chrysalis could not sign out. Nothing has changed on this device. Try again, and email us if it keeps happening.",
         "deviceIdCopy": "Copy",
         "deviceIdCopied": "Device ID copied",

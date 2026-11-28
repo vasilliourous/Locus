@@ -39,11 +39,78 @@
         align-self: stretch;
         box-sizing: border-box;
 
+        /* The row gets a definite width, and the two marks are sized below.
+         *
+         * The rule this replaces was `width: 100%; height: 100%` on every `svg`,
+         * which stretched each mark to the row's box: a 1:1 glyph forced into a
+         * wide-short box and — because MUI's `SvgIcon` sets `overflow: hidden` —
+         * CROPPED rather than scaled.
+         *
+         * The row is 159 px (the 200 px sidebar less 40 px padding and the 1 px
+         * border; see the glyph rule). It needs stating because
+         * `align-items: flex-start` on `.the-logo` means the row shrink-wraps its
+         * children rather than filling the sidebar — so with the 100 % rule gone
+         * and no width here, the row sized itself from contents and the wordmark,
+         * `flex: 1 1 auto` with no basis, came out 0 px and drew nothing. Measured
+         * in a browser: row 44 px, wordmark 0×0, no "CHRYSALIS" on screen at all. */
+        > div {
+          width: 100%;
+        }
+
         img,
         svg {
-          width: 100%;
-          height: 100%;
           pointer-events: none;
+        }
+
+        /* The glyph is sized to the WORDMARK, not to a round number.
+         *
+         * `font-size` is stated because that is how MUI sizes an `SvgIcon`: its
+         * own rule is `.MuiSvgIcon-root { width: 1em; height: 1em;
+         * font-size: 1.5rem }`, and `width`/`height` alone leave a 24 px glyph
+         * whose box is right for the wrong reason. The two-class selector here
+         * (`.the-logo > div > svg:first-child`) already outranks that single
+         * class, so no `!important` is needed — verified by removing one and
+         * measuring 20 px, not 24.
+         *
+         * WHY 20 AND NOT 36. The sidebar is `.layout-content__left` at
+         * `flex: 1 0 200px` against a `flex: 1 1 100%` sibling, which means it is
+         * 200 px at EVERY window size — measured at 520, 940 and 1400 px. Its
+         * content slot is therefore 159 px (200 − 40 padding − 1 border), and the
+         * wordmark, whose ratio is fixed at 8:1 by its artwork, gets what is left
+         * after this glyph and the 8 px gap: 131 px, which is 16.4 px tall.
+         *
+         * A 36 px glyph beside a 16.4 px wordmark is not a logo, it is a blob with
+         * a caption: the glyph's ink is 33.4 px tall against the word's 16.3, a
+         * factor of 2.0. At 20 px the glyph's ink is 18.6 px against the word's
+         * 16.3 — a factor of 1.14, which reads as a mark beside a name. The two
+         * ink heights are compared rather than the box sizes because the glyph
+         * fills 93 % of its box and the wordmark 99 % of its own, so equal boxes
+         * would not be equal weight. All of these numbers are measured in a real
+         * browser by `.harness/`, not estimated. */
+        > div > svg:first-child {
+          flex: 0 0 auto;
+          font-size: 20px;
+          width: 20px;
+          height: 20px;
+        }
+
+        > div > svg:last-child {
+          /* The wordmark. `aspect-ratio` is the whole rule, and it is the only
+           * form that works here.
+           *
+           * `logo.svg` carries no `width`/`height` attributes, so the element has
+           * no intrinsic size: `width: auto` with no ratio resolves to 0, which is
+           * how this mark first rendered 0×0 and invisible. With the ratio stated,
+           * a flex child in a row of known width derives the other dimension
+           * correctly — `height` and `width` need not be given, and adding either
+           * fixes one while the other is coerced, which is what produced a 5.25:1
+           * box (squashed letters) and a 7.08:1 one (also squashed).
+           *
+           * The size it lands at — 131 px wide, 16.4 px tall — is a consequence of
+           * the 159 px slot less the 20 px glyph and the 8 px gap, not a number
+           * chosen here. See the glyph rule above for the derivation. */
+          flex: 0 1 auto;
+          aspect-ratio: 376 / 47;
         }
 
         .the-newbtn {
@@ -320,13 +387,24 @@
         height: 100% !important;
         align-items: center !important;
         justify-content: center !important;
+        gap: 0 !important;
       }
 
       .the-logo > div > svg:last-child {
         display: none !important;
       }
 
+      /* The SAME 20 px as the open rail, not `100%` of the rail. This was
+         `width/height: 100%` of a 56 px slot, so collapsing the sidebar grew the
+         mark from 20 to 56 px — the one place in the product where it is drawn at
+         a size nobody chose, and a jump of 2.8× for a layout change. A mark that
+         changes size when the rail narrows reads as a different mark.
+         `font-size` is set beside the box because MUI's emotion rule wins the
+         cascade on `.MuiSvgIcon-root` (see the open-rail rule above). */
       .the-logo .MuiSvgIcon-root {
+        font-size: 20px !important;
+        width: 20px !important;
+        height: 20px !important;
         margin: 0 !important;
       }
 

@@ -265,6 +265,8 @@ run_module() {
     DOMAIN="$DOMAIN" FORCE="$FORCE" \
     ENABLE_UOT="$ENABLE_UOT" UOT_PORT="$UOT_PORT" UOT_PORT_FREE="$UOT_PORT_FREE" SKIP_CONSOLE="$SKIP_CONSOLE" \
     SS_METHOD="$SS_METHOD" SS_KEY_BYTES="$SS_KEY_BYTES" \
+    CANONICAL_DOMAIN="${CANONICAL_DOMAIN:-}" LEGACY_DOMAIN="${LEGACY_DOMAIN:-}" \
+    LANDING_DOMAIN="${LANDING_DOMAIN:-}" HUB_ALIAS_DOMAIN="${HUB_ALIAS_DOMAIN:-}" \
     bash "$module" 2>&1 | tee -a "$LOGFILE"
     # shellcheck disable=SC2320
     exitcode=${PIPESTATUS[0]:-$?}
@@ -510,7 +512,11 @@ for svc in caddy pocketbase; do
 done
 
 # ── Run post-deploy smoke test ──
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/scripts" 2>/dev/null && pwd || echo "")"
+# SCRIPT_DIR is ALREADY the scripts directory (line 13), and it is not redeclared
+# here: this line used to set it to "$SCRIPT_DIR/scripts", one level too deep, so
+# SMOKE_TEST and every path built from it afterwards resolved to
+# server/scripts/scripts/… and did not exist. On a fresh box (2026-11-27) that
+# silently skipped the smoke test AND the credential summary below.
 SMOKE_TEST="${SCRIPT_DIR}/smoke-test.sh"
 if [ -f "$SMOKE_TEST" ]; then
     log "Running post-deploy smoke test..."
@@ -616,7 +622,7 @@ generate_first_batch
 #
 # Written unconditionally -- including on a re-run -- so the file can never
 # go stale, which is the failure mode /root/.pb_admin_creds hit.
-CREDS_SCRIPT="${SCRIPT_DIR}/scripts/write-admin-credentials.sh"
+CREDS_SCRIPT="${SCRIPT_DIR}/write-admin-credentials.sh"
 if [ -f "$CREDS_SCRIPT" ]; then
     # Both flags are exported by the code that actually generated a secret,
     # and are the ONLY evidence of fleet divergence. Pass them through

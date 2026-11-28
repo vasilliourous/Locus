@@ -446,8 +446,27 @@ pub enum LookupStatus {
     /// deployed build already maps to `ready: true` — and this build accepts it
     /// under the meaning that actually applies, alongside the descriptive alias
     /// `already_used` for any hub that has learned to send it.
+    ///
+    /// # Why activation now refuses, and where that leaves this variant
+    ///
+    /// The hub used to admit ANY presenter of a redeemed code, which made
+    /// `ready: true` true for every redeemed code and made one purchase serve
+    /// any number of machines. It now admits one only after the holder signed
+    /// out (see `activation.pb.js`), so the hub sends this variant ONLY when the
+    /// code is genuinely available to the caller (a waiting sign-out) and
+    /// [`Self::BoundOther`] otherwise. Both names keep their meaning; neither is
+    /// re-used for the other's job.
     #[serde(alias = "bound_this_device")]
     AlreadyUsed,
+    /// The code belongs to another device, and activation will be REFUSED (409)
+    /// until that device signs out. The screen says so instead of promising a
+    /// restore that no longer happens.
+    ///
+    /// This is the third frozen name from the device-binding era, kept for the
+    /// same compatibility reason as [`Self::AlreadyUsed`] — every deployed build
+    /// already decodes it — and it is the honest one to send, because "bound to
+    /// another device" is now literally the situation.
+    BoundOther,
     Suspended,
     Expired,
     NotFound,

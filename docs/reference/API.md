@@ -33,9 +33,24 @@ All endpoints are served through Caddy reverse proxy to PocketBase on `127.0.0.1
 
 ### `POST /api/activate`
 
-Activates a code. A code is **single-use and not tied to a device**: the first
-activation stamps `codes.activated_at`, and a later activation of the same code
-is allowed — it restores the student's access and returns the tier config.
+Activates a code. One code is **one machine at a time**. The first activation
+stamps `codes.activated_at`; a later activation of the same code is allowed
+**only if the device holding it signed out afterwards**
+(`released_at > activated_at`, written by `/api/release-entitlement`), and
+answering it consumes that sign-out by re-stamping `activated_at`.
+
+Everything else — a code still signed in elsewhere — is refused with `409`. The
+reinstall path stays open because the student's own sign-out is what reopens it;
+there is no device identity to recognise them by, so that sign-out is the only
+proof available, and it is also the only proof an honest student can give.
+
+> **Why not simply re-issue to any presenter.** That was the behaviour until
+> 2026-11-27, and it made one purchase serve any number of machines for the whole
+> remaining term with nothing on the hub recording a second device. Clearing
+> `activated_at` on a sign-out instead was rejected for a different reason: the
+> endpoint is authenticated by possession of the code, and codes are printed on
+> cards, so clearing it would let the holder of a photo free a paying student's
+> code. See `docs/reference/FIXES.md`, "One code signed in on every machine".
 
 **Rate limited:** 5 attempts per 10 minutes per rate key (Caddy + JS hook double-gated).
 
@@ -114,11 +129,15 @@ is allowed — it restores the student's access and returns the tier config.
 }
 ```
 
-> Re-activating a redeemed code is a **success, not an error**, and it returns
-> the current tier config so a client can refresh stale connection parameters
-> (a rotated password, a moved server). The code is not tied to a device, so the
-> request is not checked against a stored fingerprint — the student presenting
-> their own code again is the recovery path after a reinstall or a new machine.
+> This body is returned when the student's own sign-out is consumed, and the
+> message is `"Activation successful"` for that reason: it is a first redemption
+> on this device. It returns the current tier config so a client can refresh
+> stale connection parameters (a rotated password, a moved server).
+>
+> **It is not what a second machine gets.** A code held elsewhere is `409` —
+> see the error table below. There is no fingerprint check either way: nothing
+> is bound to a device, and `/api/release-entitlement` is what distinguishes the
+> student moving machines from a stranger holding their card.
 >
 > **`device_fingerprint` is echoed on the first-activation path only**, because
 > deployed 3.2.x clients read the key. It no longer means "the device this code
@@ -131,6 +150,7 @@ is allowed — it restores the student's access and returns the tier config.
 | 400 | 400 | "Missing code" | No code provided |
 | 400 | 400 | "Invalid code format" | Luhn-mod-N validation failed |
 | 403 | 403 | "Code suspended" | Admin suspended the code |
+| 409 | 409 | "This code is already in use on another device. Sign out on that device first, then enter the code here" | Redeemed, with no sign-out after that redemption. Also carries `already_in_use: true`. **Not** 403: a client that read a shared code as a suspension would show the kick-out screen to a paying student |
 | 404 | 404 | "Code not found" | Code doesn't exist in DB |
 | 410 | 410 | "Code expired" | Past expires_at date |
 | 429 | 429 | "Too many attempts" | Rate limit hit |
@@ -420,7 +440,8 @@ attempts.
 |---|:---:|---|
 | `ok` | ready | Code exists and is ready |
 | `unbound` | ready | Code has not been redeemed yet |
-| `bound_this_device` | **ready** | Code has already been redeemed. Re-activating restores the student's access |
+| `bound_this_device` | **ready** | Redeemed, and a sign-out is waiting (`released_at > activated_at`): the next activation will be admitted |
+| `bound_other` | blocked | Redeemed and held by a machine that has not signed out: activation would answer `409` |
 | `suspended` | blocked | Operator suspended the code |
 | `expired` | blocked | Past `expires_at` |
 | `not_found` | blocked | No such code |
@@ -433,26 +454,36 @@ attempts.
 > not a gate and cannot become one — `/api/activate` is the authority, and a
 > client that refused on a lookup would strand every reinstalling student.
 >
-> That makes the message load-bearing in a way the status is not. For
-> `bound_this_device` it must state that the code **is already in use**, then what
-> re-activating does for the caller, in that order. It used to say only
-> *"entering it again will restore your access"*, and the activation screen
-> printed it under the same *"Ready — this code gives you the X tier"* heading an
-> untouched code gets — so a code that was already someone's was
-> indistinguishable from an unclaimed one, to the student holding it and to an
-> operator testing whether the hub checks. The message was right about what
-> happens next and silent about the thing being asked. Pinned by
-> `a_redeemed_code_says_it_is_already_in_use` in `activation_contract.rs`.
+> That makes the message load-bearing in a way the status is not. There are two
+> redeemed states and each message must name its own fact, because the student's
+> next move differs: `bound_this_device` says the code was **signed out** and is
+> ready here; `bound_other` says it is **in use on another device** and to sign
+> out there first, since there is no device to name and no remote release. A
+> message about what re-activating *does* for the caller, with no statement about
+> the code, reads exactly like an untouched code — that is how "a client can use
+> an already redeemed code" first looked like the hub not checking at all. Pinned
+> by `a_redeemed_code_says_it_is_already_in_use` and
+> `the_lookup_and_activation_agree_about_a_held_code` in
+> `activation_contract.rs`.
 
-> ### `bound_this_device` is a FROZEN NAME, and `already_used` must not be sent
+> ### Both redeemed statuses are FROZEN NAMES, and `already_used` must not be sent
 >
-> A redeemed code reports `bound_this_device`. The name is a leftover from the
-> device-binding era and reads oddly now that a code is not tied to a device —
-> but it is the **only** status every deployed client maps to `ready: true`, and
+> An **available** redeemed code reports `bound_this_device`; one held by a
+> machine reports `bound_other`. Both names are leftovers from the device-binding
+> era, and both are kept because a client's `LookupStatus` is an allow-list whose
+> `#[serde(other)]` catch-all is `Unknown`. `bound_this_device` is the **only**
+> status every deployed build maps to `ready: true` for a used code, and
+> `bound_other` is the third entry in the same enum, which every deployed build
+> already decodes as *bound to another device* — which is now literally the
+> situation.
 >
-> A client's `LookupStatus` is an allow-list whose `#[serde(other)]` catch-all is
-> `Unknown`. A **new** status string therefore reaches a deployed client as
-> `Unknown`, and an older client read `Unknown` as *not ready* — so it refused to
+> (`bound_this_device` used to describe every redeemed code, because activation
+> admitted every presenter. It now describes only the case where that promise is
+> still true: a sign-out is waiting. Both statuses must move together; sending
+> `bound_this_device` for a held code promises a `ready` the hub refuses.)
+>
+> A **new** status string therefore reaches a deployed client as `Unknown`, and an
+> older client read `Unknown` as *not ready* — so it refused to
 > call `/api/activate` at all. This shipped once (2026-10-03): the hub began
 > sending `already_used` for a redeemed code and every reinstalling student was
 > stranded at the code prompt, unable even to update out of it because the
@@ -483,23 +514,28 @@ attempts.
 
 A student pressed "Sign out on this device". The client forgets the code locally
 (`client/src-tauri/src/chrysalis/signout.rs`) and this endpoint records that the code
-was signed out of, so the operator can tell **"this student moved to a new
-computer"** apart from **"this key is being shared"**. From the console those two
-reports are otherwise identical.
+was signed out of. **It is what frees the code**: `/api/activate` admits a
+redeemed code only when `released_at > activated_at`, and this is the only
+endpoint that writes `released_at`. A student who signs out and then installs
+elsewhere gets in without an operator; a second machine anywhere else gets `409`.
 
-**It is an audit fact, not a revocation.** This is the most important thing about
-the endpoint, and the reason it does not simply call the admin release:
+**It writes a claim, and does not clear anything.** The distinction matters, and
+it is why this is not simply the admin release:
 
-- It does **not** clear `codes.activated_at`. That field is the base a
-  re-activation restarts the term from, so clearing it would let any student reset
-  their own clock — or, worse, reset someone else's, because the only credential
-  here is possession of a code that is printed on a card and held in middleman
-  stock.
-- It does **not** change `expires_at`, `tier`, or `suspended`.
-- Re-activation was **already** allowed for a redeemed code ("Already activated"
-  restores access), so nothing about the student's next device depends on this
-  call succeeding. The client therefore treats a failure here as
-  "signed out, not confirmed" rather than failing the sign-out.
+- It does **not** clear `codes.activated_at`. Clearing it would free the code for
+  anyone holding the card — a photo of a friend's, an unsold batch in a middleman's
+  drawer — because the only credential here is possession of the code. Writing
+  `released_at` frees it for **the next activation**, which is the student's own
+  next move, and that activation spends the claim by re-stamping `activated_at`.
+- It does **not** change `expires_at`, `tier`, or `suspended`. Consuming a claim
+  moves `activated_at` and leaves the expiry alone, so signing out and in again
+  gives the student the clock they already had rather than a new term.
+- A failure here leaves the device signed out locally and the code still looking
+  held on the hub. The client therefore reports "signed out, not confirmed"
+  rather than failing the sign-out. **This is the one failure in the whole flow
+  that costs the student something**: they will be refused elsewhere until an
+  operator releases the code (§ `codes.unbind`), which is why the sign-out
+  screen says so plainly.
 
 **Authentication:** possession of the code, exactly like `/api/code-lookup`. No
 admin token — a student cannot have one, and requiring it would make the feature
@@ -524,7 +560,7 @@ carries. It is compared against nothing.
 
 **Response `200` — recorded:**
 ```json
-{ "code": 200, "message": "Release recorded", "released": true, "count": 2 }
+{ "code": 200, "message": "Release recorded — the code can be used on another device now", "released": true, "count": 2 }
 ```
 
 **Response `404` — nothing to release:**
@@ -532,38 +568,38 @@ carries. It is compared against nothing.
 { "code": 404, "message": "Nothing to release", "released": false }
 ```
 
-Four situations answer this way, deliberately indistinguishable: the code does
-not exist, it was never redeemed, it is suspended, or it has expired. Telling the
+Five situations answer this way, deliberately indistinguishable: the code does
+not exist, it was never redeemed, it is suspended, it has expired, **or it is
+already released and not yet claimed**. Telling the
 caller which would make this an unauthenticated **code-existence oracle** — the
 request is authenticated by the very value being probed. The client maps `404` to
 "nothing to release", which is a successful no-op for the student (their local
 sign-out has already happened and is unaffected).
 
 **Fields written:** `codes.released_at` (latest), `codes.release_count`
-(monotonic), and one `code_events` row with `event = "signed_out"`. The log line
+(monotonic), and one `code_events` row with `event = "released"`. The log line
 and the event row record the code **prefix** and a truncated fingerprint only —
 a code is a bearer credential and logs are things people paste.
 
-> ### "The student signed out and the code was not released" — that is the design
+> ### Why a claim, and not a cleared `activated_at`
 >
-> This endpoint does **not** put the code back into the pool, and the report that
-> it should is answered here rather than in the code, because the answer is a
-> decision, not an omission. Clearing `activated_at` on a sign-out would mean:
+> The obvious implementation is to clear `activated_at` here and be done. It is
+> rejected for two reasons, and both are still true of the claim that replaced it:
 >
-> 1. **A student can reset their own paid term.** `expires_at` is computed from
->    `activated_at` on the next first redemption, so sign-out → sign-in mints a
->    fresh term for free.
-> 2. **Anyone holding the code can free it.** The only credential on this route is
->    possession of the code, which is printed on a card and held in middleman
->    stock. A card photo would be enough to release a paying student's code out
->    from under them.
+> 1. **A student could reset their own paid term.** `expires_at` is derived from
+>    the term on a first redemption. Consuming a claim re-stamps `activated_at`
+>    and leaves `expires_at` alone, so signing out and in again is not a purchase.
+> 2. **Anyone holding the code could free it.** The only credential on this route
+>    is possession of the card. A claim is spendable exactly once and only by an
+>    activation, so the holder of a photo gains nothing while somebody is signed
+>    in — the honest student's sign-out is what empties the slot, and their next
+>    activation fills it.
 >
-> What the operator actually needs from a sign-out is *to tell it apart from a
-> shared key*, and that is what `released_at`/`release_count` are for. They are
-> surfaced in the console (`Codes` view: a `signed out ×N` badge, and the release
-> dialog states the sign-out history rather than offering to undo it). Releasing
-> the code remains a separate, deliberate operator action — see `codes.unbind`
-> below, and note it is **not** how you move a student to a new laptop.
+> The operator-visible side is `released_pending` in `codes.list` (the same
+> comparison, so the console cannot disagree with the hub), the code detail's
+> "Next activation" line, and an Overview check for a sign-out nobody claimed.
+> Releasing a code **for someone else** — the lost-laptop case — remains a
+> separate, deliberate operator action: `codes.unbind`, below.
 
 **Error responses:**
 
