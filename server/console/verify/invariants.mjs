@@ -164,6 +164,20 @@ const badgeOf = async (ins) => (await ins.locator('.badge').first().innerText())
   await page.screenshot({ path: `${SHOTS}/inv-state-roundtrip.png` })
 }
 
+// ── I2/I5: a plain suspension offers ONE control, not two ──────────────────
+{
+  const stopped = await openInspector('RQ-GHJK-MNPQ-RSTV-7')
+  check(
+    'I2/I5: a stopped code offers Reactivate, not a duplicate Mark in term',
+    (await stopped.getByRole('button', { name: 'Reactivate' }).count()) === 1 &&
+      (await stopped.getByRole('button', { name: 'Mark in term' }).count()) === 0,
+  )
+  check(
+    'I2/I5: a stopped code does not offer Release (it would leave it stopped)',
+    (await stopped.getByRole('button', { name: 'Release', exact: true }).count()) === 0,
+  )
+}
+
 // ── I5: no inert controls ─────────────────────────────────────────────────
 {
   // Delete is disabled on EITHER a live claim or a first-issue record, because
