@@ -663,12 +663,18 @@ async fn handle_success(response: &crate::chrysalis::heartbeat::HeartbeatRespons
     // screen showing a stale date for a student who had just paid. This is the
     // value the client could previously only learn once, at activation.
     //
-    // Stored as an `Option` and written only when the hub actually said
-    // something: a hub that predates the field sends nothing, and overwriting a
-    // known date with `None` because of an older server would lose information
-    // the client legitimately has.
-    if response.expires_at.is_some()
-        && let Err(error) = store::record_expiry(response.expires_at.clone()).await
+    // ── THREE SHAPES, AND WHY THE OUTER `Option` EXISTS ──
+    //
+    // `expires_at: Option<Option<String>>` distinguishes "the hub did not send
+    // the key" (`None` — an older hub; change nothing) from "the hub sent
+    // `null`" (`Some(None)` — the code has NO expiry; CLEAR the stored date).
+    // The old `Option<String>` collapsed those, so a cleared expiry never reached
+    // the client and it kept counting down to a date the hub had withdrawn.
+    //
+    // Clearing on `Some(None)` is the whole point of R5: the admin label, the
+    // stored value and the client's screen must agree that empty means never.
+    if let Some(next) = response.expires_at.as_ref()
+        && let Err(error) = store::record_expiry(next.clone()).await
     {
         logging!(
             warn,
@@ -964,6 +970,120 @@ mod tests {
     /// (clear it). Getting this wrong the safe way — failing to recognise one —
     /// degrades to the old destructive behaviour; getting it wrong the other way
     /// would keep a dead code forever, which is why the substring is narrow.
+    /// The RELEASE-EVICTION response, end to end through the client's real code.
+    ///
+    /// R3 requires an operator's release to be observable on the device: the next
+    /// beat is refused, the code is kept, and the gate shows the stopped screen.
+    /// Four links make that true, and until this test each was only asserted in
+    /// isolation — or, for the first, not at all:
+    ///
+    ///   1. the 403 body the hook emits carries a message the client classifies as
+    ///      a refusal (`heartbeat::classify_response`);
+    ///   2. that message is recognised as a SUSPENSION (`is_suspension`), which is
+    ///      the branch that KEEPS the credential;
+    ///   3. `store::is_suspended` reports it (the read `chrysalis_status` makes),
+    ///      and refuses the pair `suspended && !activated` that would render a
+    ///      screen with no exit;
+    ///   4. `gateScreen(activated, suspended)` chooses the stopped page — pinned
+    ///      in `src/hooks/use-entitlement.test.ts`, and the screen itself is
+    ///      rendered in `client/.harness/verify-states.mjs`.
+    ///
+    /// The sentences are NOT retyped here: they are read out of
+    /// `heartbeat.pb.js`, so a hub-side reword fails this test rather than
+    /// silently sending every deployed client down the credential-deleting path.
+    #[test]
+    fn the_release_eviction_the_hub_sends_reaches_the_suspension_path() {
+        let hook = std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../server/pb_hooks/heartbeat.pb.js"),
+        )
+        .expect("the hub hook must be readable from src-tauri");
+
+        // The eviction block, from its predicate to the refusal it returns.
+        let start = hook
+            .find("if (String(record.get(\"evict_requested_at\") || \"\")) {")
+            .expect("the eviction block must exist in heartbeat.pb.js");
+        let block = &hook[start..];
+        let end = block
+            .find("return e.json(403")
+            .expect("the eviction block must return a 403");
+        let block = &block[..end];
+
+        // The assignments that BUILD the sentence, with comments stripped first.
+        //
+        // Stripping is load-bearing: the block's own comment says the message
+        // must contain the word "suspended", in quotes. Scanning the raw block
+        // therefore found that quoted word and every assertion below passed even
+        // with the message rewritten — a guard reading its own explanation. Only
+        // lines that assign `evictMsg` may be evidence.
+        let code_only: String = block
+            .lines()
+            .map(|line| line.split("//").next().unwrap_or(""))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let mut sentences = Vec::new();
+        for line in code_only.lines() {
+            if !line.contains("evictMsg") {
+                continue;
+            }
+            let mut rest = line;
+            while let Some(open) = rest.find('"') {
+                let after = &rest[open + 1..];
+                let Some(close) = after.find('"') else { break };
+                sentences.push(after[..close].to_owned());
+                rest = &after[close + 1..];
+            }
+        }
+        assert!(
+            sentences.len() >= 2,
+            "expected the generic and the reasoned eviction sentences assigned to evictMsg, found {sentences:?}"
+        );
+
+        for template in &sentences {
+            // The hook builds the reasoned sentence by concatenation; render both
+            // shapes the way it does.
+            for message in [template.clone(), format!("{template}chargeback")] {
+                let body = serde_json::json!({ "code": 403, "message": message, "suspended": true }).to_string();
+                let outcome = super::super::heartbeat::classify_response(403, &body);
+                let reason = match outcome {
+                    super::super::heartbeat::BeatOutcome::Refused { reason } => reason,
+                    other => panic!("a 403 eviction must be a refusal, got {other:?} for {message:?}"),
+                };
+                assert_eq!(
+                    reason, message,
+                    "the client must carry the hub's sentence verbatim, not substitute its own"
+                );
+                assert!(
+                    is_suspension(&reason),
+                    "the hub's eviction message {message:?} is not recognised as a suspension, \
+                     so the client would DELETE the credential instead of keeping it"
+                );
+            }
+        }
+
+        // The read `chrysalis_status` performs, in both directions.
+        // The same three fields `store`'s own tests use to make a readable
+        // activation: a code alone is not a usable record.
+        let with_code = crate::config::IVerge {
+            activation_code: Some("RQ-ABCD-EFGH-JKMN-T".into()),
+            chrysalis_tier: Some("strike".into()),
+            device_fingerprint: Some("a".repeat(64).into()),
+            chrysalis_suspended: Some(true),
+            ..Default::default()
+        };
+        assert!(
+            store::is_suspended(&with_code),
+            "a suspended device that still holds its code must report suspended"
+        );
+        let without_code = crate::config::IVerge {
+            chrysalis_suspended: Some(true),
+            ..Default::default()
+        };
+        assert!(
+            !store::is_suspended(&without_code),
+            "suspended without a code describes nothing and must not select the stopped page"
+        );
+    }
+
     #[test]
     fn both_frozen_suspension_sentences_are_recognised() {
         for reason in [

@@ -27,13 +27,15 @@ used to be one:
 > These two columns answer different questions and can look like they disagree
 > without anything being wrong. **Read them as a pair, never as one verdict.**
 
-> **If State says "sign-out recorded" and Last seen says "checked in 2m ago",
+> **If State says "unclaimed" and Last seen says "checked in 2m ago",
 > the device is fine and the claim is stale.** That is D3 in
 > [`../reference/AUTH-STATE.md`](../reference/AUTH-STATE.md) §4, and it is the
 > most common form of this report. Go to step 4.
 >
-> The wording is deliberate: **"sign-out recorded" is a fact about the code**
-> ("a Sign out was recorded since the last activation"), not about the device.
+> The wording is deliberate: **"unclaimed" is a fact about the code**
+> ("a Sign out was recorded since the last activation, and nobody has claimed it"),
+> not about the device. It is the same label the console's State column shows; it
+> was shortened from "sign-out recorded" so it fits that column without clipping.
 > It used to read "signed out", which invited exactly the inference that caused
 > this report — an operator seeing that word beside "checked in 2m ago" believes
 > the word, and the word was never about the device.

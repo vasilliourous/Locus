@@ -89,7 +89,8 @@
         "probe.livenessLive": "The server heard from this device recently.",
         "probe.livenessStale": "The server has not heard from this device for a while. It may be off, offline, or the app may have been closed — the server cannot tell which.",
         "probe.livenessAbsent": "The server has not heard from this device for over a week.",
-        "probe.livenessUnknown": "The server has no record of this device checking in yet, so it cannot say whether it is working. This is not the same as being signed out."
+        "probe.livenessUnknown": "The server has no record of this device checking in yet, so it cannot say whether it is working. This is not the same as being signed out.",
+        "neverExpires": "Never expires"
       },
       "cancel": "Stop",
       "toggleHint": "Press Enter to turn the VPN on or off",

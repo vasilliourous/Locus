@@ -14,12 +14,17 @@
 //
 //   identity   — code, name, plan, middleman, state. Read at a glance.
 //   verdict    — one sentence: is this healthy, and if not what kind of not.
-//   the facts  — term, expiry, last seen, next activation. The four that matter.
+//   the facts  — term, expiry, last seen, who sold it. Expiry and Term are
+//                EDITABLE tiles, not values behind a disclosure: they are
+//                always-manual inputs and belong at the top level.
+//   actions    — renew/stop, then the direct STATE actions (mark unused, mark
+//                in term, undo release) with no confirmation step, then the
+//                session probe and its visible result.
 //   who        — the name/plan/middleman EDITORS (the label is a name here).
-//   actions    — in frequency order, never alphabetical.
-//   history    — inline, always loaded with the code, never behind a tab.
-//   danger     — release and delete, last, separated, and confirmed in the panel
-//                rather than by window.confirm.
+//   danger     — delete, last and confirmed in the panel rather than by
+//                window.confirm.
+//   history    — a closed fold at the very bottom: support-call reading, not
+//   record     — the work of managing a code. Both are demoted, not deleted.
 //
 // The rail stays put while the list scrolls beside it, so selecting another row
 // swaps the contents and nothing else moves. That is the difference between a
@@ -43,6 +48,7 @@ import {
   overrideNote,
 } from './model'
 import { act, fetchCode, fetchHistory } from './data'
+import { runSessionProbe, type ProbeResponse } from '../../api'
 import { meta } from './meta'
 import { codeKey } from '../../router'
 
@@ -61,7 +67,6 @@ const emit = defineEmits<{
   (e: 'changed'): void
   (e: 'renew', row: CodeRow): void
   (e: 'stop', row: CodeRow): void
-  (e: 'release', row: CodeRow): void
 }>()
 
 // ── The row ──
@@ -318,30 +323,120 @@ async function toggleSuspend() {
   }
 }
 
-// ── Release (codes.unbind) ──
-// Destroys a real relationship, so it asks WHY in the same breath. The hook has
-// always accepted `reason` and written it into the audit trail; a panel that
-// called it without one would leave every future release unexplained — the one
-// thing the trail exists for.
-// ── Release ──
-// THE FLOW LIVES IN ReleaseDrawer NOW, and this panel only opens it.
+// ── State overrides: direct actions, no confirmation step ──
 //
-// It used to run `codes.unbind` inline with a two-step confirm. That was correct
-// while releasing was a quiet metadata change. It is not quiet any more: a release
-// of a code a device is still using now evicts that device, and the confirmation
-// has to show the consequences and (when evicting) require the code to be typed.
-// Keeping the inline version would mean two release paths whose confirmations
-// could drift — one of them the weaker.
-function release() {
+// R4/R7. These are the corrections an operator makes while a code is being
+// managed by hand — and there is no fixed workflow to protect them from. The
+// previous release flow asked for a reason and, when a live device was about to
+// be cut off, made the operator type the last four characters of the code. That
+// typed step changed nothing on the server (the commit is guarded by a claim
+// token, not by the typing) and the reason field's only effect was the sentence
+// the student might read. The override is now one click, and the reason it used
+// to ask for is gone: the audit row records the action, and the student sees the
+// hub's frozen generic sentence.
+//
+// WHAT IS AND IS NOT REVERSIBLE, plainly: `Mark unused` clears the claim, so a
+// later `Undo release` removes the eviction and the override pin but does NOT
+// resurrect the cleared claim (a re-redeemed claim is a real fact and must
+// survive). R4's "the operator can override back" is therefore only partly true
+// for this one action; it is stated here rather than invented around.
+const stateBusy = ref(false)
+
+async function markUnused() {
   const r = row.value
-  if (!r) return
-  emit('release', r)
+  if (!r || stateBusy.value) return
+  stateBusy.value = true
+  try {
+    const ok = await act('codes.release', { code: r.code }, 'Marked unused — free for a new holder')
+    if (ok) {
+      emit('changed')
+      await refresh()
+    }
+  } finally {
+    stateBusy.value = false
+  }
+}
+
+async function markInTerm() {
+  const r = row.value
+  if (!r || stateBusy.value) return
+  stateBusy.value = true
+  try {
+    // One id per attempt so a retried click is a replay, not a second audit row.
+    const id = `in-term-${r.code}-${Date.now().toString(36)}`
+    const ok = await act(
+      'codes.override',
+      { code: r.code, to_state: 'in_term', override_id: id },
+      'In term — the pending sign-out was cleared',
+    )
+    if (ok) {
+      emit('changed')
+      await refresh()
+    }
+  } finally {
+    stateBusy.value = false
+  }
+}
+
+async function undoRelease() {
+  const r = row.value
+  if (!r || stateBusy.value) return
+  stateBusy.value = true
+  try {
+    const ok = await act('codes.reactivate', { code: r.code }, 'Release undone')
+    if (ok) {
+      emit('changed')
+      await refresh()
+    }
+  } finally {
+    stateBusy.value = false
+  }
+}
+
+// ── The session probe, run by hand ──
+//
+// R2. The probe endpoint existed and the client's Account card could run it, but
+// the CONSOLE — the screen an operator is actually on when a student's state
+// disagrees with theirs — had no way to invoke it. It quoted the device id in a
+// collapsed "Record" fold and told the operator to use it elsewhere.
+//
+// The result is rendered in full here rather than logged: the two axes, the named
+// verdict, the divergences, and any override the hub is holding. A failed run is
+// shown as a failure with the hub's own reason, never as an empty success.
+const probeBusy = ref(false)
+const probeResult = ref<ProbeResponse | null>(null)
+const probeError = ref('')
+const probeRanAt = ref('')
+
+async function runProbe() {
+  const r = row.value
+  if (!r || probeBusy.value) return
+  const device = (r.first_seen_fingerprint || '').trim()
+  probeError.value = ''
+  probeResult.value = null
+  if (!device) {
+    probeError.value =
+      'The hub holds no device id for this code — it was never activated, or it predates the field. The probe needs the machine that first redeemed it.'
+    return
+  }
+  probeBusy.value = true
+  try {
+    const res = await runSessionProbe(r.code, device)
+    probeRanAt.value = new Date().toISOString()
+    if (res.ok && res.data) {
+      probeResult.value = res.data
+    } else {
+      probeError.value = res.message || res.transportError || 'The probe did not answer'
+    }
+  } finally {
+    probeBusy.value = false
+  }
 }
 
 // ── Delete (codes.delete) ──
 // In-panel confirmation rather than window.confirm: the confirm has to be able
-// to show what the panel knows (a redeemed code cannot be deleted; release
-// first) and to be readable.
+// to show what the panel knows (a redeemed code cannot be deleted; mark it
+// unused first) and to be readable.
 const confirmDelete = ref(false)
 const deleting = ref(false)
 
@@ -447,18 +542,23 @@ const planOptions = computed(() => {
           {{ verdict.text }}
         </div>
 
-        <!-- ── The four facts that matter, at a glance ── -->
+        <!-- ── The facts that matter, at a glance ──
+             EXPIRES and TERM are EDITABLE here, at the top level. They are not
+             "overrides" behind a disclosure: they are primary, always-manual
+             inputs, and the value an operator manages regularly must be one step
+             from the panel they are already looking at. Last seen and Who sold it
+             stay read-only facts beside them. -->
         <div class="ins-facts">
-          <div class="ins-fact">
+          <button type="button" class="ins-fact ins-fact-edit" title="Set the expiry date" @click="startExpiryEdit">
             <span class="k">Expires</span>
             <strong>{{ row.expires_at ? shortDate(row.expires_at) : 'Never' }}</strong>
-            <span v-if="remaining" class="v">{{ remaining }}</span>
-          </div>
-          <div class="ins-fact">
+            <span class="v">{{ remaining ? remaining + ' · set…' : 'set…' }}</span>
+          </button>
+          <button type="button" class="ins-fact ins-fact-edit" title="Set how long one purchase lasts" @click="startTermEdit">
             <span class="k">Term</span>
             <strong>{{ row.term_days ? row.term_days + 'd' : 'never' }}</strong>
-            <span class="v">from activation</span>
-          </div>
+            <span class="v">per purchase · set…</span>
+          </button>
           <div class="ins-fact">
             <span class="k">Last seen</span>
             <strong>{{ livenessOf(row) === 'unknown' ? '—' : livenessText(row) }}</strong>
@@ -471,12 +571,96 @@ const planOptions = computed(() => {
           </div>
         </div>
 
+        <!-- The editors open IN PLACE under the values they change. There is no
+             "Manual overrides" disclosure any more: it hid two values that were
+             never automated in the first place. -->
+        <div v-if="editingExpiry" class="ins-edit">
+          <label class="field">
+            <span>Expires on <span class="muted">(blank = never expires)</span></span>
+            <input v-model="expiryInput" type="date" @keyup.enter="saveExpiry" @keyup.esc="editingExpiry = false" />
+          </label>
+          <div class="actions">
+            <button class="tiny primary" :disabled="expiryBusy" @click="saveExpiry">
+              {{ expiryBusy ? 'Saving…' : 'Set expiry' }}
+            </button>
+            <button class="tiny" :disabled="expiryBusy" @click="editingExpiry = false">Cancel</button>
+          </div>
+        </div>
+        <div v-if="editingTerm" class="ins-edit">
+          <label class="field">
+            <span>Days per purchase <span class="muted">(0 = never expires)</span></span>
+            <input v-model="termInput" type="number" min="0" @keyup.enter="saveTerm" @keyup.esc="editingTerm = false" />
+          </label>
+          <p class="foot-note" style="margin-top: -4px">Changes the product, not this code's date. Use Renew to add paid time.</p>
+          <div class="actions">
+            <button class="tiny primary" :disabled="termBusy" @click="saveTerm">
+              {{ termBusy ? 'Saving…' : 'Set term' }}
+            </button>
+            <button class="tiny" :disabled="termBusy" @click="editingTerm = false">Cancel</button>
+          </div>
+        </div>
+
         <!-- ── Actions, in frequency order ── -->
         <div class="ins-actions">
           <button class="primary" @click="emit('renew', row)">Renew…</button>
           <button :disabled="toggling" @click="toggleSuspend">
             {{ row.suspended ? 'Reactivate' : 'Stop access…' }}
           </button>
+        </div>
+
+        <!-- ── State, changed directly ──
+             One click, no confirmation step. `Mark unused` clears the claim (and
+             cuts off a live device at its next check-in); `Mark in term` withdraws
+             a pending sign-out so the claim on the machine is the one in force
+             again; `Undo release` clears the override pin and the eviction. -->
+        <div v-if="row.redeemed || row.force_state === 'released'" class="ins-actions ins-state-actions">
+          <button v-if="row.redeemed" class="tiny" :disabled="stateBusy" @click="markUnused">Mark unused</button>
+          <button v-if="row.released_pending" class="tiny" :disabled="stateBusy" @click="markInTerm">Mark in term</button>
+          <button v-if="row.force_state === 'released'" class="tiny" :disabled="stateBusy" @click="undoRelease">
+            Undo release
+          </button>
+        </div>
+        <p v-if="row.redeemed || row.force_state === 'released'" class="foot-note" style="margin-top: 2px">
+          <template v-if="row.released_pending">A sign-out is recorded and not claimed. </template>
+          <template v-if="row.redeemed">
+            Marking it unused frees it for a different student and cuts off the device using it within about five
+            minutes.
+          </template>
+        </p>
+
+        <!-- ── The session probe, run by hand ──
+             The result is rendered here, not logged: the two axes, the named
+             verdict, the flags and any override, so "did it run, and what did it
+             say?" is answerable without opening a log. -->
+        <div class="section-title">Session probe</div>
+        <div class="ins-probe">
+          <button class="tiny" :disabled="probeBusy" @click="runProbe">
+            {{ probeBusy ? 'Running…' : 'Run session probe' }}
+          </button>
+          <span v-if="probeRanAt" class="muted ins-probe-when">ran {{ shortDateTime(probeRanAt) }}</span>
+        </div>
+        <div v-if="probeError" class="msg err">
+          <strong>The probe did not answer.</strong>
+          <div>{{ probeError }}</div>
+        </div>
+        <div v-else-if="probeResult" class="ins-probe-result">
+          <div class="msg" :class="probeResult.override ? 'warn' : 'ok'">
+            <strong>Hub answered.</strong>
+            May be used: {{ probeResult.entitlement }} · device: {{ probeResult.liveness }} · verdict:
+            <code>{{ probeResult.reason_code }}</code>
+          </div>
+          <div v-if="probeResult.override" class="msg warn">
+            <strong>Override active</strong> — {{ probeResult.override.force_state || 'evicted' }}<template
+              v-if="probeResult.override.evicted"
+            >: the device is cut off at its next check-in</template
+            >.<span v-if="probeResult.override.evicted_reason"> Reason: {{ probeResult.override.evicted_reason }}</span>
+          </div>
+          <p class="foot-note" style="margin: 4px 0">
+            Checked in:
+            {{ probeResult.hub_view.last_seen_at ? shortDateTime(probeResult.hub_view.last_seen_at) : 'never' }}
+            · lease ends {{ probeResult.lease_expires_at ? shortDateTime(probeResult.lease_expires_at) : '—' }}
+            <template v-if="probeResult.divergence.length"> · flags: {{ probeResult.divergence.join(', ') }}</template>
+          </p>
         </div>
 
         <!-- ── Who owns this: the editors ──
@@ -516,139 +700,20 @@ const planOptions = computed(() => {
           <span v-if="dirty" class="muted ins-warn">Unsaved</span>
         </div>
 
-        <!-- ── Manual overrides ──
-             Collapsed by default. These are the RARE corrections: set-term changes
-             the product (not a sale), and set-expiry moves a date without any money
-             changing hands. Without a mouse, an operator scrolling this rail to
-             reach "Renew" had to pass through both every time — the rail measured
-             1.87 screens, and the History it was heading for sat at the bottom.
-             Closed, both compress to one line each; open, they are exactly what
-             they were. -->
-        <details class="ins-fold">
-          <summary class="section-title">
-            Manual overrides
-            <span class="ins-fold-hint">term · expiry — not for a sale</span>
-          </summary>
-
-        <div v-if="!editingTerm" class="ins-row">
-          <span class="ins-row-label">
-            Term
-            <small>How long one purchase lasts, from activation. Changing it does not move the current expiry.</small>
-          </span>
-          <button class="tiny" @click="startTermEdit">Change</button>
-        </div>
-        <div v-else class="ins-edit">
-          <label class="field">
-            <span>Days per purchase <span class="muted">(0 = never expires)</span></span>
-            <input v-model="termInput" type="number" min="0" @keyup.enter="saveTerm" @keyup.esc="editingTerm = false" />
-          </label>
-          <div class="actions">
-            <button class="tiny primary" :disabled="termBusy" @click="saveTerm">
-              {{ termBusy ? 'Saving…' : 'Set term' }}
-            </button>
-            <button class="tiny" :disabled="termBusy" @click="editingTerm = false">Cancel</button>
-          </div>
-        </div>
-
-        <div v-if="!editingExpiry" class="ins-row">
-          <span class="ins-row-label">
-            Expiry
-            <small>The manual override. To add paid time, use Renew — it previews the new date and keeps what is left of the term.</small>
-          </span>
-          <button class="tiny" @click="startExpiryEdit">Set</button>
-        </div>
-        <div v-else class="ins-edit">
-          <label class="field">
-            <span>Expires on <span class="muted">(blank = never)</span></span>
-            <input v-model="expiryInput" type="date" @keyup.enter="saveExpiry" @keyup.esc="editingExpiry = false" />
-          </label>
-          <div class="actions">
-            <button class="tiny primary" :disabled="expiryBusy" @click="saveExpiry">
-              {{ expiryBusy ? 'Saving…' : 'Set expiry' }}
-            </button>
-            <button class="tiny" :disabled="expiryBusy" @click="editingExpiry = false">Cancel</button>
-          </div>
-        </div>
-        </details>
-
-        <!-- ── The full record ──
-             Also folded: the device id, "first issued", the activation rule. Read
-             once, on a support call — not on every renewal. -->
-        <details class="ins-fold">
-          <summary class="section-title">
-            Record
-            <span class="ins-fold-hint">device id · first used · activation rule</span>
-          </summary>
-        <dl class="facts">
-          <dt>First used</dt>
-          <dd>{{ row.activated_at ? shortDateTime(row.activated_at) : 'Not used yet' }}</dd>
-          <template v-if="row.first_seen_at">
-            <dt>First issued</dt>
-            <dd>
-              {{ shortDate(row.first_seen_at) }}
-              <span v-if="!row.redeemed" class="muted"> · released since</span>
-            </dd>
-          </template>
-          <template v-if="row.first_seen_fingerprint">
-            <dt>Device id</dt>
-            <dd>
-              <code>{{ row.first_seen_fingerprint }}</code>
-              <div class="muted" style="font-size: 11.5px">
-                Quote this to run the session probe. It is not a sign-in credential.
-              </div>
-            </dd>
-          </template>
-          <template v-if="row.redeemed">
-            <dt>Next activation</dt>
-            <dd v-if="row.released_pending">
-              Will succeed — a Sign out was recorded {{ shortDateTime(row.released_at) }} and not claimed since
-            </dd>
-            <dd v-else>Refused on another device until this one signs out</dd>
-          </template>
-        </dl>
-        </details>
-
-        <!-- ── History, inline ──
-             Not a tab. This is what you read while a student is on the phone. -->
-        <div class="section-title">
-          History
-          <span v-if="events.length" class="n">{{ events.length }}</span>
-        </div>
-        <div v-if="historyLoading && !events.length" class="state tiny-state">Loading…</div>
-        <div v-else-if="!events.length" class="state tiny-state">
-          <p style="margin: 0">Nothing recorded. A code that has only been minted has no events.</p>
-        </div>
-        <ol v-else class="timeline">
-          <li v-for="(h, i) in events" :key="i">
-            <span class="when">{{ shortDateTime(h.created) }}</span>
-            <span class="what">
-              <strong>{{ h.event }}</strong>
-              <span v-if="h.detail" class="detail">{{ h.detail }}</span>
-            </span>
-          </li>
-        </ol>
-
-        <!-- ── Danger, last ── -->
+        <!-- ── Irreversible, last of the ACTIONS ──
+             Release left this section: it is now a direct state action above
+             (`Mark unused`), not a confirmed destructive flow. Delete is the one
+             thing here that destroys the row. -->
         <div class="section-title">Irreversible</div>
-
-        <div v-if="row.redeemed" class="ins-danger">
-          <div class="ins-row">
-            <span class="ins-row-label">
-              Release to a different student
-              <small>Clears “in use” so someone else can activate it. Ends the current holder's access. Not needed to move a student to a new computer — they re-enter their own code.</small>
-            </span>
-            <button class="tiny" @click="release">Release…</button>
-          </div>
-        </div>
 
         <div class="ins-danger">
           <template v-if="!confirmDelete">
             <div class="ins-row">
               <span class="ins-row-label">
                 Delete permanently
-                <small>Prefer stopping or releasing. An audit entry is kept but the code is gone — for typos, duplicate batches and test rows.</small>
+                <small>Prefer stopping or marking unused. An audit entry is kept but the code is gone — for typos, duplicate batches and test rows.</small>
               </span>
-              <button class="tiny" :disabled="row.redeemed" :title="row.redeemed ? 'Release it first' : ''" @click="confirmDelete = true">
+              <button class="tiny" :disabled="row.redeemed" :title="row.redeemed ? 'Mark it unused first' : ''" @click="confirmDelete = true">
                 Delete…
               </button>
             </div>
@@ -666,6 +731,64 @@ const planOptions = computed(() => {
             </div>
           </template>
         </div>
+
+        <!-- ── History and Record, DEMOTED ──
+             Both are support-call reading, not the work of managing a code, so
+             they sit at the bottom of the rail as closed folds. They are not
+             deleted: the count in the History summary says at a glance whether
+             there is anything to open. -->
+        <details class="ins-fold ins-fold-bottom">
+          <summary class="section-title">
+            History
+            <span v-if="events.length" class="n">{{ events.length }}</span>
+            <span class="ins-fold-hint">what happened to this code</span>
+          </summary>
+          <div v-if="historyLoading && !events.length" class="state tiny-state">Loading…</div>
+          <div v-else-if="!events.length" class="state tiny-state">
+            <p style="margin: 0">Nothing recorded. A code that has only been minted has no events.</p>
+          </div>
+          <ol v-else class="timeline">
+            <li v-for="(h, i) in events" :key="i">
+              <span class="when">{{ shortDateTime(h.created) }}</span>
+              <span class="what">
+                <strong>{{ h.event }}</strong>
+                <span v-if="h.detail" class="detail">{{ h.detail }}</span>
+              </span>
+            </li>
+          </ol>
+        </details>
+
+        <details class="ins-fold ins-fold-bottom">
+          <summary class="section-title">
+            Record
+            <span class="ins-fold-hint">device id · first used · activation rule</span>
+          </summary>
+          <dl class="facts">
+            <dt>First used</dt>
+            <dd>{{ row.activated_at ? shortDateTime(row.activated_at) : 'Not used yet' }}</dd>
+            <template v-if="row.first_seen_at">
+              <dt>First issued</dt>
+              <dd>
+                {{ shortDate(row.first_seen_at) }}
+                <span v-if="!row.redeemed" class="muted"> · released since</span>
+              </dd>
+            </template>
+            <template v-if="row.first_seen_fingerprint">
+              <dt>Device id</dt>
+              <dd>
+                <code>{{ row.first_seen_fingerprint }}</code>
+                <div class="muted" style="font-size: 11.5px">Used by Run session probe above.</div>
+              </dd>
+            </template>
+            <template v-if="row.redeemed">
+              <dt>Next activation</dt>
+              <dd v-if="row.released_pending">
+                Will succeed — a Sign out was recorded {{ shortDateTime(row.released_at) }} and not claimed since
+              </dd>
+              <dd v-else>Refused on another device until this one signs out</dd>
+            </template>
+          </dl>
+        </details>
       </template>
     </div>
   </aside>

@@ -54,9 +54,12 @@ pure render: it cannot write, so an observation cannot silently become a status.
 
 ## The eviction sequence
 
-1. Operator releases a live code in the console. The drawer shows
-   `codes.release { dry_run: true }`, which computes the consequences **from the
-   row** — including whether a device will be evicted.
+1. Operator presses **Mark unused** in the inspector. The console sends
+   `codes.release { code }` as a DIRECT action — there is no drawer, no preview,
+   no typed confirmation and no reason field. `codes.release { dry_run: true }`
+   is still supported for scripts and still computes the consequences **from the
+   row**, including whether a device will be evicted; the console simply no longer
+   asks for it first.
 2. Hub writes the `code_overrides` audit row first (a hard failure aborts the
    action), then one save: `activated_at=null`, `force_state='released'`,
    `evict_requested_at`, `evict_reason`, `override_id`.
@@ -130,6 +133,19 @@ the resale works for one beat and then cuts off the student who just paid.
 So the first-redemption save clears `force_state`, `evict_requested_at` and
 `evict_reason` in the same write as `activated_at`. Guarded by §66 assertion 7.
 
+## The client half is pinned by one test, end to end
+
+`client/src-tauri/src/chrysalis/runtime.rs` carries
+`the_release_eviction_the_hub_sends_reaches_the_suspension_path`: it reads the
+eviction sentences OUT of `heartbeat.pb.js`, feeds them through the real
+`classify_response` and `is_suspension`, asserts the store read the gate uses
+(`is_suspended`, including the `suspended && !activated` refusal), and leaves the
+final "which screen" step to `gateScreen` (unit-tested) and to
+`client/.harness/verify-states.mjs`, which renders the stopped page with the hub's
+sentence. The sentences are not retyped in the test, so a hub-side reword fails it
+rather than silently sending every deployed client down the credential-deleting
+branch. It was observed failing by rewording both sentences to drop "suspended".
+
 ## A released code stays protected from deletion
 
 `codes.delete` used to refuse only while `activated_at` was set, and its message
@@ -150,11 +166,12 @@ activation override-clear each write all their fields in one call, so the hub is
 never observed half-changed. Guard 10 asserts this and was shown failing against
 an injected split save.
 
-**The console sends a `claim_token` with a release commit.** It is the
-`activated_at` the preview was computed against; a mismatch returns 409 and the
-drawer re-previews. This stops a decision made about one state from being applied
-to another. `suspend`/`kick` deliberately have no token — they are idempotent set
-operations, so a stale call converges rather than diverging.
+**The `claim_token` is still enforced when a caller sends one.** It is the
+`activated_at` a preview was computed against; a mismatch returns 409. The console
+no longer previews, so its direct release omits the token — a direct action is
+taken against the state as it is at the moment it is pressed. `suspend`/`kick`
+deliberately have no token either: they are idempotent set operations, so a stale
+call converges rather than diverging.
 
 **An already-released code is a no-op, not a 400.** It used to answer "That code
 has not been used yet", which was false and read like a failure to a second
@@ -179,6 +196,33 @@ carries the truth after it. Guard 9 checks every message variant, and also asser
 the client still classifies by `message`, because if that changes the guard's
 rationale changes too.
 
+## The other direct override: a pending sign-out → in term
+
+`codes.override { to_state: "in_term" }` is the console's **Mark in term**. It
+exists for the one state a release cannot express: a code whose holder pressed
+Sign out (`released_at` later than `activated_at`) while the claim on the machine
+is still the one the operator wants in force.
+
+It is a REAL state change, not a label: clearing `released_at` is what
+`activation.pb.js` compares, so a second machine is refused again and the current
+holder keeps the claim. `force_state` is deliberately NOT set — the derivation
+already agrees once the date is gone, and a pin that restates the derived answer
+would be a second source of truth for it. `release_count` is left alone (the
+sign-out happened; this withdraws only the pending claim), and the action writes
+one `code_overrides` row with `aspect: "in_term"` before its single save.
+
+It does not have an undo: the operator's correction is "the sign-out is void", and
+the student can sign out again. A repeated call is a truthful no-op.
+
+## The probe sees the override
+
+`session_probe.pb.js` reports `override` (force state, id, eviction) and adds
+`operator_override` to `divergence` whenever `force_state` or
+`evict_requested_at` is set. It reads the same predicate the heartbeat enforces,
+so a run after a console override answers "did it take?" — and the console shows
+it as an alert. Without this the flag would be written by one action and read by
+none of the diagnostic surfaces, which is the failure R3 names.
+
 ## Fields an override must never write
 
 `last_seen_at` (writing it makes liveness unfalsifiable), `released_at` /
@@ -189,7 +233,10 @@ rationale changes too.
 ## Undo
 
 `codes.reactivate` clears `force_state`, `evict_requested_at`, `evict_reason` and
-`override_id` in one save. It deliberately does **not** restore `activated_at`: if
+`override_id` in one save. It does **not** restore a cleared `activated_at` (see
+above), so "undo" on a release removes the eviction and the pin — the freed claim
+stays freed. The inspector offers it as **Undo release** and says so only by being
+a direct, audited action rather than promising a full rollback. It deliberately does **not** restore `activated_at`: if
 the code was re-redeemed by someone else, that claim is a real fact and survives.
 The evicted device is still beating (a suspension-shaped refusal keeps the code),
 so it is back in at its next beat with no re-entry.

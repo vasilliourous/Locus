@@ -226,6 +226,7 @@ const server = http.createServer((req, res) => {
     res.writeHead(204)
     return res.end()
   }
+  const route = String(req.url || '')
   let raw = ''
   req.on('data', (c) => (raw += c))
   req.on('end', () => {
@@ -240,6 +241,80 @@ const server = http.createServer((req, res) => {
       res.writeHead(200, { 'Content-Type': 'application/json' })
       res.end(JSON.stringify({ ok: true, ...obj }))
     }
+
+    // ── /api/session-probe — the read-only diagnostic the console now runs ──
+    //
+    // Shaped like `session_probe.pb.js`: the machine check runs FIRST and answers
+    // an opaque 404; the two axes are reported separately; the override block is
+    // present only when force_state/evict_requested_at is set. Enough to drive
+    // R2's visible result and R3's "the next probe alerts on the override".
+    if (route.startsWith('/api/session-probe')) {
+      if (Number(body.probe_version) !== 1) {
+        res.writeHead(400, { 'Content-Type': 'application/json' })
+        return res.end(JSON.stringify({ code: 400, message: 'Missing probe_version' }))
+      }
+      const c = codes.find((x) => x.code === String(body.code || '').toUpperCase())
+      const presented = String(body.device_id || '').trim().toLowerCase()
+      const stored = String((c && c.first_seen_fingerprint) || '').trim().toLowerCase()
+      const matches = !!c && presented.length >= 12 && stored.length >= 12 && (presented === stored || stored.startsWith(presented) || presented.startsWith(stored))
+      if (!matches) {
+        res.writeHead(404, { 'Content-Type': 'application/json' })
+        return res.end(JSON.stringify({ code: 404, message: 'Code not found' }))
+      }
+      const nowMs = Date.now()
+      const exp = c.expires_at ? new Date(c.expires_at).getTime() : 0
+      const releasedPending = !!c.redeemed && !!c.released_at && new Date(c.released_at).getTime() > new Date(c.activated_at || 0).getTime()
+      const entitlement = c.suspended
+        ? 'suspended'
+        : exp && exp < nowMs
+          ? 'expired'
+          : !c.activated_at
+            ? 'never-activated'
+            : releasedPending
+              ? 'released-unclaimed'
+              : 'active'
+      const seenMs = c.last_seen_at ? new Date(c.last_seen_at).getTime() : 0
+      const ageS = seenMs ? Math.floor((nowMs - seenMs) / 1000) : null
+      const liveness = ageS === null ? 'unknown' : ageS <= 8040 ? 'live' : ageS <= 7 * 86400 ? 'stale' : 'absent'
+      const hasOverride = !!c.force_state || !!c.evict_requested_at
+      const divergence = []
+      if (hasOverride) divergence.push('operator_override')
+      res.writeHead(200, { 'Content-Type': 'application/json' })
+      return res.end(
+        JSON.stringify({
+          probe_version: 1,
+          server_time: iso(nowMs),
+          entitlement,
+          liveness,
+          hub_view: {
+            activated_at: c.activated_at || null,
+            released_at: c.released_at || null,
+            released_pending: releasedPending,
+            suspended: !!c.suspended,
+            suspended_reason: c.suspended ? 'verify mock' : null,
+            expires_at: c.expires_at || null,
+            tier: c.tier,
+            last_seen_at: c.last_seen_at || null,
+            last_seen_age_s: ageS,
+            first_seen_fingerprint: c.first_seen_fingerprint || '',
+          },
+          client_view: null,
+          lease_expires_at: seenMs ? iso(seenMs + 8040 * 1000) : null,
+          reason_code: liveness === 'unknown' ? 'unknown' : 'client_beating_hub_quiet',
+          divergence,
+          override: hasOverride
+            ? {
+                force_state: c.force_state || null,
+                override_id: c.override_id || null,
+                evicted: !!c.evict_requested_at,
+                evicted_at: c.evict_requested_at || null,
+                evicted_reason: c.evict_reason || null,
+              }
+            : null,
+        }),
+      )
+    }
+
     switch (body.action) {
       case 'dashboard':
         return send(dashboard())
@@ -340,6 +415,17 @@ const server = http.createServer((req, res) => {
           c.evict_reason = String(body.reason || '')
         }
         return send({ code: c.code, evicted: willEvict, outcome: willEvict ? 'applied_with_eviction' : 'applied' })
+      }
+      case 'codes.override': {
+        const c = codes.find((x) => x.code === String(body.code || '').toUpperCase())
+        if (!c) return send({ ok: false, message: 'Code not found' }, 404)
+        if (String(body.to_state || '') !== 'in_term') return send({ ok: false, message: 'to_state must be in_term' }, 400)
+        const pending = !!c.released_at && new Date(c.released_at).getTime() > new Date(c.activated_at || 0).getTime()
+        if (!pending) return send({ code: c.code, noop: true, state: 'in_term' })
+        c.released_at = ''
+        c.released_pending = false
+        c.override_id = String(body.override_id || '')
+        return send({ code: c.code, state: 'in_term', cleared_sign_out: true })
       }
       case 'codes.reactivate': {
         const c = codes.find((x) => x.code === String(body.code || '').toUpperCase())

@@ -32,11 +32,16 @@ cd server/console/verify
 node mock-hub.mjs &                       # the stand-in hub on :8777
 ../node_modules/.bin/vite --config vite.verify.config.ts &   # the console on :5199
 
-node drive.mjs      # 44 functional checks: routes, filters, keyboard, deep links
-node workflows.mjs  # 16 mutating flows: renew, save, guard, bulk, create, back
-node audit.mjs      # contrast (WCAG AA), touch targets, focus visibility
-node visual.mjs     # layout facts: overflow, clipping, rhythm, type sizes
+node drive.mjs        # 48 functional checks: routes, filters, keyboard, deep links
+node workflows.mjs    # 16 mutating flows: renew, save, guard, bulk, create, back
+node audit.mjs        # contrast (WCAG AA), touch targets, focus visibility
+node visual.mjs       # layout facts: overflow, clipping, rhythm, type sizes
+node requirements.mjs # R2–R6: probe result, direct overrides, no no-op fields,
+                      # Term/Expiry at top level, History/Record demoted
 ```
+
+`requirements.mjs` MUTATES the mock's fixture (a release, an in-term override, an
+expiry set and cleared), so restart `mock-hub.mjs` before each run of it.
 
 Screenshots land in `shots/`.
 
@@ -48,6 +53,7 @@ Screenshots land in `shots/`.
 | `workflows.mjs` | Does a renewal/save/release change what the screen shows, and does the unsaved-changes guard hold? |
 | `audit.mjs` | Is text readable (contrast) and is every control big enough to hit? |
 | `visual.mjs` | Does anything overflow, clip silently, or use unreadably small type? |
+| `requirements.mjs` | Does the probe run and report, does an override change the state the panel/list show, and are the deleted no-op controls really gone? |
 
 `mock-hub.mjs` implements the `admin/console` actions from
 `server/pb_hooks/admin_console.pb.js` with the same field names and refusal

@@ -76,6 +76,18 @@ export const LayoutSubscription = () => {
       }
     }
 
+    // The hub confirmed there is no expiry. The console calls this "Never";
+    // this chip must say the same thing rather than "status unavailable", which
+    // would be a false claim about an answer we already have.
+    if (subscription.state === 'never') {
+      return {
+        colour: theme.palette.text.secondary,
+        icon: <ScheduleOutlined sx={{ fontSize: 14 }} />,
+        label: t('layout.components.subscription.neverExpires'),
+        tooltip: t('layout.components.subscription.neverExpiresHint'),
+      }
+    }
+
     // Activated, but no date confirmed. Says so instead of vanishing.
     if (subscription.state === 'unknown') {
       return {

@@ -117,9 +117,13 @@ export function stateLabel(row: CodeRow): string {
   // Rendered as "signed out" beside "checked in 2m ago" those two columns
   // contradict each other, and the operator believes the word over the datum —
   // which is how the original report ("the hub says I'm signed out") happened.
-  // The label now names its own axis: the CODE is released, not the DEVICE
-  // signed out. The runbook's step 0 quotes this wording.
-  if (row.redeemed && row.released_pending) return 'sign-out recorded'
+  // The label names its own axis: the CODE is free, not the DEVICE signed out.
+  //
+  // "sign-out recorded" was accurate and clipped to "sign-out re…" in the State
+  // column. R6 says shorten the label rather than let it truncate; "unclaimed" is
+  // the fact (a sign-out nobody has claimed), it fits, and it does not assert
+  // anything about the device. The runbook's step 0 quotes this wording.
+  if (row.redeemed && row.released_pending) return 'unclaimed'
   if (row.redeemed) return 'in term'
   if (row.first_seen_at) return 'released'
   return 'unused'
@@ -320,8 +324,7 @@ export function conflictOf(row: CodeRow, now: number = Date.now()): Conflict {
   // and is covered here without a special case. That is what making the two
   // orthogonal bought.
   const main = stateLabel(row)
-  const looksFree =
-    main === 'unused' || main === 'released' || main === 'sign-out recorded'
+  const looksFree = main === 'unused' || main === 'released' || main === 'unclaimed'
   if (looksFree && livenessOf(row, now) === 'live') return 'live-but-available'
   return 'none'
 }
@@ -334,8 +337,14 @@ export function conflictOf(row: CodeRow, now: number = Date.now()): Conflict {
  * there is one vocabulary and it cannot drift from `conflictOf`.
  */
 export function overrideNote(row: CodeRow): string {
-  if (row.evict_requested_at) return 'released · cutting off device'
-  if (row.force_state === 'released') return 'released by override'
+  // Suppressed when the badge ALREADY says "released": the note's job is to add
+  // the fact the badge cannot carry, and printing the same word twice is noise in
+  // a column that has little room. It still appears when the override sits under
+  // a different derived state (a stopped or lapsed code that was also released),
+  // which is the case where the operator would otherwise not see it.
+  if (row.evict_requested_at || row.force_state === 'released') {
+    return stateLabel(row) === 'released' ? '' : 'released'
+  }
   return ''
 }
 

@@ -489,6 +489,15 @@ pub enum SubscriptionStatus {
         /// without re-deriving it.
         expires_at: String,
     },
+    /// The hub confirmed this code has NO expiry.
+    ///
+    /// An operator cleared the date (or the code was never given one), which the
+    /// console labels "Never". This is a different answer from [`Unknown`](Self::Unknown):
+    /// "we have no answer" versus "the answer is: it does not expire". Rendering
+    /// it as Unknown showed "your end date is not available yet — it will appear
+    /// after this device next contacts Chrysalis", which is false forever once the
+    /// hub has confirmed there is no date. That was the class of lie R5 removes.
+    Never,
     /// The hub refused this device and the entitlement was withdrawn.
     ///
     /// Its own state, ahead of [`Unknown`](Self::Unknown), because after a
@@ -506,6 +515,12 @@ pub enum SubscriptionStatus {
         reason: String,
     },
 }
+
+/// The `enforcement_version` at which the hub began sending `expires_at`.
+///
+/// See `heartbeat.pb.js` (`response.expires_at`) and `contract::ENFORCEMENT_VERSION`.
+/// Below this, a missing date is "the hub cannot tell you", not "there is none".
+const EXPIRY_FIELD_ENFORCEMENT_VERSION: u32 = 2;
 
 /// Maps stored state to what the Account screen should say about the subscription.
 ///
@@ -526,6 +541,7 @@ fn classify_subscription(
     activated: bool,
     raw_expiry: Option<&str>,
     refusal_reason: Option<&str>,
+    hub_reports_expiry: bool,
 ) -> SubscriptionStatus {
     if !activated {
         // A device with no entitlement, that the hub has refused, is not a blank
@@ -539,6 +555,18 @@ fn classify_subscription(
             };
         }
         return SubscriptionStatus::Unknown;
+    }
+
+    // ── "No date" is an answer only when the hub is able to give one ──
+    //
+    // `hub_reports_expiry` is true once the hub has told us it speaks the
+    // `expires_at` field (enforcement_version >= 2). Below that, a missing date
+    // means "this hub cannot tell you", and saying "never expires" would invent
+    // a fact about someone's account. An UNPARSEABLE non-empty value is also
+    // Unknown: a garbled date is not the same statement as "no date".
+    let has_no_date = raw_expiry.is_none_or(|v| v.trim().is_empty());
+    if activated && has_no_date && hub_reports_expiry {
+        return SubscriptionStatus::Never;
     }
 
     match crate::chrysalis::expiry::parse(raw_expiry) {
@@ -582,6 +610,12 @@ pub async fn chrysalis_status() -> ChrysalisStatus {
         activation.is_some(),
         verge_data.chrysalis_expires_at.as_deref(),
         verge_data.chrysalis_refusal_reason.as_deref(),
+        // The hub began sending `expires_at` at enforcement_version 2. A hub
+        // below that has not answered "is there an expiry?", so its silence is
+        // not a "never".
+        verge_data
+            .chrysalis_hub_enforcement
+            .is_some_and(|v| v >= EXPIRY_FIELD_ENFORCEMENT_VERSION),
     );
 
     // Observed, not assumed. The readiness latch answers "was a start
@@ -889,10 +923,12 @@ pub async fn chrysalis_activate(code: String) -> CmdResult<ActivationResult> {
             // Without this the only writer was the heartbeat, so a freshly
             // activated device showed no expiry until the first beat landed — the
             // "days to expiry never appears" report. Only written when the hub
-            // actually sent a date: a hub that predates the field sends nothing,
-            // and writing `None` would wipe a value we legitimately hold (the
-            // same rule the heartbeat path follows). The heartbeat still
-            // refreshes it, so a renewal keeps working without a restart.
+            // actually sent a date: the activation response cannot distinguish an
+            // omitted key from `null`, so writing `None` here would wipe a value
+            // we legitimately hold. (The heartbeat CAN distinguish them — see its
+            // `expires_at: Option<Option<String>>` — and clears the date only on
+            // an explicit `null`.) The heartbeat still refreshes it, so a renewal
+            // keeps working without a restart.
             if expires_at.is_some()
                 && let Err(error) = store::record_expiry(expires_at).await
             {
@@ -2786,13 +2822,13 @@ mod tests {
     #[test]
     fn an_unactivated_device_has_an_unknown_subscription() {
         assert!(matches!(
-            classify_subscription(false, None, None),
+            classify_subscription(false, None, None, false),
             SubscriptionStatus::Unknown
         ));
         // Even with a date present — a damaged record — activation wins, because
         // an expiry without an entitlement describes nothing.
         assert!(matches!(
-            classify_subscription(false, Some("2030-01-01 00:00:00.000Z"), None),
+            classify_subscription(false, Some("2030-01-01 00:00:00.000Z"), None, false),
             SubscriptionStatus::Unknown
         ));
     }
@@ -2807,7 +2843,7 @@ mod tests {
     /// an instruction ("contact your middleman"), not a description.
     #[test]
     fn a_refused_device_is_told_why_it_was_refused() {
-        match classify_subscription(false, None, Some("Account suspended — contact your middleman")) {
+        match classify_subscription(false, None, Some("Account suspended — contact your middleman"), false) {
             SubscriptionStatus::Refused { reason } => {
                 assert_eq!(reason, "Account suspended — contact your middleman");
             }
@@ -2821,7 +2857,7 @@ mod tests {
     #[test]
     fn a_refusal_is_reachable_which_is_why_it_is_checked_first() {
         assert!(matches!(
-            classify_subscription(false, None, Some("Code expired")),
+            classify_subscription(false, None, Some("Code expired"), false),
             SubscriptionStatus::Refused { .. }
         ));
     }
@@ -2833,7 +2869,7 @@ mod tests {
         for blank in ["", "   ", "\n"] {
             assert!(
                 matches!(
-                    classify_subscription(false, None, Some(blank)),
+                    classify_subscription(false, None, Some(blank), false),
                     SubscriptionStatus::Unknown
                 ),
                 "a blank reason ({blank:?}) must not produce a Refused state"
@@ -2849,7 +2885,7 @@ mod tests {
     #[test]
     fn an_activated_device_is_never_refused() {
         assert!(matches!(
-            classify_subscription(true, Some("2030-01-01 00:00:00.000Z"), Some("Code expired")),
+            classify_subscription(true, Some("2030-01-01 00:00:00.000Z"), Some("Code expired"), false),
             SubscriptionStatus::Active { .. }
         ));
     }
@@ -2861,24 +2897,60 @@ mod tests {
     #[test]
     fn a_missing_date_on_an_activated_device_is_unknown() {
         assert!(matches!(
-            classify_subscription(true, None, None),
+            classify_subscription(true, None, None, false),
             SubscriptionStatus::Unknown
         ));
         assert!(matches!(
-            classify_subscription(true, Some(""), None),
+            classify_subscription(true, Some(""), None, false),
             SubscriptionStatus::Unknown
         ));
         assert!(matches!(
-            classify_subscription(true, Some("garbage"), None),
+            classify_subscription(true, Some("garbage"), None, false),
             SubscriptionStatus::Unknown
         ));
+    }
+
+    /// A hub that HAS answered — and says there is no date — means NEVER.
+    ///
+    /// R5's client half. The console calls an empty expiry "Never"; the client
+    /// must say the same rather than "your end date is not available yet", which
+    /// a confirmed absence makes false forever. The cases that must NOT become
+    /// Never are asserted alongside: an unactivated device (no entitlement to
+    /// describe) and a garbled non-empty date (not the same statement as none).
+    #[test]
+    fn a_hub_confirmed_absence_of_a_date_is_never_expiring() {
+        assert!(
+            matches!(classify_subscription(true, None, None, true), SubscriptionStatus::Never),
+            "an activated code whose hub reports no expiry does not expire"
+        );
+        assert!(
+            matches!(
+                classify_subscription(true, Some("\t"), None, true),
+                SubscriptionStatus::Never
+            ),
+            "a blank date from a capable hub is an absence, not an unreadable value"
+        );
+        assert!(
+            matches!(
+                classify_subscription(true, Some("garbage"), None, true),
+                SubscriptionStatus::Unknown
+            ),
+            "an unparseable date must not be reported as 'never expires'"
+        );
+        assert!(
+            matches!(
+                classify_subscription(false, None, None, true),
+                SubscriptionStatus::Unknown
+            ),
+            "an unactivated device has no subscription to call never-expiring"
+        );
     }
 
     /// A past date on an activated device is LAPSED, and says so.
     #[test]
     fn a_past_date_is_reported_as_lapsed() {
         assert!(matches!(
-            classify_subscription(true, Some("2020-01-01 00:00:00.000Z"), None),
+            classify_subscription(true, Some("2020-01-01 00:00:00.000Z"), None, false),
             SubscriptionStatus::Lapsed
         ));
     }
@@ -2891,7 +2963,7 @@ mod tests {
     fn a_future_date_is_active_with_the_right_urgency() {
         let far = chrono::Utc::now() + chrono::Duration::days(60);
         let far_text = far.format("%Y-%m-%d %H:%M:%S%.fZ").to_string();
-        match classify_subscription(true, Some(&far_text), None) {
+        match classify_subscription(true, Some(&far_text), None, false) {
             SubscriptionStatus::Active {
                 days_remaining,
                 urgent,
@@ -2911,7 +2983,7 @@ mod tests {
     fn a_soon_expiry_is_marked_urgent() {
         let soon = chrono::Utc::now() + chrono::Duration::days(2);
         let text = soon.format("%Y-%m-%d %H:%M:%S%.fZ").to_string();
-        match classify_subscription(true, Some(&text), None) {
+        match classify_subscription(true, Some(&text), None, false) {
             SubscriptionStatus::Active { urgent, .. } => assert!(urgent, "two days from expiry must be urgent"),
             other => panic!("expected Active, got {other:?}"),
         }
@@ -2964,7 +3036,7 @@ mod tests {
     fn the_gate_and_the_display_agree_on_lapsed() {
         let past = "2020-01-01 00:00:00.000Z";
         assert!(matches!(
-            classify_subscription(true, Some(past), None),
+            classify_subscription(true, Some(past), None, false),
             SubscriptionStatus::Lapsed
         ));
         assert!(!subscription_allows_connect(Some(past)));

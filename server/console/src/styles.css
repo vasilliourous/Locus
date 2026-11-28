@@ -1139,7 +1139,10 @@ table.codes-table .row-verbs { justify-content: flex-end; flex-wrap: nowrap; }
   margin-top: 3px; font-size: 12.5px; min-width: 0;
 }
 .ins-sub .row-menu { margin-left: auto; }
-.ins-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* The student's name is a heading, not a table cell: it wraps rather than
+   ellipsising. "Nothing important may be ellipsised" is R6's rule, and a name the
+   operator cannot read is exactly the support-call failure the field exists for. */
+.ins-name { overflow-wrap: anywhere; }
 
 .ins-body { flex: 1; min-height: 0; overflow-y: auto; padding: var(--s4); }
 .ins-body .msg { margin-bottom: var(--s3); }
@@ -1167,6 +1170,31 @@ table.codes-table .row-verbs { justify-content: flex-end; flex-wrap: nowrap; }
 }
 .ins-fact strong { font-size: 13.5px; font-variant-numeric: tabular-nums; }
 .ins-fact .v { font-size: 11px; color: var(--muted); }
+
+/* The two EDITABLE tiles (Expires, Term). They are real buttons so keyboard and
+   screen-reader users get them, but they keep the fact tile's shape — a control
+   that looks like a form field would push the value into a different visual
+   weight from the two read-only facts beside it. */
+.ins-fact-edit {
+  width: 100%;
+  text-align: left;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+.ins-fact-edit:hover { border-color: var(--accent-dim); }
+.ins-fact-edit:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+/* State overrides sit under the primary actions, but must not stretch to fill:
+   they are small, direct corrections rather than the two daily verbs. */
+.ins-state-actions { margin-top: calc(var(--s4) * -1 + var(--s2)); }
+.ins-actions.ins-state-actions button { flex: 0 0 auto; }
+
+.ins-probe { display: flex; align-items: center; gap: var(--s2); margin-bottom: var(--s2); }
+.ins-probe-when { font-size: 11px; }
+.ins-probe-result .msg { margin-bottom: var(--s2); line-height: 1.5; }
+.ins-probe-result code { font-size: 0.95em; }
+.ins-fold-bottom { margin-top: var(--s4); border-top: 1px solid var(--border); }
 
 .ins-actions { display: flex; gap: var(--s2); margin-bottom: var(--s4); }
 .ins-actions button { flex: 1; }
@@ -1618,8 +1646,9 @@ table.codes-table td .badge {
   text-overflow: ellipsis;
   vertical-align: middle;
 }
-/* Long badge text ("sign-out recorded") wraps rather than clipping, because the
-   STATE is the one value an operator must never misread. */
+/* A state badge never wraps or ellipsises: the STATE is the one value an operator
+   must never misread, and the labels are kept short enough to fit ("unclaimed",
+   not "sign-out recorded"). */
 table.codes-table td .badge { white-space: nowrap; }
 
 /* Six lanes at their minimum (232px + gap) need ~1464px; the content column is
@@ -1639,10 +1668,11 @@ table.codes-table td .badge { white-space: nowrap; }
 }
 
 /* ── Foldable sections in the inspector ─────────────────────────────────── */
-/* `Manual overrides` and `Record` are read rarely; `History` and the actions are
-   read constantly. Folding the two rare ones took the rail from 1.87 screens of
-   scrolling to roughly one, so the history — the reason you opened the code during
-   a support call — is reachable without hunting. */
+/* The bottom two sections (History, Record) are support-call reading rather than
+   the work of managing a code, so they are closed folds below the actions and the
+   irreversible delete. The fold/hint styles are shared with nothing else now —
+   the "Manual overrides" fold is gone, because Term and Expiry are primary
+   editable tiles at the top. */
 .ins-fold { margin: 0; }
 .ins-fold > summary {
   list-style: none;
@@ -1721,8 +1751,8 @@ table.codes-table td.sticky-code {
 table.codes-table .c-check { width: 32px; }
 table.codes-table .c-code  { width: 160px; }  /* fixed: never truncates */
 table.codes-table .c-name  { width: auto; }   /* free text: truncates */
-table.codes-table .c-plan  { width: 76px; }
-table.codes-table .c-state { width: 108px; }
+table.codes-table .c-plan  { width: 88px; }
+table.codes-table .c-state { width: 124px; }
 table.codes-table .c-seen  { width: 124px; }
 table.codes-table .c-who   { width: auto; }   /* also free text: shares leftover */
 table.codes-table .c-days  { width: 94px; }  /* fits "DAYS LEFT ↑" + arrow */

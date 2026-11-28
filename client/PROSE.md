@@ -16,7 +16,7 @@ verified-against: generated from src/locales/en/ and clash-verge-i18n/locales/en
 > `node scripts/prose-manifest.mjs` regenerates this file after the code
 > changes. `--check` fails if it is stale.
 
-**330 strings.** Each row is: the key, the text, where in the app a
+**333 strings.** Each row is: the key, the text, where in the app a
 student meets it, and the exact `file:line` that references it.
 
 Changing a row changes that string only. To change what a whole screen
@@ -112,9 +112,9 @@ says, edit the rows under that screen's heading.
 | `home.components.connection.signOut.confirmMoving` | If you are moving to a new computer, this is what you want. | src/components/shared/sign-out-card.tsx:263 |
 | `home.components.connection.signOut.confirmTitle` | Sign out on this device? | src/components/shared/sign-out-card.tsx:249 |
 | `home.components.connection.signOut.countingDown` | Signing out in {{count}}… | src/components/shared/sign-out-card.tsx:284 |
-| `home.components.connection.signOut.deviceIdCopied` | Device ID copied | src/pages/account.tsx:337 |
-| `home.components.connection.signOut.deviceIdCopy` | Copy | src/pages/account.tsx:351 |
-| `home.components.connection.signOut.deviceIdCopyFailed` | Could not copy automatically — select the Device ID and copy it by hand. | src/pages/account.tsx:346 |
+| `home.components.connection.signOut.deviceIdCopied` | Device ID copied | src/pages/account.tsx:343 |
+| `home.components.connection.signOut.deviceIdCopy` | Copy | src/pages/account.tsx:357 |
+| `home.components.connection.signOut.deviceIdCopyFailed` | Could not copy automatically — select the Device ID and copy it by hand. | src/pages/account.tsx:352 |
 | `home.components.connection.signOut.signedOut` | Signed out. This computer no longer holds your key. | src/components/shared/sign-out-card.tsx:162 |
 | `home.components.connection.signOut.signedOutFailed` | Chrysalis could not sign out. Nothing has changed on this device. Try again, and email us if it keeps happening. | src/components/shared/sign-out-card.tsx:120 |
 | `home.components.connection.signOut.signedOutOffline` | Signed out on this computer. We could not reach Chrysalis to record it, so this key will be refused on another computer until it is released here. Entering it again on THIS computer works; if this computer is going away, email us and we will release the key. | src/components/shared/sign-out-card.tsx:164 |
@@ -124,37 +124,38 @@ says, edit the rows under that screen's heading.
 
 ## Account tab
 
-*Subscription, device, preferences, updates (pages/account.tsx)* — 47 strings.
+*Subscription, device, preferences, updates (pages/account.tsx)* — 48 strings.
 
 | Key | Text | Code |
 |---|---|---|
-| `home.components.connection.account.activateForExpiry` | Activate this device to see your subscription. | src/pages/account.tsx:207 |
-| `home.components.connection.account.appVersion` | App version | src/pages/account.tsx:359 |
-| `home.components.connection.account.autoUpdate` | Check for updates automatically | src/pages/account.tsx:471 |
-| `home.components.connection.account.checkingStatus` | Checking… | src/pages/account.tsx:283 |
-| `home.components.connection.account.checkStatus` | Check status now | src/pages/account.tsx:284 |
+| `home.components.connection.account.activateForExpiry` | Activate this device to see your subscription. | src/pages/account.tsx:213 |
+| `home.components.connection.account.appVersion` | App version | src/pages/account.tsx:365 |
+| `home.components.connection.account.autoUpdate` | Check for updates automatically | src/pages/account.tsx:477 |
+| `home.components.connection.account.checkingStatus` | Checking… | src/pages/account.tsx:289 |
+| `home.components.connection.account.checkStatus` | Check status now | src/pages/account.tsx:290 |
 | `home.components.connection.account.confirmedDaysAgo` | {{count}} d ago | src/pages/account.tsx:118 |
 | `home.components.connection.account.confirmedHoursAgo` | {{count}} h ago | src/pages/account.tsx:115 |
 | `home.components.connection.account.confirmedJustNow` | just now | src/pages/account.tsx:107 |
 | `home.components.connection.account.confirmedMinutesAgo` | {{count}} min ago | src/pages/account.tsx:110 |
 | `home.components.connection.account.daysLeft` | {{count}} days | src/pages/account.tsx:156 |
-| `home.components.connection.account.deviceId` | Device ID | src/pages/account.tsx:309 |
-| `home.components.connection.account.deviceIdHint` | Quote the device ID if you need support — it identifies this install without revealing anything about you. | src/pages/account.tsx:367 |
+| `home.components.connection.account.deviceId` | Device ID | src/pages/account.tsx:315 |
+| `home.components.connection.account.deviceIdHint` | Quote the device ID if you need support — it identifies this install without revealing anything about you. | src/pages/account.tsx:373 |
 | `home.components.connection.account.expired` | Expired | src/pages/account.tsx:169 |
 | `home.components.connection.account.expires` | Expires | src/pages/account.tsx:150 |
-| `home.components.connection.account.expiresSoon` | Your subscription expires soon. Contact the person who sold you the code to renew. | src/pages/account.tsx:221 |
-| `home.components.connection.account.hubBehind` | Your Chrysalis server is running an older version of its account checks. If someone suspends your access, this device will not find out until the server is updated. Quote this number to them: {{hub}}. | src/pages/account.tsx:388 |
-| `home.components.connection.account.language` | Language | src/pages/account.tsx:444 |
-| `home.components.connection.account.lastChecked` | Last confirmed {{time}} | src/pages/account.tsx:288 |
-| `home.components.connection.account.noExpiryYet` | Your subscription end date is not available yet. It will appear after this device next contacts Chrysalis. | src/pages/account.tsx:206 |
-| `home.components.connection.account.notActivated` | This device is not activated. Enter the code from your card to connect. | src/pages/account.tsx:706 |
-| `home.components.connection.account.notActivatedToCheck` | Activate a code first — there is nothing to confirm yet. | src/pages/account.tsx:273 |
-| `home.components.connection.account.off` | Off | src/pages/account.tsx:484 |
-| `home.components.connection.account.on` | On | src/pages/account.tsx:483 |
+| `home.components.connection.account.expiresSoon` | Your subscription expires soon. Contact the person who sold you the code to renew. | src/pages/account.tsx:227 |
+| `home.components.connection.account.hubBehind` | Your Chrysalis server is running an older version of its account checks. If someone suspends your access, this device will not find out until the server is updated. Quote this number to them: {{hub}}. | src/pages/account.tsx:394 |
+| `home.components.connection.account.language` | Language | src/pages/account.tsx:450 |
+| `home.components.connection.account.lastChecked` | Last confirmed {{time}} | src/pages/account.tsx:294 |
+| `home.components.connection.account.neverExpires` | Never expires | src/pages/account.tsx:202 |
+| `home.components.connection.account.noExpiryYet` | Your subscription end date is not available yet. It will appear after this device next contacts Chrysalis. | src/pages/account.tsx:212 |
+| `home.components.connection.account.notActivated` | This device is not activated. Enter the code from your card to connect. | src/pages/account.tsx:712 |
+| `home.components.connection.account.notActivatedToCheck` | Activate a code first — there is nothing to confirm yet. | src/pages/account.tsx:279 |
+| `home.components.connection.account.off` | Off | src/pages/account.tsx:490 |
+| `home.components.connection.account.on` | On | src/pages/account.tsx:489 |
 | `home.components.connection.account.oneDayLeft` | 1 day | src/pages/account.tsx:155 |
 | `home.components.connection.account.plan` | Plan | src/pages/account.tsx:133 |
-| `home.components.connection.account.platform` | Platform | src/pages/account.tsx:355 |
-| `home.components.connection.account.preferences` | Preferences | src/pages/account.tsx:438 |
+| `home.components.connection.account.platform` | Platform | src/pages/account.tsx:361 |
+| `home.components.connection.account.preferences` | Preferences | src/pages/account.tsx:444 |
 | `home.components.connection.account.probe.intro` | If you have been told you are signed out while this app says otherwise, run this check and quote the code it shows. | src/components/shared/probe-card.tsx:107 |
 | `home.components.connection.account.probe.livenessAbsent` | The server has not heard from this device for over a week. | src/components/shared/probe-card.tsx:52 |
 | `home.components.connection.account.probe.livenessLive` | The server heard from this device recently. | src/components/shared/probe-card.tsx:50 |
@@ -164,17 +165,17 @@ says, edit the rows under that screen's heading.
 | `home.components.connection.account.probe.run` | Run the check | src/components/shared/probe-card.tsx:118 |
 | `home.components.connection.account.probe.running` | Checking… | src/components/shared/probe-card.tsx:117 |
 | `home.components.connection.account.probe.title` | Check this device against the server | src/components/shared/probe-card.tsx:102 |
-| `home.components.connection.account.refresh` | Refresh | src/pages/account.tsx:677 |
-| `home.components.connection.account.refreshBusy` | A status read was already running | src/pages/account.tsx:668 |
-| `home.components.connection.account.refreshed` | Up to date — status re-read | src/pages/account.tsx:666 |
-| `home.components.connection.account.refreshFailed` | Could not re-read the status | src/pages/account.tsx:669 |
-| `home.components.connection.account.storedCodeDamaged` | The sign-in saved on this computer is damaged and could not be used, so Chrysalis is asking you to enter your code again. Your plan and its remaining time are not affected. | src/pages/account.tsx:705 |
+| `home.components.connection.account.refresh` | Refresh | src/pages/account.tsx:683 |
+| `home.components.connection.account.refreshBusy` | A status read was already running | src/pages/account.tsx:674 |
+| `home.components.connection.account.refreshed` | Up to date — status re-read | src/pages/account.tsx:672 |
+| `home.components.connection.account.refreshFailed` | Could not re-read the status | src/pages/account.tsx:675 |
+| `home.components.connection.account.storedCodeDamaged` | The sign-in saved on this computer is damaged and could not be used, so Chrysalis is asking you to enter your code again. Your plan and its remaining time are not affected. | src/pages/account.tsx:711 |
 | `home.components.connection.account.subscription` | Subscription | src/pages/account.tsx:129 |
-| `home.components.connection.account.thisDevice` | This device | src/pages/account.tsx:306 |
+| `home.components.connection.account.thisDevice` | This device | src/pages/account.tsx:312 |
 | `home.components.connection.account.today` | Today | src/pages/account.tsx:153 |
-| `home.components.connection.account.updateBlocked` | Chrysalis cannot update itself right now: {{reason}} | src/pages/account.tsx:581 |
-| `home.components.connection.account.updateCheckOff` | Automatic update checking is off, so Chrysalis is not being told about new versions. Turn it on above to receive fixes. | src/pages/account.tsx:516 |
-| `home.components.connection.account.updateCheckOffAction` | Turn on automatic updates | src/pages/account.tsx:533 |
+| `home.components.connection.account.updateBlocked` | Chrysalis cannot update itself right now: {{reason}} | src/pages/account.tsx:587 |
+| `home.components.connection.account.updateCheckOff` | Automatic update checking is off, so Chrysalis is not being told about new versions. Turn it on above to receive fixes. | src/pages/account.tsx:522 |
+| `home.components.connection.account.updateCheckOffAction` | Turn on automatic updates | src/pages/account.tsx:539 |
 
 ## Traffic graph and figures
 
@@ -211,7 +212,7 @@ says, edit the rows under that screen's heading.
 
 ## Dialogs
 
-*Service migration, system-proxy permission, subscription, update prompt* — 35 strings.
+*Service migration, system-proxy permission, subscription, update prompt* — 37 strings.
 
 | Key | Text | Code |
 |---|---|---|
@@ -226,14 +227,16 @@ says, edit the rows under that screen's heading.
 | `layout.components.serviceMigration.success` | The Chrysalis service was updated successfully | src/components/layout/service-migration-dialog.tsx:133<br>src/components/layout/sysproxy-privilege-dialog.tsx:119 |
 | `layout.components.serviceMigration.title` | Service update required | src/components/layout/service-migration-dialog.tsx:141 |
 | `layout.components.serviceMigration.unavailableMessage` | The Chrysalis service is required and is not available. Install or repair it, then try again. Chrysalis cannot turn the VPN on without it. | src/components/layout/service-migration-dialog.tsx:159 |
-| `layout.components.subscription.daysLeft` | Expires in {{count}} days | src/components/layout/layout-subscription.tsx:96 |
+| `layout.components.subscription.daysLeft` | Expires in {{count}} days | src/components/layout/layout-subscription.tsx:108 |
 | `layout.components.subscription.expired` | Subscription expired | src/components/layout/layout-subscription.tsx:74 |
 | `layout.components.subscription.expiredHint` | Your Chrysalis subscription has ended. Contact the person who sold you the code to renew it, then activate again. | src/components/layout/layout-subscription.tsx:75 |
-| `layout.components.subscription.expiresToday` | Expires today | src/components/layout/layout-subscription.tsx:93 |
-| `layout.components.subscription.hint` | When your Chrysalis subscription ends. | src/components/layout/layout-subscription.tsx:111 |
-| `layout.components.subscription.oneDayLeft` | Expires in 1 day | src/components/layout/layout-subscription.tsx:95 |
-| `layout.components.subscription.unconfirmed` | Subscription status unavailable | src/components/layout/layout-subscription.tsx:84 |
-| `layout.components.subscription.unconfirmedHint` | Chrysalis has not confirmed your subscription with the server yet. Connect once on a working network and this will update. | src/components/layout/layout-subscription.tsx:85 |
+| `layout.components.subscription.expiresToday` | Expires today | src/components/layout/layout-subscription.tsx:105 |
+| `layout.components.subscription.hint` | When your Chrysalis subscription ends. | src/components/layout/layout-subscription.tsx:123 |
+| `layout.components.subscription.neverExpires` | No expiry | src/components/layout/layout-subscription.tsx:86 |
+| `layout.components.subscription.neverExpiresHint` | This code does not expire. | src/components/layout/layout-subscription.tsx:87 |
+| `layout.components.subscription.oneDayLeft` | Expires in 1 day | src/components/layout/layout-subscription.tsx:107 |
+| `layout.components.subscription.unconfirmed` | Subscription status unavailable | src/components/layout/layout-subscription.tsx:96 |
+| `layout.components.subscription.unconfirmedHint` | Chrysalis has not confirmed your subscription with the server yet. Connect once on a working network and this will update. | src/components/layout/layout-subscription.tsx:97 |
 | `layout.components.sysproxyPrivilege.alternative` | If you would rather not install the service, turning system proxy off in Chrysalis also stops this prompt. | src/components/layout/sysproxy-privilege-dialog.tsx:162 |
 | `layout.components.sysproxyPrivilege.applying` | Applying your system proxy change… | src/components/layout/sysproxy-privilege-dialog.tsx:75 |
 | `layout.components.sysproxyPrivilege.installing` | Installing the system service. This may ask for permission. | src/components/layout/sysproxy-privilege-dialog.tsx:73 |
@@ -290,7 +293,7 @@ says, edit the rows under that screen's heading.
 | `settings.sections.proxyControl.messages.installedCheckProxy` | The service is installed and the core is running through it. Check the system proxy switch and make your change again if it did not take. | src/components/layout/sysproxy-privilege-dialog.tsx:121 |
 | `settings.sections.proxyControl.messages.installedCoreNotOnService` | The service is installed, but the core is not running through it. Check the core and try again. | src/components/layout/sysproxy-privilege-dialog.tsx:127 |
 | `settings.sections.proxyControl.messages.installedProxyRestored` | The service is installed, the core is running through it, and your system proxy change has been applied. | src/components/layout/sysproxy-privilege-dialog.tsx:122 |
-| `settings.sections.system.fields.autoLaunch` | Auto Launch | src/pages/account.tsx:598 |
+| `settings.sections.system.fields.autoLaunch` | Auto Launch | src/pages/account.tsx:604 |
 | `settings.sections.system.notifications.tunMode.autoDisabled` | TUN Mode automatically disabled due to service unavailable | src/pages/_layout/utils/notification-handlers.ts:69 |
 | `settings.sections.system.notifications.tunMode.autoDisableFailed` | Failed to disable TUN Mode automatically | src/pages/_layout/utils/notification-handlers.ts:73 |
 | `settings.statuses.clash.restarting` | Restarting Core... | src/hooks/use-service-installer.ts:33 |

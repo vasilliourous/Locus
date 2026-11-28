@@ -562,6 +562,17 @@ export type SubscriptionStatus =
    * Whether this is inside the renewal-warning window.
    * The hub's own string, so the UI can show the exact date on hover
    * without re-deriving it.
+   * The hub confirmed this code has NO expiry.
+   *
+   * An operator cleared the date (or the code was never given one), which the
+   * console labels "Never". This is a different answer from [`Unknown`](Self::Unknown):
+   * "we have no answer" versus "the answer is: it does not expire". Rendering
+   * it as Unknown showed "your end date is not available yet — it will appear
+   * after this device next contacts Chrysalis", which is false forever once the
+   * hub has confirmed there is no date. That was the class of lie R5 removes.
+   */
+  | { state: 'never' }
+  /**
    * The hub refused this device and the entitlement was withdrawn.
    *
    * Its own state, ahead of [`Unknown`](Self::Unknown), because after a

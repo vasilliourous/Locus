@@ -48,7 +48,9 @@
       "oneDayLeft": "Expires in 1 day",
       "daysLeft": "Expires in {{count}} days",
       "unconfirmed": "Subscription status unavailable",
-      "unconfirmedHint": "Chrysalis has not confirmed your subscription with the server yet. Connect once on a working network and this will update."
+      "unconfirmedHint": "Chrysalis has not confirmed your subscription with the server yet. Connect once on a working network and this will update.",
+      "neverExpires": "No expiry",
+      "neverExpiresHint": "This code does not expire."
     }
   },
   "feedback": {

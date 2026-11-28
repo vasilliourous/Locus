@@ -672,7 +672,7 @@ bound, so a support session cannot spend a student's activation budget).
 |---|:--:|---|
 | `probe_version` | ✅ | Schema version. An unrecognised value answers `409` rather than being interpreted — a half-understood probe is worse than a refused one. |
 | `code` | ✅ | The activation code. |
-| `device_id` | ✅ | The client's **already-redacted** 12-char fingerprint (`store::redact`). Compared to `codes.first_seen_fingerprint`; a mismatch is an indistinguishable `404`. |
+| `device_id` | ✅ | The client's **already-redacted** 12-char fingerprint (`store::redact`). Compared to `codes.first_seen_fingerprint` as a prefix: activation stores 16 characters plus a literal `****`, the client sends 12, and the shorter must match the longer (`≥ 12` chars). A mismatch is an indistinguishable `404`. The console may quote the stored value verbatim. |
 | `client` | ❌ | The client's own view, when the operator is at the device. Omitted is normal and is reported as `null`, never defaulted. |
 
 **Response `200`:**
@@ -697,7 +697,25 @@ bound, so a support session cannot spend a student's activation budget).
   "client_view": null,
   "lease_expires_at": "2026-11-25T12:20:12.000Z",
   "reason_code": "client_beating_hub_quiet",
-  "divergence": []
+  "divergence": [],
+  "override": null
+}
+```
+
+**`override`** is the operator's decision when one is in force, and `null`
+otherwise — never an "unknown" placeholder. It reads the same stored predicate
+the heartbeat enforces (`force_state`, `evict_requested_at`, `evict_reason`,
+`override_id`), so a probe run after a console override can answer "did it take?"
+The `divergence` list also gains `operator_override`, which is what makes the
+console show an alert rather than silently returning ordinary data:
+
+```json
+"override": {
+  "force_state": "released",
+  "override_id": "rel-m3k2-8fa1",
+  "evicted": true,
+  "evicted_at": "2026-11-25T10:12:00.000Z",
+  "evicted_reason": null
 }
 ```
 

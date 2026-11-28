@@ -11,8 +11,17 @@ and asserts the things that have actually gone wrong.
 
 ```sh
 pnpm exec vite --config harness.vite.config.mts --port 3100 &   # from client/
-node .harness/verify.mjs
+node .harness/verify.mjs          # the marks
+node .harness/verify-states.mjs   # the stopped page, and "No expiry" vs a countdown
 ```
+
+`verify-states.mjs` mounts two SHIPPED screens: `SuspendedScreen` (the screen the
+real `gateScreen` selects for a suspended device) and `LayoutSubscription` (with
+only its data source replaced — `subscription-fixture.ts`, aliased in
+`harness.vite.config.mts` — because the real hook needs the Tauri IPC). It is the
+client-app half of requirements R3 (a release puts the student on the stopped
+page, showing the hub's own sentence) and R5 (a hub-confirmed absence of a date
+reads "No expiry" and does not count down). Screenshots land in `shots/`.
 
 **Why a browser and not `vitest`.** Every defect in this family is a *layout*
 failure, and none of them is visible in the DOM:

@@ -203,18 +203,43 @@ routerAdd("POST", "/api/session-probe", function (e) {
         // ── The machine check (the real gate) ───────────────────────────────
         //
         // `device_id` is the client's already-redacted 12-char fingerprint
-        // (`store::redact`). `first_seen_fingerprint` is stored the same way.
-        // A caller who cannot present the machine that first redeemed the code
-        // gets the uniform 404 — they have a code, which may be a photograph,
-        // and nothing more.
+        // (`store::redact`). `first_seen_fingerprint` is the value activation
+        // stored, which for existing rows is the first 16 characters PLUS a
+        // literal "****" redaction suffix. A caller who cannot present the
+        // machine that first redeemed the code gets the uniform 404 — they have
+        // a code, which may be a photograph, and nothing more.
+        //
+        // ── WHY THIS IS A PREFIX MATCH, NOT AN EQUALITY ──
+        //
+        // It was an equality, and it could never pass: the client sends 12
+        // characters and the hub stores 20 (16 + "****"), so EVERY probe from a
+        // real device answered the opaque 404. The endpoint's own header claimed
+        // the two were stored "in the same truncated form"; the write in
+        // `activation.pb.js` disproves that. The symptom was exactly the reported
+        // one — an operator had no way to tell a working probe from a broken one,
+        // because both looked like "Code not found".
+        //
+        // So the comparison accepts the shorter as a prefix of the longer, with a
+        // floor of 12 characters (the redaction length the client sends). That
+        // keeps the oracle closed — the attacker still has to know 12 hex
+        // characters of the machine — and it works for both stored shapes.
         //
         // A code with NO `first_seen_fingerprint` (never redeemed through the
         // path that writes it, i.e. pre-migration stock) FAILS this check. That
         // is the safe direction: an operator diagnosing such a code uses the
         // console, which is authenticated by admin token, not this endpoint.
-        var presentedId = String(data.device_id || "").trim();
+        var presentedId = String(data.device_id || "").trim().toLowerCase();
         var firstSeen = String(record.get("first_seen_fingerprint") || "").trim();
-        if (!presentedId || !firstSeen || presentedId !== firstSeen) return opaqueNotFound();
+        var firstSeenLower = firstSeen.toLowerCase();
+        var MIN_FINGERPRINT = 12;
+        var machineMatches = false;
+        if (presentedId.length >= MIN_FINGERPRINT
+                && firstSeenLower.length >= MIN_FINGERPRINT) {
+            machineMatches = presentedId === firstSeenLower
+                || firstSeenLower.indexOf(presentedId) === 0
+                || presentedId.indexOf(firstSeenLower) === 0;
+        }
+        if (!machineMatches) return opaqueNotFound();
 
         // ── The entitlement axis ────────────────────────────────────────────
         var suspended = record.getBool("suspended");
@@ -238,6 +263,24 @@ routerAdd("POST", "/api/session-probe", function (e) {
         else if (!activatedAtRaw || actMs <= 0) entitlement = "never-activated";
         else if (releasedPending) entitlement = "released-unclaimed";
         else entitlement = "active";
+
+        // ── The operator's override: a marker the probe MUST report ─────────
+        //
+        // A release by an operator is a decision, not a derived state: it clears
+        // the claim and (for a live device) asks the heartbeat to cut it off.
+        // Until this existed the probe could not tell an operator-run correction
+        // from an ordinary redemption, so "I overrode that code — did it take?"
+        // had no answer from the one endpoint built to answer questions like it.
+        //
+        // `force_state` and `evict_requested_at` are the STORED predicate — no
+        // new column, because they are already written by the override that
+        // creates the condition and read by the heartbeat. This block only reads
+        // them, preserving the endpoint's write-nothing rule.
+        var forceState = String(record.get("force_state") || "").trim();
+        var evictAt = String(record.get("evict_requested_at") || "").trim();
+        var evictReason = String(record.get("evict_reason") || "").trim();
+        var overrideId = String(record.get("override_id") || "").trim();
+        var hasOverride = forceState !== "" || evictAt !== "";
 
         // ── The liveness axis, from the ONE column the beat writes ──────────
         //
@@ -408,6 +451,13 @@ routerAdd("POST", "/api/session-probe", function (e) {
         if (clientState === "activated" && entitlement !== "active") {
             divergences.push("entitlement_refused");
         }
+        if (hasOverride) {
+            // The operator's own correction, surfaced in the same list as every
+            // other observation. Deliberately NOT a `reason_code`: those name a
+            // DIVERGENCE between the two sides, and an override is a decision
+            // both sides are being made to agree with.
+            divergences.push("operator_override");
+        }
         for (var gi = 0; gi < clientDegradation.length; gi++) {
             // The client's own degradation flags are passed through verbatim so
             // the operator sees the client's words, not this hub's paraphrase.
@@ -422,6 +472,16 @@ routerAdd("POST", "/api/session-probe", function (e) {
             // to choose, which is the point.
             entitlement: entitlement,
             liveness: liveness,
+
+            // The operator's decision, when one is in force. `null` is the
+            // ordinary case and MUST render as "no override", not as "unknown".
+            override: hasOverride ? {
+                force_state: forceState || null,
+                override_id: overrideId || null,
+                evicted: evictAt !== "",
+                evicted_at: evictAt || null,
+                evicted_reason: evictReason || null,
+            } : null,
 
             hub_view: {
                 activated_at: activatedAtRaw ? String(activatedAtRaw) : null,

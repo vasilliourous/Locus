@@ -314,7 +314,7 @@ function req(over) {
   // gate to that chain lets a gate placed after the reads pass — which an earlier
   // version of this assertion did, and the mutation that moved the gate below
   // `record.getBool("suspended")` went GREEN. That is a guard that cannot fail.
-  const gateAt = src.indexOf('presentedId !== firstSeen')
+  const gateAt = src.indexOf('if (!machineMatches) return opaqueNotFound()')
   const firstStateReadAt = Math.min(
     ...['record.getBool("suspended")', 'parsePBDate(record.get("expires_at"))', 'var entitlement'].map((m) => {
       const at = src.indexOf(m)
@@ -456,7 +456,89 @@ function req(over) {
   else bad('the redacted device id is missing from the response')
 }
 
-// ── 8. The reason_code vocabulary is closed ────────────────────────────────
+// ── 8. The machine check accepts the shape the two sides ACTUALLY store ─────
+//
+// This is the bug that made every real probe answer 404. The client sends its
+// 12-char redacted fingerprint; `activation.pb.js` stores 16 characters plus a
+// literal "****". Equality could therefore never hold, and no test noticed
+// because every fixture used the same string on both sides.
+//
+// So both real shapes are driven here: the short client value against a long
+// stored value, and the long stored value (which the console quotes) against
+// itself. A different prefix must still be refused — the prefix rule must not
+// become "any two non-empty strings match".
+{
+  const stored = 'a1b2c3d4e5f699aa****'
+  const longStored = runProbe({ fields: baseFields({ first_seen_fingerprint: stored }) }, req({ device_id: DEVICE }))
+  if (longStored.status === 200) {
+    ok('a 12-char client device id matches the 16+"****" value activation stores')
+  } else {
+    bad(`the client's 12-char device id was refused against a stored "${stored}" (${longStored.status}) — every real probe would answer 404`)
+  }
+
+  const consoleRun = runProbe({ fields: baseFields({ first_seen_fingerprint: stored }) }, req({ device_id: stored }))
+  if (consoleRun.status === 200) {
+    ok('the stored fingerprint the console quotes also passes the machine check')
+  } else {
+    bad(`the stored fingerprint was refused when presented verbatim (${consoleRun.status})`)
+  }
+
+  const nearMiss = runProbe({ fields: baseFields({ first_seen_fingerprint: stored }) }, req({ device_id: 'a1b2c3d4e5f7' }))
+  if (nearMiss.status === 404) {
+    ok('a device id that differs in one character is still the uniform 404')
+  } else {
+    bad(`a near-miss device id answered ${nearMiss.status}, expected 404 — the prefix rule is too loose`)
+  }
+}
+
+// ── 9. An operator's override is REPORTED, not silently absorbed ───────────
+//
+// R3: the override must set a flag the next probe run detects and alerts on.
+// `force_state` / `evict_requested_at` are that flag; this asserts the probe
+// actually reads them, and that the ordinary case stays `null` rather than
+// rendering as some kind of unset override.
+{
+  const plain = runProbe({ fields: baseFields() }, req())
+  if (plain.status === 200 && plain.body.override === null) {
+    ok('a code with no override reports override: null')
+  } else {
+    bad(`a code with no override reported ${plain.status} ${JSON.stringify(plain.body && plain.body.override)}`)
+  }
+  if (plain.status === 200 && !(plain.body.divergence || []).includes('operator_override')) {
+    ok('a code with no override does not raise operator_override')
+  } else {
+    bad('a code with no override raised operator_override')
+  }
+
+  const overridden = runProbe(
+    {
+      fields: baseFields({
+        force_state: 'released',
+        override_id: 'rel-abc',
+        evict_requested_at: iso(MIN),
+        evict_reason: 'chargeback',
+      }),
+    },
+    req(),
+  )
+  if (overridden.status === 200 && overridden.body.override && overridden.body.override.force_state === 'released') {
+    ok('a released-by-override code reports force_state in the probe')
+  } else {
+    bad(`a released-by-override code did not report it: ${JSON.stringify(overridden.body && overridden.body.override)}`)
+  }
+  if (overridden.status === 200 && overridden.body.override && overridden.body.override.evicted === true) {
+    ok('the probe reports that a device is being cut off (evicted: true)')
+  } else {
+    bad('the probe did not report the eviction on an evicted code')
+  }
+  if (overridden.status === 200 && (overridden.body.divergence || []).includes('operator_override')) {
+    ok('an override is raised in the probe divergence list')
+  } else {
+    bad('an override did not appear in the probe divergence list — nothing would alert')
+  }
+}
+
+// ── 10. The reason_code vocabulary is closed ───────────────────────────────
 //
 // `model.ts` and the runbook are keyed on these strings. An undocumented one
 // would render as an unexplained value at a student.
@@ -530,7 +612,7 @@ function req(over) {
   }
 }
 
-// ── 9. The clock-skew verdict is a threshold, not a feeling ────────────────
+// ── 11. The clock-skew verdict is a threshold, not a feeling ───────────────
 {
   const near = runProbe(
     { fields: baseFields() },

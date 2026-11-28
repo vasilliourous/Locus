@@ -25,6 +25,7 @@ export interface TranslationResources {
             hubBehind: string
             language: string
             lastChecked: string
+            neverExpires: string
             noExpiryYet: string
             notActivated: string
             notActivatedToCheck: string
@@ -189,6 +190,8 @@ export interface TranslationResources {
           expiredHint: string
           expiresToday: string
           hint: string
+          neverExpires: string
+          neverExpiresHint: string
           oneDayLeft: string
           unconfirmed: string
           unconfirmedHint: string

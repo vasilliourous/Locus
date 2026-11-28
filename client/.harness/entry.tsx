@@ -17,6 +17,11 @@ import { SvgIcon, ThemeProvider } from '@mui/material'
 import { createRoot } from 'react-dom/client'
 import { createMemoryRouter, RouterProvider } from 'react-router'
 
+import SuspendedScreen from '@/pages/suspended'
+import { LayoutSubscription } from '@/components/layout/layout-subscription'
+import { initializeLanguage } from '@/services/i18n'
+import { gateScreen } from '@/hooks/use-entitlement'
+import type { ChrysalisStatus } from '@/services/chrysalis'
 import glyph from '@/assets/image/glyph.svg?react'
 import LogoSvg from '@/assets/image/logo.svg?react'
 import { LayoutSidebar } from '@/components/layout/layout-sidebar'
@@ -62,6 +67,20 @@ const Frame = ({
   </div>
 )
 
+/**
+ * The status the GATE already read, as the suspension screen receives it.
+ *
+ * Only `subscription` is read by `SuspendedScreen`; the other fields are present
+ * because the prop's type is the whole status, and a cast is honest here — the
+ * harness is supplying the fact the app supplies, not re-deriving it.
+ */
+const refusedStatus = (reason: string): ChrysalisStatus =>
+  ({
+    activated: true,
+    suspended: true,
+    subscription: { state: 'refused', reason },
+  }) as unknown as ChrysalisStatus
+
 const Scenarios = () => {
   const params = new URLSearchParams(location.search)
   const which = params.get('which') ?? 'logo'
@@ -93,6 +112,71 @@ const Scenarios = () => {
               <LogoBlock />
             </div>
             <div style={{ flex: '1 1 100%' }} />
+          </div>
+        </div>
+      </Frame>
+    )
+  }
+
+  // The kick-out screen, rendered from the status shape a release-eviction
+  // produces. This is the screen R3 requires the client to end up on; the gate
+  // that chooses it is `gateScreen` (unit-tested), and this asserts what the
+  // student actually reads once it has.
+  if (which === 'suspended') {
+    const reason =
+      params.get('reason') ??
+      'Account suspended — this code was released by your provider'
+    // THE SHIPPED DECISION, called with the pair a release-eviction produces
+    // (`store::is_suspended` requires a code, so `activated` is true).
+    const gate = gateScreen(true, true)
+    return (
+      <Frame w={520} h={520}>
+        <div data-gate={gate}>
+          {gate === 'suspended' ? (
+            <SuspendedScreen status={refusedStatus(reason)} />
+          ) : (
+            <div data-gate-wrong="1">gate chose {gate}</div>
+          )}
+        </div>
+      </Frame>
+    )
+  }
+
+  // The subscription chip, from a `SubscriptionState` fixture. `state=never` is
+  // the hub confirming there is no expiry; `state=active` is the countdown.
+  if (which === 'subscription') {
+    const state = params.get('state') ?? 'never'
+    const days = Number(params.get('days') ?? 30)
+    window.__SUBSCRIPTION_FIXTURE__ = {
+      activated: true,
+      subscription:
+        state === 'never'
+          ? { state: 'never' }
+          : state === 'lapsed'
+            ? { state: 'lapsed' }
+            : {
+                state: 'active',
+                daysRemaining: days,
+                urgent: days <= 7,
+                expiresAt: '2027-06-30 00:00:00.000Z',
+              },
+    }
+    return (
+      <Frame w={280} h={80}>
+        <div
+          className="layout"
+          style={{ width: 280, height: 80, display: 'flex' }}
+        >
+          <div
+            className="layout-content"
+            style={{ display: 'flex', height: '100%', width: '100%' }}
+          >
+            <div
+              className="layout-content__left"
+              style={{ flex: '0 0 280px', width: 280, paddingTop: 16 }}
+            >
+              <LayoutSubscription />
+            </div>
           </div>
         </div>
       </Frame>
@@ -153,6 +237,13 @@ const Scenarios = () => {
 const router = createMemoryRouter([{ path: '*', element: <Scenarios /> }], {
   initialEntries: ['/'],
 })
+
+// The locale bundles arrive by dynamic import, exactly as they do at app
+// start-up, so `t()` renders sentences rather than keys. Render FIRST and let the
+// bundles land: the provider re-renders on the i18n `initialized` event, and
+// gating the mount on the import made the marks scenarios render later than the
+// 300 ms their guard allows.
+void initializeLanguage('en')
 
 createRoot(document.getElementById('root')!).render(
   <ThemeProvider theme={chrysalisTheme}>

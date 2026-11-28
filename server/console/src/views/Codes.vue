@@ -53,7 +53,6 @@ import Inspector from './codes/Inspector.vue'
 import CreateDrawer from './codes/CreateDrawer.vue'
 import RenewDrawer from './codes/RenewDrawer.vue'
 import StopDrawer from './codes/StopDrawer.vue'
-import ReleaseDrawer from './codes/ReleaseDrawer.vue'
 
 const { rows, facets, loading, failed, denied, total, load } = useCodes()
 
@@ -358,9 +357,6 @@ async function deleteChecked() {
 // ── Drawers ──
 const renewRow = ref<CodeRow | null>(null)
 const stopRow = ref<CodeRow | null>(null)
-// Release has its own drawer: clearing the claim is a larger consequence than
-// cutting one device off, and its confirmation shows what the handler will do.
-const releaseRow = ref<CodeRow | null>(null)
 const createOpen = ref(false)
 
 // ── Row verbs ──
@@ -703,14 +699,12 @@ function livenessTitle(row: CodeRow): string {
       @changed="refreshAll"
       @renew="(r) => (renewRow = r)"
       @stop="(r) => (stopRow = r)"
-      @release="(r) => (releaseRow = r)"
     />
   </div>
 
   <!-- ── Drawers ── -->
   <RenewDrawer :row="renewRow" :middlemen="middlemanOptions" @close="renewRow = null" @done="renewRow = null; refreshAll()" />
   <StopDrawer :row="stopRow" @close="stopRow = null" @done="stopRow = null; refreshAll()" />
-  <ReleaseDrawer :row="releaseRow" @close="releaseRow = null" @done="releaseRow = null; refreshAll()" />
   <CreateDrawer :open="createOpen" :tiers="meta.tiers.value" :middlemen="middlemanOptions" @close="createOpen = false" @created="refreshAll(); meta.refresh()" />
 
   <ConfirmSheet

@@ -110,18 +110,33 @@ check('the open code is in the URL', /\/codes\/RQ-[A-Z0-9-]+$/.test(page.url()),
 const listStillThere = await page.locator('table.data tbody tr').count()
 check('the list stays visible beside the inspector', listStillThere === 15, `${listStillThere} rows still rendered`)
 
-// The facts the brief named: name, plan, middleman, history all reachable at once.
+// The facts the brief named: name, plan, middleman, the actions, and Term/Expiry
+// as PRIMARY editable tiles. History is deliberately a closed fold at the bottom
+// (R6c demotes it), so it is checked separately: present in the DOM, opens on one
+// click, and shows the trail.
 const insText = await page.locator('.inspector').innerText()
 for (const [what, needle] of [
   ['the name (label)', 'Tom'],
   ['the plan', 'strike'],
   ['the middleman', 'Sarah'],
-  ['the history, inline', 'renewed'],
   ['the renewal action', 'Renew'],
   ['the stop action', 'Stop access'],
+  ['the session probe control', 'Run session probe'],
 ]) {
   check(`inspector shows ${what} without another click`, insText.includes(needle))
 }
+
+const editTiles = await page.locator('.ins-fact-edit').count()
+check('Term and Expiry are editable at the top level', editTiles === 2, `${editTiles} editable tiles`)
+check('there is no “Manual overrides” disclosure', (await page.locator('summary', { hasText: 'Manual overrides' }).count()) === 0)
+
+const historyFold = page.locator('details.ins-fold', { hasText: 'History' }).first()
+check('History is demoted to a fold', (await historyFold.count()) === 1)
+await historyFold.locator('summary').click()
+await page.waitForTimeout(150)
+const historyOpen = await historyFold.innerText()
+check('History opens on one click and shows the trail', historyOpen.includes('renewed'), historyOpen.slice(0, 80))
+
 await page.screenshot({ path: `${SHOTS}/04-inspector.png` })
 
 // ── 5. Direct address ──────────────────────────────────────────────────────

@@ -302,8 +302,9 @@ pub async fn record_heartbeat_failure(failures: u32) -> Result<()> {
 ///
 /// Takes an `Option` rather than a `&str` because the hub may legitimately send
 /// `null` for a code with no expiry recorded. The caller decides whether that is
-/// worth writing; see the note in `runtime::handle_success` for why a `None` from
-/// an older hub must not overwrite a date we already hold.
+/// worth writing: `runtime::handle_success` writes `None` only when the hub
+/// explicitly said `null` (its `expires_at` is an `Option<Option<String>>`), and
+/// leaves a known date alone when an older hub omitted the key entirely.
 pub async fn record_expiry(expires_at: Option<String>) -> Result<()> {
     save_verge(|draft| {
         draft.chrysalis_expires_at = expires_at.map(Into::into);

@@ -196,6 +196,12 @@ const AccountPage = () => {
             {subscription.reason}
           </Typography>
         )}
+        {subscription.state === 'never' && (
+          <Row
+            label={t('home.components.connection.account.expires')}
+            value={t('home.components.connection.account.neverExpires')}
+          />
+        )}
         {subscription.state === 'unknown' && (
           <Typography
             variant="caption"

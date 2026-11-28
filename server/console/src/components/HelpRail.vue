@@ -53,7 +53,7 @@ const HELP: Record<RouteName, HelpSection[]> = {
       h: 'The faults, and what each one actually means',
       p: [
         'A plan the hub cannot serve: the code activates “successfully” and hands the device no server config. The student sees a connected app that reaches nothing. Fix the plan, not the code.',
-        'Signed out and not claimed: the key is free and the term is still running. Usually a move in progress; after days it means anyone holding the card can take the code.',
+        'Unclaimed: the key is free and the term is still running. Usually a move in progress; after days it means anyone holding the card can take the code.',
         'In term but quiet: usually a closed laptop. It is also what a hub outage or a blocked school network looks like — check the hub before the students.',
         'In use with no name: the name is the only link between a student and their code. Without it a support call cannot be answered.',
       ],
@@ -65,7 +65,7 @@ const HELP: Record<RouteName, HelpSection[]> = {
       p: [
         'State is about the ENTITLEMENT: may this code be used? The hub decides, and refuses.',
         'Last seen is about LIVENESS: did the device reach us? The client decides, by checking in.',
-        'They are different questions with different owners, and merging them is the defect this table exists to avoid. “Sign-out recorded” next to “checked in 2m ago” is not a contradiction — it is a code that is free while its device is still beating.',
+        'They are different questions with different owners, and merging them is the defect this table exists to avoid. “Unclaimed” next to “checked in 2m ago” is not a contradiction — it is a code that is free while its device is still beating.',
         '“—” in the Last seen column means never checked in. It does not mean gone, and it does not mean signed out.',
       ],
     },
@@ -74,14 +74,14 @@ const HELP: Record<RouteName, HelpSection[]> = {
       p: [
         'Renew delivers a SALE: it adds a span to this code, from whichever is later — today, or the current expiry. Paying early never loses days.',
         'Set term changes the PRODUCT: how long one purchase lasts from now on. It does not move an expiry already running.',
-        'Set expiry is the manual override. It moves the date without you having sold anything, so it records no price and no renewal.',
+        'Set expiry moves the date without you having sold anything, so it records no price and no renewal. Term and Expiry are edited from the two tiles at the top of the panel — there is no separate “overrides” section.',
       ],
     },
     {
-      h: 'Release is not “move to a new computer”',
+      h: '“Mark unused” is not “move to a new computer”',
       p: [
         'A code is not tied to a machine. A student on a new laptop re-enters their own code and it just works.',
-        'Release ends the current holder’s access and frees the code for a DIFFERENT student. It is irreversible, which is why it asks for a reason and records it.',
+        '“Mark unused” ends the current holder’s access and frees the code for a DIFFERENT student. It is one click: the audit row records the decision, and the device is cut off at its next check-in.',
       ],
     },
     {

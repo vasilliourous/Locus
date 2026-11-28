@@ -1233,10 +1233,21 @@ routerAdd("POST", "/api/admin/console", function(e) {
                 // Fall through — the write below is harmless and idempotent.
             }
 
-            var reason = String(body.reason || "Released from console").trim();
+            // ── The reason is OPTIONAL, and empty means "say nothing" ──
+            //
+            // The console's release is now a DIRECT action (no drawer, no reason
+            // field), so it sends none. An empty reason must not become an
+            // invented sentence on the student's screen — the heartbeat falls
+            // back to its frozen generic message. Callers that DO send one
+            // (`codes.unbind` from a script, a support note) keep the behaviour
+            // they had: the sentence is capped and shown verbatim.
+            var reason = String(body.reason || "").trim();
             if (reason.length > 200) {
                 return bad(400, "keep the reason under 200 characters; it is shown to the student");
             }
+            // The audit row has a required `reason` column; an action nobody
+            // explained is still a decision, and the row must say what it can.
+            var auditReason = reason || "Released from console";
             // `codes.unbind` predates the idempotency key and must keep working
             // for existing callers, so a missing id is generated rather than
             // refused. The console always sends one.
@@ -1270,7 +1281,9 @@ routerAdd("POST", "/api/admin/console", function(e) {
                 // deployed clients take the reversible branch). A preview that
                 // misquotes the student-facing text is a desync between what the
                 // operator confirms and what the student sees.
-                consequences.push("It will see: \"Account suspended — this code was released: " + reason + "\".");
+                consequences.push(reason
+                    ? "It will see: \"Account suspended — this code was released: " + reason + "\"."
+                    : "Its app will show: \"Account suspended — this code was released by your provider\".");
                 consequences.push("Its current connection drops; in-flight traffic is interrupted, not drained.");
                 // ── THE WORST CASE, STATED, BECAUSE IT OTHERWISE LOOKS LIKE A FAILURE ──
                 //
@@ -1347,7 +1360,7 @@ routerAdd("POST", "/api/admin/console", function(e) {
                 aspect: "release",
                 from_value: fromValue,
                 to_value: toValue,
-                reason: reason,
+                reason: auditReason,
                 actor: String(body.actor || "console"),
                 observed_state: observed,
                 observed_at_override: String(recU.get("last_seen_at") || ""),
@@ -1359,11 +1372,13 @@ routerAdd("POST", "/api/admin/console", function(e) {
             // activation.pb.js).
             recU.set("activated_at", null);
             setIfPresent(recU, "unbound_at", nowISO());
-            setIfPresent(recU, "unbind_reason", reason);
+            setIfPresent(recU, "unbind_reason", auditReason);
             setIfPresent(recU, "force_state", "released");
             setIfPresent(recU, "override_id", ovId);
             if (willEvict) {
                 setIfPresent(recU, "evict_requested_at", nowISO());
+                // Empty when the operator supplied none: the heartbeat then uses
+                // its frozen generic sentence rather than quoting a placeholder.
                 setIfPresent(recU, "evict_reason", reason);
             }
             // `first_seen_at` is DELIBERATELY left alone. Releasing a code puts
@@ -1374,7 +1389,7 @@ routerAdd("POST", "/api/admin/console", function(e) {
             // it would lose the only record that it had ever been sold.
             $app.dao().saveRecord(recU);
 
-            logEvent(targetU, willEvict ? "released+evicted" : "released", reason, prevAt.substring(0, 16));
+            logEvent(targetU, willEvict ? "released+evicted" : "released", auditReason, prevAt.substring(0, 16));
 
             var reply = ok({
                 code: targetU,
@@ -1457,6 +1472,88 @@ routerAdd("POST", "/api/admin/console", function(e) {
             $app.dao().saveRecord(recR2);
             logEvent(targetR2, "reactivated", reasonR2, "");
             return ok({code: targetR2, evicted_cleared: hadEvict, force_state_cleared: hadForce !== ""});
+        }
+
+        // ─────────────────────────────────────────────────────────────
+        // codes.override — a direct state correction that is not a release
+        //
+        // The console exposes ONE transition besides release/undo: a code whose
+        // holder pressed Sign out (`released_pending` — `released_at` is later
+        // than `activated_at`) can be put back IN TERM. That means the sign-out
+        // is withdrawn and the claim that is already on a machine is the one in
+        // force again.
+        //
+        // ── WHY THIS IS A REAL STATE CHANGE, NOT A FLAG ──
+        //
+        // `activation.pb.js` decides whether a second device may redeem this code
+        // by comparing `released_at` with `activated_at`. Clearing `released_at`
+        // therefore changes what the hub will DO: a second machine is refused
+        // again, and the current holder keeps the claim. Writing a cosmetic
+        // "in term" marker without this would leave the hub handing the code to
+        // the next caller — the exact "records an intention" failure the console
+        // must not have.
+        //
+        // `force_state` is deliberately NOT set. It pins the label when the
+        // derivation would disagree with the operator; here the derivation
+        // already agrees once `released_at` is cleared, and a pin that restates
+        // the derived answer is a second source of truth for it.
+        //
+        // The audit row is HARD-FAIL (writeOverride throws) and runs before the
+        // save, so a correction cannot apply without a justification.
+        // ─────────────────────────────────────────────────────────────
+        if (action === "codes.override") {
+            var targetO = canonical(body.code);
+            if (!targetO) return bad(400, "code is required");
+            var recO = null;
+            try { recO = $app.dao().findFirstRecordByData("codes", "code", targetO); } catch (nfO) { recO = null; }
+            if (!recO) return bad(404, "Code not found");
+
+            var wantO = String(body.to_state || "").trim();
+            if (wantO !== "in_term") {
+                return bad(400, "to_state must be in_term; every other state has its own action");
+            }
+
+            var actO = parsePBDate(recO.get("activated_at"));
+            var relO = parsePBDate(recO.get("released_at"));
+            var pendingO = actO > 0 && relO > 0 && relO > actO;
+            if (!pendingO) {
+                // Truthful no-op, like a repeated release: the code is already in
+                // the state asked for, and that is not a failure.
+                return ok({
+                    code: targetO,
+                    noop: true,
+                    state: "in_term",
+                    note: "This code is already in term — nothing changed."
+                });
+            }
+
+            var ovIdO = String(body.override_id || "").trim();
+            if (!ovIdO) ovIdO = "in-term-" + targetO + "-" + nowISO();
+            var priorO = findOverride(targetO, ovIdO);
+            if (priorO) return ok({code: targetO, replay: true, state: "in_term"});
+
+            writeOverride({
+                code: targetO,
+                override_id: ovIdO,
+                aspect: "in_term",
+                from_value: "sign-out@" + String(recO.get("released_at") || "").substring(0, 19),
+                to_value: "in_term",
+                reason: String(body.reason || "Sign-out cleared from console").trim(),
+                actor: String(body.actor || "console"),
+                observed_state: livenessForConfirmation(recO),
+                observed_at_override: String(recO.get("last_seen_at") || ""),
+                outcome: "applied"
+            });
+
+            // ONE save. `release_count` is the student's own statement about
+            // their sign-outs and is deliberately left alone; clearing the date
+            // withdraws the pending claim, it does not un-record that one happened.
+            setIfPresent(recO, "released_at", null);
+            setIfPresent(recO, "override_id", ovIdO);
+            $app.dao().saveRecord(recO);
+            logEvent(targetO, "override-in-term",
+                     "the student's pending sign-out was cleared — the code is in term again", "");
+            return ok({code: targetO, state: "in_term", cleared_sign_out: true, override_id: ovIdO});
         }
 
         // ─────────────────────────────────────────────────────────────

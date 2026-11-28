@@ -459,6 +459,193 @@ const read = (f) => {
   }
 }
 
+
+// ── 6. The actions BEHAVE: an override moves real state, and a direct release
+//       still evicts ─────────────────────────────────────────────────────────
+//
+// Sections 1–5 read the source's shape. This one lifts the real `codes.override`
+// and `codes.release` branches out of the hook and RUNS them against a stub dao,
+// the same technique as `probe-hook-consistency.js`. Shape cannot tell whether
+// `codes.override` actually changes the field `activation.pb.js` reads.
+//
+// Two properties are asserted, both of which a "record an intention" implementation
+// would pass a source review while failing here:
+//
+//   * `codes.override {to_state:"in_term"}` CLEARS `released_at`, and the real
+//     `codes.list` branch then reports released_pending:false. That is the hub
+//     agreeing with the console, not a label written beside the state.
+//   * A direct `codes.release` with no reason still sets `evict_requested_at`
+//     (so the client is cut off) and leaves `evict_reason` EMPTY (so the student
+//     gets the frozen generic sentence rather than an invented one).
+{
+  const admin = read('admin_console.pb.js')
+
+  function grabFn(name) {
+    const start = admin.indexOf(`function ${name}(`)
+    if (start < 0) throw new Error(`no function ${name} in the hook`)
+    const body = balanced(admin, start)
+    const open = admin.indexOf('{', start)
+    return admin.slice(start, open + body.length)
+  }
+  function grabAction(action) {
+    const start = admin.indexOf(`if (action === "${action}"`)
+    if (start < 0) throw new Error(`no branch for ${action}`)
+    return balanced(admin, start)
+  }
+
+  // eslint-disable-next-line no-eval
+  const parsePBDate = eval(`(${grabFn('parsePBDate')})`)
+
+  class StubRecord {
+    constructor(fields, kind) {
+      this.fields = { ...fields }
+      this.kind = kind || 'codes'
+    }
+    get(k) {
+      return Object.prototype.hasOwnProperty.call(this.fields, k) ? this.fields[k] : null
+    }
+    getString(k) {
+      const v = this.fields[k]
+      return v === null || v === undefined ? '' : String(v)
+    }
+    getBool(k) {
+      return !!this.fields[k]
+    }
+    set(k, v) {
+      this.fields[k] = v
+    }
+    collection() {
+      return { fields: { getByName: () => ({ name: 'stub' }) } }
+    }
+  }
+
+  // `codes.list` needs the SAME record object the action mutated, so the harness
+  // can observe the state the hub would return afterwards.
+  function harness(initialFields) {
+    const row = new StubRecord(initialFields)
+    const audit = []
+    const codeSaves = []
+    const dao = {
+      findFirstRecordByData: (coll, _field, _value) => {
+        if (coll === 'codes') return row
+        throw new Error('not found')
+      },
+      findFirstRecordByFilter: () => {
+        throw new Error('no rows in result set')
+      },
+      findCollectionByNameOrId: (name) => ({ name }),
+      findRecordsByExpr: (name) => (name === 'codes' ? [row] : []),
+      saveRecord: (rec) => {
+        if (rec && rec.kind === 'code_overrides') audit.push(rec.fields)
+        else if (rec && rec.kind === 'code_events') { /* best-effort mirror */ }
+        else codeSaves.push(rec.fields)
+      },
+    }
+    const $app = { dao: () => dao }
+    const $dbx = { exp: () => ({}) }
+    function Record(coll) {
+      return new StubRecord({}, coll && coll.name === 'code_overrides' ? 'code_overrides' : 'code_events')
+    }
+    function run(action, body) {
+      const branch = grabAction(action)
+      let out = null
+      const ok = (data) => {
+        out = { ok: true, ...(data || {}) }
+        return out
+      }
+      const bad = (status, message) => {
+        out = { ok: false, status, message }
+        return out
+      }
+      const nowISO = () => new Date().toISOString()
+      const logEvent = () => {}
+      // eslint-disable-next-line no-new-func
+      const fn = new Function(
+        'body', '$app', '$dbx', 'parsePBDate', 'ok', 'bad', 'Record',
+        'grabFn', 'grabAction',
+        `${grabFn('canonical')}\n${grabFn('setIfPresent')}\n${grabFn('livenessForConfirmation')}\n${grabFn('writeOverride')}\n${grabFn('findOverride')}\n${grabFn('nowISO')}\n${grabFn('logEvent')}\n${branch}`,
+      )
+      fn(body, $app, $dbx, parsePBDate, ok, bad, Record, grabFn, grabAction)
+      return out
+    }
+    return { row, audit, codeSaves, run }
+  }
+
+  const NOW = Date.now()
+  const iso = (ms) => new Date(ms).toISOString()
+  const base = {
+    code: 'RQ-ABCD-EFGH-JKMN-T',
+    tier: 'strike',
+    activated_at: iso(NOW - 5 * 86400000),
+    released_at: iso(NOW - 60000),
+    release_count: 1,
+    expires_at: iso(NOW + 20 * 86400000),
+    last_seen_at: iso(NOW - 60000),
+    suspended: false,
+    first_seen_at: iso(NOW - 5 * 86400000),
+  }
+
+  // A. sign-out recorded → in term clears the field activation.pb.js compares.
+  {
+    const h = harness(base)
+    const out = h.run('codes.override', { code: base.code, to_state: 'in_term' })
+    if (out && out.ok && h.row.get('released_at') === null) {
+      ok('codes.override in_term clears released_at — the state activation reads')
+    } else {
+      bad(`codes.override in_term did not clear released_at (out=${JSON.stringify(out)}, released_at=${JSON.stringify(h.row.get('released_at'))})`)
+    }
+    if (h.codeSaves.length === 1) ok('codes.override in_term is a single record save')
+    else bad(`codes.override in_term performed ${h.codeSaves.length} saves; expected 1`)
+    if (h.audit.length === 1 && h.audit[0].aspect === 'in_term') {
+      ok('codes.override in_term writes one code_overrides audit row')
+    } else {
+      bad(`codes.override in_term wrote ${h.audit.length} audit row(s); expected 1 with aspect in_term`)
+    }
+
+    const listed = h.run('codes.list', { query: base.code })
+    const row = listed && listed.codes && listed.codes[0]
+    if (row && row.released_pending === false && row.status === 'redeemed') {
+      ok('after the override the hub lists the code as in term (released_pending:false)')
+    } else {
+      bad(`after the override the hub still lists ${JSON.stringify(row && { status: row.status, released_pending: row.released_pending })}`)
+    }
+  }
+
+  // B. A code with no pending sign-out is a truthful no-op, not a write.
+  {
+    const h = harness({ ...base, released_at: null })
+    const out = h.run('codes.override', { code: base.code, to_state: 'in_term' })
+    if (out && out.ok && out.noop === true && h.codeSaves.length === 0 && h.audit.length === 0) {
+      ok('codes.override on an in-term code is a no-op with no write and no audit row')
+    } else {
+      bad('codes.override on an in-term code was not a truthful no-op')
+    }
+  }
+
+  // C. The release stays a DIRECT action that evicts, and invents no sentence.
+  {
+    const h = harness(base)
+    const out = h.run('codes.release', { code: base.code })
+    if (h.row.get('evict_requested_at')) {
+      ok('a direct codes.release still sets evict_requested_at (the client is cut off)')
+    } else {
+      bad('a direct codes.release did not set evict_requested_at — the client would keep working')
+    }
+    if (h.row.get('force_state') === 'released') {
+      ok('a direct codes.release sets force_state=released (the probe-readable flag)')
+    } else {
+      bad(`a direct codes.release did not set force_state (got ${JSON.stringify(h.row.get('force_state'))})`)
+    }
+    if (h.row.get('evict_reason') === '') {
+      ok('a reasonless release leaves evict_reason empty, so the student gets the frozen generic sentence')
+    } else {
+      bad(`a reasonless release invented evict_reason ${JSON.stringify(h.row.get('evict_reason'))}`)
+    }
+    if (out && out.ok && h.codeSaves.length === 1) ok('a direct codes.release is a single record save')
+    else bad(`a direct codes.release performed ${h.codeSaves.length} saves; expected 1`)
+  }
+}
+
 console.log()
 if (failed) {
   console.log(`override-consistency FAILED — ${failed} assertion(s)`)

@@ -122,7 +122,7 @@ watch(
 
       <button class="search-trigger" type="button" @click="palette?.openPalette(); navOpen = false">
         <span aria-hidden="true">⌕</span>
-        <span>Find a code or name…</span>
+        <span>Find code or name</span>
         <span class="kbd">/</span>
       </button>
 

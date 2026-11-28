@@ -108,6 +108,22 @@ where
     })
 }
 
+/// Deserialises `expires_at` so that an explicit `null` is distinguishable from
+/// an ABSENT key.
+///
+/// Serde's `Option<Option<T>>` does not do this on its own: the outer `Option`
+/// consumes `null` and yields `None`, exactly as it does for a missing key. That
+/// was measured, not assumed — the three-shape test below failed before this
+/// helper existed. With `#[serde(default)]` the missing key never reaches here,
+/// so any invocation means the key was present, and `null` is therefore an
+/// ANSWER.
+fn explicit_null_expiry<'de, D>(deserializer: D) -> Result<Option<Option<String>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    Ok(Some(Option::<String>::deserialize(deserializer)?))
+}
+
 /// The subset of the heartbeat response the client acts on.
 #[derive(Debug, Clone, Deserialize)]
 pub struct HeartbeatResponse {
@@ -147,17 +163,27 @@ pub struct HeartbeatResponse {
 
     /// When this code lapses, exactly as the hub stores it.
     ///
-    /// **Optional, and absence is meaningful.** A hub that predates the field
-    /// sends nothing, and a code with no expiry recorded sends `null`; both
-    /// deserialise to `None`. The UI must render nothing in that case rather
-    /// than guessing "expired" — a fabricated expiry date is worse than a
-    /// missing one, because it is a false claim about the student's account that
-    /// support then has to argue with.
+    /// **Three shapes, and the difference between the first two is load-bearing:**
+    ///
+    ///   * the key is ABSENT  → `None`            → a hub that predates the field.
+    ///     Leave whatever date the client already holds alone; we were told
+    ///     nothing, and clearing a real date because an old hub stayed silent
+    ///     would lose information the client legitimately has.
+    ///   * the key is `null`  → `Some(None)`      → the hub says this code has NO
+    ///     expiry. That is an answer, not a gap: the operator cleared it, or the
+    ///     code was never given one. It must CLEAR the stored date, or the client
+    ///     keeps counting down to an expiry the hub has withdrawn — the exact
+    ///     "empty expiry means never, but the app still counts down" report.
+    ///   * the key is a date  → `Some(Some(date))` → store it.
+    ///
+    /// This used to be `Option<String>`, which collapsed the first two into
+    /// `None`. That is why a cleared expiry never reached the client: the only
+    /// writer was gated on `is_some()`.
     ///
     /// Not reformatted here either: it is parsed with [`crate::chrysalis::expiry::parse`]
     /// at the point of display, so there is one parser and one dialect.
-    #[serde(default)]
-    pub expires_at: Option<String>,
+    #[serde(default, deserialize_with = "explicit_null_expiry")]
+    pub expires_at: Option<Option<String>>,
 
     /// The free tier's monthly allowance, in **mebibytes**, sent by the hub.
     ///
@@ -669,8 +695,11 @@ fn classify_tunnel_response(parsed: HeartbeatResponse) -> BeatOutcome {
 /// code-authenticated device means the code itself — an unknown code answers
 /// 404, so a 401 here is treated as a refusal and the device is torn down.
 /// There is no token to renew any more: tokens went with device recognition.
+// `pub(crate)` only so the eviction contract test in `runtime` can drive the
+// REAL classifier with the REAL bytes the hook emits. A test that re-implemented
+// this would be free to agree with the hub about the wrong thing.
 #[must_use]
-fn classify_response(code: u16, text: &str) -> BeatOutcome {
+pub(crate) fn classify_response(code: u16, text: &str) -> BeatOutcome {
     let message = || {
         serde_json::from_str::<serde_json::Value>(text)
             .ok()
@@ -1072,6 +1101,36 @@ mod tests {
     }
 
     const PLATFORM: &str = "linux";
+
+    /// The three shapes of `expires_at`, kept distinct.
+    ///
+    /// This is R5's wire half. `Option<String>` collapsed "the hub omitted the
+    /// field" and "the hub said null", so a cleared expiry could never reach the
+    /// client and it kept counting down to a date the hub had withdrawn. The
+    /// outer `Option` is what separates "we were told nothing" from "we were told
+    /// there is nothing" — and the difference is the difference between keeping a
+    /// real date and clearing a withdrawn one.
+    #[test]
+    fn a_null_expiry_is_distinct_from_an_absent_key() {
+        let null: HeartbeatResponse =
+            serde_json::from_str(r#"{"status":"ok","expires_at":null}"#).expect("null must parse");
+        assert_eq!(
+            null.expires_at,
+            Some(None),
+            "an explicit null means 'no expiry' and must be actionable"
+        );
+
+        let missing: HeartbeatResponse = serde_json::from_str(r#"{"status":"ok"}"#).expect("a missing key must parse");
+        assert_eq!(
+            missing.expires_at, None,
+            "a missing key means an older hub said nothing; it must not clear a date"
+        );
+
+        let dated: HeartbeatResponse =
+            serde_json::from_str(r#"{"status":"ok","expires_at":"2030-01-01 00:00:00.000Z"}"#)
+                .expect("a date must parse");
+        assert_eq!(dated.expires_at, Some(Some("2030-01-01 00:00:00.000Z".to_owned())));
+    }
 
     /// The per-platform field must win over the legacy one.
     #[test]
