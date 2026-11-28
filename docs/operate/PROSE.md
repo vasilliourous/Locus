@@ -4,8 +4,15 @@
 audience:    whoever edits the app's wording
 status:      live
 authoritative-for: the procedure for applying a prose change, and what it does not reach
-verified-against: client/scripts/prose-manifest.mjs, client/scripts/apply-prose.mjs, .github/workflows/client.yml
+verified-against: client/scripts/prose-manifest.mjs, client/scripts/apply-prose.mjs, client/scripts/prose-locate.mjs, server/scripts/release-gate.sh, .github/workflows/client.yml
 ```
+
+> **Refreshed, not rewritten.** The last full revision of this document was
+> before the Locus→Chrysalis rename and before the manifest grew the
+> "Deliberately not in the manifest" and "Not English-only" sections. Every
+> count and path below was re-derived from the tree and checked against
+> `prose-manifest.mjs --check`; where a number disagreed with the tree the tree
+> won. §8 says which claims are still read rather than run.
 
 > **The one-line version.** Edit the Text column of `client/PROSE.md`, run
 > `pnpm prose:apply`, regenerate with `pnpm prose`, run the gates, commit. Then
@@ -21,7 +28,14 @@ This document is the procedure. What each string *is* belongs in
 ## 1. What you are editing
 
 `client/PROSE.md` is **generated from the tree**, not maintained by hand. It holds
-every user-facing string in the app — 333 of them — each with three facts:
+every user-facing string in the app — **330** of them — each with three facts:
+
+That 330 is not "every key in `en.json`". It is the keys a student can reach:
+262 frontend leaves and 70 backend (`en.yml`) leaves, minus the strings listed
+under **Deliberately not in the manifest**. The generator prints the exact split
+and its own count on every run (`PROSE.md written: N strings, M out of scope`),
+which is why the count is not repeated anywhere as a hard-coded literal — see
+[`docs/state.toml`](../state.toml).
 
 | Column | What it is | Why you need it |
 |---|---|---|
@@ -30,7 +44,8 @@ every user-facing string in the app — 333 of them — each with three facts:
 | **Code** | `src/pages/connection.tsx:154` | where the string is *consumed*. Not where it is stored. |
 
 The third column is the one people misread. A string's storage is always
-`src/locales/en/home.json` (or one of the four sibling bundles), but its
+`src/locales/en/home.json` (one of five bundles: `home`, `layout`, `profiles`,
+`settings`, `shared`), but its
 **consumer** can be far away — the service-blocker sentences are rendered from
 `pages/connect-notice.ts`, and the sign-out outcome strings from
 `components/shared/sign-out-card.tsx`. That column is how you find the screen when
@@ -41,16 +56,28 @@ it means the scan could not find the call site, and the two ways that happens
 have both already happened in this repo — i18next's selector form
 `i18n.t(($) => $.a.b.c)`, where the key is a bare property path and not a quoted
 string, and a Rust file list resolved against the wrong root. Both are now
-guarded by `tests/prose-locate.test.ts`, which fails when any row's Code cell is
-empty.
+`prose-locate.mjs` (note: `client/scripts/`, not `client/scripts/lib/` — it was
+moved out of the manifest so the test could import it without running the
+generator). It fails when any row's Code cell is empty.
 
 ### The headings are the screen map
 
-Strings are grouped in the order a student meets them: Activation gate, Suspension
-screen, Connection, Support block, Sign-out, Account, Traffic, Sidebar, Dialogs,
-Toasts and notifications, Network readouts, Error screen, and Native strings (the
-tray, OS notifications and the macOS launch guard — those live in Rust and a YAML
-file, not in the client bundles).
+Strings are grouped in the order a student meets them, and there are twelve
+screen headings: Activation gate, Suspension screen, Connection tab, Support
+block, Sign-out card, Account tab, Traffic graph and figures, Sidebar and
+navigation, Dialogs, Toasts and notifications, Error screen, and **Native
+strings** (the tray, OS notifications and the macOS launch guard — those live in
+Rust and a YAML file, not in the client bundles).
+
+Two more sections are not screens and are the ones people miss:
+
+| Section | What it is |
+|---|---|
+| **Deliberately not in the manifest** | Bundle keys a student cannot reach — `profiles.*` (the removed profiles UI), the unrendered `components/base/` control set (`shared.actions`, `shared.placeholders`, `shared.validation`, `shared.editorModes`, `shared.statuses`), and `shared.labels.retryAttempts`. Each carries the reason it is still shipped. A copy pass should read this *first*, so it does not "fix" a string no screen renders. Read the table as it is generated: an entry disappears when its last key does, so it is not a fixed list. |
+| **Not English-only: what a rewrite does and does not reach** | The per-locale reality. The long form of §5 below; the generated copy sits next to the strings so a copy editor who never opens this document still meets it. |
+
+"Network readouts" is no longer a heading of its own — those strings now sit
+under **Error screen** and **Traffic graph and figures**.
 
 If you want to change what a *screen* says, work down one heading. If you want to
 change one *concept* — a word used in six places — use the Key column: a stable
@@ -173,19 +200,26 @@ write path, so a half-applied copy pass is not a state you can reach.
 | Tests | `pnpm test` | the palette guards **and `tests/prose-locate.test.ts`**; a copy change should never touch the palette guards |
 | Lint | `pnpm lint` | unused imports left behind when a label moved |
 | Manifest | `pnpm prose:check` | `PROSE.md` disagreeing with the tree |
+| Parity | `pnpm i18n:parity` | a finished surface still reading as English in a non-English bundle. `pnpm test` runs the same file; this alias runs **only** that file, which is what the release gate uses. |
 | Cross-repo | `bash server/scripts/check-consistency.sh` | **§41**: the support address must exist exactly once. See the trap below. |
 
-`prose:check` is also wired into the `verify` job of
-`.github/workflows/client.yml`, so a stale manifest fails CI rather than being
-noticed by whoever next opens the file. It is a string comparison — it cannot be
-satisfied by anything but the real generated output.
+`prose:check` and `i18n:parity` are both wired into the `verify` job of
+`.github/workflows/client.yml` (steps *"User-facing prose manifest is current"*
+and *"Locale keys are in parity with English"*), so a stale manifest fails CI
+rather than being noticed by whoever next opens the file. `prose:check` is a
+string comparison — it cannot be satisfied by anything but the real generated
+output.
+
+`pnpm lint` runs `eslint … src` only, so it will not lint a stray edit under
+`scripts/` or `tests/`. If you changed the generator or the applier rather than a
+string, the type check and the tests are your gates; lint is silent about it.
 
 **What `prose:check` cannot see, and the test that covers it.** `--check` compares
 the generated text against the committed file. If the generated Code column was
 *wrong when it was generated*, comparing it to itself is clean — a stale manifest
 and a differently-stale manifest agree. That is how four live strings and all 68
 native rows sat behind a `—` with every gate green. `tests/prose-locate.test.ts`
-runs inside `pnpm test`, calls the same `scripts/lib/prose-locate.mjs` the
+runs inside `pnpm test`, calls the same `scripts/prose-locate.mjs` the
 generator does, and fails on any row whose consumption site does not resolve.
 
 ### The `i18n:format` trap
@@ -202,6 +236,17 @@ adding a *new* key or removing a dead one. If you run it:
 
 Neither of those is a defect in this procedure; they are properties of that tool,
 and the procedure is to know them.
+
+### A dead entry in `NOT_USER_FACING`
+
+`NOT_USER_FACING` in `prose-manifest.mjs` is a list of prefixes, and the generated
+table is built by iterating **only the prefixes that matched a live key**. So an
+entry whose keys are all gone silently disappears from `PROSE.md` — which is the
+right behaviour, but it also means the list can carry a prefix that matches
+nothing. `monaco.*` is one: the editor chrome left the bundles, and the entry
+remains as a reason attached to zero keys. It is harmless today and it is the
+thing to check when a key you expected to be listed is not: if no generated row
+names its prefix, no key in `en.json` starts with it.
 
 ### Adding or removing a string
 
@@ -221,13 +266,23 @@ This is the section that decides whether a job is finished.
 
 `src/locales/en/` is canonical, but the app ships in **13 languages**, and each of
 the other 12 owns the same key set. `prose:apply` writes English only. A row you
-rewrite therefore has three possible outcomes per locale:
+rewrite therefore has **four** possible outcomes per locale, and only the third
+is a finished job:
 
 | That locale's value | What a student sees after you apply | Finished? |
 |---|---|---|
 | a real translation | the **old** meaning, in their language | **no** |
 | a copy of the old English | the **old** English | **no** |
 | the key is absent | the new English, by fallback | yes |
+| a value the app cannot read | nothing — the build fails | **no** |
+
+The fourth row is the one that is not merely stale. A **native** string
+(`Native strings`, `en.yml`) is read by rust_i18n at **compile time**, and a
+lint-free YAML file can still fail it: a malformed `clash-verge-i18n/locales/
+*.yml` stops `cargo build` with `proc macro panicked: Parse file … failed`, on
+whichever platform builds it. `prose:apply` writes English only, so a rewrite
+leaves the other twelve bundles untouched and valid — but if you hand-edit one,
+run `cargo build -p clash-verge-i18n` before you believe it.
 
 So a rewrite of a string that someone translated is **not live for that student**
 until the translated value is updated. That is not a bug to fix by copying English
@@ -238,6 +293,16 @@ language.
 `pnpm i18n:check` reports the drift as `missing` per locale. A value *identical*
 to English in a locale that normally translates cannot be distinguished from a
 fallback copy by any tool, so the count is a floor, not a total.
+
+`i18n:check` is also a **parity** check, not a translation-quality check: it reads
+each locale against the English baseline and reports `unused` / `missing` /
+`extra` / `missingSource`. A locale that still holds the old English under a key
+that exists in both is *clean* to it — which is exactly the case §5's first two
+rows describe, and exactly why `tests/locale-parity.test.ts` (not this script) is
+the guard for a finished surface. On the tree this document was refreshed against,
+every locale reports `unused=0, missing=0, extra=0` for both `src/locales` (262
+keys) and the backend `en.yml` (70 keys); that is a clean state, not a permanent
+one.
 
 **Count-sensitive strings need the plural forms re-checked in every language.**
 `{{count}} days` has one plural form in Japanese and three in Russian. i18next
@@ -268,12 +333,14 @@ version bump:
    that changes a bundle without the manifest fails `prose:check` in CI, and one
    that changes the manifest without the bundle is a document describing text the
    app does not show.
-2. **Push to `main`.** `client/**` is in the workflow's `paths` filter, so the run
-   starts; `verify` runs the four gates and `check-consistency.sh`. A prose-only
-   push also refreshes the **preview installers**, because `preview` runs for every
-   push to `main` — so a copy change can be installed and read on a real screen
-   without cutting a release. **Read the words on that screen.** No gate in this
-   repository can tell you whether a sentence is clear.
+2. **Push to `main`.** `client/**` is in the workflow's `paths` filter (alongside
+   `server/**`, `scripts/**`, `docs/**` and the root docs), so the run starts;
+   `verify` runs the gates in §4 — including `prose:check` and `i18n:parity` —
+   plus `check-consistency.sh`. A prose-only push also refreshes the **preview
+   installers**, because `preview` is `if: github.event_name == 'push' && github.ref == 'refs/heads/main'`
+   — so a copy change can be installed and read on a real screen without cutting a
+   release. **Read the words on that screen.** No gate in this repository can tell
+   you whether a sentence is clear.
 3. **Releasing** is a separate, deliberate act (`docs/operate/RELEASING.md`). The
    version is not bumped by CI, so a tag that disagrees with the version files
    builds a binary that misreports itself. If the copy change should reach
@@ -308,10 +375,24 @@ before/after output before you trust it.**
 
 ## 8. Not verified
 
-- The gate list in §4 was run by hand on this tree, not observed in CI. The
-  commands themselves ran green locally; whether `verify` runs them in the same
-  order on a runner is read from `client.yml`, not watched.
-- The claim that `preview` publishes on a prose-only push is read from
-  `client.yml`'s `paths` filter and `preview`'s `if:`. It was not watched running.
+**Verified in this refresh** (run against the tree, output read):
+
+- `node scripts/prose-manifest.mjs --check` → `PROSE.md is up to date`.
+- `node scripts/prose-manifest.mjs` → `330 strings, 25 out of scope, 0 unattributed`.
+- `node scripts/cleanup-unused-i18n.mjs` → `unused=0, missing=0, extra=0` for all
+  13 locales, both `src/locales` (262 keys) and the backend `en.yml` (70 keys).
+- The row counts per heading, the five `en` bundles, the 13 locales, the 12
+  siblings, the 68 native rows and the 25 out-of-scope keys — all counted from
+  the tree, not copied.
+
+**Read, not run:**
+
+- The gate list in §4 is read from `client.yml`'s step names and
+  `release-gate.sh`. That both are green on a runner was not watched.
+- The `preview` claim in §6 is read from `client.yml`'s `paths` filter and the
+  job's `if:`. It was not watched running.
+- `cargo build -p clash-verge-i18n` failing on malformed YAML (§5) is the
+  generator's stated behaviour and the manifest's own text, not reproduced here.
 - The per-locale coverage in §5 is a count from `i18n:check`, not a review of any
-  translation.
+  translation. Nothing in this repository can tell you whether a sentence is
+  clear, and no paragraph below changes that.

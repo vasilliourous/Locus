@@ -99,7 +99,12 @@ a { color: var(--accent); }
   box-shadow: inset 3px 0 0 var(--accent);
 }
 
-.main { flex: 1; padding: 22px 26px 60px; max-width: 1240px; }
+/* REMOVED: an earlier `.main` rule here set `padding: 22px 26px 60px;
+   max-width: 1240px`. It silently overrode the canonical `.main` further down
+   (same specificity, later definition wins), so every `max-width` decision below
+   was a no-op and the console was capped at 1240px — which is what left the Codes
+   table 800px wide inside a 1680px viewport and forced a horizontal scrollbar that
+   had nothing to do with the table. `.main` is defined ONCE now, below. */
 
 .page-title { margin: 0 0 4px; font-size: 20px; }
 .page-sub { margin: 0 0 20px; color: var(--muted); font-size: 13px; }
@@ -254,10 +259,28 @@ tr.dim { opacity: .55; }
 }
 .dropzone:hover, .dropzone.drag { border-color: var(--accent); color: var(--text); }
 
+/* Toasts sit above the page but BELOW the drawer, and never over its footer
+   action. Measured defect: a toast from a previous action landed exactly on the
+   renew drawer's "Renew" button (y=849 in a 900px viewport), so the click that
+   should have committed the renewal dismissed the toast instead — the operator
+   sees the drawer stay open and believes the button is broken.
+   Fixed two ways: the stack is lifted clear of the footer, and it is
+   pointer-transparent except for the toasts themselves. */
 .toast {
-  position: fixed; right: 18px; bottom: 18px; z-index: 100;
-  max-width: 420px; box-shadow: 0 6px 24px rgba(0,0,0,.4);
+  position: fixed;
+  right: 18px;
+  bottom: 18px;
+  z-index: 40; /* below .drawer (45) and .confirm-sheet (70) */
+  max-width: 420px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  pointer-events: none;
+  /* Keep clear of a drawer's footer action, which is 60px tall at the bottom of
+     the right-hand 520px. When a drawer is open the toast moves up and LEFT of
+     it — see the rule below. */
 }
+.toast > * { pointer-events: auto; }
 
 /* ── Releases page ── */
 /* A plain data table for artifact/sha summaries. .grid was used by the
@@ -344,7 +367,9 @@ tr.dim { opacity: .55; }
   flex: 1;
   min-width: 0; /* a wide table must scroll, not stretch the page */
   padding: var(--s5) var(--s6) 80px;
-  max-width: 1180px;
+  /* No max-width. A 1180px cap on an operator table means a wide monitor gets
+     letterboxed: the page stops growing while the table keeps needing room, so
+     columns get truncated to protect empty margin. The table sizes itself. */
 }
 
 /* ── Navigation ─────────────────────────────────────────────────────────── */
@@ -515,7 +540,13 @@ tr.dim { opacity: .55; }
   border-radius: var(--radius);
   overflow: hidden; /* clip the header's rounded corners */
 }
-.table-scroll { max-height: calc(100vh - 300px); overflow: auto; }
+/* The scroll container fills the space the page leaves, instead of guessing it.
+   The old rule was `max-height: calc(100vh - 300px)` — a hard-coded subtraction
+   for the chrome above the table, which gave ~400px on a laptop (ten rows) and
+   almost nothing on a short window, in a table with no pagination. `min-height: 0`
+   is what lets a flex child actually shrink; without it the table pushes the page
+   taller instead of scrolling. */
+.table-scroll { overflow: auto; min-height: 0; max-height: calc(100vh - 260px); }
 
 table.data { font-size: 13px; }
 table.data thead th {
@@ -550,7 +581,49 @@ table.data tbody tr.dim td { opacity: .6; }
 /* Numbers align on the decimal, which is what makes a column scannable. */
 .num { font-variant-numeric: tabular-nums; text-align: right; }
 .nowrap { white-space: nowrap; }
-.truncate { max-width: 1px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Truncation for a LONG free-text cell (a name, a middleman, a detail string).
+   `max-width: 1px` is the standard trick for letting a table cell shrink below
+   its content while the COLUMN still takes its share — but it only works when the
+   table is `table-layout: fixed` or the cell is inside a sized flex/grid track. In
+   the Codes table it did the opposite of what was wanted: a 6-character State
+   badge measured 135px because the unconstrained cells pushed width into it. So
+   the table is fixed-layout with explicit column widths (below), and this class is
+   used only where a cell is genuinely free text. */
+.truncate { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* The Codes table sizes to its container, never to its content.
+   Two problems this solves, both measured in a real browser:
+     1. The intrinsic width of eight populated columns was 919px inside a 756px
+        track, so the table scrolled sideways at a 1440px viewport.
+     2. A 6-character State badge was 135px wide, because the cells with
+        `max-width: 1px` were handing their space to it.
+   `width: 100%` plus `table-layout: fixed` makes the COLUMNS share the available
+   width; free-text cells then truncate with an ellipsis, which is what a table
+   should do with a long name. Column hiding (the Column chooser) still works
+   because hidden columns are not rendered at all. */
+/* The Codes table sizes to its container, never to its content.
+   Measured in Chromium, three separate causes, all fixed here:
+     1. The table's intrinsic width was 919px inside a 756px track → a sideways
+        scrollbar at a 1440px viewport.
+     2. A 6-character State badge measured 135px, because cells with
+        `max-width: 1px` were handing their width to it.
+     3. `table-layout: fixed` + per-column px widths does NOT shrink to fit: CSS
+        takes specified widths literally (they summed to 856px and the table stayed
+        856px in a 754px box). Column widths must therefore be declared as
+        PERCENTAGES, which fixed layout distributes against the container.
+   So: fixed layout, percentage widths from the component, and free-text cells
+   truncate. `min-width: 0` on the wrapper is what lets the grid track shrink. */
+table.codes-table { table-layout: fixed; width: 100%; }
+table.codes-table td { overflow: hidden; }
+table.codes-table th { overflow: hidden; white-space: nowrap; }
+/* The code must never clip: it is a fixed 19-char value and the row's identity. */
+table.codes-table td.sticky-code,
+table.codes-table th.sticky-code { overflow: visible; }
+/* The verbs column is sized to fit its two buttons; if they ever stop fitting, an
+   ellipsis is a better failure than a sideways scroll. */
+table.codes-table td:last-child { overflow: hidden; }
+table.codes-table .row-verbs { justify-content: flex-end; flex-wrap: nowrap; }
+.table-scroll { min-width: 0; }
 
 /* The one mutating action a row offers, at a fixed size so the column reads as
    a column. Everything else lives behind the row menu — the old table had up to
@@ -1000,3 +1073,735 @@ table.data tbody tr.dim td { opacity: .6; }
    every button in a wrap-anywhere `.actions` row, so a 6-button detail panel
    reflowed on every resize. */
 .so-head .row-menu { flex: 0 0 auto; }
+
+/* ════════════════════════════════════════════════════════════════════════════
+   THE OBJECT LAYOUT — table beside the inspector, and the surfaces that came
+   with it: the board, the grouped sidebar, the mobile shell.
+
+   The rule these all follow: the list and the thing you selected are
+   SIMULTANEOUSLY visible. Every earlier version of this console showed one or
+   the other, so "which code is this, and what else do I know about it" always
+   cost a round trip.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/* ── Codes: the split ───────────────────────────────────────────────────── */
+
+.codes-layout {
+  display: grid;
+  /* `auto` for the rail, `minmax(0,1fr)` for the table: the TABLE gets to size
+     itself and the rail takes what is left, rather than the rail taking a fixed
+     380px and starving the table. Measured cause: the table's intrinsic minimum is
+     ~919px (eight columns of real data), so a fixed rail left it 756px and forced
+     a horizontal scrollbar at a 1440px viewport — the one thing a table must never
+     do. At 1280px+ there is room for both; below that the rail becomes an overlay
+     (see the 1100px media query). */
+  grid-template-columns: minmax(0, 1fr) clamp(300px, 26%, 360px);
+  gap: var(--s4);
+  align-items: start;
+}
+
+.codes-main { min-width: 0; }
+
+/* The inspector: sticky, full-height, scrolls on its own. Sticky rather than
+   fixed because it must live inside the page's grid — but pinned so selecting a
+   row 200 down a long table does not scroll the panel out of view.
+
+   `top: var(--s4)` and a viewport-relative max-height keep it entirely on
+   screen. Its own scroller is what makes a long history readable without
+   growing the page. */
+.inspector {
+  position: sticky;
+  top: var(--s4);
+  max-height: calc(100vh - var(--s6));
+  display: flex;
+  flex-direction: column;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+.inspector-idle { border-style: dashed; }
+
+.ins-empty { padding: var(--s5) var(--s4); }
+.ins-empty-title { margin: 0 0 var(--s2); font-weight: 600; }
+.ins-empty-hint { margin: 0; font-size: 12.5px; color: var(--muted); line-height: 1.7; }
+
+.ins-head {
+  padding: var(--s3) var(--s4);
+  border-bottom: 1px solid var(--border);
+  flex: 0 0 auto;
+}
+.ins-title { display: flex; align-items: center; gap: var(--s2); flex-wrap: wrap; }
+.ins-code { font-size: 14.5px; font-weight: 600; }
+.ins-sub {
+  display: flex; align-items: center; gap: var(--s2);
+  margin-top: 3px; font-size: 12.5px; min-width: 0;
+}
+.ins-sub .row-menu { margin-left: auto; }
+.ins-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.ins-body { flex: 1; min-height: 0; overflow-y: auto; padding: var(--s4); }
+.ins-body .msg { margin-bottom: var(--s3); }
+
+/* The four facts. A 2×2 grid rather than a definition list: these are read in a
+   glance, and a vertical dl of eight rows pushes the actions below the fold in a
+   380px column. */
+.ins-facts {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--s2);
+  margin-bottom: var(--s4);
+}
+.ins-fact {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: var(--s2) var(--s3);
+  display: flex; flex-direction: column; gap: 1px;
+  min-width: 0;
+}
+.ins-fact .k {
+  font-size: 10px; text-transform: uppercase; letter-spacing: .06em;
+  color: var(--muted); font-weight: 600;
+}
+.ins-fact strong { font-size: 13.5px; font-variant-numeric: tabular-nums; }
+.ins-fact .v { font-size: 11px; color: var(--muted); }
+
+.ins-actions { display: flex; gap: var(--s2); margin-bottom: var(--s4); }
+.ins-actions button { flex: 1; }
+
+.ins-pair { display: grid; grid-template-columns: 1fr 1fr; gap: var(--s3); }
+.ins-pair .field { margin-bottom: var(--s3); }
+
+.ins-save { display: flex; align-items: center; gap: var(--s2); margin-bottom: var(--s4); }
+.ins-warn { font-size: 11.5px; color: var(--warn); }
+
+/* A one-line row with a label and a command: the pattern for the manual
+   overrides and the irreversible actions. The explanation sits UNDER the label
+   in small type, so the control never moves. */
+.ins-row {
+  display: flex; align-items: flex-start; gap: var(--s3);
+  padding: var(--s2) 0;
+  border-bottom: 1px solid var(--border);
+}
+.ins-row-label { flex: 1; font-size: 13px; min-width: 0; }
+.ins-row-label small {
+  display: block; color: var(--muted); font-size: 11.5px; line-height: 1.5;
+  margin-top: 2px;
+}
+.ins-edit { padding: var(--s2) 0 var(--s3); border-bottom: 1px solid var(--border); }
+.ins-danger { margin-bottom: var(--s2); }
+.ins-confirm { font-size: 12.5px; margin: 0 0 var(--s2); line-height: 1.55; }
+
+/* The history, as a timeline. Denser than a table and it reads chronologically,
+   which is how "what happened to this" is asked. */
+.timeline { list-style: none; margin: 0 0 var(--s4); padding: 0; }
+.timeline li {
+  display: grid;
+  grid-template-columns: 116px 1fr;
+  gap: var(--s2);
+  padding: var(--s2) 0;
+  border-bottom: 1px solid var(--border);
+  font-size: 12.5px;
+  align-items: baseline;
+}
+.timeline li:last-child { border-bottom: none; }
+.timeline .when { color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+.timeline .what { min-width: 0; }
+.timeline .detail { display: block; color: var(--muted); font-size: 11.5px; margin-top: 1px; line-height: 1.45; }
+.tiny-state { padding: var(--s3); font-size: 12.5px; }
+
+/* ── Row verbs ──────────────────────────────────────────────────────────── */
+/* Three and only three, sized to a column. Restored from the version that hid
+   everything behind ⋯: Renew and Stop are daily, so a menu round-trip on each is
+   a tax paid all day to save one column of pixels. */
+.row-verbs { display: flex; gap: 4px; justify-content: flex-end; }
+
+/* The code cell and the row pointer. The whole row opens the inspector; the
+   code is the visible affordance for it. */
+.code-link { color: var(--accent); cursor: pointer; }
+.code-link:hover { text-decoration: underline; }
+table.data tbody tr { cursor: pointer; }
+table.data tbody tr.inspecting td { background: var(--accent-dim); }
+table.data tbody tr.inspecting td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
+
+/* A sticky first column: on a wide table with horizontal scroll, the code is
+   the one value you must never lose track of. */
+/* The checkbox column and the code column both pin, as a pair. Pinning only the
+   code at `left: 0` let the 32px checkbox column slide over it (measured: the
+   code moved 32px on scroll), so the code is pinned at the checkbox's width and
+   the checkbox is pinned at zero. Together they keep "which row is this" visible
+   at any horizontal scroll position — the point of a sticky identity column. */
+table.codes-table th:first-child,
+table.codes-table td:first-child {
+  position: sticky;
+  left: 0;
+  z-index: 2;
+  background: var(--panel);
+}
+th.sticky-code, td.sticky-code {
+  position: sticky;
+  left: 32px;
+  z-index: 2;
+  background: var(--panel);
+}
+th.sticky-code { z-index: 3; }
+table.data tbody tr:hover td.sticky-code { background: var(--panel-2); }
+table.data tbody tr.inspecting td.sticky-code { background: var(--accent-dim); }
+
+/* ── Column chooser ─────────────────────────────────────────────────────── */
+.cols-menu { position: relative; }
+.cols-menu > summary {
+  list-style: none;
+  cursor: pointer;
+  padding: 3px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.cols-menu > summary::-webkit-details-marker { display: none; }
+.cols-menu > summary:hover { color: var(--text); border-color: var(--accent-dim); }
+.cols-body {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 4px);
+  z-index: 30;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: var(--s2);
+  min-width: 240px;
+  box-shadow: 0 8px 24px rgba(0,0,0,.4);
+}
+.cols-row {
+  display: flex; gap: var(--s2); align-items: flex-start;
+  padding: var(--s1) var(--s2);
+  border-radius: 5px;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+.cols-row:hover { background: var(--panel-2); }
+.cols-row small { display: block; color: var(--muted); font-size: 11px; }
+
+/* ── The board (Renewals due) ───────────────────────────────────────────── */
+
+/* Five lanes, horizontally scrollable rather than wrapping: the comparison
+   between "lapsed" and "due ≤7d" is the reason the page exists, and wrapping
+   puts them on different rows on a laptop. */
+.board {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(232px, 1fr);
+  gap: var(--s3);
+  overflow-x: auto;
+  align-items: start;
+  padding-bottom: var(--s3);
+}
+
+.lane {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  min-width: 0;
+}
+.lane-head { padding: var(--s3) var(--s3) var(--s2); border-bottom: 1px solid var(--border); }
+.lane-title {
+  display: flex; align-items: center; gap: var(--s2);
+  border: none; background: none; padding: 0; width: 100%;
+  font: inherit; text-align: left; cursor: pointer; color: var(--text);
+}
+.lane-title strong { font-size: 13px; }
+.lane-count {
+  margin-left: auto;
+  font-size: 12px; font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+}
+.lane-hint { margin: 3px 0 0; font-size: 11px; color: var(--muted); line-height: 1.4; }
+.lane-body { padding: var(--s2); display: flex; flex-direction: column; gap: var(--s2); }
+.lane-empty { font-size: 12px; color: var(--muted); padding: var(--s2); }
+
+/* The dot vocabulary is shared with the Today checks: same colours, same
+   meanings, so a red dot means "fault" everywhere. */
+.dot { width: 7px; height: 7px; border-radius: 50%; flex: 0 0 auto; background: var(--muted); }
+.dot.bad { background: var(--danger); }
+.dot.warn { background: var(--warn); }
+.dot.good { background: var(--success); }
+.dot.quiet { background: var(--muted); opacity: .6; }
+
+.card-code {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: var(--s2) var(--s3);
+  cursor: pointer;
+  transition: border-color .1s ease;
+}
+.card-code:hover { border-color: var(--accent-dim); }
+.card-code:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.card-top { display: flex; align-items: center; justify-content: space-between; gap: var(--s2); }
+.card-name {
+  font-size: 12px; margin-top: 2px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.card-meta { font-size: 11px; color: var(--muted); margin-top: 1px; }
+.card-verbs { display: flex; gap: 4px; margin-top: var(--s2); }
+
+/* ── The mobile shell ───────────────────────────────────────────────────── */
+/* The console had NO responsive story: a 224px fixed sidebar, a fixed-width main
+   column and a table. On a phone it was a horizontally scrolling table behind a
+   permanent sidebar — on the one device you would be holding when a student
+   rings. The sidebar becomes a drawer, the split layout becomes a stack, and the
+   inspector takes over the screen when a code is selected. */
+
+.nav-toggle {
+  display: none;
+  position: fixed;
+  top: var(--s2);
+  left: var(--s2);
+  z-index: 60;
+  padding: var(--s2) var(--s3);
+  font-size: 16px;
+  line-height: 1;
+}
+.nav-scrim { display: none; }
+
+@media (max-width: 1500px) {
+  /* MEASURED BREAKPOINT, not a guess. The Codes table needs ~780px to show every
+     column without truncating the name to nothing, and the rail is 300-360px; at a
+     1440px window that leaves the name column 57px and at 1280px it collapses to
+     ZERO. So below 1500px the rail stops being a column and becomes a full-screen
+     sheet — still "a place you stay", because it replaces the page rather than
+     covering it with a modal, and the table gets its whole width back. */
+  .codes-layout { grid-template-columns: minmax(0, 1fr); }
+  /* A PANEL beside the list, not a sheet over it. The first version made this
+     `inset: 0` (full screen) and that broke the premise of the whole layout: at
+     1440px the inspector covered the table completely, so clicking another row
+     was impossible without closing it first — the round-trip the redesign exists
+     to remove. It now docks to the right at 62% of the width, leaving the left
+     38% of the list visible and clickable, with its own width capped so the
+     content does not stretch to a silly line length. */
+  .inspector {
+    position: fixed;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    left: auto;
+    width: min(560px, 78vw);
+    /* BELOW the drawer (45) and the confirm sheet (70): the inspector is a
+       browsing surface, a drawer is a FLOW the operator has committed to. When it
+       sat above the drawer, a renew drawer opened from a selected code was
+       unclickable — its footer button sat under the inspector's history list
+       (measured: an <li> from .timeline intercepted every click at 1440px). */
+    z-index: 40;
+    max-height: none;
+    border-radius: 0;
+    border-left: 1px solid var(--border);
+    box-shadow: -12px 0 40px rgba(0, 0, 0, 0.45);
+  }
+  .inspector-idle { display: none; }
+}
+
+@media (max-width: 800px) {
+  .nav-toggle { display: block; }
+  .shell { display: block; }
+
+  .sidebar {
+    position: fixed;
+    inset: 0 auto 0 0;
+    width: 260px;
+    z-index: 58;
+    transform: translateX(-100%);
+    transition: transform .16s ease;
+    height: 100vh;
+  }
+  .sidebar.open { transform: none; }
+  .nav-scrim {
+    display: block;
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,.5);
+    z-index: 56;
+  }
+
+  .main { padding: calc(var(--s6) + var(--s4)) var(--s3) var(--s6); }
+  .page-head { flex-wrap: wrap; }
+  .filters { flex-wrap: wrap; }
+  .filters > * { flex: 1 1 140px; min-width: 0; }
+  .table-scroll { max-height: none; }
+  .board { grid-auto-columns: minmax(200px, 1fr); }
+  .ins-facts { grid-template-columns: 1fr; }
+  .ins-pair { grid-template-columns: 1fr; }
+  .timeline li { grid-template-columns: 1fr; gap: 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sidebar { transition: none; }
+  .card-code { transition: none; }
+}
+
+/* ── The leave-with-unsaved-edits sheet ─────────────────────────────────── */
+/* Composed like the drawer family (fixed sheet + scrim) rather than a centred
+   modal, because it interrupts a navigation and should read as part of the same
+   furniture. The SAFE action is the left one and receives focus. */
+.confirm-sheet {
+  position: fixed;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 70;
+  width: min(420px, calc(100vw - var(--s5) * 2));
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: var(--s5);
+  box-shadow: 0 20px 60px rgba(0,0,0,.5);
+}
+.confirm-sheet h2 { margin: 0 0 var(--s2); font-size: 16px; }
+.confirm-sheet p { margin: 0 0 var(--s4); font-size: 13px; line-height: 1.55; }
+.confirm-sheet .actions { justify-content: flex-end; margin-top: 0; }
+
+/* ── The help rail ──────────────────────────────────────────────────────── */
+/* Pushed by the shell, not overlaid: help that covers the thing it explains is
+   useless. 320px is enough for the prose at 13px without long line lengths. */
+.help-rail {
+  position: sticky;
+  top: 0;
+  align-self: start;
+  width: 320px;
+  flex: 0 0 320px;
+  height: 100vh;
+  overflow-y: auto;
+  background: var(--panel);
+  border-left: 1px solid var(--border);
+  padding: var(--s5) var(--s4);
+  font-size: 13px;
+}
+.help-head {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: var(--s4);
+}
+.help-body section { margin-bottom: var(--s4); }
+.help-body h3 {
+  margin: 0 0 var(--s2);
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  color: var(--accent);
+}
+.help-body p { margin: 0 0 var(--s2); line-height: 1.6; color: var(--text); }
+.help-foot { color: var(--muted); font-size: 11.5px; line-height: 1.55; margin-top: var(--s5); }
+
+@media (max-width: 1400px) {
+  /* On a narrower window the rail would squeeze the table it is explaining, so
+     it becomes an overlay pinned to the right instead. Still dismissable with
+     the same key. */
+  .help-rail {
+    position: fixed;
+    right: 0; top: 0;
+    z-index: 58;
+    box-shadow: -12px 0 40px rgba(0,0,0,.45);
+  }
+}
+@media (max-width: 800px) {
+  .help-rail { width: 100vw; flex-basis: 100vw; }
+}
+
+/* ════════════════════════════════════════════════════════════════════════════
+   MEASURED TOUCH TARGETS
+
+   Found by measuring every interactive element in Chromium, not by eye:
+   row checkboxes were 13x13, the board's lane headers 20px tall, and the
+   Distribution drill-down links 7px wide. WCAG 2.2 AA (2.5.8) asks for 24x24.
+   These are the fixes, sized to the comfortable minimum rather than the legal
+   one, because a renewal queue is worked with a mouse in short bursts.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/* A checkbox is a control, not text: 16px visual box inside a 24px hit area.
+   `width: auto` alone left the native 13px box, which is under the minimum and
+   under the size a hand can reliably hit on a laptop trackpad. */
+input[type='checkbox'] {
+  width: 16px;
+  height: 16px;
+  min-width: 16px;
+  min-height: 16px;
+  /* The hit area is larger than the glyph: `padding` on a checkbox does not
+     create clickable space in every browser, so the extra room comes from the
+     cell's own padding and from this element's margin box being 24px tall. */
+  margin: 4px;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+table.data tbody td:first-child { padding: 0 var(--s2); }
+
+/* The board's lane header is a button that collapses the lane: give it the
+   height a control needs, and keep the heading type size. */
+.lane-title { min-height: 24px; padding: var(--s1) 0; }
+
+/* The Distribution drill-down numbers ("4", "1", …) are links disguised as
+   digits — 7px wide. They need a hit area, and underlining on hover is what
+   says "this is a link". */
+.linkish {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 24px;
+  min-height: 24px;
+  padding: 0 4px;
+  border-radius: 4px;
+}
+.linkish:hover { background: var(--panel-2); text-decoration: underline; }
+
+/* Disclosure summaries that are the only way into a section. */
+.cols-menu > summary,
+.help > summary { min-height: 24px; display: inline-flex; align-items: center; }
+
+/* Any anchor that prints a filename or hash: it is a link, it must be clickable
+   and legible as one. */
+table a, .card a { display: inline-block; min-height: 20px; }
+
+/* A table cell whose text is a link to a filtered view (a middleman's codes).
+   Reads as a name, behaves as a control: the underline appears on hover so the
+   affordance is discoverable, and the box is at least 24px tall so it is hittable. */
+.name-link {
+  border: none;
+  background: none;
+  padding: 2px 4px;
+  margin: -2px -4px;
+  min-height: 24px;
+  color: var(--text);
+  font: inherit;
+  font-weight: 600;
+  text-align: left;
+  border-radius: 4px;
+  cursor: pointer;
+}
+.name-link:hover { background: var(--panel-2); text-decoration: underline; }
+
+/* Download links in the Releases read-out: a filename is the link text, so it
+   needs the height of a control, not of a line of inline text (it measured 20px). */
+.releases a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  padding: 0 2px;
+}
+
+/* ════════════════════════════════════════════════════════════════════════════
+   CELLS THAT HOLD STRUCTURED VALUES
+
+   Measured in Chromium: the "Days left" cell held 79px of content ("lapsed" plus
+   a "Nov 25, 2026" line) inside 59px, and the plan chip 69px inside 59px — both
+   cut mid-word with NO ellipsis, so the date read "Nov 25, 20". A table cell with
+   a two-line value needs to be told to stack and truncate deliberately.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/* Days left: a number and a date under it. The date is secondary and may
+   truncate with an ellipsis; the number never does. */
+table.codes-table td.num { white-space: nowrap; }
+table.codes-table td.num > div {
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* A plan chip is a short token ("strike", "budget"). It must fit or ellipsis —
+   never be cut in the middle of the word. */
+table.codes-table td .chip,
+table.codes-table td .badge {
+  display: inline-block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  vertical-align: middle;
+}
+/* Long badge text ("sign-out recorded") wraps rather than clipping, because the
+   STATE is the one value an operator must never misread. */
+table.codes-table td .badge { white-space: nowrap; }
+
+/* Six lanes at their minimum (232px + gap) need ~1464px; the content column is
+   1152px, so the board DOES scroll — that is correct for a board, and it must
+   scroll ITSELF rather than push the page sideways (measured: the last lane sat at
+   right=1464 in a 1440 viewport, i.e. a page-level horizontal scrollbar).
+   `min-width: 0` + `max-width: 100%` keeps the scrolling inside this element, and
+   the trailing padding stops the last card being flush against the cut edge. */
+.board {
+  min-width: 0;
+  max-width: 100%;
+  padding-right: var(--s3);
+  /* A visible affordance that there is more to the right: a subtle inset shadow,
+     only while there is overflow. */
+  background:
+    linear-gradient(to left, var(--bg), transparent) right / 24px 100% no-repeat;
+}
+
+/* ── Foldable sections in the inspector ─────────────────────────────────── */
+/* `Manual overrides` and `Record` are read rarely; `History` and the actions are
+   read constantly. Folding the two rare ones took the rail from 1.87 screens of
+   scrolling to roughly one, so the history — the reason you opened the code during
+   a support call — is reachable without hunting. */
+.ins-fold { margin: 0; }
+.ins-fold > summary {
+  list-style: none;
+  cursor: pointer;
+  display: flex;
+  align-items: baseline;
+  gap: var(--s2);
+  padding: var(--s2) 0;
+  /* Overrides .section-title's top margin so a folded header is a compact row. */
+  margin: var(--s3) 0 var(--s1);
+}
+.ins-fold > summary::-webkit-details-marker { display: none; }
+.ins-fold > summary::before {
+  content: '▸';
+  font-size: 9px;
+  opacity: .7;
+  color: var(--muted);
+}
+.ins-fold[open] > summary::before { content: '▾'; }
+.ins-fold > summary:hover { color: var(--text); }
+.ins-fold-hint {
+  margin-left: auto;
+  font-size: 10.5px;
+  font-weight: 400;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--muted);
+  opacity: .85;
+  text-align: right;
+}
+
+/* The liveness cell holds "checked in 2h ago" — the "ago" is what makes it a fact
+   rather than a status word, so it must not be the part that gets dropped. If the
+   column is ever too narrow, ellipsis (never a silent mid-word cut), and the
+   tooltip carries the full explanation. */
+table.codes-table td.nowrap.muted {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* An empty header cell (the verbs column) has nothing to clip; suppressing the
+   check keeps the audit honest about real clipping. */
+table.codes-table th:empty { overflow: visible; }
+
+/* The Code column is the one cell that must NEVER truncate — it is the row's
+   identity and the thing an operator reads aloud to a student. It is a fixed
+   19-character monospace string, so it is sized in `ch` (one character width in
+   the mono font) rather than a percentage that changes with the viewport. */
+table.codes-table th.sticky-code,
+table.codes-table td.sticky-code {
+  white-space: nowrap;
+  text-overflow: clip;
+}
+
+/* ════════════════════════════════════════════════════════════════════════════
+   THE CODES TABLE — ONE COLUMN BUDGET
+
+   Every width lives here, as one list you can add up. Mixing px and % inline in
+   the component made the total impossible to reason about (measured: the code
+   column clipped at eight pixels short, and Plan/State were 13px wide).
+
+   The rule the budget expresses:
+     * CODE is a fixed 19-character string → fixed 176px (144px of text + padding).
+       It must never truncate: it is the row's identity.
+     * The two FREE-TEXT columns (Name, Middleman) share the remaining space and
+       truncate with an ellipsis.
+     * The three FIXED-MEANING columns (Plan, State, Days) get just enough for
+       their longest real value.
+     * The verbs column is sized by its two buttons, never by chance.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/* The fixed columns total 548px; everything else is shared by Name and, when
+   Middleman is shown, Middleman. In `table-layout: fixed` an unspecified column
+   takes only the REMAINDER — so these must stay well under the narrowest table
+   width (900px) or the free-text column collapses to nothing (measured: 32px). */
+table.codes-table .c-check { width: 32px; }
+table.codes-table .c-code  { width: 160px; }  /* fixed: never truncates */
+table.codes-table .c-name  { width: auto; }   /* free text: truncates */
+table.codes-table .c-plan  { width: 76px; }
+table.codes-table .c-state { width: 108px; }
+table.codes-table .c-seen  { width: 124px; }
+table.codes-table .c-who   { width: auto; }   /* also free text: shares leftover */
+table.codes-table .c-days  { width: 94px; }  /* fits "DAYS LEFT ↑" + arrow */
+table.codes-table .c-verbs { width: 144px; }
+
+/* At narrower windows the table is allowed to scroll horizontally INSIDE its own
+   container rather than crush every column to unreadable widths. `min-width`
+   guarantees each column keeps its meaning; the scrollbar is the honest outcome. */
+/* Below ~1200px the columns cannot all stay readable. Rather than crush the Name
+   column to 45px (measured at 1100px) or zero (at 900px), the table keeps its
+   minimum and the CONTAINER scrolls — the standard, honest behaviour for a dense
+   table on a small screen. Sticky positioning on the code column means the row's
+   identity stays visible while you scroll to see the rest. */
+table.codes-table { min-width: 900px; }
+.table-scroll { overflow-x: auto; }
+
+/* A drawer is 520px wide on the right; its footer action is at the bottom. Move
+   the toast stack clear of BOTH so it can never sit on the button that commits
+   the action the toast is about. `.drawer` is the sibling that sets the context. */
+body:has(.drawer) .toast {
+  right: calc(min(520px, 100vw) + 18px);
+  bottom: 18px;
+}
+@media (max-width: 900px) {
+  /* On a narrow screen the drawer is full-width, so the toast moves to the top
+     instead — anywhere at the bottom is over the footer. */
+  body:has(.drawer) .toast { right: 12px; bottom: auto; top: 12px; }
+}
+
+/* ── Every table scrolls inside its own box ─────────────────────────────── */
+/* Only the Codes table wrapped its rows in `.table-scroll`; Today's queue, the
+   Distribution and Tiers tables used `.table-wrap` alone, so on a phone their
+   tables escaped their container and widened the whole page (measured: tables
+   overflowing on Today, Distribution and Tiers at 390px). One rule makes the
+   wrapper itself the scroller for every page, which is also what a reader
+   expects of a bordered table box. */
+.table-wrap {
+  overflow-x: auto;
+  overflow-y: hidden;
+  max-width: 100%;
+}
+/* A table that is already inside a dedicated scroller must not double-scroll. */
+.table-wrap > .table-scroll { overflow-x: visible; }
+
+/* Releases laid out its summary as a `.grid` table with no wrapper at all, so it
+   pushed the page 123px wide on a phone. Same treatment. */
+.grid { display: block; overflow-x: auto; }
+.grid > thead, .grid > tbody, .grid > tfoot { display: table; width: 100%; }
+
+/* ── The observed-vs-main conflict marker ──
+   Sits beside the state badge, and only when the two axes disagree or an eviction
+   is outstanding. Amber for "reads free but a device checked in" — a warning, not
+   an accusation; red for "cut off at the next check-in", which is a live
+   consequence. Deliberately small: it is a flag on the datum, not a second badge,
+   because two competing badges is how one gets believed over the other. */
+.conflict {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 15px;
+  height: 15px;
+  margin-left: 6px;
+  border-radius: 50%;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+  cursor: help;
+  vertical-align: middle;
+}
+.conflict.live-but-available { background: var(--panel-2); color: var(--warn); border: 1px solid var(--warn); }
+.conflict.evicted { background: var(--panel-2); color: var(--danger); border: 1px solid var(--danger); }
+
+/* The override note, beside the status badge. Deliberately NOT badge-shaped: a
+   second pill next to the first reads as "another status", and the whole point of
+   making the override orthogonal was that it is not one. It is small, muted, and
+   prefixed, so it annotates the badge rather than competing with it. */
+.override-note {
+  margin-left: 6px;
+  font-size: 0.78em;
+  color: var(--warn);
+  white-space: nowrap;
+}

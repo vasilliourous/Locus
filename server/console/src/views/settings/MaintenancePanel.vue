@@ -128,6 +128,13 @@ async function copyLink() {
 </script>
 
 <template>
+  <div class="page-head">
+    <div class="titles">
+      <h1>Maintenance</h1>
+      <p class="page-sub">The operations that exist for a bad day: reconcile, trigger, export.</p>
+    </div>
+  </div>
+
   <!-- ── Import ── -->
   <div class="panel">
     <h2>Add codes the hub is missing</h2>

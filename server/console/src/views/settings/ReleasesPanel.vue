@@ -2,6 +2,7 @@
 import { ref, onMounted, computed } from 'vue'
 import { call, fetchRelease, type FetchArtifact } from '../../api'
 import { toast } from '../../toast'
+import StateBlock from '../../components/StateBlock.vue'
 
 // ── Releases page: publish by pulling a GitHub Release ──
 //
@@ -69,6 +70,8 @@ const EXPECTED: { key: string; filename: string; label: string }[] = [
 const release = ref<Release | null>(null)
 const version = ref('')
 const loading = ref(true)
+/** A 403 (expired session) is not a read failure; see loadRelease(). */
+const denied = ref(false)
 const savingRollout = ref(false)
 const fetching = ref(false)
 
@@ -89,6 +92,7 @@ function fmtBytes(n: number): string {
 
 async function loadRelease() {
   loading.value = true
+  denied.value = false
   const res = await call<{ release: Release }>('releases.get')
   if (res.ok && res.data) {
     release.value = res.data.release
@@ -96,6 +100,10 @@ async function loadRelease() {
     // the current version is a useful default, but after they enter a new one
     // (e.g. 2.2.1 while the hub is on 2.2.0) reloading must not reset the field.
     if (!version.value.trim()) version.value = res.data.release.version
+  } else if (res.message && /sign in again/i.test(res.message)) {
+    // A 403 is not a failed read: the retry in the error state could never
+    // succeed. Route it to the sign-in state instead.
+    denied.value = true
   } else {
     toast.err(res.message || res.transportError || 'Could not load release state')
   }
@@ -319,11 +327,19 @@ onMounted(() => {
 </script>
 
 <template>
+  <div class="page-head">
+    <div class="titles">
+      <h1>Releases</h1>
+      <p class="page-sub">Which build the fleet is offered, and how it gets here.</p>
+    </div>
+  </div>
 
+  <div class="releases">
   <!-- ── What the hub currently advertises ── -->
   <div class="card">
     <h2>On the hub now</h2>
-    <p v-if="loading" class="muted">Loading…</p>
+    <StateBlock v-if="denied" state="denied" @retry="loadRelease" />
+    <p v-else-if="loading" class="muted">Loading…</p>
     <template v-else-if="release">
       <div class="kv">
         <div><span class="muted">Version</span><strong>{{ release.version || '—' }}</strong></div>
@@ -507,4 +523,5 @@ onMounted(() => {
       release on a real machine before turning this on.
     </p>
   </div>
+  </div><!-- /.releases -->
 </template>

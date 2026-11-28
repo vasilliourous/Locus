@@ -48,6 +48,7 @@ set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 HOOKS_SRC="${REPO_ROOT}/server/pb_hooks"
+SCRIPTS_SRC="${REPO_ROOT}/server/scripts"
 CONSOLE_DIR="${REPO_ROOT}/server/console"
 STAGING_SRC="${REPO_ROOT}/server"
 
@@ -122,6 +123,43 @@ ACTIVE=$(remote 'systemctl is-active pocketbase' 2>/dev/null || echo unknown)
 if [ "$DO_HOOKS" = "1" ]; then
     step "PocketBase hooks"
     [ -d "$HOOKS_SRC" ] || die "no hooks directory at $HOOKS_SRC" 1
+
+    # ── SCHEMA PREFLIGHT ───────────────────────────────────────────────────
+    #
+    # This deploy has never carried schema, and PocketBase DISCARDS a write to an
+    # undefined field. So a hook could land ahead of its columns and record
+    # nothing, silently, while the operator saw success. docs/reference/FIXES.md
+    # records that happening three times ("THE THIRD REPORT OF THE SAME DEFECT"),
+    # and the same three columns are still missing on the live hub today.
+    #
+    # The durable fix is not "add the column" — that returns the moment the next
+    # hub drifts. It is this check, on every deploy. Runs in --check too, so a dry
+    # run tells the truth.
+    step "Schema preflight"
+    remote 'mkdir -p /root/server/scripts' || die "cannot create script dir" 2
+    remote "cat > /root/server/scripts/check-hook-schema-drift.py" < "$SCRIPTS_SRC/check-hook-schema-drift.py" \
+        || die "could not upload the schema checker" 2
+    drift_out=$(remote 'python3 /root/server/scripts/check-hook-schema-drift.py 2>&1' || true)
+    case "$drift_out" in
+        OK*)
+            ok "$drift_out"
+            ;;
+        MISSING:*)
+            bad_fields=$(printf '%s\n' "$drift_out" | head -1 | cut -d: -f2)
+            warn "hooks write field(s) the live schema does NOT have: $bad_fields"
+            warn "PocketBase discards those writes SILENTLY — the feature would look deployed and do nothing."
+            if [ "$CHECK_ONLY" = "1" ]; then
+                warn "apply with: server/scripts/seed-override-schema.py  (adds columns, writes no records)"
+            elif [ "${ALLOW_SCHEMA_DRIFT:-0}" = "1" ]; then
+                warn "ALLOW_SCHEMA_DRIFT=1 — deploying anyway"
+            else
+                die "refusing to deploy hooks into schema drift (pass ALLOW_SCHEMA_DRIFT=1 to override)" 4
+            fi
+            ;;
+        *)
+            warn "schema preflight inconclusive: $(printf '%s' "$drift_out" | head -1)"
+            ;;
+    esac
 
     # Compare by hash and upload only what differs, so a no-op deploy says so.
     remote "mkdir -p $REMOTE_HOOKS" || die "cannot create $REMOTE_HOOKS" 2

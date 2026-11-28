@@ -120,6 +120,70 @@ routerAdd("POST", "/api/heartbeat", function(e) {
             return e.json(410, {code:410, message:"Code expired"});
         }
 
+        // ── EVICTION: a release that must reach a device still using the code ──
+        //
+        // An operator can release a code (codes.release) while a device is using
+        // it. Before this existed, that left two records disagreeing forever: the
+        // hub cleared the claim, and the next heartbeat never read it, returned
+        // 200, and the device kept serving a code the hub considered free.
+        //
+        // ── THE TWO THINGS THIS FILE MUST AND MUST NOT DO ──
+        //
+        // `evict_requested_at` is the WHOLE predicate. It is set only by a
+        // release, cleared only by `codes.reactivate`, and read ONLY here.
+        // `activation.pb.js` deliberately does NOT read it: a released code must
+        // still be activatable by the NEXT holder, which is the entire point of
+        // releasing. Expressing the eviction as `suspended` would have refused
+        // that new holder and broken the resale.
+        //
+        // ── WHY THE BODY SAYS `suspended: true` AND THE COLUMN DOES NOT ──
+        //
+        // Deployed clients decide reversibility with a substring test
+        // (`runtime.rs`: is_suspension → contains("suspended")). A new status word
+        // would send every installed build down the non-suspension branch, which
+        // DELETES the credential — a permanent lock-out for what may be an
+        // operator's mistaken "I think this is free". So the response carries the
+        // only refusal shape the fleet treats as reversible, with the true
+        // sentence in `suspended_reason`, and `evicted: true` as an additive key
+        // for builds that understand it. Old clients show "suspended" + the
+        // sentence; new ones show the correct screen. This is a frozen-wire fact,
+        // not a preference: do not "tidy" it.
+        //
+        // Checked BEFORE the suspension check so that an evicted-and-suspended
+        // code reports the release — the more specific and more recoverable truth.
+        if (String(record.get("evict_requested_at") || "")) {
+            var evictNote = String(record.get("evict_reason") || "").trim();
+            // ── THE MESSAGE MUST CONTAIN THE WORD "suspended". THIS IS NOT A STYLE CHOICE. ──
+            //
+            // The first version of this said "This code was released by your
+            // provider — …", which reads better and is WRONG. The deployed client
+            // does not read the JSON `suspended` flag: `handle_refusal` decides
+            // reversibility from `is_suspension(reason)`, and `reason` comes from
+            // the `message` field. So a message without "suspended" takes the
+            // NOT-reversible branch, which calls `stop()` and `record_refusal` —
+            // deleting the credential. A mistaken release would have permanently
+            // locked the student out and made them find their card again.
+            //
+            // Verified by running the real predicate against both strings, not by
+            // reading the comment that used to claim this worked.
+            //
+            // So the sentence keeps the frozen prefix the client keys on, and the
+            // truth about what happened goes in `suspended_reason` (shown by newer
+            // builds and by the console) and in the parenthetical.
+            var evictMsg = "Account suspended — this code was released by your provider";
+            if (evictNote) evictMsg = "Account suspended — this code was released: " + evictNote;
+            return e.json(403, {
+                code: 403,
+                message: evictMsg,
+                // Frozen contract: the reversible branch deployed clients take.
+                suspended: true,
+                suspended_reason: evictNote,
+                // Additive. Ignored by older builds, which fall back to `message`.
+                evicted: true,
+                override_id: String(record.get("override_id") || "")
+            });
+        }
+
         // ── Suspension, with the operator's own sentence when there is one ──
         //
         // The MESSAGE is a frozen contract: the client classifies a 403 by looking

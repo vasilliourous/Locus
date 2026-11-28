@@ -38,6 +38,15 @@ interface TierRow {
 const rows = ref<TierRow[]>([])
 const loading = ref(true)
 const failed = ref('')
+/**
+ * A session that expired mid-page is NOT a failed read.
+ *
+ * `api.ts` clears the token and returns "Your session is no longer valid — please
+ * sign in again" on a 403. Rendered as the generic error, that message came with a
+ * "Try again" button that could never succeed — the operator retried into the same
+ * wall. This flag routes it to StateBlock's `denied` state instead.
+ */
+const denied = ref(false)
 const saving = ref('')
 /** The row currently expanded for editing, by tier name. One at a time. */
 const editing = ref('')
@@ -45,9 +54,14 @@ const editing = ref('')
 async function load() {
   loading.value = true
   failed.value = ''
+  denied.value = false
   const res = await call<{ tiers: TierRow[] }>('tiers.list')
   loading.value = false
   if (!res.ok || !res.data) {
+    if (res.message && /sign in again/i.test(res.message)) {
+      denied.value = true
+      return
+    }
     failed.value = res.message || res.transportError || 'Could not load the tiers.'
     return
   }
@@ -108,7 +122,19 @@ function tierMisconfigured(row: TierRow): boolean {
 </script>
 
 <template>
+  <div class="page-head">
+    <div class="titles">
+      <h1>Tiers</h1>
+      <p class="page-sub">The connection settings every client receives on activation.</p>
+    </div>
+  </div>
+
   <StateBlock v-if="loading" state="loading" :rows="3" />
+  <StateBlock
+    v-else-if="denied"
+    state="denied"
+    @retry="load"
+  />
   <StateBlock
     v-else-if="failed"
     state="error"

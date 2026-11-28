@@ -234,6 +234,86 @@ routerAdd("POST", "/api/admin/console", function(e) {
         }
     }
 
+    // ── The liveness axis, as the HUB needs it for a confirmation ──
+    //
+    // This is a COARSE classification, used only to decide (a) whether a release
+    // should ask the heartbeat to evict a live client and (b) what evidence to
+    // record in the audit row. It is NOT the console's rendering rule: the
+    // vocabulary and the lease are owned by `session_probe.pb.js` and
+    // `views/codes/model.ts`, and §58/§59 execute those two against each other.
+    // Do not grow this into a third opinion — it answers one yes/no question.
+    //
+    // Returns "live" | "stale" | "absent" | "unknown". `unknown` on an empty or
+    // unparseable value, NEVER "absent": a code that has not beaten has no
+    // evidence either way, and calling it gone is the accusation this product
+    // already shipped once (see docs/reference/AUTH-STATE.md).
+    function livenessForConfirmation(record) {
+        var raw = record.get("last_seen_at");
+        if (raw === null || raw === undefined || String(raw).trim() === "") return "unknown";
+        var seenMs = parsePBDate(raw);
+        if (seenMs === 0 || isNaN(seenMs)) return "unknown";
+        var nowMs = Date.now();
+        // A future stamp means two clocks disagree; the age is not knowable.
+        if (seenMs > nowMs + 5 * 60 * 1000) return "unknown";
+        var age = nowMs - seenMs;
+        var leaseMs = (2 * 60 * 60 + 14 * 60) * 1000;   // §59: 2h14m
+        var staleMs = 7 * 24 * 60 * 60 * 1000;          // mirrors GRACE_PERIOD
+        if (age <= leaseMs) return "live";
+        if (age <= staleMs) return "stale";
+        return "absent";
+    }
+
+    // ── The override audit row — HARD FAIL, unlike logEvent ──
+    //
+    // `code_events` is best-effort: `logEvent` swallows its exception, so it can
+    // record an action that never happened. An override needs the opposite
+    // guarantee, because the audit row IS the justification for a decision that
+    // cuts a paying student off. So this THROWS, and the caller lets the throw
+    // become a 500 with nothing else applied.
+    //
+    // Ordering in the caller: this runs BEFORE the record is saved. If the row
+    // cannot be written, no state changes. `code_events` is still written after
+    // the save, as a best-effort MIRROR so the existing history drawer needs no
+    // change.
+    function writeOverride(o) {
+        var coll = $app.dao().findCollectionByNameOrId("code_overrides");
+        var rec = new Record(coll);
+        rec.set("code", o.code);
+        rec.set("override_id", o.override_id);
+        rec.set("aspect", o.aspect);
+        rec.set("from_value", o.from_value || "");
+        rec.set("to_value", o.to_value || "");
+        rec.set("reason", o.reason);
+        rec.set("actor", o.actor || "console");
+        rec.set("observed_state", o.observed_state || "unknown");
+        if (o.observed_at_override) rec.set("observed_at_override", o.observed_at_override);
+        rec.set("outcome", o.outcome);
+        $app.dao().saveRecord(rec);   // throws → caller returns 500
+    }
+
+    // Has this override already been applied? The console mints one id per
+    // confirmed action and reuses it on retry, so a retried request must be a
+    // no-op rather than a second side effect. Matched on (code, override_id).
+    function findOverride(code, overrideId) {
+        // `canonical()` passes a non-conforming string THROUGH unchanged (verified
+        // against its own logic), so a crafted `code` could otherwise reach this
+        // filter. A code is `RQ-XXXX-XXXX-XXXX-C`; anything else cannot be in
+        // `code_overrides`, so return null rather than building a filter from it.
+        // Belt-and-braces on top of the quote-stripping below: the strip makes the
+        // filter safe, this makes the answer honest.
+        if (!/^[A-Z0-9]{2}-[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]$/.test(String(code))) {
+            return null;
+        }
+        try {
+            return $app.dao().findFirstRecordByFilter(
+                "code_overrides",
+                "code = '" + String(code).replace(/'/g, "") + "' && override_id = '" +
+                String(overrideId).replace(/'/g, "") + "'");
+        } catch (none) {
+            return null;
+        }
+    }
+
     // ── Device binding: REMOVED ──
     //
     // There used to be a `device_bindings` index here, keyed on a fingerprint,
@@ -507,6 +587,9 @@ routerAdd("POST", "/api/admin/console", function(e) {
                     if (excludeSuspended && fsusp) continue;
                     if (!fexp || isNaN(fexp) || fexp <= nowMs || fexp > windowEndMs) continue;
                 }
+                // FOUR BUCKETS, exactly as the filter bar renders and
+                // console-card-consistency.js asserts. The override is a flag on
+                // a row, not a fifth bucket — see the note at `var status` above.
                 var fstatus = fsusp ? "suspended" : fisExp ? "expired" : fred ? "redeemed" : "available";
                 facetStatus[fstatus] = (facetStatus[fstatus] || 0) + 1;
                 var ftier = fr.getString("tier") || "(none)";
@@ -525,6 +608,34 @@ routerAdd("POST", "/api/admin/console", function(e) {
                 var expMs2 = parsePBDate(expRaw);
                 var isExp2 = expMs2 && !isNaN(expMs2) && expMs2 < nowMs;
                 var susp2 = rec.getBool("suspended");
+                // ── `status` IS A FOUR-VALUE PARTITION, AND THE OVERRIDE IS NOT ONE OF THEM ──
+                //
+                // This was wrong in the first version of this change and the
+                // error is worth recording. Adding "released" as a fifth status
+                // broke three things at once, all silently:
+                //
+                //   * `?status=available` stopped listing released stock, so the
+                //     "Unused" filter — which an operator uses to find cards to
+                //     sell — hid exactly the codes that were free to sell.
+                //   * the facet counts gained a "released" bucket that the filter
+                //     bar's four <option>s do not render, so those codes vanished
+                //     from every count.
+                //   * `dashboard` counts available/redeemed/suspended/expired and
+                //     never read `force_state`, so the dashboard and the list
+                //     disagreed about the same code in one console.
+                //
+                // `server/scripts/console-card-consistency.js` already asserts
+                // "the four buckets partition every code". That guard was right
+                // and the change was wrong.
+                //
+                // So status keeps its four values and the override is ORTHOGONAL:
+                // `force_state` and `evict_requested_at` are passed through as
+                // their own fields and rendered BESIDE the status, never as it.
+                // A released code is `status: "available"` (it IS available to a
+                // new holder — see activation.pb.js) that also carries
+                // `force_state: "released"`.
+                var forceState = String(rec.get("force_state") || "");
+                var evictAt = String(rec.get("evict_requested_at") || "");
 
                 var status = susp2 ? "suspended"
                            : isExp2 ? "expired"
@@ -652,6 +763,20 @@ routerAdd("POST", "/api/admin/console", function(e) {
                     // value into a definite state is the exact defect this whole
                     // change removes; it must not be reintroduced here.
                     last_seen_at: rec.getString("last_seen_at") || "",
+                    // ── The OVERRIDE, which is not a second status ──
+                    //
+                    // Passed through RAW and unjudged, like `last_seen_at`: the
+                    // console decides how to render it, and there is exactly one
+                    // classifier on the client (§58/§59 guard the liveness one).
+                    //
+                    // `evict_requested_at` is the eviction predicate the heartbeat
+                    // reads. Its presence means "a live device is being cut off",
+                    // which is different from "released" and must be shown beside
+                    // it, not instead of it.
+                    force_state: forceState,
+                    evict_requested_at: evictAt,
+                    evict_reason: rec.getString("evict_reason") || "",
+                    override_id: rec.getString("override_id") || "",
                     middleman: rec.getString("middleman") || "",
                     label: rec.getString("label") || "",
                     notes: rec.getString("notes") || "",
@@ -949,7 +1074,22 @@ routerAdd("POST", "/api/admin/console", function(e) {
             $app.dao().saveRecord(recS);
             logEvent(target, wantSuspend ? "suspended" : "unsuspended",
                      String(body.reason || ""), "");
-            return ok({code: target, suspended: wantSuspend});
+            var replyS = ok({code: target, suspended: wantSuspend});
+            // ── Unsuspend does NOT clear an override, and must say so ──
+            //
+            // `suspended` and the override are independent: a code can be
+            // "released by override" AND run through this action. Clearing the
+            // suspension alone leaves `evict_requested_at` set, so the device is
+            // refused again at its next beat. That is correct — the code IS still
+            // released — but an operator who meant "let them back in" would read
+            // the 200 as success and then see the eviction persist. Warn instead
+            // of clearing, because silently clearing would undo a release nobody
+            // asked to undo.
+            if (!wantSuspend && String(recS.get("evict_requested_at") || "")) {
+                replyS.warning = "This code is still released by override, so the device "
+                    + "will be refused again at its next check-in. Use codes.reactivate to undo the release.";
+            }
+            return replyS;
         }
 
         // ─────────────────────────────────────────────────────────────
@@ -1015,32 +1155,217 @@ routerAdd("POST", "/api/admin/console", function(e) {
         }
 
         // ─────────────────────────────────────────────────────────────
-        // codes.unbind — release a redeemed code back to unused
+        // codes.release — release a redeemed code back to unused
+        //
+        // Formerly `codes.unbind`, which is kept as an alias below because the
+        // `codes.rebind` refusal names it in prose and scripts may call it.
         //
         // There is no device binding any more (see activation.pb.js): the action
         // is to clear the single-use stamp so the code can be activated again —
         // by the same student on a new machine, or handed to a different one.
-        // The response key keeps the name `previous_fingerprint` for the console,
-        // but it now carries the time the code was redeemed, which is the only
-        // thing there is to report.
+        //
+        // ── WHY THIS NOW CARRIES AN EVICTION ──
+        //
+        // Releasing a code that a device is STILL USING used to leave the two
+        // records disagreeing forever: `activated_at` was cleared, and the live
+        // client's next heartbeat never read it, got 200, and kept serving a code
+        // the hub considered free. That was a silent bug, not a feature — so a
+        // release of a live code now also asks the heartbeat to cut the device
+        // off, and records what it did.
+        //
+        // ── THE ONE THING THIS MUST NOT DO ──
+        //
+        // It must NOT set `codes.suspended`. That column is read by
+        // activation.pb.js (:351, :381), so "evict" expressed as a suspension
+        // would refuse the NEXT holder and break the resale this action exists
+        // for. The eviction predicate is `evict_requested_at`, which only the
+        // heartbeat reads. The student's kick-out screen still says "suspended"
+        // on the wire, because that is the only refusal deployed clients treat
+        // as reversible — but that is a RESPONSE field, not this column.
+        //
+        // See docs/reference/OVERRIDES.md for the sequence and the failure modes.
         // ─────────────────────────────────────────────────────────────
-        if (action === "codes.unbind") {
+        if (action === "codes.release" || action === "codes.unbind") {
             var targetU = canonical(body.code);
             if (!targetU) return bad(400, "code is required");
             var recU = null;
             try { recU = $app.dao().findFirstRecordByData("codes", "code", targetU); } catch (nf3) { recU = null; }
             if (!recU) return bad(404, "Code not found");
+
             var prevAt = recU.getString("activated_at") || "";
-            if (!prevAt) return bad(400, "That code has not been used yet");
+            // ── ALREADY RELEASED IS NOT AN ERROR, AND MUST NOT CLAIM OTHERWISE ──
+            //
+            // This used to return "That code has not been used yet" whenever
+            // `activated_at` was empty — including for a code that WAS used and
+            // has already been released. Two things were wrong with that:
+            //
+            //   * the sentence is false, and an operator reading it concludes the
+            //     code was never sold when it was;
+            //   * a second operator (or a double-click, or a retried request)
+            //     releases the same code, gets a 400 that reads like a bug, and
+            //     has no way to tell "already done" from "failed".
+            //
+            // A release is a SET operation: "make this code not-held". Asking for
+            // it twice is not an error, it is the same request. So a code with no
+            // live claim is answered with what is already true, and says so — the
+            // console renders a replay as a no-op rather than a failure.
+            if (!prevAt) {
+                var alreadyReleased = String(recU.get("force_state") || "") === "released"
+                    || !!String(recU.get("unbound_at") || "");
+                if (alreadyReleased || String(recU.get("first_seen_at") || "") === "") {
+                    // Distinguish the two truthful cases. A code never sold has
+                    // nothing to release; a released code is already as asked.
+                    if (alreadyReleased) {
+                        return ok({
+                            code: targetU,
+                            replay: true,
+                            already_released: true,
+                            observed_state: livenessForConfirmation(recU),
+                            evicted: !!String(recU.get("evict_requested_at") || ""),
+                            outcome: "already_released",
+                            consequences: ["This code was already released. Nothing changed."]
+                        });
+                    }
+                    return bad(400, "That code has never been issued, so there is nothing to release");
+                }
+                // Issued once, claim already spent by a sign-out: releasing is a
+                // no-op on the claim but still records the operator's intent.
+                // Fall through — the write below is harmless and idempotent.
+            }
+
             var reason = String(body.reason || "Released from console").trim();
-            // Release: clear the single-use stamp. The tier and expiry are
-            // untouched — releasing must not change what the code entitles its
-            // holder to.
+            if (reason.length > 200) {
+                return bad(400, "keep the reason under 200 characters; it is shown to the student");
+            }
+            // `codes.unbind` predates the idempotency key and must keep working
+            // for existing callers, so a missing id is generated rather than
+            // refused. The console always sends one.
+            var ovId = String(body.override_id || "").trim();
+            if (!ovId) ovId = "unbind-" + targetU + "-" + nowISO();
+
+            // WHERE THE DECISION IS MADE. "live" and "stale" both warrant an
+            // eviction: a stale device is within the 7-day window and may come
+            // back at any beat. "absent"/"unknown" do NOT — a code nobody has
+            // touched in a week is very likely genuinely free, and a false
+            // suspension on a code we are about to resell outlives the mistake.
+            var observed = livenessForConfirmation(recU);
+            var willEvict = (observed === "live" || observed === "stale");
+
+            // The consequence list is computed from the ROW, before any write, so
+            // `dry_run` and the real call describe the same thing by construction.
+            var consequences = [
+                "The single-use claim is cleared: this code becomes available to a new holder.",
+                "Its tier and expiry are NOT changed."
+            ];
+            if (observed === "unknown") {
+                consequences.push("Observed: no check-in on record, so this device may be offline or may never have beaten.");
+            } else {
+                consequences.push("Observed: " + observed + " (last check-in " + String(recU.get("last_seen_at") || "").substring(0, 16) + ").");
+            }
+            if (willEvict) {
+                consequences.push("That app will be cut off at its next check-in — within about five minutes while connected.");
+                // Quote what the device ACTUALLY renders. The first version quoted
+                // "This code was released by your provider —", which is not what
+                // the heartbeat sends (it must lead with "Account suspended" so
+                // deployed clients take the reversible branch). A preview that
+                // misquotes the student-facing text is a desync between what the
+                // operator confirms and what the student sees.
+                consequences.push("It will see: \"Account suspended — this code was released: " + reason + "\".");
+                consequences.push("Its current connection drops; in-flight traffic is interrupted, not drained.");
+                // ── THE WORST CASE, STATED, BECAUSE IT OTHERWISE LOOKS LIKE A FAILURE ──
+                //
+                // A device that cannot reach the hub at all keeps its tunnel for
+                // the 7-day grace period, because nothing on the hub can be
+                // delivered to a client that is not asking. An operator who is not
+                // told this watches a released code keep working and concludes the
+                // release did not take. Stating the bound is what makes the two
+                // distinguishable: "not yet told" is not "not applied".
+                consequences.push("A device that cannot reach the hub at all keeps working for up to 7 days (its offline grace), then stops. This only applies to an unresponsive device — it is refused at the first check-in that reaches us.");
+            } else {
+                consequences.push("Nothing is cut off. If that device reappears later it will not be refused by this release, because it was not considered live when you released it.");
+            }
+            consequences.push("This is recorded as an override, with the observation above.");
+
+            if (body.dry_run === true || body.dry_run === "true") {
+                return ok({
+                    code: targetU,
+                    dry_run: true,
+                    observed_state: observed,
+                    will_evict: willEvict,
+                    severity: willEvict ? "evicts-live-client" : "release-only",
+                    consequences: consequences,
+                    // A token the caller echoes on the commit. It is the claim the
+                    // preview was computed against; if it has moved by the time the
+                    // operator confirms, the server must NOT act on a decision made
+                    // about a different state. Returned even on a dry run so the
+                    // drawer can hold it between preview and submit.
+                    claim_token: String(recU.get("activated_at") || "")
+                });
+            }
+
+            // ── The preview and the commit must describe the SAME state ──
+            //
+            // Between an operator reading the consequences and pressing the button,
+            // another tab (or another operator) can release, suspend or renew this
+            // code. Without this check the release applies to a state the operator
+            // never saw — the "I confirmed something else" failure. The console
+            // sends the `claim_token` the preview returned; a mismatch is a 409 that
+            // says exactly what moved, and the drawer re-previews instead of
+            // silently committing.
+            //
+            // Only enforced when the caller sends a token, so `codes.unbind` (which
+            // predates this and sends none) is unaffected.
+            var sentToken = body.claim_token;
+            if (sentToken !== undefined && sentToken !== null
+                    && String(sentToken) !== String(recU.get("activated_at") || "")) {
+                return bad(409, "This code changed while you were confirming — it is no longer in the state you reviewed. Re-open the release to see the current consequences.");
+            }
+
+            // Idempotent replay: same (code, override_id) → same answer, no
+            // second audit row and no second save.
+            var prior = findOverride(targetU, ovId);
+            if (prior) {
+                return ok({
+                    code: targetU,
+                    replay: true,
+                    previous_fingerprint: prevAt.substring(0, 16),
+                    observed_state: String(prior.get("observed_state") || "unknown"),
+                    outcome: String(prior.get("outcome") || "applied"),
+                    consequences: consequences
+                });
+            }
+
+            var fromValue = "redeemed@" + prevAt.substring(0, 19);
+            var toValue = willEvict ? "released+evict" : "released";
+
+            // HARD FAILURE POINT. If this throws, the handler's catch turns it
+            // into a 500 and NOTHING below runs — no state change without an
+            // audit row, which is the whole reason this is not logEvent.
+            writeOverride({
+                code: targetU,
+                override_id: ovId,
+                aspect: "release",
+                from_value: fromValue,
+                to_value: toValue,
+                reason: reason,
+                actor: String(body.actor || "console"),
+                observed_state: observed,
+                observed_at_override: String(recU.get("last_seen_at") || ""),
+                outcome: willEvict ? "applied_with_eviction" : "applied"
+            });
+
+            // ONE save for every field below: two saves would be two chances to
+            // record only one of them (the `first_seen_at` precedent in
+            // activation.pb.js).
             recU.set("activated_at", null);
-            // These two columns previously did not exist, so the audit trail
-            // recorded nothing. They are part of the schema now.
             setIfPresent(recU, "unbound_at", nowISO());
             setIfPresent(recU, "unbind_reason", reason);
+            setIfPresent(recU, "force_state", "released");
+            setIfPresent(recU, "override_id", ovId);
+            if (willEvict) {
+                setIfPresent(recU, "evict_requested_at", nowISO());
+                setIfPresent(recU, "evict_reason", reason);
+            }
             // `first_seen_at` is DELIBERATELY left alone. Releasing a code puts
             // it back into the pool for a different student, and that is the
             // operator's decision — but it does not un-issue it. Erasing the
@@ -1048,8 +1373,90 @@ routerAdd("POST", "/api/admin/console", function(e) {
             // indistinguishable from a fresh one, and the operator who released
             // it would lose the only record that it had ever been sold.
             $app.dao().saveRecord(recU);
-            logEvent(targetU, "unbound", reason, prevAt.substring(0, 16));
-            return ok({code: targetU, previous_fingerprint: prevAt.substring(0, 16)});
+
+            logEvent(targetU, willEvict ? "released+evicted" : "released", reason, prevAt.substring(0, 16));
+
+            var reply = ok({
+                code: targetU,
+                // The key is KEPT for the console, which has rendered it since
+                // before this change; it carries the redemption time because no
+                // device exists to name.
+                previous_fingerprint: prevAt.substring(0, 16),
+                observed_state: observed,
+                evicted: willEvict,
+                outcome: willEvict ? "applied_with_eviction" : "applied",
+                override_id: ovId,
+                consequences: consequences
+            });
+            if (willEvict) {
+                reply.note = "The device is cut off at its next heartbeat (within about five "
+                    + "minutes while connected). Use codes.reactivate to undo this.";
+            }
+            return reply;
+        }
+
+        // ─────────────────────────────────────────────────────────────
+        // codes.reactivate — undo an override
+        //
+        // The counterpart to `codes.release`: clears the override fields, and the
+        // derived status snaps back to whatever the underlying fields say. That
+        // is the property the "override is an input, not a status" design buys —
+        // undo is a delete, not a reconstruction.
+        //
+        // What it deliberately does NOT do: it does not restore `activated_at`.
+        // If the code was re-redeemed by a different student between the release
+        // and the undo, that redemption is a real fact and must survive — undo
+        // removes the EVICTION and the override PIN, never someone's claim.
+        //
+        // The evicted device is still beating every two minutes (the client keeps
+        // the code on a suspension-shaped refusal), so clearing the predicate puts
+        // it straight back in at its next beat with no re-entry and no restart.
+        // ─────────────────────────────────────────────────────────────
+        if (action === "codes.reactivate") {
+            var targetR2 = canonical(body.code);
+            if (!targetR2) return bad(400, "code is required");
+            var recR2 = null;
+            try { recR2 = $app.dao().findFirstRecordByData("codes", "code", targetR2); } catch (nfR2) { recR2 = null; }
+            if (!recR2) return bad(404, "Code not found");
+
+            var hadEvict = !!String(recR2.get("evict_requested_at") || "");
+            var hadForce = String(recR2.get("force_state") || "");
+            if (!hadEvict && !hadForce) {
+                return bad(400, "That code has no override to undo");
+            }
+            var reasonR2 = String(body.reason || "Override reversed from console").trim();
+            if (reasonR2.length > 200) {
+                return bad(400, "keep the reason under 200 characters");
+            }
+            var ovId2 = String(body.override_id || "").trim();
+            if (!ovId2) ovId2 = "reactivate-" + targetR2 + "-" + nowISO();
+            var priorR2 = findOverride(targetR2, ovId2);
+            if (priorR2) {
+                return ok({code: targetR2, replay: true});
+            }
+
+            writeOverride({
+                code: targetR2,
+                override_id: ovId2,
+                aspect: "reactivate",
+                from_value: (hadForce || "none") + (hadEvict ? "+evict" : ""),
+                to_value: "none",
+                reason: reasonR2,
+                actor: String(body.actor || "console"),
+                observed_state: livenessForConfirmation(recR2),
+                observed_at_override: String(recR2.get("last_seen_at") || ""),
+                outcome: "applied"
+            });
+
+            // Cleared in ONE save, together, so a crash cannot leave "released"
+            // without its eviction or the reverse.
+            setIfPresent(recR2, "force_state", "");
+            setIfPresent(recR2, "evict_requested_at", null);
+            setIfPresent(recR2, "evict_reason", "");
+            setIfPresent(recR2, "override_id", "");
+            $app.dao().saveRecord(recR2);
+            logEvent(targetR2, "reactivated", reasonR2, "");
+            return ok({code: targetR2, evicted_cleared: hadEvict, force_state_cleared: hadForce !== ""});
         }
 
         // ─────────────────────────────────────────────────────────────
@@ -1328,8 +1735,24 @@ routerAdd("POST", "/api/admin/console", function(e) {
             try { recD = $app.dao().findFirstRecordByData("codes", "code", targetD); } catch (nf6) { recD = null; }
             if (!recD) return bad(404, "Code not found");
             var dRedeemed = recD.getString("activated_at") || "";
-            if (body.force_delete_bound !== true && dRedeemed) {
-                return bad(409, "That code has been used by a student. Release it first, or pass force_delete_bound to override.");
+            // ── A RELEASED CODE IS STILL "USED", AND DELETING IT IS A DATA LOSS ──
+            //
+            // This used to refuse only while `activated_at` was set, and told the
+            // operator to "Release it first". After a release `activated_at` is
+            // null, so the guard stopped protecting the row — and worse, the
+            // message actively guided the operator toward releasing a sold code
+            // just to delete it, which throws away the only record that it was ever
+            // sold (`first_seen_at`) along with its audit trail.
+            //
+            // A code that has been issued is one a student paid for. It stays
+            // protected whether or not it currently has a holder, and whether or
+            // not it has been released, renewed or overridden. Test rows and
+            // typos never had a holder and are untouched by this.
+            var dIssued = !!String(recD.get("first_seen_at") || "") || !!dRedeemed
+                || !!String(recD.get("unbound_at") || "");
+            if (body.force_delete_bound !== true && dIssued) {
+                return bad(409, "That code has been issued to a student. Deleting it destroys the record "
+                    + "that it was ever sold. Pass force_delete_bound to delete it anyway.");
             }
             logEvent(targetD, "deleted",
                      "tier=" + recD.getString("tier") + " middleman=" + recD.getString("middleman") +

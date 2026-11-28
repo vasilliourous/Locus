@@ -49,6 +49,20 @@ export interface CodeRow {
    * rendered as any liveness state — see `livenessOf` below.
    */
   last_seen_at?: string
+  /**
+   * The override, passed through raw and unjudged.
+   *
+   * `force_state === 'released'` is an operator's decision that outranks the
+   * other status inputs; it is why `status` is DERIVED rather than stored, so
+   * clearing the override restores the prior state exactly.
+   * `evict_requested_at` is the eviction predicate the heartbeat reads: its
+   * presence means a device is being cut off, which is a different fact from
+   * "released" and is shown beside it.
+   */
+  force_state?: string
+  evict_requested_at?: string
+  evict_reason?: string
+  override_id?: string
 }
 
 export interface HistoryEvent {
@@ -72,6 +86,20 @@ export interface Facets {
  * distinguishes them, so the label does too.
  */
 export function stateLabel(row: CodeRow): string {
+  // ── THE OVERRIDE IS A SEPARATE MARKER, NOT A STATUS VALUE ──
+  //
+  // This function used to return a fifth label for an override, and that was
+  // WRONG in a way worth keeping written down: `status` is a four-value
+  // PARTITION (`console-card-consistency.js` asserts the four buckets sum to the
+  // total), and the filter bar, the facet counts and the dashboard all enumerate
+  // exactly those four. A fifth value made released stock disappear from the
+  // "Unused" filter, from every facet count, and made the dashboard and the list
+  // disagree about the same code.
+  //
+  // A released-by-override code IS available — that is the point of releasing,
+  // and `activation.pb.js` will hand it to the next holder. So it reads
+  // "unused", and the override is reported by `overrideNote()` below, rendered
+  // BESIDE this badge. Two facts, two places, neither pretending to be the other.
   if (row.suspended) return 'stopped'
   if (row.status === 'expired') return 'lapsed'
   // A sign-out waiting to be claimed. It reads as its own state because it is
@@ -98,6 +126,9 @@ export function stateLabel(row: CodeRow): string {
 }
 
 export function stateClass(row: CodeRow): string {
+  // No override branch: the badge carries the STATUS only. The override has its
+  // own marker (`overrideNote`), styled separately, so a badge can never be read
+  // as a status the hub did not compute. See `stateLabel`.
   if (row.suspended) return 'suspended'
   if (row.status === 'expired') return 'expired'
   if (row.redeemed && row.released_pending) return 'issued'
@@ -262,4 +293,60 @@ export function livenessText(row: CodeRow, now: number = Date.now()): string {
   const ageH = Math.round(ageMin / 60)
   if (ageH < 48) return `${label} ${ageH}h ago`
   return `${label} ${Math.round(ageH / 24)}d ago`
+}
+
+/**
+ * Where the OBSERVED state and the MAIN status disagree, or an eviction is
+ * outstanding.
+ *
+ * This is the answer to "the operator thinks it is free but the device is
+ * beating". It is a RENDER, never a writer: it is a pure function of fields the
+ * list already carries, so it cannot mutate the main status, and removing it
+ * changes only what is displayed. That is deliberate — an "observed status" that
+ * needed promoting by a human would be a queue nobody drains, and one that wrote
+ * itself would be the silent-override defect in the other direction.
+ *
+ * `live-but-available` is the conflict worth seeing: the code reads free and a
+ * device is checking in. It does NOT mean the device is "wrong" — `last_seen_at`
+ * proves the device reached the hub, not that someone is using it (see
+ * `livenessLabel`) — so the marker reports the disagreement, not a verdict.
+ */
+export type Conflict = 'none' | 'evicted' | 'live-but-available'
+
+export function conflictOf(row: CodeRow, now: number = Date.now()): Conflict {
+  if (row.evict_requested_at) return 'evicted'
+  // "Looks free" is expressed on the STATUS axis alone: the override no longer
+  // has a status value of its own, so a released-by-override code is `available`
+  // and is covered here without a special case. That is what making the two
+  // orthogonal bought.
+  const main = stateLabel(row)
+  const looksFree =
+    main === 'unused' || main === 'released' || main === 'sign-out recorded'
+  if (looksFree && livenessOf(row, now) === 'live') return 'live-but-available'
+  return 'none'
+}
+
+/**
+ * The override, as a note BESIDE the status badge — never as the status.
+ *
+ * Returns '' when there is no override, which is the common case. This is the
+ * only place the console turns `force_state`/`evict_requested_at` into words, so
+ * there is one vocabulary and it cannot drift from `conflictOf`.
+ */
+export function overrideNote(row: CodeRow): string {
+  if (row.evict_requested_at) return 'released · cutting off device'
+  if (row.force_state === 'released') return 'released by override'
+  return ''
+}
+
+/** The one-line explanation for a conflict marker, or '' when there is none. */
+export function conflictText(row: CodeRow, now: number = Date.now()): string {
+  switch (conflictOf(row, now)) {
+    case 'evicted':
+      return 'Cut off at the next check-in'
+    case 'live-but-available':
+      return 'Reads free, but a device checked in recently'
+    case 'none':
+      return ''
+  }
 }

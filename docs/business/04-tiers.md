@@ -549,10 +549,12 @@ extends the same treatment to the paid tier, and adds one new guard:
 - The **UoT endpoint** is asserted two-sided: `seed-pb.py` advertises `uot_port`
   for `strike`, and the client declares the key that carries it.
 - **§27 (new)** holds the console's tier dropdown to the hub's actual tier rows.
-  The console's list is a **hardcoded literal** in `server/console/src/views/Codes.vue`,
-  not a read of `tier_configs` — so a tier can exist on the hub and be
-  unmintable, or be offered and unresolvable. That is exactly the two-sources-of-
-  truth defect [`../operate/OPS.md`](../operate/OPS.md) documents for hooks.
+  The console's list is **not a literal**: it is read from `tiers.list` in the one
+  shared store `server/console/src/views/codes/meta.ts`, and §27 asserts both
+  halves — that the read exists, and that the mint form's options are bound to it.
+  A hardcoded list would make a tier exist on the hub and be unmintable, or be
+  offered and unresolvable: exactly the two-sources-of-truth defect
+  [`../operate/OPS.md`](../operate/OPS.md) documents for hooks.
 - **§23(g)** — the prose check — is extended to the paid tier, because the
   existing guard greps `README.md` for `tc caps (1/100/200 Mbps)`, which this
   change invalidates. A guard that greps a literal is doing its job when a

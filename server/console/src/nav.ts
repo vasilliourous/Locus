@@ -1,92 +1,91 @@
-// Navigation state for the console.
+// The console's navigation model.
 //
-// WHY THIS EXISTS. The console has no router and should not grow one: five
-// destinations, no URL contract to honour (the token lives in sessionStorage, so
-// every page is a fresh hash-less load anyway), and a router would be more
-// moving parts than the thing it routes. The first version of cross-page
-// navigation was a `window` CustomEvent — "chrysalis:open-worklist" — dispatched
-// by the Dashboard and caught in App.vue, because the Dashboard is not the
-// parent of Codes and threading a callback would have coupled two pages that
-// should not know about each other.
+// WHAT THIS FILE IS NOW, AND WHAT IT WAS. It used to be a command bus: a
+// `reactive` object holding the current page, the settings section, a filter
+// object and a request counter, plus three functions (`go`, `openCodes`,
+// `openSettings`) that pages called to move each other around. The comments in it
+// explained, at length, why a CustomEvent had been replaced by that object, and
+// then why the object needed a `codeRequestSeq` so that asking for the same filter
+// twice still applied it.
 //
-// That event worked and was the wrong shape: it could only express ONE
-// navigation (open the worklist with N days), it needed a matching removeEventListener
-// to avoid leaking a handler per mount, and once a second page wanted to open a
-// third with a filter, the event would have needed a union type of every
-// destination's parameters. A `reactive` object is the same amount of machinery
-// and has none of those limits — so the event is gone.
+// Every one of those mechanisms existed to compensate for the fact that the URL
+// did not hold the state. Once it does (`router.ts`), they are all dead weight —
+// and worse than dead: `nav.codeFilter` was a second copy of the query that could
+// disagree with the page's own refs, which is how F5 lost a filter. So the bus is
+// gone, and this file is what a nav model should be: the list of destinations and
+// how they group.
 //
-// The filter travels WITH the destination rather than as a separate ref the
-// target page has to watch, because "open Codes filtered to the renewals due in
-// 7 days" is one intent, and splitting it into two pieces of state is what made
-// the old version need a watcher plus a mount path.
+// ONE ITEM PER JOB. The old sidebar kept four top-level items by hiding Tiers,
+// Releases and Maintenance behind a Settings item — with a sub-menu that appeared
+// only while Settings was open, PLUS a segmented control inside Settings
+// re-expressing the same three. Two mechanisms, one job, and neither said where
+// you were. Tiers/Releases/Maintenance are three different jobs on three different
+// objects; they are now three destinations under one heading. Six items in two
+// groups is cheaper to scan than four items plus a conditional sub-tree.
 
-import { reactive } from 'vue'
+import type { RouteName } from './router'
+import { route, navigate } from './router'
 
-export type Page = 'overview' | 'codes' | 'distribution' | 'settings'
+export interface NavItem {
+  name: RouteName
+  label: string
+  /** Shown under the label in the palette and as a title, never in the sidebar. */
+  hint: string
+}
 
-/** Which Settings section is showing. Settings is one nav item, three surfaces. */
-export type SettingsSection = 'tiers' | 'releases' | 'maintenance'
+export interface NavGroup {
+  label: string
+  items: NavItem[]
+}
 
 /**
- * A request to look at codes. Every field is a `codes.list` filter, so the
- * Codes page applies it directly rather than interpreting a bespoke mode.
+ * The destinations, in reading order.
  *
- * `expiring_within_days` is the renewal worklist (0 = every code); `status` is
- * one of codes.list's four; `query` is free text matching code, label, notes or
- * middleman.
+ * `today` is first because it is the entry point of a session; `fleet` is last
+ * because it holds the changes you make rarely and deliberately. The order is
+ * the only thing grouping here — there is no nesting, so there is no hidden
+ * sub-menu to discover.
  */
-export interface CodeFilter {
-  query?: string
-  status?: '' | 'available' | 'redeemed' | 'expired' | 'suspended'
-  tier?: string
-  middleman?: string
-  expiring_within_days?: number
-  /** Which tab of the Codes page: the workbench or the renewal queue. */
-  view?: 'all' | 'worklist'
+export const NAV: NavGroup[] = [
+  {
+    label: 'Work',
+    items: [
+      { name: 'today', label: 'Today', hint: 'counts, the renewal queue and what needs attention' },
+      { name: 'codes', label: 'Codes', hint: 'find, renew and fix a code' },
+      { name: 'renewals', label: 'Renewals due', hint: 'every renewal code by urgency' },
+      { name: 'distribution', label: 'Distribution', hint: 'per-middleman stock and collections' },
+    ],
+  },
+  {
+    label: 'Fleet',
+    items: [
+      { name: 'fleet/tiers', label: 'Tiers', hint: 'connection settings every client receives' },
+      { name: 'fleet/releases', label: 'Releases', hint: 'which build the fleet is offered' },
+      { name: 'fleet/maintenance', label: 'Maintenance', hint: 'import codes, trigger links, export' },
+    ],
+  },
+]
+
+/** Flat list, for the palette. */
+export const NAV_FLAT: NavItem[] = NAV.flatMap((g) => g.items)
+
+/**
+ * Which sidebar item is active for a location.
+ *
+ * `/codes/<code>` is the Codes destination plus a selection, so it highlights
+ * Codes. Kept as a function rather than comparing `item.name === route.name`
+ * everywhere, because that comparison is where "the selected code un-highlights
+ * its own page" bugs come from.
+ */
+export function activeName(): RouteName {
+  return route.name
 }
 
-interface NavState {
-  page: Page
-  section: SettingsSection
-  /**
-   * Bumped on every request. The Codes page watches this rather than the filter
-   * object, so asking for the SAME view twice (e.g. clicking the same Overview
-   * card again) still re-applies it — a deep watcher on an unchanged object
-   * would fire zero times and the click would silently do nothing.
-   */
-  codeRequestSeq: number
-  codeFilter: CodeFilter
-}
-
-export const nav = reactive<NavState>({
-  page: 'overview',
-  section: 'tiers',
-  codeRequestSeq: 0,
-  codeFilter: { view: 'all' },
-})
-
-/** Go to the Codes page, applying `filter`. Every call re-applies, by design. */
-export function openCodes(filter: CodeFilter = {}) {
-  nav.codeFilter = { view: 'all', ...filter }
-  nav.codeRequestSeq++
-  nav.page = 'codes'
-}
-
-/** Go to a Settings section. Re-selecting the current section is a no-op. */
-export function openSettings(section: SettingsSection) {
-  nav.section = section
-  nav.page = 'settings'
-}
-
-export function go(page: Page) {
-  // Re-clicking the active destination should not reset its state: the operator
-  // may have typed a search and mis-clicked. Only a genuine destination CHANGE
-  // clears the Codes filter, so returning to Codes from elsewhere starts fresh
-  // rather than resurrecting a filter from five minutes ago.
-  if (page === 'codes' && nav.page !== 'codes') {
-    nav.codeFilter = { view: 'all' }
-    nav.codeRequestSeq++
-  }
-  nav.page = page
+/** Navigate, as a plain function so templates can call it without a helper. */
+export function go(name: RouteName): void {
+  // Re-selecting the destination you are on must not reset its filters: the
+  // operator may have typed a search and mis-clicked. `navigate` with no opts
+  // would CLEAR the query, so an active item is a no-op here.
+  if (name === route.name) return
+  navigate(name)
 }

@@ -7,7 +7,14 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview"
+    "typecheck": "tsc --noEmit",
+    "preview": "vite preview",
+    "verify:mock": "node verify/mock-hub.mjs",
+    "verify:serve": "vite --config verify/vite.verify.config.ts",
+    "verify:drive": "node verify/drive.mjs",
+    "verify:workflows": "node verify/workflows.mjs",
+    "verify:audit": "node verify/audit.mjs",
+    "verify:visual": "node verify/visual.mjs"
   },
   "dependencies": {
     "vue": "^3.4.0"

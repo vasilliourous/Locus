@@ -226,9 +226,10 @@ pass for Free, by definition.
 > pricing honesty: a card printed in advance is worth its full term whenever it
 > is sold, so a batch can be printed before a term starts without decaying.
 >
-> **This is also the console's default.** `Codes.vue`'s mint form defaults to
-> `genTermDays = 70`, so the term pass is what the operator gets without thinking
-> about it — which is the intended default ([`07-billing.md`](07-billing.md) §7.3).
+> **This is also the console's default.** The mint form
+> (`views/codes/CreateDrawer.vue`) initialises `termDays = ref(70)`, so the term
+> pass is what the operator gets without thinking about it — which is the
+> intended default ([`07-billing.md`](07-billing.md) §7.3).
 
 ---
 

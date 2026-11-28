@@ -339,6 +339,58 @@ collections = [
         # reinstated student must not stay on a page explaining a withdrawal that
         # has been undone.
         {"name":"suspended_reason","type":"text"},
+        # ── Override: an operator's decision, stored separately from status ──
+        #
+        # THESE FOUR COLUMNS BELONG TO THE OVERRIDE FEATURE, and they are NOT a
+        # second status field. `status` stays DERIVED (see `codes.list`); an
+        # override is an INPUT the derivation reads at highest precedence.
+        # Removing an override row therefore restores the prior derived state
+        # exactly, which is what makes undo a delete rather than a re-derivation.
+        #
+        # `force_state` — optional explicit main state. Today the only value used
+        # is "released" (a release that must not be re-derived into "available"
+        # while the record still carries a `first_seen_at`). NULL means "no
+        # override", i.e. ordinary derivation.
+        #
+        # `evict_requested_at` / `evict_reason` — a release that must reach a
+        # LIVE client. `evict_requested_at` is the WHOLE predicate: heartbeat.pb.js
+        # refuses while it is set, and activation.pb.js does NOT read it (a
+        # released code must still be activatable by the next holder — see the
+        # C1 note in docs/reference/OVERRIDES.md). `evict_reason` is the operator's
+        # sentence, shown verbatim to the student, cap 200 chars like `codes.kick`.
+        #
+        # `override_id` — the idempotency key. A retried console action reuses it
+        # and is a no-op; nothing counts on this column being unique in the DB
+        # (PocketBase 0.22 only indexes single fields), the handler dedupes.
+        #
+        # DELIBERATELY NOT a `suspended` write: `suspended` is read by
+        # activation.pb.js, so "evict" expressed as `suspended` would refuse the
+        # NEXT holder too and break the resale that releasing is for.
+        {"name":"force_state","type":"text"},
+        {"name":"evict_requested_at","type":"date"},
+        {"name":"evict_reason","type":"text"},
+        {"name":"override_id","type":"text"},
+    ]),
+    # ── Overrides: append-only, hard-fail audit ──
+    #
+    # `code_events` is best-effort (logEvent swallows its exception), so it can
+    # record an action that did not happen. An override needs the opposite
+    # guarantee: if the row cannot be written, the action must NOT apply. Hence a
+    # separate collection whose insert is in the critical path.
+    #
+    # No updateRule/deleteRule: append-only at the PocketBase rule level, the
+    # cheapest immutability available.
+    ("code_overrides", [
+        {"name":"code","type":"text","required":True},
+        {"name":"override_id","type":"text","required":True},
+        {"name":"aspect","type":"text","required":True},
+        {"name":"from_value","type":"text"},
+        {"name":"to_value","type":"text"},
+        {"name":"reason","type":"text","required":True},
+        {"name":"actor","type":"text","required":True},
+        {"name":"observed_state","type":"text"},
+        {"name":"observed_at_override","type":"date"},
+        {"name":"outcome","type":"text","required":True},
     ]),
     # ── device_bindings / device_identities — REMOVED ──
     #
@@ -417,7 +469,21 @@ rules = {
     "deleteRule": "@request.auth.admin = true",
 }
 
+# Per-collection rule overrides. Only `code_overrides` differs: it is an audit
+# log, so append-only is enforced by the rules themselves rather than by a
+# convention nobody can see. A null rule denies everyone, including the admin.
+rules_by_collection = {
+    "code_overrides": {
+        "listRule": "@request.auth.admin = true",
+        "viewRule": "@request.auth.admin = true",
+        "createRule": "@request.auth.admin = true",
+        "updateRule": None,
+        "deleteRule": None,
+    },
+}
+
 for name, schema in collections:
+    coll_rules = rules_by_collection.get(name, rules)
     # Check if collection already exists
     existing = api("GET", "/api/collections")
     found = any(c.get("name") == name for c in existing.get("items", []))
@@ -440,10 +506,23 @@ for name, schema in collections:
             else:
                 log(f"    ✗ could not add {', '.join(f['name'] for f in missing)}: {resp.get('message', resp)}")
                 SCHEMA_ERRORS += 1
+        # Rules are reconciled too, and only for collections that override them.
+        # Without this, a `code_overrides` created by an earlier build kept the
+        # permissive default (update/delete allowed), so the append-only
+        # guarantee would be a comment rather than a rule.
+        if name in rules_by_collection:
+            drift = {k: v for k, v in coll_rules.items() if cur.get(k) != v}
+            if drift:
+                resp = api("PATCH", f"/api/collections/{name}", drift)
+                if resp.get("id"):
+                    log(f"    ~ rules reconciled: {', '.join(drift)}")
+                else:
+                    log(f"    ✗ could not reconcile rules {', '.join(drift)}: {resp.get('message', resp)}")
+                    SCHEMA_ERRORS += 1
         continue
     # Create it
     body = {"name": name, "type": "base", "schema": schema}
-    body.update(rules)
+    body.update(coll_rules)
     resp = api("POST", "/api/collections", body)
     if resp.get("id"):
         log(f"  ✓ {name} created")

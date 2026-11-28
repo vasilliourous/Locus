@@ -444,6 +444,29 @@ routerAdd("POST", "/api/activate", function(e) {
         // one field, written once, and `alreadyRedeemed` above is the only reader
         // — there is no device, no fingerprint and no index to keep in step.
         rec.set("activated_at", new Date().toISOString());
+        // ── A successful activation CONSUMES the override ──
+        //
+        // A released code arrives HERE, at the first-redemption arm, because
+        // `activated_at` is null. Its `evict_requested_at` was set to cut off the
+        // PREVIOUS holder. If this save left that predicate in place, the new
+        // holder's very next heartbeat would be refused — the resale would appear
+        // to work for one beat and then cut off the student who just paid. That is
+        // a worse bug than the one the release was fixing.
+        //
+        // Written in the SAME save as `activated_at`, for the same reason
+        // `first_seen_at` is: two writes would be two chances to record only one.
+        //
+        // `force_state` is cleared too — the code has a holder again, so there is
+        // nothing left for it to pin. `first_seen_at` is deliberately NOT touched
+        // (see below): the code has been issued before, and that marker must
+        // survive a re-issue.
+        //
+        // Through `setIfPresent`: these columns are absent on a hub that has not
+        // been re-seeded, and PocketBase silently discards a write to an undefined
+        // field rather than failing the save.
+        setIfPresent(rec, "force_state", "");
+        setIfPresent(rec, "evict_requested_at", null);
+        setIfPresent(rec, "evict_reason", "");
         // The FIRST-redemption marker, written once and never overwritten.
         //
         // `activated_at` cannot answer "is this code already someone's?" after
@@ -491,6 +514,21 @@ routerAdd("POST", "/api/activate", function(e) {
         // released build might send the request.
         var resp = {code:200, message:"Activation successful", tier:rec.getString("tier"), device_fingerprint:fp};
         resp.expires_at = expiryForWire(rec);
+        // ── Informational only: was this code released by an override? ──
+        //
+        // ADDITIVE, and it REFUSES NOBODY. A released code must stay activatable
+        // by the next holder — that is what releasing is for — so this key exists
+        // only so that a support conversation about "my code changed hands" has an
+        // answer. Old clients ignore it.
+        //
+        // Deliberately NOT a read of `evict_requested_at` in a way that could
+        // grow a refusal: the eviction is the heartbeat's alone
+        // (heartbeat.pb.js), because only the device that already holds the code
+        // should be cut off, and activation cannot tell the holder from the buyer.
+        if (String(rec.get("force_state") || "") === "released"
+                || String(rec.get("evict_requested_at") || "")) {
+            resp.released_by_override = true;
+        }
         if (cfgRec) {
             // The tier config is passed through VERBATIM, so the UoT endpoint
             // reaches the client under its stored key "uot_port". That key is a

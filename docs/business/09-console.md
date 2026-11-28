@@ -15,6 +15,57 @@ panel" description.
   discriminator, in `server/pb_hooks/admin_console.pb.js`.
 - **Auth:** `ADMIN_API_TOKEN` in the JSON body or the `X-Admin-Token` header.
 
+## 9.0 How the console is organised (the URL redesign)
+
+The console holds its state **in the URL**, not in a `reactive` object. Every
+destination has a path, every selected code has an address, and every filter is a
+query parameter. This is what makes the list refresh-safe, the back button work,
+and a code linkable in a support thread. The router is `console/src/router.ts` —
+a ~200-line module over the History API, **not a dependency**; Caddy already
+served `/index.html` for unknown paths under `/admin/`, so the server needed no
+change.
+
+| Path | Screen | What it is |
+|---|---|---|
+| `/` | **Today** | Counts, the inline renewal queue, the attention checks, activity |
+| `/codes` | **Codes** | The table. Filters are query params: `?q=`, `?status=`, `?tier=`, `?m=`, `?due=` |
+| `/codes/<CODE>` | Codes + **inspector** | That code, in the right-hand rail |
+| `/renewals` | **Renewals due** | Every renewal code as a board, by urgency |
+| `/distribution` | **Distribution** | Per-middleman stock and collections |
+| `/fleet/tiers` | **Tiers** | Connection settings every client receives |
+| `/fleet/releases` | **Releases** | Which build the fleet is offered |
+| `/fleet/maintenance` | **Maintenance** | Import, one-shot links, export |
+
+**The code is the primary object.** Selecting a code fills a persistent
+inspector beside the table; the list never covers and the panel never moves. The
+inspector has no tabs — identity, verdict, the four facts (expiry, term, last
+seen, middleman), the editable name/plan/middleman, the actions, the history and
+the irreversible operations are one scrolling column, in the order they are
+needed.
+
+`?` toggles a **help rail** with the reasoning for the screen ("why nothing
+prompts a renewal", "why lapsed is not the urgent column"). This is where the
+long explanations live, instead of permanently under a table — the prose was
+never the problem, its placement was.
+
+### 9.0.1 Auth: one operator, by decision
+
+**This console has exactly one operator and no identity model.** That is a
+recorded decision, not an omission:
+
+- One shared `ADMIN_API_TOKEN`, compared against an environment variable.
+- `sessionStorage`, never `localStorage` (a shared machine must not keep the
+  session), and the token is never in the built bundle.
+- There is **no** per-operator token, no rate limit, and no `actor` on the audit
+  trail — every `code_events` row is authored by "the console".
+
+The consequence is stated plainly so nobody assumes otherwise: **the audit trail
+cannot say WHO renewed a code or released it.** If a second person ever needs
+access, this section must change first — named tokens, a hashed comparison, a
+rate limit, and `actor` on `logEvent` — because the current model makes "who did
+this" permanently unanswerable rather than merely inconvenient.
+
+
 ## 9.1 Actions that exist today (verified)
 
 | Group | Actions |
@@ -83,10 +134,12 @@ Worth recording, because it bounds what the operator can delegate:
   notifies anyone that a student is due; the hub holds no identity and therefore
   no contact route
   ([`redesign/01-identity-without-pii.md`](redesign/01-identity-without-pii.md) §1.2).
-  The console answers it the only way it can: a live count on the **Codes** nav
-  item (codes ending within 7 days), a **Renewals due** view sorted most-urgent
-  first, and an Overview check for codes that lapsed without being noticed. That
-  is still the largest operational risk in the design
+  The console answers it the only way it can: a live count on the **Renewals
+  due** and **Today** nav items (codes ending within 7 days), the queue shown as
+  ROWS on **Today** so it can be worked without leaving the landing page, a
+  **Renewals due** board that arranges every code by urgency (lapsed · ≤7d ·
+  8–30d · later · stopped), and a Today check for codes that lapsed without being
+  noticed. That is still the largest operational risk in the design
   ([`14-risks.md`](14-risks.md)) — a queue only works if somebody opens it.
 - **No free-tier quota control.** The allowance is enforced client-side and
   is not configurable from here.

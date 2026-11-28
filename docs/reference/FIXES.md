@@ -24,6 +24,128 @@ commercial gaps, [`../business/17-not-built.md`](../business/17-not-built.md).
 
 ---
 
+## THE FOURTH TIME: deploy.sh COULD NOT TELL THAT A HOOK WAS AHEAD OF ITS SCHEMA (2026-11-28)
+
+**What was found.** The three-column drift recorded below already had an entry —
+"THE THIRD REPORT OF THE SAME DEFECT" (2026-11-27) — which ended by saying the
+durable fix was **not** "add the column", because that "is right for this host and
+returns the moment the next hub drifts". That reasoning was correct and had not
+been acted on. On 2026-11-28 the live `codes` collection still lacked
+`last_seen_at`, `first_seen_at`, `first_seen_fingerprint` and `suspended_reason`,
+so:
+
+- every heartbeat's liveness write was silently discarded, so the console's
+  liveness column read `unknown` for every code, in production, always;
+- `suspended_reason` was dropped, so a kicked student saw the generic sentence
+  instead of the operator's words;
+- an eviction could never fire, because `observed_state` was permanently `unknown`.
+
+**Why it kept happening.** `deploy.sh` ships hooks and has never shipped schema. A
+hook can therefore land ahead of its columns, and PocketBase **accepts and then
+discards** a write to an undefined field, so nothing fails. The hub had been
+"updated piecemeal for months", exactly as the third report put it.
+
+**The structural fix — this is the part that stops the recurrence.** `deploy.sh`
+now runs a **schema preflight** before uploading any hook, and **refuses to
+deploy** if a hook writes a field the live collection does not declare. It runs in
+`--check` too, so a dry run tells the truth. `ALLOW_SCHEMA_DRIFT=1` overrides it
+for a known reason, deliberately loudly.
+
+The checker is `server/scripts/check-hook-schema-drift.py`: it reads the hooks on
+the host, extracts every field they write (`.set("x"` and `setIfPresent(r, "x"`,
+stripping comment lines so a guard cannot read its own prose), and diffs that
+against the live `codes` schema over the admin API. Observed failing before it was
+kept: run against the live hub before the migration it named all four missing
+columns; after it, `OK — every field the hooks write exists in the live schema
+(58 names checked)`.
+
+`server/scripts/seed-override-schema.py` is the matching **additive** migration —
+it adds columns and writes no records, precisely because `seed-pb.py` would also
+reset `update_config` (see the note in `add-signature-columns.py`, which exists
+for the same reason). Applied to the live hub on 2026-11-28: all four columns
+added, `codes` row count unchanged at 11, and a live heartbeat then wrote
+`last_seen_at` for the first time.
+
+**Rule kept.** A deploy that can make a schema claim must verify the schema, or
+the claim is unverified. Silence is the failure mode here, not an error: nothing
+throws, nothing logs, the write simply does not happen.
+
+## RELEASING A CODE THAT WAS STILL IN USE LEFT THE HUB AND THE CLIENT DISAGREEING FOREVER (2026-11-28)
+
+**What broke.** `codes.unbind` cleared `activated_at` with no liveness check, and
+`heartbeat.pb.js` never read `activated_at`. So an operator who released a code a
+device was still using produced two records that disagreed **indefinitely**: the
+console showed the code free, the live client's next beat returned `200`, and it
+kept serving a code that could be sold to someone else. Nothing evicted it and
+nothing said so. The console offered no way to see that it had happened.
+
+**The second half, found while fixing the first.** The live hub's `codes`
+collection has 15 columns and **four of the ones the hooks write are absent from
+it**: `last_seen_at`, `suspended_reason`, `first_seen_at`,
+`first_seen_fingerprint`. PocketBase silently discards a write to an undefined
+field, so the heartbeat has been stamping liveness into nothing since it was
+added, and the console's liveness column renders `unknown` for every code in
+production. The deployed `heartbeat.pb.js` contains no reference to
+`last_seen_at` at all — so it is both absent from the schema and not written by
+the deployed hook.
+
+**What fixed it.** `codes.release` (with `codes.unbind` kept as an alias) now
+records an override row, pins the derived status with `force_state`, and — when
+the observation is `live` or `stale` — sets `evict_requested_at`. The heartbeat
+refuses on that predicate before the suspension check. The console gained a
+ReleaseDrawer whose confirmation is computed from `dry_run`, a conflict marker
+for observed-vs-main disagreement, and `codes.reactivate` to undo.
+
+**The rule it produced, and it is the expensive part.** An eviction must NOT be
+expressed as `codes.suspended = true`. That column is read by
+`activation.pb.js` (:351, :381), so a suspension-shaped eviction **refuses the
+next holder** and breaks the resale that releasing exists for. The eviction
+response still carries `suspended: true` **in the body**, because deployed
+clients decide reversibility with a substring test and a new status word sends
+them down the credential-deleting branch — but the stored predicate is
+`evict_requested_at` alone. Both halves are load-bearing and neither should be
+"tidied". Guarded by §66 (`override-consistency.js`), which was observed failing
+against both the `suspended`-write and the wrong-ordering variants before it was
+kept. See `docs/reference/OVERRIDES.md`.
+
+**Still inert on the live host** until `seed-pb.py` runs there: it adds the four
+new columns, the four missing ones, and `code_overrides`. Deploying the hooks
+without the schema is exactly the `unbound_at` failure this log already records.
+**And the first implementation of this feature was wrong in four ways**, recorded
+because the mistakes are the reusable part:
+
+1. It made the override a FIFTH status value. `status` is a four-value partition
+   (`console-card-consistency.js` asserts the buckets sum to the total), so
+   `?status=available` stopped listing released stock, released codes vanished
+   from every facet count, and `dashboard` disagreed with the list. The override
+   is now orthogonal — a separate field rendered beside the badge.
+2. Two guards written for (1) were **blind**: one matched the column name
+   `force_state` against code that uses the local `forceState`; the other checked
+   a literal init map that a dynamic ternary grows at runtime. Both were shown to
+   pass against the real bug, which is the one thing a guard may not do.
+3. A re-sold code **evicted its new holder**. Activation's first-redemption arm
+   never cleared `evict_requested_at`, so the buyer activated and was refused at
+   their next heartbeat — worse than the bug being fixed.
+4. `codes.delete` told the operator to "Release it first" and then stopped
+   protecting the row, so the guidance led to destroying the record that a code
+   was ever sold. It now refuses on "was ever issued".
+5. **The eviction permanently locked the student out.** The refusal message said
+   "This code was released by your provider — …", which does not contain
+   "suspended". The deployed client takes its refusal reason from the JSON
+   `message` field and `is_suspension` is a substring test, so it took the
+   branch that `stop()`s the tunnel and calls `record_refusal()` — **deleting the
+   credential**. The JSON `suspended: true` flag I was relying on is invisible to
+   `classify_response`. Verified by running the real predicate, not by reading the
+   comment that claimed it worked. The message now leads with the frozen
+   `Account suspended —` prefix. Guard 9 asserts it, and also asserts the client
+   still classifies by `message`.
+6. A double release returned `"That code has not been used yet"` — false, for a
+   code that had been sold, and it read like a bug to a second operator. Now a
+   truthful no-op. Releases also carry a `claim_token` so a decision made about a
+   stale row is refused (409) rather than applied.
+
+---
+
 ## A FRESH DEPLOY ON A WIPED HOST SILENTLY DESTROYED EVERY LIVE ACTIVATION CODE (2026-11-27)
 
 **What broke.** The hub was rebuilt onto a blank VPS and `setup.sh` ran `seed-pb.py`
@@ -817,12 +939,13 @@ client sees an unknown status. This matters: an unknown status is `Unknown`, and
 `already_used` incident cost a fleet.
 
 **What the operator sees.** `codes.list` returns `released_pending` (same
-comparison, same parser), `CodeDetail.vue` states whether the next activation will
-succeed or be refused, and the badge reads "signed out" instead of "in term". The
-Overview's `shared` check changed meaning with the rule and was rewritten rather
-than left to reassure: since a second device is now refused, "in use in two places
-at once" is not a state a code can be in, and the honest version of the question
-is "signed out and not claimed, with term left".
+comparison, same parser), the code inspector (`views/codes/Inspector.vue`, which
+replaced `CodeDetail.vue` in the URL redesign) states whether the next activation
+will succeed or be refused, and the badge reads "sign-out recorded" instead of "in
+term". The Today `shared` check changed meaning with the rule and was rewritten
+rather than left to reassure: since a second device is now refused, "in use in two
+places at once" is not a state a code can be in, and the honest version of the
+question is "signed out and not claimed, with term left".
 
 **Guards, each observed failing** — the hook defect reinserted, watched red,
 restored:

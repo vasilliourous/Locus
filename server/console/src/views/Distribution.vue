@@ -29,7 +29,7 @@
 
 import { computed, onMounted, ref } from 'vue'
 import { call } from '../api'
-import { openCodes } from '../nav'
+import { navigate } from '../router'
 import StateBlock from '../components/StateBlock.vue'
 
 interface Middleman {
@@ -122,7 +122,7 @@ function moneyTitle(r: Middleman): string {
 }
 
 function openFor(r: Middleman, status?: string) {
-  openCodes({ middleman: r.name, status: status || '', view: 'all' })
+  navigate('codes', { middleman: r.name, status: status || '' })
 }
 </script>
 
@@ -166,7 +166,7 @@ function openFor(r: Middleman, status?: string) {
         message="A code is attributed when it is minted with a middleman name, or amended later in its detail panel."
       >
         <template #actions>
-          <button @click="openCodes({ view: 'all' })">Open Codes</button>
+          <button @click="navigate('codes')">Open Codes</button>
         </template>
       </StateBlock>
 
@@ -187,10 +187,10 @@ function openFor(r: Middleman, status?: string) {
         <tbody>
           <tr v-for="r in shown" :key="r.name">
             <td>
-              <button
-                style="border: none; background: none; padding: 0; color: var(--text); font: inherit; font-weight: 600"
-                @click="openFor(r)"
-              >
+              <!-- A name that is also a link. Given a real hit area (min 24px
+                   tall) because it is the drill-down into that middleman's codes,
+                   and it measured 20px tall with no padding. -->
+              <button class="name-link" @click="openFor(r)">
                 {{ r.name }}
               </button>
               <div class="muted" style="font-size: 11.5px">
@@ -206,7 +206,7 @@ function openFor(r: Middleman, status?: string) {
               <span v-else class="muted">0</span>
             </td>
             <td class="num">
-              <button v-if="r.due_7d" class="linkish num urgent" @click="openCodes({ middleman: r.name, view: 'worklist', expiring_within_days: 7 })">
+              <button v-if="r.due_7d" class="linkish num urgent" @click="navigate('codes', { middleman: r.name, due: 7 })">
                 {{ r.due_7d }}
               </button>
               <span v-else class="muted">0</span>
@@ -224,7 +224,7 @@ function openFor(r: Middleman, status?: string) {
               <span v-else class="muted">0</span>
             </td>
             <td class="num">
-              <button v-if="r.renewals" class="linkish num" @click="openCodes({ middleman: r.name, view: 'all' })">{{ r.renewals }}</button>
+              <button v-if="r.renewals" class="linkish num" @click="navigate('codes', { middleman: r.name })">{{ r.renewals }}</button>
               <span v-else class="muted">0</span>
             </td>
             <td class="num" :title="moneyTitle(r)">

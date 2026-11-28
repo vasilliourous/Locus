@@ -427,23 +427,34 @@ section_27() {
         # this asserts the POSITIVE that makes the negative safe: the mint form's
         # option list is assigned from the hub's `tiers.list`, so Budget is offered
         # by construction rather than by a name somebody remembered to type here.
-        #     The fetch lives on the page that OWNS the tier list (Codes.vue), and the
-        #     drawer receives it as a prop — so assert the two halves that together
-        #     make the claim true: the page reads `tiers.list`, and the drawer's
-        #     option list is bound to that prop rather than to a literal.
-        if [ -f "$CONSOLE_CREATE" ] && [ -f "$CONSOLE_CODES" ]; then
-            if grep -q "call<{ tiers: { tier: string }\[\] }>('tiers.list')" "$CONSOLE_CODES"; then
+        #     The fetch moved in the URL redesign (2026-11): it used to live on
+        #     Codes.vue and was passed down as a prop. It now lives in ONE shared
+        #     store, views/codes/meta.ts, because the same two lists feed the Codes
+        #     filter bar, the inspector's pickers and the mint/renew drawers — and
+        #     the old code refetched both on every renewal, two round-trips per
+        #     action. The assertion follows the code rather than pinning a filename:
+        #     what must stay true is that the list is READ FROM THE HUB (here) and
+        #     BOUND to the drawer's options (below), not which file does the read.
+        #
+        #     `CONSOLE_SRC`/`CONSOLE_CREATE` come from §1c, which runs earlier.
+        #     `CONSOLE_TIERS` is derived here, and MUST default safely: the
+        #     orchestrator runs under `set -u`, so an unset variable would abort the
+        #     ENTIRE run at this line rather than fail one assertion.
+        CONSOLE_TIERS="${CONSOLE_SRC:-$REPO/server/console/src}/views/codes/meta.ts"
+        CONSOLE_CREATE_F="${CONSOLE_CREATE:-${CONSOLE_SRC:-$REPO/server/console/src}/views/codes/CreateDrawer.vue}"
+        if [ -f "$CONSOLE_CREATE_F" ] && [ -f "$CONSOLE_TIERS" ]; then
+            if grep -q "call<{ tiers: TierRecord\[\] }>('tiers.list')" "$CONSOLE_TIERS"; then
                 ok "the console reads the tier list from the hub's tiers.list"
             else
                 bad "the console does not read tiers from tiers.list — the plan would be live on the hub and un-mintable"
             fi
-            if grep -qE '<option v-for="t in tiers"' "$CONSOLE_CREATE"; then
+            if grep -qE '<option v-for="t in tiers"' "$CONSOLE_CREATE_F"; then
                 ok "the mint form's options are bound to that list"
             else
                 bad "the mint form's tier options are not bound to the hub's list — a literal would offer tiers that cannot be served"
             fi
         else
-            bad "a console file §27 needs is missing (expected: views/Codes.vue and views/codes/CreateDrawer.vue)"
+            bad "a console file §27 needs is missing (expected: views/codes/meta.ts and views/codes/CreateDrawer.vue)"
         fi
         if [ -f "$THEME_TSX" ]; then
             if grep -Eq "^[[:space:]]*${BUDGET_ROW}:[[:space:]]*\{[[:space:]]*color:" "$THEME_TSX"; then

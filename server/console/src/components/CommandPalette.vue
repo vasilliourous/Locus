@@ -22,7 +22,8 @@
 
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { call } from '../api'
-import { openCodes, openSettings, go } from '../nav'
+import { navigate } from '../router'
+import { NAV_FLAT } from '../nav'
 
 export interface PaletteCode {
   id: string
@@ -44,19 +45,16 @@ const inputEl = ref<HTMLInputElement | null>(null)
 let debounce: number | undefined
 let seq = 0
 
-// Static destinations. Short and fixed on purpose: a palette is for the two
-// kinds of navigation an operator needs mid-task — "take me to the screen I
-// know exists" and "find this code" — and a static list of four is faster and
-// more predictable than searching page names.
-const DESTINATIONS = [
-  { kind: 'Page', what: 'Overview', hint: 'counts, queues and what needs attention', run: () => go('overview') },
-  { kind: 'Page', what: 'Codes', hint: 'find, renew and fix a code', run: () => openCodes({ view: 'all' }) },
-  { kind: 'Page', what: 'Renewal worklist', hint: 'codes ending within 7 days', run: () => openCodes({ view: 'worklist', expiring_within_days: 7 }) },
-  { kind: 'Page', what: 'Distribution', hint: 'per-middleman stock and collections', run: () => go('distribution') },
-  { kind: 'Page', what: 'Settings · Tiers', hint: 'connection settings clients receive', run: () => openSettings('tiers') },
-  { kind: 'Page', what: 'Settings · Releases', hint: 'publish and offer a client update', run: () => openSettings('releases') },
-  { kind: 'Page', what: 'Settings · Maintenance', hint: 'import codes, trigger links, export', run: () => openSettings('maintenance') },
-]
+// Static destinations, generated from the one nav model so a new page cannot be
+// missing from the palette. Short and fixed on purpose: a palette is for the two
+// kinds of navigation an operator needs mid-task — "take me to the screen I know
+// exists" and "find this code".
+const DESTINATIONS = NAV_FLAT.map((n) => ({
+  kind: 'Page',
+  what: n.label,
+  hint: n.hint,
+  run: () => navigate(n.name),
+}))
 
 const pages = computed(() => {
   const needle = q.value.trim().toLowerCase()
@@ -73,7 +71,10 @@ const rows = computed(() => {
       kind: 'Code',
       what: c.code,
       hint: [c.label, c.middleman, c.tier, c.status].filter(Boolean).join(' · '),
-      run: () => openCodes({ query: c.code, view: 'all' }),
+      // Open the code's INSPECTOR, not a one-row list. This was the palette's
+      // one unfinished step: it found the code, then put a list in front of it
+      // that the operator had to click through.
+      run: () => navigate('codes', { code: c.code }),
     })
   }
   return out
