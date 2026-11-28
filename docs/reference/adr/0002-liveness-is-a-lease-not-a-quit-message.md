@@ -43,7 +43,7 @@ message is wrong for most of its input space.
 
 | Bound | Value | Derivation |
 |---|---|---|
-| lease (live) | 2 h 16 min | `MAX_INTERVAL` 2 h × 1.1 jitter + 15 s timeout + 60 s retry slack |
+| lease (live) | 2 h 14 min | `MAX_INTERVAL` 2 h × 1.1 jitter + 15 s timeout + 60 s retry slack = 2 h 13 min 15 s, rounded up |
 | stale | 7 days | the client's `GRACE_PERIOD` |
 
 ## Why the lease is not shorter
@@ -56,7 +56,7 @@ silence, not by the fastest a demo could look.
 
 ## Consequences
 
-* `kill -9` is reflected as `stale` within **≤ 2 h 16 min of last beat**, with no
+* `kill -9` is reflected as `stale` within **≤ 2 h 14 min of last beat**, with no
   message. This is stated as the measured bound, not a tighter aspiration,
   because a tighter bound would require beating every 5 minutes forever against
   a 1-per-10s-per-IP Caddy limit — a polling storm for a diagnostic operators

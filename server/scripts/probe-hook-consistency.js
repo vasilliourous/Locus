@@ -191,8 +191,23 @@ const NOW = Date.now()
 const iso = (msAgo) => new Date(NOW - msAgo).toISOString()
 const MIN = 60 * 1000
 
-const LEASE_MS = ((2 * 60 + 16) * 60) * 1000
-const STALE_MS = 7 * 24 * 60 * 60 * 1000
+// The lease and the stale bound, taken from the DERIVATION rather than restated.
+//
+// These were literals (`2h16m`), which made this file a FIFTH copy of a number
+// that already lived in the hook, the console and the Overview — and it was the
+// copy nobody grepped when the lease was corrected to 2h14m on 2026-11-28. §58
+// caught it immediately ("at the lease → stale, expected live"), which is the
+// guard doing its job, but the durable fix is not to retype it: it is to read the
+// hook's own value, so this file cannot disagree with the code it drives.
+function hookSeconds(name) {
+  const m = new RegExp(`var\\s+${name}\\s*=\\s*([0-9\\s*+]+);`).exec(src)
+  if (!m) throw new Error(`cannot read ${name} from session_probe.pb.js`)
+  // Plain integer arithmetic, evaluated. Anything else is a shape change this
+  // guard must not silently paper over.
+  return Function(`"use strict"; return (${m[1]});`)()
+}
+const LEASE_MS = hookSeconds('LEASE_SECONDS') * 1000
+const STALE_MS = hookSeconds('STALE_SECONDS') * 1000
 
 const DEVICE = 'a1b2c3d4e5f6'
 

@@ -48,6 +48,12 @@ section_53() {
         retain_report=$(cd "$REPO" && python3 - <<'PY'
 import os
 import re
+import sys
+
+# A guard that BANS a string must be able to NAME it to explain itself.
+# `guard_self` is the one rule for that, shared with §4 and §8.
+sys.path.insert(0, os.path.join("server", "scripts", "lib"))
+from guard_self import is_explanation
 
 def read(path):
     try:
@@ -443,7 +449,12 @@ else:
 # The repository template's own `Documentation=` URL is included on purpose — it
 # is a link an operator clicks, and a 404 there is the same defect as a failing
 # command.
-BAD_REPO = "vasilliourous/Chrysalis"
+#
+# BUILT, NOT SPELLED — the same reason §4's pattern is. A literal assignment here
+# is a CODE line carrying the banned string, which `is_explanation` deliberately
+# does not license, so this guard would report its own `BAD_REPO` line and nothing
+# could turn it off. Two pieces, joined; do not "simplify" this back.
+BAD_REPO = "vasilliourous/" + "Chrysalis"
 SCAN_SUFFIXES = (".md", ".sh", ".py", ".js", ".service", ".yml", ".json", ".toml", ".rs")
 bad_repo_hits = []
 for root, dirs, files in os.walk("."):
@@ -452,10 +463,6 @@ for root, dirs, files in os.walk("."):
                 "archive", "history", ".hubtmp")]
     for fn in files:
         if not fn.endswith(SCAN_SUFFIXES):
-            continue
-        # The checker is excluded: this paragraph HAS to name the bad string to
-        # explain it, so scanning itself would make the guard permanently red.
-        if fn == "check-consistency.sh":
             continue
         p = os.path.join(root, fn).replace(os.sep, "/")
         # NOT `.lstrip("./")`. That strips CHARACTERS, not a prefix, so a dotfile
@@ -471,8 +478,18 @@ for root, dirs, files in os.walk("."):
         except OSError:
             continue
         for n, line in enumerate(body.splitlines(), 1):
-            if BAD_REPO in line:
-                bad_repo_hits.append((p, n, line.strip()))
+            if BAD_REPO not in line:
+                continue
+            # THE GUARD NAMES THE STRING IT BANS, so it has to be able to read
+            # its own explanation. The exemption used to be `if fn ==
+            # "check-consistency.sh"` — correct until the sections were split
+            # into `server/scripts/checks/`, after which this guard reported its
+            # own paragraph HERE and nowhere else. `guard_self` is the shared
+            # rule: a COMMENT in the checks directory may name a banned string,
+            # a code line may not. See its docstring.
+            if is_explanation(p, line):
+                continue
+            bad_repo_hits.append((p, n, line.strip()))
 if bad_repo_hits:
     for p, n, line in bad_repo_hits[:6]:
         print("BAD\t%s:%d names `%s`, which is not a repository." % (p, n, BAD_REPO))
@@ -542,15 +559,24 @@ PY
             bad "the retained-name check CRASHED - a crashing guard reads like a passing one:"
             printf '%s\n' "$retain_report" | sed 's/^/        /' >&2
         else
+            # PROCESS SUBSTITUTION, NOT A PIPELINE, and not a heredoc.
+            #
+            # The original was `done <<EOF … EOF`, which takes the loop's stdin
+            # from the heredoc and swallowed the caller's. It hung §28 in the
+            # same shape and reported `interactive_prompt` with no TTY.
+            #
+            # The obvious repair, `printf … | while read`, is WRONG: a pipeline
+            # runs the loop in a subshell, so each `bad` increments a copy of the
+            # failure state and this section would print BAD lines while exiting
+            # 0 — process substitution keeps the loop in the current shell.
             while IFS="$(printf '\t')" read -r _kind message; do
+                [ -n "$_kind" ] || continue
                 case "$_kind" in
                     OK)  ok "$message" ;;
                     BAD) bad "$message" ;;
                     *)   bad "retained-names: $message" ;;
                 esac
-            done <<EOF
-$retain_report
-EOF
+            done < <(printf '%s\n' "$retain_report")
         fi
     fi
 

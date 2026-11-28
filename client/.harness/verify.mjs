@@ -50,7 +50,8 @@ const measure = () =>
       // The ink, as a fraction of each box, measured from the artwork.
       glyphInkRatio: 222.77 / 240,
       wordInkRatio: 46.67 / 47,
-      slot: document.querySelector('.the-logo > div').getBoundingClientRect().width,
+      slot: document.querySelector('.the-logo > div').getBoundingClientRect()
+        .width,
     }
   })
 

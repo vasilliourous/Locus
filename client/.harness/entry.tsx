@@ -55,7 +55,9 @@ const Frame = ({
   h: number
   children: React.ReactNode
 }) => (
-  <div style={{ width: w, height: h, background: '#1A1B26', overflow: 'visible' }}>
+  <div
+    style={{ width: w, height: h, background: '#1A1B26', overflow: 'visible' }}
+  >
     {children}
   </div>
 )

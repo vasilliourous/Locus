@@ -6,7 +6,8 @@ status:      live
 authoritative-for: the free-tier tunnel used for hub calls and plan establishment on a network that
                    blocks the hub by name, and what is not yet proven about it
 verified-against: client/src-tauri/src/chrysalis/activation_tunnel.rs, client/src-tauri/src/chrysalis/tier.rs,
-                  client/src-tauri/src/chrysalis/hub/client.rs, client/src-tauri/build.rs
+                  client/src-tauri/src/chrysalis/hub/client.rs, client/src-tauri/src/chrysalis/probe.rs,
+                  client/src-tauri/build.rs
 ```
 
 ## 1. What it is
@@ -17,8 +18,19 @@ no discovery handshake and no hub round-trip to form, which is the whole point: 
 is the one route available to a device that cannot reach the hub's name.
 
 Split scope: it carries **this process's hub-bound traffic only** — activation,
-heartbeat, the update download, and the plan tunnel's own outbound. It never
-carries a student's traffic; user traffic goes through the plan tunnel.
+heartbeat, the session probe, the update download, and the plan tunnel's own
+outbound. It never carries a student's traffic; user traffic goes through the
+plan tunnel.
+
+**The session probe is the one caller that does not wait for a failure.** Every
+other hub call tries the tunnel only after a direct attempt has failed in a way
+that had no HTTP status at all (§3). The probe tries both routes on every
+invocation, starting an engine if none is warm, because it is a single
+human-initiated request on the exact network the tunnel exists for — see
+[`AUTH-STATE.md`](AUTH-STATE.md) and the transport note in
+`chrysalis/probe.rs`. The practical consequence for an operator: **a probe on a
+blocked network can take several seconds the first time, and that is the engine
+starting, not the hub hanging.**
 
 ## 2. The failure it addresses
 
@@ -138,6 +150,26 @@ build simply has no maintenance tunnel.
 
 `err=None` means the retry also produced no HTTP status; a status there means the
 hub answered and the route works but the call did not.
+
+**The probe adds one line and two failure sentences:**
+
+```
+[probe] answered via the free tunnel
+```
+
+That line means the direct route failed with no status and the tunnel carried the
+diagnostic — the same condition, on the same network, as `[hub] retry via
+maintenance ok` above. It is logged only on the tunnel path, so its presence is
+proof the second route was needed and worked.
+
+The probe's failures are written to be told apart, because "both blocked" and
+"this build has no tunnel" are different answers and an operator chasing the
+first would be wrong:
+
+| Text | Means |
+|---|---|
+| "this build carries no free-tier key, so the free tunnel was not available. This is very likely your network refusing `<hub>`" | the build has no `CHRYSALIS_FREE_TIER_KEY`; the network is a guess, not a finding |
+| "Your network is blocking both" | both routes were actually tried and neither answered |
 
 ## 7. Known limitations
 

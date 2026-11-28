@@ -26,6 +26,12 @@ section_8() {
     doc_links=$(cd "$REPO" && python3 - <<'PY'
 import os, re, sys
 
+# A guard that BANS a path must be able to NAME it in order to explain itself.
+# `guard_self` is that one rule, shared with §4 and §53 — see its docstring for
+# why the old per-guard filename exemption stopped working.
+sys.path.insert(0, os.path.join('server', 'scripts', 'lib'))
+from guard_self import is_explanation
+
 def slug(h):
     h = h.strip().lower()
     h = re.sub(r'[^a-z0-9 \-_]', '', h)
@@ -186,7 +192,20 @@ def code_files():
                     yield os.path.join(dirpath, fn)
 
 def stale_in(path, text):
-    """Yields (lineno, rel) for a stale `docs/…md` reference on a line."""
+    """Yields (lineno, rel) for a stale `docs/…md` reference on a line.
+
+    The MOVED_BASENAMES list above is itself a list of dead paths, so this guard
+    finds itself before it finds anything else. `guard_self.is_explanation` is the
+    one licence every such guard shares: a COMMENT in `server/scripts/checks/` may
+    name a banned path, a code line may not. This function therefore yields the
+    line too, so its caller can ask.
+
+    THE OLD EXEMPTION WAS DEAD, and that is the whole reason this changed. It read
+    `if p == 'server/scripts/check-consistency.sh': continue` — correct until the
+    sections were split into one file each under `server/scripts/checks/`, after
+    which the guard's own explanation lived in a file the exemption did not name.
+    It reported four of its own lines on 2026-11-28. See guard_self.py.
+    """
     for lineno, line in enumerate(text.splitlines(), 1):
         for m in STALE_PATHS.finditer(line):
             rel = m.group(1)
@@ -194,7 +213,7 @@ def stale_in(path, text):
                 continue
             if os.path.exists(os.path.join('docs', rel)):
                 continue
-            yield lineno, rel
+            yield lineno, rel, line
 
 for p in docs:
     # Historical logs cite old paths on purpose — they record what happened.
@@ -202,20 +221,26 @@ for p in docs:
             or p.startswith('docs/archive/'):
         continue
     with open(p, encoding='utf-8', errors='replace') as fh:
-        for lineno, rel in stale_in(p, fh.read()):
+        for lineno, rel, line in stale_in(p, fh.read()):
             # A reference into another tree (client/docs/…) is written with
             # its own prefix and will not match `docs/…` here.
+            if is_explanation(p, line):
+                continue
             bad.append(f"{p}:{lineno}: stale path docs/{rel} (no such file)")
 
 for p in code_files():
-    if os.path.normpath(p) == 'server/scripts/check-consistency.sh':
-        continue
     try:
         with open(p, encoding='utf-8', errors='replace') as fh:
             text = fh.read()
     except OSError:
         continue
-    for lineno, rel in stale_in(p, text):
+    for lineno, rel, line in stale_in(p, text):
+        # The code-comment case, and the reason `is_explanation` exists rather
+        # than a filename skip: this guard's own MOVED_BASENAMES list and its
+        # evidence block are code and comments IN THE SAME FILE, and only the
+        # comments are allowed to name a dead path.
+        if is_explanation(p, line):
+            continue
         bad.append(f"{p}:{lineno}: stale path docs/{rel} (no such file) — "
                    f"the file moved; repoint the reference")
 

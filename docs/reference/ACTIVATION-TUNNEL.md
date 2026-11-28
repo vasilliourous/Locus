@@ -144,10 +144,26 @@ the allowlist:
 /api/activate
 /api/code-lookup
 /api/heartbeat
+/api/release-entitlement
+/api/session-probe
 ```
 
 Deliberately excluded: `/api/admin/*` (privileged — the console's channel, never
 a student's), `/api/release`, `/updates/*`, `/admin/`, `/_/`.
+
+The last two were added after the original three, and each is argued in
+`09-activation-tunnel.sh` beside its entry:
+
+- **`/api/release-entitlement`** is what frees a code for a reinstalling student.
+  A device that can only reach the hub through this tunnel could otherwise enrol
+  but never sign out, so it could not move machines.
+- **`/api/session-probe`** is the surface support *asks a student to reach*
+  ("open Account, run the check, send me the code"). The network that made them
+  call support is the same one that would block a direct probe, so leaving it out
+  would make the diagnostic unavailable in the one condition that causes the
+  report. It is strictly weaker than its neighbour: it writes nothing at all, not
+  even `last_seen_at`, and reveals nothing to a caller who cannot present the
+  machine's redacted fingerprint.
 
 Refusals return `403` with an **empty body**. A bootstrap endpoint must not
 describe what it protects.
@@ -159,6 +175,14 @@ Caddy limits `/api/activate` to 5 events per 10 minutes per source
 forwarder enforces the same limit itself. `check-consistency.sh` §40 reads
 **both** numbers and fails when the tunnel's is laxer — a second, looser limit on
 the endpoint that mints entitlements would be the weakest link.
+
+**There are now three buckets, one per kind of call, and each exists so that one
+kind cannot spend another's budget:** `activate_` (enrolment, 5 per 10 min),
+`release_` (sign-out, 10 per 10 min) and `probe_` (the diagnostic, 10 per
+10 min). Each matches the Caddy zone beside it, and §40 fails if any is laxer on
+either side. The reason they are separate is argued in `device_release.pb.js` and
+`session_probe.pb.js`: spending a student's activation budget on a support
+diagnostic would lock them out of the screen that explains their code.
 
 > **The bucket was shared by every tunnelled client (found and fixed 2026-11-09).**
 > A limit per *source* needs a distinct source, and this path had none: the

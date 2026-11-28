@@ -67,6 +67,8 @@ find its owner here first.
 | How to diagnose a defect | [`reference/DEBUGGING-METHOD.md`](reference/DEBUGGING-METHOD.md) |
 | The readiness chain ("stuck on connecting") | [`reference/EGRESS-READINESS.md`](reference/EGRESS-READINESS.md) |
 | How a student keeps their entitlement | [`reference/DEVICE-IDENTITY.md`](reference/DEVICE-IDENTITY.md) |
+| Whether a client is signed in — entitlement × liveness, the desync cases, the lease | [`reference/AUTH-STATE.md`](reference/AUTH-STATE.md). The two bounds are [`state.toml`](state.toml) `[liveness]`, guarded by §59; the operator's ordered procedure is [`operate/RUNBOOK-DESYNC.md`](operate/RUNBOOK-DESYNC.md) |
+| The free / maintenance tunnel, and the activation allowlist | [`reference/MAINTENANCE-TUNNEL.md`](reference/MAINTENANCE-TUNNEL.md), [`reference/ACTIVATION-TUNNEL.md`](reference/ACTIVATION-TUNNEL.md) |
 | Client internals & upstream diff | [`client/docs/UPSTREAM-CHANGES.md`](../client/docs/UPSTREAM-CHANGES.md) (authoritative), [`client/docs/FRONTEND.md`](../client/docs/FRONTEND.md), [`client/docs/LOGIC-INVENTORY.md`](../client/docs/LOGIC-INVENTORY.md) |
 | Client release signing | [`client/docs/SIGNING.md`](../client/docs/SIGNING.md) |
 | Every colour value, and how a surface looks | [`../COLOURS.md`](../COLOURS.md) — the only file allowed to state one; §49 guards the literal's location, not the truth of a sentence about it |

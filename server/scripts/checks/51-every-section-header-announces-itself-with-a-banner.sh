@@ -60,10 +60,9 @@ section_51() {
         ok "every numbered '#' section header has a matching echo banner"
     else
         while IFS="$(printf '\t')" read -r _kind number; do
+            [ -n "$number" ] || continue
             bad "§${number} has a '# ${number}.' header but no 'echo \"${number}. …\"' — it executes and is invisible, so a citation to it sends the reader to a section they cannot find"
-        done <<EOF
-$banner_report
-EOF
+        done < <(printf '%s\n' "$banner_report")
     fi
 
     echo

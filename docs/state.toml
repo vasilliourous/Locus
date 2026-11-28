@@ -423,6 +423,35 @@ value      = { free = 0, budget = 2, full = 5, currency = "NZD", period = "month
 source     = "docs/business/05-pricing.md; docs/business/11-growth.md"
 provenance = "asserted"
 
+[liveness]
+# How long a device may be silent before it is not "live", and how long before
+# it is aged out entirely — the two bounds the heartbeat lease is built from.
+#
+# WHY THESE ARE DERIVED FACTS AND NOT PROSE. They appeared in three places after
+# the liveness axis landed (2026-11-28): the client's heartbeat constants
+# (`heartbeat.rs` MAX_INTERVAL / GRACE_PERIOD), the hub's `session_probe.pb.js`
+# (LEASE_SECONDS), and the console's `model.ts` (LEASE_MS / STALE_MS). §58
+# already executes the last two against each other across the language boundary.
+# The first was the one nothing held: `LEASE_SECONDS` is MAX_INTERVAL plus jitter,
+# the 15 s timeout and a maintenance-tunnel retry, and if the client's interval
+# changed the hub's lease would keep declaring a healthy device absent — the exact
+# failure the lease is sized to prevent. §59 recomputes all four from this file.
+#
+# The arithmetic, so a reader does not have to re-derive it:
+#   2 h MAX_INTERVAL, ±10 % jitter (+13 min 12 s), +15 s timeout, +60 s slack
+#   = 2 h 13 min 15 s, rounded UP to the next whole minute = 2 h 14 min.
+#
+# This was 2 h 16 min until 2026-11-28, and the extra two minutes were NOT in the
+# formula above — the constant was picked first and the sentence written to match
+# it. §59 derives the bound from `heartbeat.rs` instead of trusting the sentence,
+# which is how the discrepancy was found.
+lease_s = 8040
+# 7 days, and it mirrors the client's GRACE_PERIOD rather than being chosen: two
+# windows would recreate the desync the lease exists to remove.
+stale_s = 604800
+source     = "client/src-tauri/src/chrysalis/heartbeat.rs (MAX_INTERVAL, GRACE_PERIOD)"
+provenance = "derived"
+
 [world]
 # A pointer into CLAIMS.md §5, not a fact. Listed here so a reader of this file
 # is sent to the right place rather than tempted to put a world claim in this

@@ -9,7 +9,7 @@ verified-against: server/pb_hooks/heartbeat.pb.js,
                   server/pb_hooks/session_probe.pb.js,
                   server/console/src/views/codes/model.ts,
                   client/src-tauri/src/chrysalis/heartbeat.rs
-guard:       server/scripts/check-consistency.sh §58
+guard:       server/scripts/check-consistency.sh §58, §59
 ```
 
 **Read this before touching `last_seen_at`, `stateLabel`, `livenessOf`, or
@@ -154,15 +154,20 @@ a final message is wrong for at least four of those.
 
 | Bound | Value | Derivation |
 |---|---|---|
-| `LEASE` (live) | 2 h 16 min | `MAX_INTERVAL` 2 h × 1.1 jitter + 15 s timeout + 60 s slack |
+| `LEASE` (live) | 2 h 14 min | `MAX_INTERVAL` 2 h × 1.1 jitter + 15 s timeout + 60 s slack = 2 h 13 min 15 s, rounded up |
 | `STALE` | 7 days | the client's own `GRACE_PERIOD` |
+
+Both values are **data**, not prose: [`../state.toml`](../state.toml) `[liveness]`
+holds them, and §59 recomputes them from `heartbeat.rs` and fails when the hook,
+the console, the Overview or the prose drift from that derivation. The lease was
+2 h 16 min until 2026-11-28; the extra two minutes were never in the formula.
 
 A shorter lease would declare a **healthy but unlucky** device absent the moment
 it backed off to `MAX_INTERVAL` after an outage. That is the failure the number
 is sized to prevent — see ADR [0002](adr/0002-liveness-is-a-lease-not-a-quit-message.md).
 
 **Acceptance-criterion bound:** a `kill -9`'d client reads `stale` within **≤ 2 h
-16 min of its last beat**, with no message. That is a property of the existing
+14 min of its last beat**, with no message. That is a property of the existing
 backoff, not new machinery, and tightening it would require beating every 5
 minutes forever against a 1-per-10s-per-IP Caddy limit.
 
@@ -177,11 +182,26 @@ before it was kept:
 |---|---|---|
 | the heartbeat writes `last_seen_at` | deleted the `record.set` from `heartbeat.pb.js` | **FAIL** "liveness would be permanently unknown and the desync unfixable" |
 | it is written before the refusal | moved the write below the 410 return | **FAIL** "a suspended or expired device that is beating would be reported absent" |
-| the two sides agree on the lease | set the hook's `LEASE_SECONDS` to 300 | **FAIL** "hook 300s vs console 8160s" |
+| the two sides agree on the lease | set the hook's `LEASE_SECONDS` to 300 | **FAIL** "hook 300s vs console 8040s" |
 | the vocabulary agrees | — | same script, per-word assertions |
 | `unknown` is not a state | made `livenessLabel('unknown')` return `'signed out'` | **FAIL** "that is the exact defect this change removes" |
 
 Restored, all 36 assertions pass.
+
+§59 asserts the lease is **derived** rather than stated, and it was shown failing
+the same way — by changing the source, not the copies:
+
+| Assertion | How it was made to fail | Result |
+|---|---|---|
+| the lease follows `MAX_INTERVAL` | set `MAX_INTERVAL` to 1 h in `heartbeat.rs` | **FAIL** four BAD lines: state.toml, the hook, the Overview and §58's driver all still said 8040 s against an implied 4080 s |
+| the stale bound follows `GRACE_PERIOD` | set `GRACE_PERIOD` to 3 days | **FAIL** state.toml and the console still said 7 days |
+
+The first run of §59 also **found a real defect**: the lease had been 2 h 16 min
+since it was introduced, but the derivation every copy cited
+(`2 h × 1.1 + 15 s + 60 s`) yields 2 h 13 min 15 s. The constant was chosen first
+and the sentence written to match it. Corrected to 2 h 14 min everywhere on
+2026-11-28; the number is now `docs/state.toml` `[liveness]` `lease_s` and nothing
+restates it.
 
 ---
 
@@ -246,7 +266,7 @@ reviewed, not run. A hub staging deploy is the first real exercise.
 
 **Unverified, and named as such:**
 
-* **Kill-9 timing.** The ≤ 2 h 16 min bound is arithmetic from the client's own
+* **Kill-9 timing.** The ≤ 2 h 14 min bound is arithmetic from the client's own
   constants, not a measured wall-clock observation across all four platforms.
 * **The `device_id` gate against a pre-migration code.** A code with no
   `first_seen_fingerprint` fails the machine check and answers `404`. That is the
@@ -296,3 +316,40 @@ Defect 5 is the one that should worry a reader most: the fix for "unknown is
 never a state" reintroduced "unknown is a state" on the other side of the wire.
 That is why §58 asserts the property on both sides and why
 `probe-hook-consistency.js` and `liveness-consistency.js` both exist.
+
+---
+
+## 10. Open item: the tunnel coupling is unverified
+
+**Status: blocked, not done.** Read this before trusting the probe's transport.
+
+`chrysalis/probe.rs` reaches the hub by trying the direct route and then the free
+tunnel (`worthy_of_tunnel`, then `hub_client_for_retry`). That logic is written
+against `activation_tunnel.rs` **as it stands at commit `e887583`** — which, at
+the time this section was written, is the newest such commit in this checkout.
+
+A report of "extensive alterations to the tunnelling system" could not be located
+in this repository: not in the working tree, not on `main`, not on
+`origin/main`, and not in any other worktree. The tunnel source file is unchanged
+since the product rename.
+
+This matters because the probe depends on four things in that file, and any of
+them moving breaks the diagnostic silently:
+
+| The probe relies on | In `activation_tunnel.rs` |
+|---|---|
+| `hub_client_for` (direct / warm only) | exists |
+| `hub_client_for_retry` (may **start** an engine) | exists |
+| `activation_tunnel_available` (build carries a key) | exists |
+| `Failure::retryable_over_tunnel` as the *starting point* for `worthy_of_tunnel` | exists |
+
+**If the tunnel layer has been rewritten**, re-check those four names and the
+`worthy_of_tunnel` fault set against the new code before deploying. The
+`Transport` widening is the specific thing to preserve: it exists because a
+silent blackhole is a common school-network block and the heartbeat's predicate
+deliberately excludes it for loop-economics reasons that do not apply to a
+one-shot probe.
+
+Nothing else in this design depends on the tunnel, so a change there cannot
+affect the liveness axis, the state model, the console or the heartbeat's
+lease arithmetic.

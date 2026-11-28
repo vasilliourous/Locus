@@ -1676,18 +1676,18 @@ routerAdd("POST", "/api/admin/console", function(e) {
                 //
                 // The threshold is the same lease the console and the probe use,
                 // written out in full rather than as `2 * 60 * 60`: the lease is
-                // 2h MAX_INTERVAL * 1.1 jitter + 15s timeout + 60s slack, and the
-                // rounded-down version says "quiet" 16 minutes before the probe
-                // does. That is exactly the drift `liveness-consistency.js` §4b
-                // exists to catch — it caught this line when it was the round
-                // number.
+                // 2h MAX_INTERVAL * 1.1 jitter + 15s timeout + 60s slack, rounded
+                // UP to the next whole minute = 2h14m, and the rounded-down
+                // version says "quiet" about 14 minutes before the probe does.
+                // That is exactly the drift `liveness-consistency.js` §4b exists
+                // to catch — it caught this line when it was the round number.
                 //
                 // Duplicated rather than shared because this hook cannot import
                 // from `session_probe.pb.js` (goja hoists nothing across files);
                 // §4b evaluates all three and fails when they disagree.
                 var seenAMs = parsePBDate(ca.get("last_seen_at"));
                 var seenAValid = seenAMs > 0 && !isNaN(seenAMs);
-                var goneQuietA = redeemedA && !lapsedA && !suspA && seenAValid && (nowA - seenAMs) > (2 * 60 * 60 + 16 * 60) * 1000;
+                var goneQuietA = redeemedA && !lapsedA && !suspA && seenAValid && (nowA - seenAMs) > (2 * 60 * 60 + 14 * 60) * 1000;
                 if (goneQuietA) {
                     countsA.gone_quiet++;
                     if (groupsA.gone_quiet.length < CAP) {

@@ -21,6 +21,9 @@ procedure; each rule links to the file that owns it.
 | **Diagnosing a defect** | [`docs/reference/DEBUGGING-METHOD.md`](docs/reference/DEBUGGING-METHOD.md) — and check [`docs/reference/FIXES.md`](docs/reference/FIXES.md) §1, it may already be known-unverified |
 | **Writing any fact into a document** | [`docs/operate/CLAIMS.md`](docs/operate/CLAIMS.md) — data vs world claim |
 | **Deploying or operating the hub** | [`docs/operate/OPS.md`](docs/operate/OPS.md), [`docs/operate/DEPLOY.md`](docs/operate/DEPLOY.md) |
+| **A ticket that says "the hub thinks I'm signed out"** | [`docs/operate/RUNBOOK-DESYNC.md`](docs/operate/RUNBOOK-DESYNC.md) — the ordered diagnosis. Start here, not at the code |
+| **Touching `last_seen_at`, `stateLabel`, `livenessOf`, the heartbeat or the session probe** | [`docs/reference/AUTH-STATE.md`](docs/reference/AUTH-STATE.md) — entitlement × liveness, the six desync cases and the lease. Then [`docs/reference/adr/`](docs/reference/adr/) for why |
+| **Touching the free/maintenance tunnel or the activation allowlist** | [`docs/reference/MAINTENANCE-TUNNEL.md`](docs/reference/MAINTENANCE-TUNNEL.md), [`docs/reference/ACTIVATION-TUNNEL.md`](docs/reference/ACTIVATION-TUNNEL.md) |
 | **Changing the hub's data/schema** | [`docs/business/redesign/05-migration-and-live-data.md`](docs/business/redesign/05-migration-and-live-data.md) — the gating file |
 | **Touching client Rust logic** | [`client/docs/UPSTREAM-CHANGES.md`](client/docs/UPSTREAM-CHANGES.md) (authoritative on ours-vs-upstream) |
 | **Touching the UI** | [`client/docs/FRONTEND.md`](client/docs/FRONTEND.md) |
@@ -85,8 +88,17 @@ One clause each; the file that owns it has the story.
 - **`main` and the tag are separate pushes**, and CI does not bump versions — a
   tag that disagrees with the version files builds binaries that misreport
   themselves. [`docs/operate/RELEASING.md`](docs/operate/RELEASING.md).
-- **Run `check-consistency.sh` with `bash`.** Under `sh`/`dash` it aborts with
-  "Bad substitution" and prints false `BAD` lines.
+- **Run `server/scripts/check-consistency.sh` — it is under `server/`, with
+  `bash`, from the repo root.** Under `sh`/`dash` it aborts with "Bad
+  substitution" and prints false `BAD` lines. `--verbose` prints every section's
+  transcript; without it a clean run is one line.
+- **A guard that quotes the string it bans must not read itself.** §4, §8 and §53
+  each ban a literal and each must name it to explain itself; the exemption used
+  to be the filename `check-consistency.sh`, which stopped matching the moment the
+  sections were split into `server/scripts/checks/`. All three went red on their
+  own evidence. The rule is `server/scripts/lib/guard_self.py`: a *comment* in the
+  checks directory may name a banned string, a *code* line may not — so a guard's
+  own pattern is built (`"2022-" + "blake3"`) rather than spelled.
 - **Secrets do not travel with a repo copy.** A fresh clone has zero Actions
   secrets and every signed build fails until `CHRYSALIS_UPDATE_KEY` (or its
   `LOCUS_UPDATE_KEY` alias) is set.

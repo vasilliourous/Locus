@@ -180,10 +180,15 @@ export type Liveness = 'live' | 'stale' | 'absent' | 'unknown'
  * exists to prevent. `server/pb_hooks/session_probe.pb.js` carries the same
  * number for the same reason.
  *
+ * The arithmetic: 2 h × 1.1 + 15 s timeout + 60 s slack = 2 h 13 min 15 s,
+ * rounded up to 2 h 14 min. `docs/state.toml` [liveness] `lease_s` is the
+ * canonical value, and `check-consistency.sh` §59 recomputes it from
+ * `heartbeat.rs` and fails if anything here disagrees.
+ *
  * `STALE_MS` mirrors the client's own `GRACE_PERIOD` (7 days) so both sides age
  * a device out on the same clock; two windows would recreate the desync.
  */
-const LEASE_MS = (2 * 60 * 60 + 16 * 60) * 1000
+const LEASE_MS = (2 * 60 * 60 + 14 * 60) * 1000
 const STALE_MS = 7 * 24 * 60 * 60 * 1000
 
 /**

@@ -273,7 +273,33 @@ PY
     if [ -z "$doc_index_report" ]; then
         ok "every live document is linked from docs/README.md, and none contradicts its own status"
     else
+        # READ THE REPORT INTO AN ARRAY, THEN REPORT. Not `done <<EOF`, and not
+        # `printf … | while read`.
+        #
+        # `done <<EOF … EOF` was here first. In a terminal it worked; in a
+        # non-interactive run it blocked forever, because the same `read` loop
+        # was draining stdin it did not own. The symptom a harness shows is
+        # `interactive_prompt`, which reads like the GUARD hung and sends the
+        # next reader hunting a bug in the doc-index scan. The scan was fine.
+        #
+        # The obvious repair, `printf | while read`, is WRONG here: the pipeline
+        # runs the loop in a subshell, so the `bad` calls inside it increment a
+        # copy of the failure state and this section would print BAD lines and
+        # still exit 0 — a guard that cannot fail, which is the defect §28 exists
+        # to prevent. §10 avoids this by accumulating into a variable inside the
+        # subshell and reporting after; done here with an array, which keeps the
+        # tab separator intact (whitespace IFS would split the message).
+        _idx_kinds=()
+        _idx_details=()
         while IFS="$(printf '\t')" read -r kind detail; do
+            [ -n "$kind" ] || continue
+            _idx_kinds+=("$kind")
+            _idx_details+=("$detail")
+        done < <(printf '%s\n' "$doc_index_report")
+
+        for _i in "${!_idx_kinds[@]}"; do
+            kind="${_idx_kinds[$_i]}"
+            detail="${_idx_details[$_i]}"
             case "$kind" in
                 ORPHAN)
                     bad "live document not reachable from docs/README.md: $detail"
@@ -282,9 +308,7 @@ PY
                     bad "a live document announces its own retirement: $detail"
                     bad "  Either move it to archive/ (the folder carries the status), or fix" ;;
             esac
-        done <<EOF
-$doc_index_report
-EOF
+        done
         bad "  the front-matter — §25. Do not leave the two disagreeing."
     fi
 

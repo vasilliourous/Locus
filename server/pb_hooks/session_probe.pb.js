@@ -119,21 +119,27 @@ routerAdd("POST", "/api/session-probe", function (e) {
     // ── The lease arithmetic, in ONE place ──────────────────────────────────
     //
     // These two numbers are derived from the CLIENT's heartbeat constants, not
-    // chosen by feel. `MIN_INTERVAL` 5 min, `MAX_INTERVAL` 2 h, ±10 % jitter,
-    // 15 s per-attempt timeout, one retry over the maintenance tunnel:
+    // chosen by feel. `MAX_INTERVAL` 2 h, ±10 % jitter, 15 s per-attempt timeout,
+    // one retry over the maintenance tunnel, 60 s slack:
     //
-    //   LEASE_SECONDS = 2h * 1.1 + 15s + 60s slack = 2h16m
+    //   LEASE_SECONDS = 2h * 1.1 + 15s + 60s = 2h13m15s, rounded up to 2h14m
     //
     // A shorter lease would declare a HEALTHY but unlucky device (one that has
     // backed off to MAX_INTERVAL after an outage) absent. That is the failure
     // this number is sized to prevent, and it is why the lease is not tuned
     // down to make demos look faster — see ADR 0002.
     //
+    // THE FIGURE WAS 2h16m UNTIL 2026-11-28 and the two extra minutes were never
+    // in the arithmetic above — the constant was picked, then this comment written
+    // to describe it. `check-consistency.sh` §59 now derives the bound from
+    // `heartbeat.rs` and fails if this line disagrees, so the sentence can no
+    // longer drift from the number. `docs/state.toml` [liveness] is the home.
+    //
     // STALE_SECONDS mirrors the client's own GRACE_PERIOD (7 days) so both sides
     // age a device out on the same clock. Two different windows would mean the
     // console says "gone" while the client still believes it is authenticated,
     // which is the desync in the other direction.
-    var LEASE_SECONDS = 2 * 60 * 60 + 16 * 60;
+    var LEASE_SECONDS = 2 * 60 * 60 + 14 * 60;
     var STALE_SECONDS = 7 * 24 * 60 * 60;
 
     try {

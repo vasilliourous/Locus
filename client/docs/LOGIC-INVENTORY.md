@@ -37,6 +37,11 @@ src-tauri/src/
 │  ├─ credential.rs      # the activation code mirrored to a machine-scoped store
 │  ├─ heartbeat.rs       # loop, backoff, jitter, grace, outcome classification
 │  ├─ expiry.rs          # subscription date parsing + connect-gate decision
+│  ├─ signout.rs         # "Sign out on this device" -> /api/release-entitlement, then forget
+│  ├─ activation_tunnel.rs # the pre-activation Shadowsocks route to the hub's free tier
+│  ├─ probe.rs           # the session probe: ask the hub what IT believes about this device
+│  ├─ meter.rs           # Core byte totals -> a stored allowance window
+│  ├─ usage.rs           # the free tier's monthly allowance: counting, rollover, throttle
 │  ├─ tier.rs            # tier payload -> mihomo config (incl. the UoT outbound)
 │  ├─ store.rs           # product state as additive IVerge fields
 │  ├─ apply.rs           # write the tier as a profile, call Verge's pipeline

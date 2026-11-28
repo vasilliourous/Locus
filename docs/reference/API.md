@@ -165,11 +165,17 @@ proof available, and it is also the only proof an honest student can give.
 > `activation_contract_test`; the operator's own `suspended_reason` is appended on
 > the heartbeat, never substituted here.
 >
-> **There is no "bound to another device" refusal and no 409 one-code-per-device
-> check.** Device binding was removed in 2026-10; the only record of redemption is
-> `codes.activated_at`, and re-activation is deliberately allowed. Do not put
-> authorisation back on the fingerprint — it is a rate-limit and support key, not
-> an identity.
+> **There is no device BINDING, and no authorisation on the fingerprint.** Binding
+> was removed in 2026-10: `device_fingerprint` is a rate-limit and support key, not
+> an identity, and nothing is compared against it on this route.
+>
+> **That is not the same as "activation always succeeds", and an earlier revision of
+> this paragraph said it was.** Since 2026-11-27 the one-machine rule is enforced by
+> the SIGN-OUT, not by an identity: a code whose `released_at` is not later than its
+> `activated_at` is refused here with `409` (row above), because the only credential
+> in this system is possession of the code and a sign-out is the only proof an honest
+> student can give. Do not read "no binding" as "re-activation is always allowed" —
+> it is allowed exactly when the previous holder signed out.
 
 ---
 
@@ -240,13 +246,13 @@ update signal and a refreshed tier config.
   "status": "ok",
   "server_time": "2026-09-19T10:09:42.945Z",
   "tier": "free",
-  "update_available": "3.5.0",
-  "update_url": "https://networkingguides.jadedns.uk/updates/3.5.0/chrysalis-linux-amd64",
+  "update_available": "<version>",
+  "update_url": "https://networkingguides.jadedns.uk/updates/<version>/chrysalis-linux-amd64",
   "update_sha256": "abc123...",
-  "update_linux": "https://.../updates/3.5.0/chrysalis-linux-amd64",
-  "update_windows": "https://.../updates/2.1.0/installer-Chrysalis_2.1.0_x64-setup.exe",
-  "update_macos_intel": "https://.../updates/3.5.0/chrysalis-darwin-amd64.app.tar.gz",
-  "update_macos_arm": "https://.../updates/3.5.0/chrysalis-darwin-arm64.app.tar.gz",
+  "update_linux": "https://.../updates/<version>/chrysalis-linux-amd64",
+  "update_windows": "https://.../updates/<version>/installer-Chrysalis_<version>_x64-setup.exe",
+  "update_macos_intel": "https://.../updates/<version>/chrysalis-darwin-amd64.app.tar.gz",
+  "update_macos_arm": "https://.../updates/<version>/chrysalis-darwin-arm64.app.tar.gz",
   "update_sha256_linux": "abc123...",
   "update_sha256_windows": "def456...",
   "update_sha256_macos_intel": "ghi789...",
@@ -647,7 +653,7 @@ bound, so a support session cannot spend a student's activation budget).
   "code": "RQ-ABCD-EFGH-JKMN-T",
   "device_id": "a1b2c3d4e5f6",
   "client": {
-    "app_version": "3.5.0",
+    "app_version": "<version>",
     "platform": "linux",
     "auth_state": "activated",
     "last_heartbeat_ok_unix": 1765000000,
@@ -708,7 +714,7 @@ label; a caller that wants a single badge has to choose, which is the point.
 
 | `liveness` | Meaning |
 |---|---|
-| `live` | Beat within the lease (2 h 16 min, derived from the client's max backoff). |
+| `live` | Beat within the lease (2 h 14 min, derived from the client's max backoff — `docs/state.toml` `[liveness]`). |
 | `stale` | No beat within the lease, but within 7 days. |
 | `absent` | No beat for over 7 days. |
 | `unknown` | **`last_seen_at` is null.** Never render this as `absent`. |
@@ -759,8 +765,8 @@ device, and guessing is how a Windows client is handed a Linux binary.
 
 ```json
 {
-  "version": "2.4.0",
-  "url": "https://<domain>/updates/2.4.0/installer-Chrysalis_2.4.0_x64-setup.exe",
+  "version": "<version>",
+  "url": "https://<domain>/updates/<version>/installer-Chrysalis_<version>_x64-setup.exe",
   "signature": "<base64 minisign signature>",
   "sha256": "abc123…"
 }
@@ -801,12 +807,12 @@ served openly from `/updates/*`.
 {
   "ok": true,
   "published": true,
-  "version": "2.4.0",
+  "version": "<version>",
   "platforms": {
-    "linux":       { "url": "https://<domain>/updates/3.5.0/chrysalis-linux-amd64",       "sha256": "abc123…", "signature": "…" },
-    "windows":     { "url": "https://<domain>/updates/2.4.0/installer-Chrysalis_2.4.0_x64-setup.exe", "sha256": "def456…", "signature": "…" },
-    "macos_intel": { "url": "https://<domain>/updates/3.5.0/chrysalis-darwin-amd64.app.tar.gz",      "sha256": "ghi789…", "signature": "…" },
-    "macos_arm":   { "url": "https://<domain>/updates/3.5.0/chrysalis-darwin-arm64.app.tar.gz",      "sha256": "jkl012…", "signature": "…" }
+    "linux":       { "url": "https://<domain>/updates/<version>/chrysalis-linux-amd64",       "sha256": "abc123…", "signature": "…" },
+    "windows":     { "url": "https://<domain>/updates/<version>/installer-Chrysalis_<version>_x64-setup.exe", "sha256": "def456…", "signature": "…" },
+    "macos_intel": { "url": "https://<domain>/updates/<version>/chrysalis-darwin-amd64.app.tar.gz",      "sha256": "ghi789…", "signature": "…" },
+    "macos_arm":   { "url": "https://<domain>/updates/<version>/chrysalis-darwin-arm64.app.tar.gz",      "sha256": "jkl012…", "signature": "…" }
   }
 }
 ```
@@ -831,7 +837,7 @@ Static file served by Caddy. A placeholder — the updater does NOT read it; it 
 **Response `200`:**
 ```json
 {
-  "version": "1.0.0",
+  "version": "<version>",
   "rollout_percent": 0,
   "windows": null,
   "linux_amd64": null

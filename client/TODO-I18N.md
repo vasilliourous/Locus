@@ -55,6 +55,7 @@ translation that happens to match English (a product name, an address) counts.
 | Surface | Where it is | Measure | What closes it |
 |---|---|---|---|
 | Support block, account panel, sign-out, traffic, dialogs, toasts | the rest of `src/locales/*/` | ~50% of all values are identical to English | One surface per pass — translate a screen, add it to `FINISHED_SURFACES`, keep it green. Do not bulk-copy English over a real translation. |
+| **The session probe card** | `components.connection.account.probe.*` — 9 keys, `src/components/shared/probe-card.tsx` | **9 of 9 English in all twelve bundles** (added 2026-11-28) | Translate the nine. It is the smallest surface in this table and the one an operator is most likely to ask a student to read, so it is a good first pass. |
 
 ## How a pass is run
 
